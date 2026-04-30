@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -128,6 +129,19 @@ class ShotDetectConfig(BaseModel):
     # fast splits, which are typically louder relative to the preceding shot.
     echo_refractory_ms: int = 150
     echo_amplitude_ratio: float = 0.4
+    # Drop candidates with confidence below this threshold before returning.
+    # Default 0.0 = keep all (current behavior). Sweep against audited fixtures
+    # (issue #6 follow-up) shows 0.03 is the empirical maximum that preserves
+    # recall (289 -> 243 candidates, -16 %, 0 real shots dropped). At 0.04+
+    # AGC-ducked real shots start being dropped. 0.03 is the safe opt-in cap.
+    min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Recall fallback: after the librosa-based first pass, optionally run a
+    # second pass to fill suspicious gaps. ``"none"`` (default) leaves the
+    # behaviour unchanged. ``"cwt"`` runs a Ricker-wavelet two-pass detector
+    # (see ``shot_detect._apply_cwt_recall_fallback``); recovers the rare
+    # busy-ambient miss where spectral flux fails to fire, at the cost of
+    # ~20 % more candidates per stage. Use for known-windy/noisy stages.
+    recall_fallback: Literal["none", "cwt"] = "none"
 
 
 class VideoMatchConfig(BaseModel):

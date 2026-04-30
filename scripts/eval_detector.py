@@ -103,6 +103,8 @@ def main() -> None:
     p.add_argument("--min-gap-ms", type=int)
     p.add_argument("--echo-refractory-ms", type=int)
     p.add_argument("--echo-amplitude-ratio", type=float)
+    p.add_argument("--min-confidence", type=float)
+    p.add_argument("--recall-fallback", choices=["none", "cwt"])
     args = p.parse_args()
 
     cfg_kwargs: dict = {}
@@ -114,6 +116,10 @@ def main() -> None:
         cfg_kwargs["echo_refractory_ms"] = args.echo_refractory_ms
     if args.echo_amplitude_ratio is not None:
         cfg_kwargs["echo_amplitude_ratio"] = args.echo_amplitude_ratio
+    if args.min_confidence is not None:
+        cfg_kwargs["min_confidence"] = args.min_confidence
+    if args.recall_fallback is not None:
+        cfg_kwargs["recall_fallback"] = args.recall_fallback
     config = ShotDetectConfig(**cfg_kwargs) if cfg_kwargs else ShotDetectConfig()
     print(f"config: {config.model_dump()}")
     print(f"tolerance_ms: {args.tolerance_ms}")

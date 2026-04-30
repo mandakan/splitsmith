@@ -58,6 +58,7 @@ from __future__ import annotations
 import librosa
 import numpy as np
 from scipy.ndimage import maximum_filter1d
+from scipy.signal import fftconvolve
 
 from .config import Shot, ShotDetectConfig
 
@@ -198,6 +199,25 @@ def detect_shots(
     # peak is typically a few ms past the leading edge, still inside the peak
     # window since _PEAK_WIN_MS is symmetric).
     kept_peaks = [_peak_amplitude(audio, t, sample_rate, peak_win_samples) for t in kept_times]
+
+    # Optional CWT recall fallback: fill suspicious gaps with Ricker-wavelet
+    # peaks. Adds candidates ONLY in regions where pass 1 was silent
+    # unusually long, so calmer fixtures see no change.
+    if config.recall_fallback == "cwt":
+        kept_times, kept_strengths, kept_peaks = _apply_cwt_recall_fallback(
+            audio,
+            sample_rate,
+            kept_times,
+            kept_strengths,
+            kept_peaks,
+            search_lo=search_lo,
+            search_hi=search_hi,
+            beep_time=beep_time,
+            stage_time=stage_time,
+            peak_win_samples=peak_win_samples,
+            min_gap_s=min_gap_s,
+        )
+
     # HF/LF spectral signature at the refined leading edge. Re-rank only --
     # nothing is dropped on this feature.
     kept_hf_lf = [_hf_lf_ratio(audio, t, sample_rate) for t in kept_times]
@@ -212,16 +232,18 @@ def detect_shots(
 
     shots: list[Shot] = []
     prev_t = beep_time
-    for i, (t_abs, strength, peak, hf_lf) in enumerate(
-        zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True), start=1
+    for t_abs, strength, peak, hf_lf in zip(
+        kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True
     ):
         s_norm = strength / max_kept_strength if max_kept_strength > 0 else 0.0
         p_norm = peak / max_kept_peak if max_kept_peak > 0 else 0.0
         hf_norm = hf_lf / max_kept_hf_lf if max_kept_hf_lf > 0 else 0.0
         confidence = float(np.clip((s_norm * p_norm * hf_norm) ** (1.0 / 3.0), 0.0, 1.0))
+        if confidence < config.min_confidence:
+            continue
         shots.append(
             Shot(
-                shot_number=i,
+                shot_number=len(shots) + 1,
                 time_absolute=t_abs,
                 time_from_beep=t_abs - beep_time,
                 split=t_abs - prev_t,
@@ -330,3 +352,165 @@ def _peak_amplitude(audio: np.ndarray, t: float, sr: int, half_win: int) -> floa
     if hi <= lo:
         return 0.0
     return float(np.max(np.abs(audio[lo:hi])))
+
+
+# ---- Optional CWT recall fallback ------------------------------------------
+# Two-pass detector for the busy-ambient failure mode: librosa's spectral flux
+# can fail to fire on a real shot when surrounding audio is already spectrally
+# rich (e.g. continuous sub-shot transients between real shots from neighbour
+# bays). This pass adds candidates ONLY in suspicious gaps -- the calmer
+# stages still see no extras. Sweep against audited fixtures (issue #6) showed
+# this configuration recovers the persistent Stage 7 t=6.6399s miss at ~+19 %
+# total candidate cost across the four fixtures. Off by default; opt-in via
+# ``ShotDetectConfig.recall_fallback = "cwt"``.
+_CWT_SCALES_SAMPLES_AT_48K = (12, 24, 48, 96, 192)  # ~0.25, 0.5, 1, 2, 4 ms
+_CWT_GAP_FACTOR = 3.0  # gap > median_split * factor is "suspicious"
+_CWT_GAP_MIN_S = 0.600  # absolute floor on suspicious gap (avoids triggering on tight stages)
+_CWT_STRENGTH_QUANTILE = 0.75  # CWT extras must clear this quantile of pass-1 CWT levels
+
+
+def _ricker(width: int) -> np.ndarray:
+    n = int(8 * width)
+    if n % 2 == 0:
+        n += 1
+    t = np.arange(n) - n // 2
+    a = (t / width) ** 2
+    norm = 2.0 / (np.sqrt(3.0 * width) * np.pi**0.25)
+    return norm * (1.0 - a) * np.exp(-a / 2.0)
+
+
+def _cwt_max_envelope(audio: np.ndarray, sr: int) -> np.ndarray:
+    """Max-across-scales |Ricker CWT|. Wavelet widths are scaled to the input
+    sample rate so the time-extent stays at ~0.25-4 ms regardless of sr."""
+    scale_factor = sr / 48000.0
+    scales = [max(2, int(round(w * scale_factor))) for w in _CWT_SCALES_SAMPLES_AT_48K]
+    out = np.zeros((len(scales), audio.size), dtype=np.float64)
+    sig = audio.astype(np.float64)
+    for k, w in enumerate(scales):
+        psi = _ricker(w)
+        out[k] = fftconvolve(sig, psi[::-1], mode="same")
+    return np.abs(out).max(axis=0)
+
+
+def _apply_cwt_recall_fallback(
+    audio: np.ndarray,
+    sr: int,
+    kept_times: list[float],
+    kept_strengths: list[float],
+    kept_peaks: list[float],
+    *,
+    search_lo: int,
+    search_hi: int,
+    beep_time: float,
+    stage_time: float,
+    peak_win_samples: int,
+    min_gap_s: float,
+) -> tuple[list[float], list[float], list[float]]:
+    """Insert CWT-detected candidates inside suspicious gaps in ``kept_times``.
+
+    Returns extended (kept_times, kept_strengths, kept_peaks) lists. Each new
+    extra is given an onset_strength equal to its CWT response (so it
+    participates in confidence ranking on the same axis as pass-1 onsets).
+    """
+    if len(kept_times) < 2:
+        return kept_times, kept_strengths, kept_peaks
+
+    # Compute CWT envelope only over the search segment for efficiency.
+    segment = audio[search_lo:search_hi]
+    if segment.size < int(0.020 * sr):
+        return kept_times, kept_strengths, kept_peaks
+    env = _cwt_max_envelope(segment, sr)
+
+    pad = int(0.005 * sr)
+    pass1_strengths_cwt = []
+    for t in kept_times:
+        i_seg = int(round(t * sr)) - search_lo
+        lo = max(0, i_seg - pad)
+        hi = min(env.size, i_seg + pad)
+        pass1_strengths_cwt.append(float(env[lo:hi].max()) if hi > lo else 0.0)
+    if not pass1_strengths_cwt:
+        return kept_times, kept_strengths, kept_peaks
+    threshold = float(np.quantile(pass1_strengths_cwt, _CWT_STRENGTH_QUANTILE))
+    if threshold <= 0:
+        return kept_times, kept_strengths, kept_peaks
+
+    splits = [kept_times[i + 1] - kept_times[i] for i in range(len(kept_times) - 1)]
+    median_split = float(np.median(splits))
+    gap_thresh = max(median_split * _CWT_GAP_FACTOR, _CWT_GAP_MIN_S)
+
+    boundaries = [beep_time + _POST_BEEP_SKIP_S] + list(kept_times) + [beep_time + stage_time + 1.0]
+    extras_t: list[float] = []
+    extras_strength: list[float] = []
+    min_gap_samples = int(round(min_gap_s * sr))
+    for k in range(len(boundaries) - 1):
+        a, b = boundaries[k], boundaries[k + 1]
+        if b - a <= gap_thresh:
+            continue
+        # Search inside (a + 20ms, b - 20ms) to leave space around adjacent shots
+        i0 = max(0, int(round((a + 0.020) * sr)) - search_lo)
+        i1 = min(env.size, int(round((b - 0.020) * sr)) - search_lo)
+        if i1 - i0 < int(0.020 * sr):
+            continue
+        win_env = env[i0:i1]
+        above = win_env > threshold
+        last_p = -(10**18)
+        in_run = False
+        run_start = 0
+        for j in range(win_env.size):
+            if above[j]:
+                if not in_run:
+                    in_run, run_start = True, j
+            else:
+                if in_run:
+                    am = run_start + int(np.argmax(win_env[run_start:j]))
+                    if am - last_p >= min_gap_samples:
+                        t_abs = (search_lo + i0 + am) / sr
+                        extras_t.append(t_abs)
+                        extras_strength.append(float(win_env[am]))
+                        last_p = am
+                    in_run = False
+        if in_run:
+            am = run_start + int(np.argmax(win_env[run_start:]))
+            if am - last_p >= min_gap_samples:
+                t_abs = (search_lo + i0 + am) / sr
+                extras_t.append(t_abs)
+                extras_strength.append(float(win_env[am]))
+
+    if not extras_t:
+        return kept_times, kept_strengths, kept_peaks
+
+    # Refine each extra to its rise-foot leading edge, then ensure min-gap from
+    # the existing pass-1 candidates.
+    refined: list[tuple[float, float]] = []  # (time, cwt_strength)
+    for t, s in zip(extras_t, extras_strength, strict=True):
+        t_refined = _leading_edge(audio, t, sr)
+        if all(abs(t_refined - q) >= min_gap_s for q in kept_times):
+            refined.append((t_refined, s))
+    if not refined:
+        return kept_times, kept_strengths, kept_peaks
+
+    # Merge into kept_*, preserving sorted order. Use the librosa-strength
+    # scale for extras: scale CWT response into roughly the same range as
+    # pass-1 librosa strengths so confidence ranking stays meaningful.
+    if pass1_strengths_cwt and max(pass1_strengths_cwt) > 0 and kept_strengths:
+        # Map CWT response -> pass-1 librosa-strength scale so extras don't
+        # swamp the normalization. Use the median pass-1 librosa strength as
+        # the reference for the median pass-1 CWT response.
+        ref_lib = float(np.median(kept_strengths))
+        ref_cwt = float(np.median(pass1_strengths_cwt))
+        scale = ref_lib / ref_cwt if ref_cwt > 0 else 0.0
+    else:
+        scale = 0.0
+
+    merged: list[tuple[float, float, float]] = []  # (t, strength, peak)
+    for t, s, p in zip(kept_times, kept_strengths, kept_peaks, strict=True):
+        merged.append((t, s, p))
+    for t, cwt_s in refined:
+        peak = _peak_amplitude(audio, t, sr, peak_win_samples)
+        merged.append((t, cwt_s * scale, peak))
+    merged.sort(key=lambda x: x[0])
+
+    out_t = [m[0] for m in merged]
+    out_s = [m[1] for m in merged]
+    out_p = [m[2] for m in merged]
+    return out_t, out_s, out_p
