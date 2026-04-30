@@ -164,35 +164,49 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float):
     return universe, per_fixture
 
 
-def _vote_b_threshold(universe) -> float:
-    pos = [c["clap_diff"] for c in universe if c["label"] == 1]
+def _vote_b_threshold(calib_universe) -> float:
+    pos = [c["clap_diff"] for c in calib_universe if c["label"] == 1]
     return min(pos) if pos else 0.0
 
 
-def _vote_c_probs_and_threshold(universe, target_recall: float):
-    X = np.array(
-        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in universe], dtype=np.float64
+def _x_from(cands) -> np.ndarray:
+    return np.array(
+        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in cands], dtype=np.float64
     )
-    y = np.array([c["label"] for c in universe], dtype=np.int64)
+
+
+def _train_voter_c(calib_universe, target_recall: float):
+    """Fit GBDT on calibration set (no CV); pick threshold to hit target recall on
+    held-out 5-fold predictions of the SAME calibration set. Returns (clf, threshold)."""
+    X = _x_from(calib_universe)
+    y = np.array([c["label"] for c in calib_universe], dtype=np.int64)
+
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    probs = np.zeros_like(y, dtype=np.float64)
+    cv_probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        clf = GradientBoostingClassifier(
+        f = GradientBoostingClassifier(
             n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
         )
-        clf.fit(X[tr], y[tr])
-        probs[te] = clf.predict_proba(X[te])[:, 1]
+        f.fit(X[tr], y[tr])
+        cv_probs[te] = f.predict_proba(X[te])[:, 1]
+
     n_pos = int(y.sum())
-    pairs = sorted(zip(probs, y, strict=True), key=lambda x: -x[0])
-    cum = 0
-    threshold = 0.0
+    pairs = sorted(zip(cv_probs, y, strict=True), key=lambda x: -x[0])
+    cum, threshold = 0, 0.0
     for prob, lbl in pairs:
         if lbl == 1:
             cum += 1
         if cum / n_pos >= target_recall:
             threshold = prob
             break
-    return probs, threshold
+
+    # Final model trained on ALL calibration data (no held-out -- this is what
+    # we apply to the new fixtures).
+    clf = GradientBoostingClassifier(
+        n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
+    )
+    clf.fit(X, y)
+    return clf, threshold
 
 
 def _build_fixture_json(
@@ -228,31 +242,84 @@ def _materialize(json_path: Path, wav_src: Path, fixture_dict: dict) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--fixture", action="append", help="Fixture stem (repeatable). Default: all four.")
+    p.add_argument("--fixture", action="append", help="Calibration fixture stem (repeatable). Default: all four audited.")
+    p.add_argument(
+        "--include-fixture",
+        action="append",
+        default=[],
+        help="Apply the trained ensemble to this fixture too (no labels needed). Repeatable.",
+    )
     p.add_argument("--consensus", type=int, default=3, choices=[1, 2, 3],
-                   help="N-of-3 consensus level for the *-ensemble.json variant (default 3).")
+                   help="Consensus threshold for the *-ensemble.json variant (default 3). "
+                   "Keep if (vote_total + apriori_boost) >= consensus.")
+    p.add_argument(
+        "--expected-rounds",
+        type=int,
+        default=None,
+        help="Soft apriori prior. Candidates ranked top-N by detector confidence "
+        "(within the fixture) get +apriori-boost added to their consensus score. "
+        "Applies only to fixtures listed in --include-fixture (not calibration set). "
+        "Lets a top-confidence candidate survive with one fewer voter agreement.",
+    )
+    p.add_argument(
+        "--apriori-boost",
+        type=float,
+        default=1.0,
+        help="Magnitude of the apriori boost (default 1.0 = equivalent to +1 vote). "
+        "Pick smaller (e.g. 0.5) for a gentler nudge that only breaks ties.",
+    )
     p.add_argument("--tolerance-ms", type=float, default=75.0)
     args = p.parse_args()
 
-    fixtures = args.fixture or DEFAULT_FIXTURES
-    print(f"Computing voter signals across {len(fixtures)} fixture(s)...")
-    universe, per_fixture = _compute_universe(fixtures, args.tolerance_ms)
-    print(f"Universe: {len(universe)} candidates, {sum(c['label'] for c in universe)} positives")
+    calibration_fixtures = args.fixture or DEFAULT_FIXTURES
+    apply_fixtures = list(dict.fromkeys(calibration_fixtures + args.include_fixture))
+    new_fixtures = [f for f in apply_fixtures if f not in calibration_fixtures]
+    print(f"Calibrating voters on {len(calibration_fixtures)} audited fixture(s)...")
+    if new_fixtures:
+        print(f"Applying ensemble to {len(new_fixtures)} new fixture(s) (no labels): {new_fixtures}")
 
-    clap_thr = _vote_b_threshold(universe)
-    probs, c_thr = _vote_c_probs_and_threshold(universe, target_recall=1.0)
-    print(f"Voter B threshold (CLAP shot-notshot): {clap_thr:.4f}")
-    print(f"Voter C threshold (GBDT, target recall 100 %): {c_thr:.4f}")
+    universe, per_fixture = _compute_universe(apply_fixtures, args.tolerance_ms)
+    calib_universe = [c for c in universe if c["fixture"] in calibration_fixtures]
+    print(
+        f"Calibration set: {len(calib_universe)} candidates, "
+        f"{sum(c['label'] for c in calib_universe)} positives"
+    )
+
+    clap_thr = _vote_b_threshold(calib_universe)
+    clf_c, c_thr = _train_voter_c(calib_universe, target_recall=1.0)
+    print(f"Voter B threshold (CLAP shot-notshot, calibrated): {clap_thr:.4f}")
+    print(f"Voter C threshold (GBDT, 5-fold CV target recall 100 %): {c_thr:.4f}")
+
+    # Apply voter C to the FULL universe using the model trained on calibration.
+    X_all = _x_from(universe)
+    probs = clf_c.predict_proba(X_all)[:, 1]
 
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_thr)
         c["vote_c"] = int(probs[i] >= c_thr)
         c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"]
+        c["score_c"] = float(probs[i])
+
+    # Apply per-fixture soft apriori boost (only for --include-fixture targets;
+    # calibration fixtures are unmodified so their existing eval numbers stand).
+    boost_set = set(args.include_fixture)
+    for fix in apply_fixtures:
+        rows = [c for c in universe if c["fixture"] == fix]
+        if args.expected_rounds is not None and fix in boost_set:
+            ranked = sorted(rows, key=lambda c: -c["confidence"])
+            top_set = {id(r) for r in ranked[: args.expected_rounds]}
+            for c in rows:
+                c["apriori_boost"] = args.apriori_boost if id(c) in top_set else 0.0
+        else:
+            for c in rows:
+                c["apriori_boost"] = 0.0
+        for c in rows:
+            c["score"] = c["vote_total"] + c["apriori_boost"]
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"\nWriting fixture variants to {OUTPUT_DIR}/")
 
-    for fix in fixtures:
+    for fix in apply_fixtures:
         info = per_fixture[fix]
         truth = info["truth"]
         all_shots = info["shots"]
@@ -282,19 +349,22 @@ def main() -> None:
                     "source": "detected",
                 })
 
-        # Ensemble shots[]: candidates passing the chosen consensus level. Each
-        # entry includes vote_total in its notes so the JSON itself documents
-        # how the kept set was computed.
+        # Ensemble shots[]: keep if (vote_total + apriori_boost) >= consensus.
+        # Each entry surfaces its votes / boost / score so the JSON documents
+        # the decision (and the UI / audit trail can show it).
         ensemble_shots = []
         for n, ui in enumerate(idxs, start=1):
-            if universe[ui]["vote_total"] >= args.consensus:
+            u = universe[ui]
+            if u["score"] >= args.consensus:
                 ensemble_shots.append({
                     "shot_number": len(ensemble_shots) + 1,
                     "candidate_number": n,
-                    "time": round(universe[ui]["t"], 4),
-                    "ms_after_beep": round(universe[ui]["time_from_beep"] * 1000, 0),
+                    "time": round(u["t"], 4),
+                    "ms_after_beep": round(u["time_from_beep"] * 1000, 0),
                     "source": "detected",
-                    "ensemble_votes": universe[ui]["vote_total"],
+                    "ensemble_votes": u["vote_total"],
+                    "apriori_boost": u["apriori_boost"],
+                    "ensemble_score": round(u["score"], 2),
                 })
 
         # Materialize both.
@@ -315,14 +385,30 @@ def main() -> None:
         n_ens = len(ensemble_shots)
         n_audited = sum(1 for s in truth.get("shots", []) if s.get("source") != "manual")
         n_manual = sum(1 for s in truth.get("shots", []) if s.get("source") == "manual")
+        boost_tag = ""
+        if fix in boost_set and args.expected_rounds is not None:
+            n_boosted = sum(
+                1 for ui in idxs if universe[ui]["apriori_boost"] > 0
+            )
+            n_lift = sum(
+                1
+                for ui in idxs
+                if universe[ui]["apriori_boost"] > 0
+                and universe[ui]["vote_total"] < args.consensus
+                and universe[ui]["score"] >= args.consensus
+            )
+            boost_tag = (
+                f" [apriori top-{args.expected_rounds}: {n_boosted} cands boosted, "
+                f"{n_lift} lifted into kept set]"
+            )
         print(
             f"  {fix}: cands {n_total}, baseline {n_base}, "
             f"ensemble({args.consensus}/3) {n_ens}, "
-            f"audited {n_audited} (+{n_manual} manual)"
+            f"audited {n_audited} (+{n_manual} manual){boost_tag}"
         )
 
     print(f"\nOpen in the review UI -- one fixture per browser tab/window:")
-    for fix in fixtures:
+    for fix in apply_fixtures:
         b = OUTPUT_DIR / f"{fix}-baseline.json"
         e = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"
         print(f"\n  uv run splitsmith review --fixture {b}")

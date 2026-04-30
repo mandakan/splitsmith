@@ -161,6 +161,15 @@ Expected output:
 
 To get a clean 14-shot timeline from the demo, see the cull workflow under [`fcpxml`](#fcpxml----regenerate-timeline-from-a-possibly-hand-edited-csv) above.
 
+## Reproducibility / what's in git
+
+Source MP4/MOV recordings are gitignored (multi-GB; not worth git-LFS for a personal tool). The committed inputs are:
+
+- `tests/fixtures/*.wav` -- pre-trimmed audio slices (~1-2 MB each), the canonical input for every detection / classification / eval script.
+- `tests/fixtures/*.json` -- audited shot times (ground truth) plus `_candidates_pending_audit` (raw detector output) and a `source` / `fixture_window_in_source` provenance pair naming the original video and time window.
+
+Anyone with the repo can run the full pipeline (beep / shot detection, PANN + CLAP feature extraction, ensemble eval) against the WAVs without touching the source videos. What you cannot reproduce without the original MP4 is the `audit-prep` step itself -- if you want a different trim window, padding, or beep override, you need the source video. That step is "input data preparation" rather than "pipeline reproduction"; the WAV is the canonical artefact downstream.
+
 ## Output file layout
 
 ```
