@@ -239,15 +239,18 @@ def test_detect_shots_min_confidence_filter(fixtures_dir: Path) -> None:
     found. With the filter at 0.0 the count must equal the unfiltered count;
     raising it must monotonically reduce (never increase) the count."""
     audio, sr, truth = _load_fixture(fixtures_dir)
-    base = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig())
+    base = detect_shots(
+        audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig()
+    )
     last_n = len(base)
-    last_min_conf = -1.0
     for cap in [0.0, 0.05, 0.10, 0.20, 0.50, 0.99]:
         cfg = ShotDetectConfig(min_confidence=cap)
         out = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
         assert len(out) <= last_n, f"min_confidence={cap}: count rose ({last_n} -> {len(out)})"
         for s in out:
-            assert s.confidence >= cap - 1e-9, f"min_confidence={cap}: kept shot with conf={s.confidence}"
+            assert (
+                s.confidence >= cap - 1e-9
+            ), f"min_confidence={cap}: kept shot with conf={s.confidence}"
         # shot_number must remain dense even after filtering
         assert [s.shot_number for s in out] == list(range(1, len(out) + 1))
         last_n = len(out)
@@ -258,9 +261,14 @@ def test_detect_shots_recall_fallback_cwt_idempotent_on_calm_audio(fixtures_dir:
     zero candidates -- the suspicious-gap trigger should not fire on a stage
     where pass 1 already covers everything at typical inter-shot pacing."""
     audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots")
-    base = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig())
+    base = detect_shots(
+        audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig()
+    )
     with_cwt = detect_shots(
-        audio, sr, truth["beep_time"], truth["stage_time_seconds"],
+        audio,
+        sr,
+        truth["beep_time"],
+        truth["stage_time_seconds"],
         ShotDetectConfig(recall_fallback="cwt"),
     )
     assert len(with_cwt) == len(base), (
@@ -274,9 +282,14 @@ def test_detect_shots_recall_fallback_recovers_known_miss(fixtures_dir: Path) ->
     within 75 ms of the known librosa miss at t=6.6399s, while leaving all
     pass-1 candidates intact."""
     audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots-tallmilan-stage7")
-    base = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig())
+    base = detect_shots(
+        audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig()
+    )
     with_cwt = detect_shots(
-        audio, sr, truth["beep_time"], truth["stage_time_seconds"],
+        audio,
+        sr,
+        truth["beep_time"],
+        truth["stage_time_seconds"],
         ShotDetectConfig(recall_fallback="cwt"),
     )
     # All pass-1 candidates survive (within 1 sample of their original time).
@@ -284,7 +297,9 @@ def test_detect_shots_recall_fallback_recovers_known_miss(fixtures_dir: Path) ->
     cwt_times = sorted(s.time_absolute for s in with_cwt)
     for b in base_times:
         nearest = min(abs(c - b) for c in cwt_times)
-        assert nearest < 1.0 / sr + 1e-9, f"pass-1 candidate at {b:.4f} disappeared after CWT fallback"
+        assert (
+            nearest < 1.0 / sr + 1e-9
+        ), f"pass-1 candidate at {b:.4f} disappeared after CWT fallback"
     # The known miss is now covered.
     assert any(abs(c - 6.6399) * 1000.0 < 75.0 for c in cwt_times), (
         f"CWT fallback failed to recover Stage 7 t=6.6399 miss; nearest cand "

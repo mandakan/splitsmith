@@ -307,10 +307,7 @@ def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
         if prev < min_so_far:
             min_so_far = prev
             min_pos = i - 1
-        elif (
-            (peak_local - i) >= rise_guard_samples
-            and prev > min_so_far * _RISE_BACK_FACTOR
-        ):
+        elif (peak_local - i) >= rise_guard_samples and prev > min_so_far * _RISE_BACK_FACTOR:
             i = min_pos
             break
         i -= 1
