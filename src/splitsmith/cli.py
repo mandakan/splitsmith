@@ -213,6 +213,180 @@ def review(
         server.server_close()
 
 
+@app.command("audit-prep")
+def audit_prep(
+    video: Path = typer.Option(..., "--video", help="Source video file (mp4/mov)."),
+    time: float = typer.Option(..., "--time", help="Official stage time in seconds."),
+    stage_number: int = typer.Option(..., "--stage-number"),
+    stage_name: str = typer.Option(..., "--stage-name"),
+    output_dir: Path = typer.Option(
+        Path("tests/fixtures"), "--output-dir", help="Where to write the fixture files."
+    ),
+    stem: str = typer.Option(..., "--stem", help="File stem (e.g. stage-shots-tallmilan-stage5)."),
+    fixture_pre_pad_s: float = typer.Option(0.5, "--pre-pad-seconds"),
+    fixture_post_pad_s: float = typer.Option(1.5, "--post-pad-seconds"),
+    config_path: Path | None = typer.Option(None, "--config"),
+) -> None:
+    """Build a review-ready fixture (wav + JSON + audit CSV) from a source video.
+
+    Steps:
+    1. Extract mono 48 kHz audio from the source video via ffmpeg.
+    2. Detect the beep, then run shot_detect over the stage window.
+    3. Slice ``[beep - pre_pad, beep + stage_time + post_pad]`` of the audio
+       and save as ``<stem>.wav`` in ``output_dir``.
+    4. Save ``<stem>.json`` (metadata + empty shots[] + candidate dump) and
+       ``<stem>-candidates.csv`` (with audit_keep column).
+
+    Existing files at the same paths are overwritten.
+    """
+    import csv as _csv
+    import json as _json
+    import subprocess as _subprocess
+
+    import soundfile as sf
+
+    config = Config.load(config_path)
+    if not video.exists():
+        raise typer.BadParameter(f"video not found: {video}")
+    if not shutil.which("ffmpeg"):
+        raise typer.BadParameter("ffmpeg is required to extract audio")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    full_wav = output_dir / f"{stem}-FULL.wav"
+    console.print(f"  extracting full audio -> {full_wav}")
+    _subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(video),
+            "-ac",
+            "1",
+            "-ar",
+            "48000",
+            "-vn",
+            str(full_wav),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    audio, sr = beep_detect.load_audio(full_wav)
+    full_wav.unlink()  # we keep only the sliced fixture wav
+
+    beep = beep_detect.detect_beep(audio, sr, config.beep_detect)
+    console.print(
+        f"  beep at source t=[cyan]{beep.time:.4f}s[/]  "
+        f"peak={beep.peak_amplitude:.3f}  duration={beep.duration_ms:.0f}ms"
+    )
+
+    fix_lo = max(0.0, beep.time - fixture_pre_pad_s)
+    fix_hi = min(len(audio) / sr, beep.time + time + fixture_post_pad_s)
+    fixture_audio = audio[int(fix_lo * sr) : int(fix_hi * sr)]
+    fixture_wav = output_dir / f"{stem}.wav"
+    sf.write(fixture_wav, fixture_audio, sr, subtype="PCM_16")
+    console.print(
+        f"  fixture wav: {fixture_wav} "
+        f"({len(fixture_audio) / sr:.2f}s, {fixture_wav.stat().st_size / 1e6:.2f} MB)"
+    )
+
+    detected = shot_detect.detect_shots(audio, sr, beep.time, time, config.shot_detect)
+    beep_in_fixture = beep.time - fix_lo
+    candidates = []
+    for i, s in enumerate(detected, start=1):
+        candidates.append(
+            {
+                "candidate_number": i,
+                "time": round(s.time_absolute - fix_lo, 4),
+                "ms_after_beep": round(s.time_from_beep * 1000, 0),
+                "peak_amplitude": round(s.peak_amplitude, 4),
+                "confidence": round(s.confidence, 3),
+            }
+        )
+
+    fixture_json = output_dir / f"{stem}.json"
+    fixture_json.write_text(
+        _json.dumps(
+            {
+                "source": (
+                    f"{video.name} stage {stage_number} '{stage_name}' "
+                    "(audio extracted at 48 kHz mono)"
+                ),
+                "stage_number": stage_number,
+                "stage_name": stage_name,
+                "fixture_window_in_source": [round(fix_lo, 4), round(fix_hi, 4)],
+                "beep_time": round(beep_in_fixture, 4),
+                "tolerance_ms": 15,
+                "stage_time_seconds": time,
+                "stage_window_end_in_fixture": round(beep_in_fixture + time, 4),
+                "shots": [],
+                "_candidates_pending_audit": {
+                    "_note": (
+                        "Auto-detected by current shot_detect (half-rise leading edge). "
+                        "NOT ground truth. Open in `splitsmith review` to audit, "
+                        "or mark audit_keep in the companion -candidates.csv and run "
+                        "`splitsmith audit-apply`."
+                    ),
+                    "candidates": candidates,
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    console.print(f"  fixture json: {fixture_json}  ({len(candidates)} candidates)")
+
+    csv_path = output_dir / f"{stem}-candidates.csv"
+    stage_end_ms = time * 1000
+    with csv_path.open("w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(
+            [
+                "audit_keep",
+                "candidate_number",
+                "time_fixture_s",
+                "time_source_s",
+                "ms_after_beep",
+                "split_from_prev_ms",
+                "peak_amplitude",
+                "confidence",
+                "in_stage_window",
+                "suspect_echo_lt_150ms",
+            ]
+        )
+        prev_t = beep_in_fixture
+        for c in candidates:
+            t_fix = c["time"]
+            t_src = round(t_fix + fix_lo, 4)
+            split_ms = round((t_fix - prev_t) * 1000, 1)
+            in_win = "Y" if c["ms_after_beep"] <= stage_end_ms + 1000 else "N"
+            echo = "Y" if split_ms < 150 else ""
+            w.writerow(
+                [
+                    "",
+                    c["candidate_number"],
+                    t_fix,
+                    t_src,
+                    c["ms_after_beep"],
+                    split_ms,
+                    c["peak_amplitude"],
+                    c["confidence"],
+                    in_win,
+                    echo,
+                ]
+            )
+            prev_t = t_fix
+    console.print(f"  candidates csv: {csv_path}")
+    console.print(
+        f"\n[green]Ready.[/] Open in the UI:\n"
+        f"  uv run splitsmith review --fixture {fixture_json} --video {video}"
+    )
+
+
 @app.command("audit-apply")
 def audit_apply(
     candidates: Path = typer.Option(

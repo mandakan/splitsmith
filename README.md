@@ -100,6 +100,7 @@ Keyboard:
 | `Space` | play / pause |
 | `M` / `Shift+M` | next / previous marker |
 | `Cmd+1` / `Cmd+2` / `Cmd+3` | zoom in / fit / zoom out |
+| `Cmd+Z` | undo (toggle / drag / add / delete) |
 | `Cmd+S` | save |
 | right-click marker | delete (manual) or reject (detected) |
 
@@ -171,6 +172,59 @@ analysis/
 ```
 
 A `.wav` cache file is written next to each source video on first run -- this is intentional (re-running `detect` on the same video skips the audio extraction). Add `*.wav` to your match-videos directory's `.gitignore` if it's tracked.
+
+## Detection methodology
+
+Splitsmith treats *consistency across stages and matches* as more important than matching any other tool's exact timestamps. This section documents what the detector does, why, and how its output relates to a hardware shot timer like the CED7000.
+
+### Beep detection (`beep_detect.py`)
+
+1. Bandpass-filter the audio to `[freq_min_hz, freq_max_hz]` (default 2-5 kHz, the typical IPSC timer beep range).
+2. Compute the Hilbert envelope, lightly smoothed (10 ms moving average).
+3. Find candidate runs where the smoothed envelope exceeds `min_amplitude * peak` (default 30%) for at least `min_duration_ms` (default 150 ms).
+4. Pick the strongest candidate run.
+5. **Backtrack to the leading edge**: walk backward from the candidate's start through the smoothed envelope until reaching `5 * p95(noise)` (with the noise window taken from before the run). That sample is the reported beep time.
+
+The backtrack matters because timer beeps ramp up over ~400 ms; a fixed amplitude threshold would land deep into the rise. Using a multiple of the recording's own pre-beep noise floor adapts to gain, distance, and ambient noise.
+
+### Shot detection (`shot_detect.py`)
+
+1. **Skip the first 500 ms after the beep.** Beep tones are 200-400 ms and human reaction + draw is never under 500 ms on a head-mounted recording.
+2. **`librosa.onset.onset_detect`** with spectral flux (default `delta=0.07`, `pre_max=post_max=30 ms`) finds onset frames at ~10.7 ms resolution.
+3. **80 ms minimum-gap filter** (greedy): drop onsets within 80 ms of a previously-kept one. Catches close echoes from steel/walls.
+4. **150 ms echo refractory**: drop subsequent onsets within 150 ms of a kept onset whose peak amplitude is below 40% of the previous peak. Catches lower-amplitude intra-bay echoes.
+5. **Half-rise leading edge**: this is the per-shot time you see in outputs. For each kept onset, find the absolute peak `|audio|` in a 30 ms window around the librosa frame, then report the first sample whose `|audio|` reaches **half** that peak. This is the "leading edge" definition used everywhere downstream.
+
+#### Why half-rise?
+
+| target | property | why we don't use it |
+|---|---|---|
+| absolute amplitude threshold (CED7000-style) | simple, fast | sensitive to AGC, distance, gain. A quiet AGC-ducked shot crosses the threshold later in its rise than a loud unducked shot, biasing splits. |
+| noise-floor-relative threshold | adapts to recording conditions | depends on a tunable "K times noise" knob; biases earlier on slow-rise transients. |
+| **half of the local peak (half-rise)** | uses the burst's own peak as reference, so AGC ducking doesn't bias timing; matches what the eye picks when scrubbing a waveform | (the choice) |
+
+Half-rise is the standard "onset" definition in audio-engineering literature for sharp transients. It is **insensitive** to:
+- ambient noise levels (uses peak ratio, not absolute energy)
+- camera AGC ducking (a quieter shot still has a peak; half-rise lands at the same fractional point)
+- recording gain or distance (peak scales linearly; half scales the same way)
+
+It is **sensitive** to:
+- the burst's own profile (sharp transients have a sharp leading edge; gradual transients land later)
+- the 30 ms peak-search window (transients longer than 30 ms would have their peak underestimated; not a concern for gunshots)
+
+#### Comparing splitsmith times to a CED7000 / Pact / similar
+
+**Don't expect absolute timestamps to match.** A CED7000 typically uses an absolute amplitude threshold; splitsmith uses half-rise. On the same recording the two definitions can differ by 5-15 ms per shot.
+
+**Splits *do* match across recordings.** Because the half-rise definition is internally consistent, the *difference* between two consecutive shot times is comparable across stages, matches, and recording conditions. Any constant per-shot offset cancels in the subtraction. This is the metric that matters for training.
+
+If you ever need to compare absolute times to another timer, expect a small constant offset (typically splitsmith reports 5-15 ms earlier than amplitude-threshold timers because half-rise lands earlier in the rise than a fixed threshold).
+
+### Confidence ranking
+
+Each shot has a `confidence` score = geometric mean of normalized onset strength and normalized peak amplitude (each normalized to the max within the kept set). Sorting CSV rows by confidence ascending puts the most likely false positives (echoes, neighbouring bays) at the top — fast triage when culling.
+
+Real shots that come right after a long pause are AGC-ducked and rank lower in confidence, so don't blindly delete the bottom-N rows. Eyeball timestamps too.
 
 ## Configuration
 

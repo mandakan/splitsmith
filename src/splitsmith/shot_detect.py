@@ -1,19 +1,43 @@
 """Detect gunshot timestamps via librosa onset detection within the stage window.
 
-v1 design priorities (per SPEC.md and CLAUDE.md):
-- High recall: prefer false positives over missed shots.
-- Surface uncertainty: every detected onset is returned with peak amplitude and a
-  confidence score so the user (and report.py) can flag suspicious detections.
-- Don't filter on absolute amplitude. Insta360 Go 3S has aggressive AGC that
-  ducks follow-up shots; the FIRST shot after a long pause can be 5x quieter
-  than the loudest shot of the same string.
+Pipeline:
+1. Slice ``[beep_time + 0.5, beep_time + stage_time + 1.0]`` of the audio.
+2. ``librosa.onset.onset_detect`` (spectral flux, delta=onset_delta) to locate
+   candidate onsets at frame resolution (~10.7 ms at 48 kHz / hop 512).
+3. Greedy ``min_gap_ms`` filter: drop onsets within 80 ms of a previously
+   kept one (handles within-shot echoes from steel/walls).
+4. Echo refractory: drop onsets within 150 ms of a kept one whose peak
+   amplitude is below 40 % of the previous peak (catches quieter intra-bay
+   echoes that survive min-gap).
+5. **Half-rise leading-edge refinement** (the per-onset time you actually
+   see in the output): for each kept onset, find the local peak |audio| in
+   a 30 ms window and walk forward to the first sample reaching 50 % of
+   that peak. This is the "leading edge" definition used for all timing.
 
-The minimum-gap filter handles within-shot echoes (typically 10-80 ms after the
-shot). Other-bay contamination and post-stage shots are NOT filtered here -- the
-report layer flags them for manual review.
+Why half-rise (not amplitude threshold or noise-floor crossing):
+- INSENSITIVE to ambient noise and AGC: the burst's own peak is the reference,
+  so a quiet AGC-ducked shot lands at the same fractional point on its rise as
+  a loud unducked shot. This keeps timing consistent across stages, matches,
+  and recording conditions.
+- DEFENSIBLE: half-rise is the standard onset definition in audio-engineering
+  literature for sharp transients. It's also approximately where the human
+  eye picks the leading edge when scrubbing a waveform in a UI.
+- NOT directly comparable to a CED7000 (which uses an absolute threshold),
+  but SPLITS (differences between consecutive shots) ARE comparable since
+  any constant detection offset cancels.
 
-Pure function: takes audio + beep time + stage time + config, returns list[Shot].
-No file I/O.
+v1 priorities:
+- High recall: prefer false positives over missed shots; the user culls in
+  the review UI / CSV.
+- Surface uncertainty: every onset is returned with peak amplitude and a
+  confidence score (geometric mean of onset strength and peak, normalized
+  within the kept set) so the user can sort by confidence ascending and cull
+  from the bottom.
+- Don't filter on absolute amplitude (Insta360 Go 3S AGC ducks follow-up
+  shots; the first shot after a pause can be 5x quieter than peak).
+
+Pure function: takes audio + beep time + stage time + config, returns
+list[Shot]. No file I/O.
 """
 
 from __future__ import annotations
@@ -32,6 +56,17 @@ _PEAK_WIN_MS = 5.0  # half-width of the window used to read peak amplitude per s
 # also distorts the onset-envelope reference statistics enough to drop genuine
 # late-stage onsets, so this is also a detection-quality fix.
 _POST_BEEP_SKIP_S = 0.5
+
+# Half-rise leading-edge refinement. For each kept onset:
+#   1. find the peak |audio| within ``_LEAD_EDGE_PEAK_WINDOW_S`` of the
+#      librosa-frame onset time (a small backward pad accommodates frame
+#      quantization and any pre-peak slack);
+#   2. walk forward from the start of that window to the first sample whose
+#      |audio| reaches ``_LEAD_EDGE_HALF_RISE_FRAC * peak``.
+# That sample is the reported leading edge.
+_LEAD_EDGE_PRE_PAD_S = 0.005  # backward pad before the librosa frame
+_LEAD_EDGE_PEAK_WINDOW_S = 0.030  # forward span used to locate the local peak
+_LEAD_EDGE_HALF_RISE_FRAC = 0.5  # the "half" in half-rise
 
 
 def detect_shots(
@@ -114,6 +149,15 @@ def detect_shots(
         kept_strengths.append(float(strength))
         kept_peaks.append(float(peak))
 
+    # Refine each kept onset's time to its half-rise leading edge. Min-gap
+    # and refractory operate on the librosa-frame times above (preserving
+    # ordering and candidate count); only the OUTPUT time changes.
+    kept_times = [_half_rise_leading_edge(audio, t, sample_rate) for t in kept_times]
+    # Re-measure peak amplitude at the backtracked times (the actual transient
+    # peak is typically a few ms past the leading edge, still inside the peak
+    # window since _PEAK_WIN_MS is symmetric).
+    kept_peaks = [_peak_amplitude(audio, t, sample_rate, peak_win_samples) for t in kept_times]
+
     # Combined confidence: geometric mean of onset strength and peak amplitude,
     # each normalized to its own max within the kept set. Sorting CSV rows by
     # this column ascending puts the most likely false positives at the top.
@@ -141,6 +185,34 @@ def detect_shots(
         prev_t = t_abs
 
     return shots
+
+
+def _half_rise_leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
+    """Return the half-rise time of the transient surrounding ``onset_t``.
+
+    The window starts a few ms BEFORE the librosa frame (to accommodate frame
+    quantization, since the actual transient often begins slightly before the
+    frame at which spectral flux peaks) and extends ~30 ms after. Within that
+    window we find the absolute peak |audio| (the burst's transient peak),
+    then walk forward from the window's start to the first sample at or above
+    HALF that peak. That's the reported leading edge.
+
+    Falls back to ``onset_t`` if the audio in the window is silent.
+    """
+    onset_idx = int(round(onset_t * sr))
+    win_lo = max(0, onset_idx - int(_LEAD_EDGE_PRE_PAD_S * sr))
+    win_hi = min(audio.size, onset_idx + int(_LEAD_EDGE_PEAK_WINDOW_S * sr))
+    if win_hi <= win_lo:
+        return onset_t
+    window = np.abs(audio[win_lo:win_hi])
+    peak = float(window.max()) if window.size else 0.0
+    if peak <= 0.0:
+        return onset_t
+    half = peak * _LEAD_EDGE_HALF_RISE_FRAC
+    above = window >= half
+    if not above.any():
+        return onset_t
+    return (win_lo + int(np.argmax(above))) / sr
 
 
 def _ms_to_frames(ms: int, sample_rate: int) -> int:

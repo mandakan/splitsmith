@@ -75,14 +75,16 @@ header h1 { margin: 0; font-size: 1.1rem; }
     color: #e7e7e7;
     cursor: pointer;
 }
-#time-display, #zoom-display { font-family: ui-monospace, SFMono-Regular, monospace; }
+#time-display, #zoom-display, #drag-info { font-family: ui-monospace, SFMono-Regular, monospace; }
+#drag-info { color: #ffd60a; min-width: 0; }
+#drag-info:empty::before { content: ""; }
 .hint { color: #888; font-size: 0.85rem; margin-left: auto; }
 
 #waveform-section {
     position: relative;
     background: #18181a;
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: hidden;
+    height: 140px;
 }
 #waveform {
     height: 140px;
@@ -92,7 +94,11 @@ header h1 { margin: 0; font-size: 1.1rem; }
     top: 0;
     left: 0;
     height: 140px;
+    will-change: transform;
     pointer-events: none;
+    /* wavesurfer's internal canvas/cursor elements have explicit z-index;
+       lift the overlay above them so marker pins receive clicks. */
+    z-index: 10;
 }
 .marker {
     position: absolute;
@@ -123,6 +129,36 @@ header h1 { margin: 0; font-size: 1.1rem; }
 .marker.beep .marker-pin { cursor: default; }
 .marker.manual .marker-pin {
     border-style: dashed;
+}
+#time-ruler-section {
+    position: relative;
+    background: #18181a;
+    overflow: hidden;
+    height: 22px;
+    border-bottom: 1px solid #2c2c2e;
+}
+#time-ruler {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 22px;
+    will-change: transform;
+}
+.time-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #3a3a3c;
+    color: #888;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.7rem;
+    padding-left: 3px;
+    white-space: nowrap;
+}
+.time-tick.major {
+    background: #5a5a5c;
+    color: #c0c0c2;
 }
 .marker-label {
     position: absolute;

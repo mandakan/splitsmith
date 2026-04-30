@@ -29,12 +29,17 @@
         <button id="play-btn">Play (Space)</button>
         <span id="time-display">0.000 / 0.000s</span>
         <span id="zoom-display">zoom 1.0x</span>
+        <span id="drag-info"></span>
         <span class="hint">Cmd+1 zoom in / Cmd+2 fit / Cmd+3 zoom out</span>
     </section>
 
     <section id="waveform-section">
         <div id="waveform"></div>
         <div id="markers-overlay"></div>
+    </section>
+
+    <section id="time-ruler-section">
+        <div id="time-ruler"></div>
     </section>
 
     <section id="marker-list-section">
@@ -60,6 +65,7 @@
         click a marker to toggle keep &middot;
         drag to adjust time &middot;
         double-click waveform to add a marker &middot;
+        <kbd>Cmd+Z</kbd> undo &middot;
         <kbd>Cmd+S</kbd> save
     </footer>
 
