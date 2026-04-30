@@ -4,9 +4,16 @@ Strategy:
 1. Bandpass to [freq_min_hz, freq_max_hz] (typical shot-timer beep ~2.5-4 kHz).
 2. Hilbert envelope, lightly smoothed.
 3. Find runs where the smoothed envelope (normalized to its global peak) exceeds
-   ``min_amplitude`` for at least ``min_duration_ms``. Pick the strongest run.
-4. **Rise-foot leading edge** (matches shot_detect): locate the peak of the
-   smoothed envelope inside the strong run, then walk backward through the
+   ``min_amplitude`` for at least ``min_duration_ms``.
+4. **Silence-preference scoring**: pick the run with the highest ratio of
+   ``run_peak / (mean envelope in the pre-window + eps)``. Real IPSC beeps are
+   preceded by several seconds of "Are you ready? / Stand by" and a pause; in-
+   stage steel rings and shots are not. Ranking by peak alone biases toward
+   loud mid-stage transients on AGC'd / quiet recordings; ranking by
+   peak-over-pre-silence biases toward the actual beep regardless of absolute
+   loudness.
+5. **Rise-foot leading edge** (matches shot_detect): locate the peak of the
+   smoothed envelope inside the chosen run, then walk backward through the
    envelope. Walking stops when the envelope drops below 5 % of peak (silence
    before the tone) or starts rising again (entering an earlier transient).
 
@@ -68,6 +75,16 @@ def detect_beep(
     if audio.size == 0:
         raise ValueError("audio is empty")
 
+    # Limit the search to the configured leading window. This prevents mid-
+    # stage low-activity moments from out-scoring the real beep on silence
+    # preference alone (e.g. a steel ring after a long reload, late in the
+    # stage, can have lower pre-window energy than the beep itself).
+    if config.search_window_s and config.search_window_s > 0:
+        search_hi = min(audio.size, int(round(config.search_window_s * sample_rate)))
+        audio = audio[:search_hi]
+        if audio.size == 0:
+            raise BeepNotFoundError("search window is empty")
+
     sos = butter(
         4,
         [config.freq_min_hz, config.freq_max_hz],
@@ -87,21 +104,41 @@ def detect_beep(
     if peak_value <= 0.0:
         raise BeepNotFoundError("flat audio: no energy in beep band")
 
-    # Strong-run candidate selection: ``min_amplitude`` is interpreted as a
-    # fraction of the global peak envelope, matching how the SPEC describes it.
-    above = env >= (config.min_amplitude * peak_value)
+    # Strong-run candidate selection: combine the fraction-of-peak threshold
+    # (current behaviour) with an ABSOLUTE peak floor so a low global peak
+    # doesn't let near-silent ambient noise qualify as a candidate. The
+    # effective cutoff is the larger of the two.
+    cutoff = max(config.min_amplitude * peak_value, config.min_abs_peak)
+    above = env >= cutoff
     edges = np.diff(above.astype(np.int8), prepend=0, append=0)
     starts = np.flatnonzero(edges == 1)
     ends = np.flatnonzero(edges == -1)  # exclusive
 
     min_run_samples = int(round(sample_rate * config.min_duration_ms / 1000.0))
 
-    candidates: list[tuple[int, int, float]] = []
+    pre_window_samples = int(round(sample_rate * config.silence_window_s))
+    pre_skip_samples = int(round(sample_rate * config.silence_pre_skip_s))
+
+    candidates: list[tuple[int, int, float, float]] = []
     for s, e in zip(starts, ends, strict=True):
         if (e - s) < min_run_samples:
             continue
         run_peak = float(env[s:e].max())
-        candidates.append((s, e, run_peak))
+        # Mean envelope in the pre-silence window. ``silence_pre_skip_s``
+        # excludes the immediate ramp-up so a slow beep onset doesn't bleed
+        # into its own pre-silence measurement. If the candidate starts too
+        # early in the audio for a full window, use what we have.
+        pre_hi = max(0, s - pre_skip_samples)
+        pre_lo = max(0, pre_hi - pre_window_samples)
+        if pre_hi > pre_lo:
+            pre_mean = float(env[pre_lo:pre_hi].mean())
+        else:
+            pre_mean = 0.0
+        # Score: loud burst preceded by quiet wins over loud burst preceded
+        # by an active stage (or other shots / RO chatter). Eps prevents a
+        # zero-pre-silence candidate from scoring infinity.
+        score = run_peak / (pre_mean + 1e-6)
+        candidates.append((s, e, run_peak, score))
 
     if not candidates:
         raise BeepNotFoundError(
@@ -110,7 +147,7 @@ def detect_beep(
             f"{config.freq_max_hz}] Hz"
         )
 
-    run_start, run_end, run_peak = max(candidates, key=lambda c: c[2])
+    run_start, run_end, run_peak, _score = max(candidates, key=lambda c: c[3])
 
     leading_idx = _rise_foot_leading_edge(env, run_start, run_end)
 

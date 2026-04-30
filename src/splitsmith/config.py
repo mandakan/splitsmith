@@ -114,7 +114,36 @@ class BeepDetectConfig(BaseModel):
     freq_min_hz: int = 2000
     freq_max_hz: int = 5000
     min_duration_ms: int = 150
-    min_amplitude: float = 0.3
+    # Fraction of the global envelope peak that a candidate run must clear.
+    # Lowered from 0.3 because Insta360 GO 3S audio at competitions records the
+    # beep MUCH quieter than nearby steel rings or shots; a 0.3 floor would
+    # silently skip the real beep when a louder transient exists earlier in the
+    # clip. 0.05 admits faint candidates; the silence-preference scoring below
+    # then picks the one preceded by the longest pre-event silence.
+    min_amplitude: float = 0.05
+    # Absolute peak floor on the bandpassed envelope. Belt-and-braces against
+    # very-quiet false positives (RO chatter clipping into the 2-5 kHz band,
+    # mic handling, etc.) when the leading window happens to contain a
+    # near-silent segment. Real IPSC beeps from a Insta360 GO 3S typically peak
+    # around 0.05-0.20 in [-1, 1] -- 0.04 is well below that. The effective
+    # cutoff per recording is max(min_amplitude * global_peak, min_abs_peak).
+    min_abs_peak: float = 0.04
+    # Silence-preference scoring: an IPSC beep is preceded by ~3 s of "Are you
+    # ready / Stand by", then a brief pause. A steel ring or shot during the
+    # stage is NOT. We score each candidate by run_peak / (mean envelope in
+    # [start - silence_window_s, start - silence_pre_skip_s] + eps) and pick
+    # the highest score. ``silence_pre_skip_s`` skips the immediate ramp-up
+    # so the metric isn't polluted by the beep's own envelope leakage.
+    silence_window_s: float = 1.5
+    silence_pre_skip_s: float = 0.2
+    # Hard search-window cap. Real IPSC beeps come within the first ~30 s of a
+    # head-cam recording: shooter walks to the line, RO runs through commands,
+    # beep. After that window we're inside the stage where mid-stage moments
+    # of relative silence followed by a loud transient (a steel ring after a
+    # reload, etc.) can score higher than the actual beep on silence-preference
+    # alone. Capping the search avoids that failure mode entirely. Override per
+    # video in YAML if your recording is longer-leading.
+    search_window_s: float = 30.0
 
 
 class ShotDetectConfig(BaseModel):
