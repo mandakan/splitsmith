@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# uv
+.python-version
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Project-specific
+analysis/
+match_raw/
+*.mp4
+*.mov
+*.wav
+# Whitelist small audio fixtures only. Video fixtures (e.g. stage_sample.mp4 at
+# ~580 MB) live on disk for integration tests but are kept out of git history;
+# track them via git-lfs or an external store if/when they need to be shared.
+!tests/fixtures/*.wav
+# But keep CLI-cached extractions (named identically to their source video)
+# out of git -- they're derivable from the video on demand.
+tests/fixtures/stage_sample.wav
+config.yaml

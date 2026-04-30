@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>splitsmith review</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+    <header>
+        <div id="title-block">
+            <h1 id="stage-title">loading...</h1>
+            <div id="stage-meta"></div>
+        </div>
+        <div id="header-controls">
+            <span id="save-status"></span>
+            <button id="save-btn">Save (Cmd+S)</button>
+        </div>
+    </header>
+
+    <section id="video-section">
+        <video id="video" controls muted></video>
+        <div id="no-video-msg" class="hidden">
+            No video provided. Pass <code>--video PATH</code> to <code>splitsmith review</code>
+            to align footage alongside the waveform.
+        </div>
+    </section>
+
+    <section id="transport">
+        <button id="play-btn">Play (Space)</button>
+        <span id="time-display">0.000 / 0.000s</span>
+        <span id="zoom-display">zoom 1.0x</span>
+        <span class="hint">Cmd+1 zoom in / Cmd+2 fit / Cmd+3 zoom out</span>
+    </section>
+
+    <section id="waveform-section">
+        <div id="waveform"></div>
+        <div id="markers-overlay"></div>
+    </section>
+
+    <section id="marker-list-section">
+        <table id="marker-list">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>t (s)</th>
+                    <th>split</th>
+                    <th>peak</th>
+                    <th>conf</th>
+                    <th>source</th>
+                    <th>keep</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </section>
+
+    <footer>
+        <kbd>Space</kbd> play/pause &middot;
+        <kbd>M</kbd> / <kbd>Shift+M</kbd> next/prev marker &middot;
+        click a marker to toggle keep &middot;
+        drag to adjust time &middot;
+        double-click waveform to add a marker &middot;
+        <kbd>Cmd+S</kbd> save
+    </footer>
+
+    <script src="/vendor/wavesurfer.min.js"></script>
+    <script src="/app.js"></script>
+</body>
+</html>

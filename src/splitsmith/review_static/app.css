@@ -1,0 +1,178 @@
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: #e7e7e7;
+    background: #1c1c1e;
+    font-size: 14px;
+}
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #2c2c2e;
+    background: #232325;
+}
+header h1 { margin: 0; font-size: 1.1rem; }
+#stage-meta { font-size: 0.85rem; color: #a0a0a3; margin-top: 0.15rem; }
+#header-controls { display: flex; align-items: center; gap: 1rem; }
+#save-btn {
+    padding: 0.4rem 0.9rem;
+    background: #0a84ff;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+#save-btn:hover { background: #0066d3; }
+#save-btn.dirty { background: #ff9f0a; }
+#save-status { color: #a0a0a3; font-size: 0.85rem; }
+
+#video-section {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #000;
+    padding: 0.5rem;
+    min-height: 200px;
+    max-height: 40vh;
+}
+#video {
+    max-width: 100%;
+    max-height: 38vh;
+}
+#no-video-msg {
+    color: #888;
+    text-align: center;
+    padding: 1.5rem;
+    background: #18181a;
+    border-radius: 6px;
+    max-width: 600px;
+}
+#no-video-msg code {
+    background: #2c2c2e;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+.hidden { display: none !important; }
+
+#transport {
+    padding: 0.5rem 1rem;
+    background: #232325;
+    border-top: 1px solid #2c2c2e;
+    border-bottom: 1px solid #2c2c2e;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+#play-btn {
+    padding: 0.3rem 0.8rem;
+    background: #2c2c2e;
+    border: 1px solid #3a3a3c;
+    border-radius: 4px;
+    color: #e7e7e7;
+    cursor: pointer;
+}
+#time-display, #zoom-display { font-family: ui-monospace, SFMono-Regular, monospace; }
+.hint { color: #888; font-size: 0.85rem; margin-left: auto; }
+
+#waveform-section {
+    position: relative;
+    background: #18181a;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+#waveform {
+    height: 140px;
+}
+#markers-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 140px;
+    pointer-events: none;
+}
+.marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.marker-pin {
+    position: absolute;
+    top: 4px;
+    left: -7px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid;
+    cursor: grab;
+    transition: transform 0.05s;
+}
+.marker-pin:active { cursor: grabbing; }
+.marker.keep .marker-pin { background: #30d158; border-color: #30d158; }
+.marker.keep { background: rgba(48, 209, 88, 0.6); }
+.marker.reject .marker-pin { background: transparent; border-color: #ff453a; }
+.marker.reject { background: rgba(255, 69, 58, 0.4); }
+.marker.beep .marker-pin { background: #ffd60a; border-color: #ffd60a; }
+.marker.beep { background: rgba(255, 214, 10, 0.6); cursor: default; }
+.marker.beep .marker-pin { cursor: default; }
+.marker.manual .marker-pin {
+    border-style: dashed;
+}
+.marker-label {
+    position: absolute;
+    top: 24px;
+    left: -10px;
+    font-size: 0.7rem;
+    background: rgba(0,0,0,0.7);
+    padding: 1px 4px;
+    border-radius: 2px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+#marker-list-section {
+    flex: 1;
+    overflow-y: auto;
+    background: #1c1c1e;
+}
+#marker-list {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85rem;
+}
+#marker-list th, #marker-list td {
+    text-align: left;
+    padding: 0.3rem 0.7rem;
+    border-bottom: 1px solid #2c2c2e;
+}
+#marker-list th { background: #232325; position: sticky; top: 0; }
+#marker-list tbody tr { cursor: pointer; }
+#marker-list tbody tr:hover { background: #2c2c2e; }
+#marker-list tbody tr.keep td:nth-child(7) { color: #30d158; font-weight: bold; }
+#marker-list tbody tr.reject td:nth-child(7) { color: #ff453a; }
+#marker-list tbody tr.manual td:nth-child(6) { color: #ffd60a; font-style: italic; }
+#marker-list tbody tr.active { background: #2c2c2e; }
+
+footer {
+    padding: 0.5rem 1rem;
+    background: #232325;
+    border-top: 1px solid #2c2c2e;
+    color: #888;
+    font-size: 0.85rem;
+    text-align: center;
+}
+kbd {
+    background: #2c2c2e;
+    border: 1px solid #3a3a3c;
+    border-radius: 3px;
+    padding: 0.1rem 0.4rem;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.8rem;
+}

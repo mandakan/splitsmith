@@ -1,0 +1,9 @@
+{
+  "source": "Insta360 Go 3S head-mounted camera, Tallmilan 2026 stage start",
+  "description": "Audio from 'Are you ready' through start beep and a few shots into the stage.",
+  "beep_time": 4.853,
+  "beep_time_method": "leading edge of the 3047.5 Hz timer tone, defined as the first sample at which the bandpass-filtered envelope exceeds 5x the pre-beep p95 noise floor. STFT energy in [2.5,3.5] kHz first crosses 5x noise at this timestamp.",
+  "tolerance_ms": 20,
+  "beep_dominant_freq_hz": 3047.5,
+  "sample_rate_hz": 48000
+}

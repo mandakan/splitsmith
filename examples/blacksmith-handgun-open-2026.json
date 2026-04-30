@@ -1,0 +1,180 @@
+{
+  "match": {
+    "ct": "22",
+    "id": "27046",
+    "name": "Blacksmith Handgun Open 2026"
+  },
+  "competitors": [
+    {
+      "competitor_id": 1,
+      "name": "Sample Shooter",
+      "division": "Production Optics",
+      "club": "Sample IPSC Club",
+      "squad": "Squad 1",
+      "stages": [
+        {
+          "stage_number": 1,
+          "stage_name": "K-vallen",
+          "time_seconds": 42.76,
+          "scorecard_updated_at": "2026-04-12T11:29:28.833034+00:00"
+        },
+        {
+          "stage_number": 2,
+          "stage_name": "100m",
+          "time_seconds": 12.48,
+          "scorecard_updated_at": "2026-04-12T12:03:32.729554+00:00"
+        },
+        {
+          "stage_number": 3,
+          "stage_name": "H1",
+          "time_seconds": 15.38,
+          "scorecard_updated_at": "2026-04-12T07:18:54.854078+00:00"
+        },
+        {
+          "stage_number": 4,
+          "stage_name": "H2",
+          "time_seconds": 14.67,
+          "scorecard_updated_at": "2026-04-12T07:49:08.238240+00:00"
+        },
+        {
+          "stage_number": 5,
+          "stage_name": "H3",
+          "time_seconds": 23.3,
+          "scorecard_updated_at": "2026-04-12T08:28:00.884239+00:00"
+        },
+        {
+          "stage_number": 6,
+          "stage_name": "H4",
+          "time_seconds": 9.05,
+          "scorecard_updated_at": "2026-04-12T08:53:34.144335+00:00"
+        },
+        {
+          "stage_number": 7,
+          "stage_name": "H5",
+          "time_seconds": 21.68,
+          "scorecard_updated_at": "2026-04-12T09:23:09.214671+00:00"
+        },
+        {
+          "stage_number": 8,
+          "stage_name": "H6",
+          "time_seconds": 26.48,
+          "scorecard_updated_at": "2026-04-12T11:00:40.391960+00:00"
+        }
+      ]
+    },
+    {
+      "competitor_id": 1,
+      "name": "Sample Shooter",
+      "division": "Production Optics",
+      "club": "Sample IPSC Club",
+      "squad": "Squad 1",
+      "stages": [
+        {
+          "stage_number": 1,
+          "stage_name": "K-vallen",
+          "time_seconds": 28.34,
+          "scorecard_updated_at": "2026-04-12T08:34:24.350827+00:00"
+        },
+        {
+          "stage_number": 2,
+          "stage_name": "100m",
+          "time_seconds": 13.11,
+          "scorecard_updated_at": "2026-04-12T09:11:02.252648+00:00"
+        },
+        {
+          "stage_number": 3,
+          "stage_name": "H1",
+          "time_seconds": 11.43,
+          "scorecard_updated_at": "2026-04-12T09:50:30.287347+00:00"
+        },
+        {
+          "stage_number": 4,
+          "stage_name": "H2",
+          "time_seconds": 12.72,
+          "scorecard_updated_at": "2026-04-12T10:51:30.285694+00:00"
+        },
+        {
+          "stage_number": 5,
+          "stage_name": "H3",
+          "time_seconds": 20.99,
+          "scorecard_updated_at": "2026-04-12T11:27:32.979950+00:00"
+        },
+        {
+          "stage_number": 6,
+          "stage_name": "H4",
+          "time_seconds": 8.9,
+          "scorecard_updated_at": "2026-04-12T12:10:28.252344+00:00"
+        },
+        {
+          "stage_number": 7,
+          "stage_name": "H5",
+          "time_seconds": 25.05,
+          "scorecard_updated_at": "2026-04-12T07:21:33.861717+00:00"
+        },
+        {
+          "stage_number": 8,
+          "stage_name": "H6",
+          "time_seconds": 21.78,
+          "scorecard_updated_at": "2026-04-12T07:49:32.923054+00:00"
+        }
+      ]
+    },
+    {
+      "competitor_id": 1,
+      "name": "Sample Shooter",
+      "division": "Classic Minor",
+      "club": "Sample IPSC Club",
+      "squad": "Squad 1",
+      "stages": [
+        {
+          "stage_number": 1,
+          "stage_name": "K-vallen",
+          "time_seconds": 34.56,
+          "scorecard_updated_at": "2026-04-12T11:40:43.623000+00:00"
+        },
+        {
+          "stage_number": 2,
+          "stage_name": "100m",
+          "time_seconds": 11.72,
+          "scorecard_updated_at": "2026-04-12T12:11:53.626220+00:00"
+        },
+        {
+          "stage_number": 3,
+          "stage_name": "H1",
+          "time_seconds": 22.62,
+          "scorecard_updated_at": "2026-04-12T07:09:12.218194+00:00"
+        },
+        {
+          "stage_number": 4,
+          "stage_name": "H2",
+          "time_seconds": 18.87,
+          "scorecard_updated_at": "2026-04-12T07:38:30.001885+00:00"
+        },
+        {
+          "stage_number": 5,
+          "stage_name": "H3",
+          "time_seconds": 22.28,
+          "scorecard_updated_at": "2026-04-12T08:15:52.211648+00:00"
+        },
+        {
+          "stage_number": 6,
+          "stage_name": "H4",
+          "time_seconds": 10.23,
+          "scorecard_updated_at": "2026-04-12T08:42:56.808882+00:00"
+        },
+        {
+          "stage_number": 7,
+          "stage_name": "H5",
+          "time_seconds": 22.72,
+          "scorecard_updated_at": "2026-04-12T09:11:45.152317+00:00"
+        },
+        {
+          "stage_number": 8,
+          "stage_name": "H6",
+          "time_seconds": 26.22,
+          "scorecard_updated_at": "2026-04-12T11:10:45.455838+00:00"
+        }
+      ]
+    }
+  ]
+}
