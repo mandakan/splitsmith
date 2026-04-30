@@ -88,6 +88,17 @@ _LEAD_EDGE_PEAK_WINDOW_S = 0.030  # peak-search anchor AFTER the librosa frame
 _LEAD_EDGE_BACKWARD_MAX_S = 0.100  # max backward walk (caps if librosa fires late)
 _RISE_FOOT_FRAC = 0.05  # rise-foot threshold (fraction of local peak)
 _LEAD_EDGE_SMOOTH_S = 0.002  # 2 ms moving-max smoothing of |audio| -> envelope
+# Backward-walk rise-detection guard. After the walk has reached at least this
+# many ms before the peak (so it has actually descended into the rise), stop
+# when the envelope climbs back above ``_RISE_BACK_FACTOR`` x the deepest
+# valley reached so far. Without this, busy audio (continuous sub-shot
+# transients between real shots) lets the walk run all the way to the 100 ms
+# cap and the candidate lands on the foot of the PREVIOUS event. 20 ms is
+# the upper end of the safe range -- ``scripts/eval_detector.py`` shows this
+# value gives the lowest median+p90 drag without losing any audited shots;
+# 25 ms+ starts overshooting on tight inter-shot gaps and regresses recall.
+_LEAD_EDGE_RISE_GUARD_MIN_S = 0.020
+_RISE_BACK_FACTOR = 1.5
 
 # HF/LF spectral signature window. Centred on the refined leading edge so the
 # transient body sits inside the window. 30 ms is short enough that the FFT
@@ -257,11 +268,29 @@ def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
         return onset_t
     foot_threshold = peak * _RISE_FOOT_FRAC
 
-    # Walk back while envelope stays at-or-above the foot threshold. Bounded
-    # by win_lo (the 100 ms backward limit), which protects against drifting
-    # into a previous transient's tail.
+    # Walk back from the peak. Stop when the envelope drops below the foot
+    # threshold (silence) OR climbs back above the running minimum by more
+    # than _RISE_BACK_FACTOR (we've descended into the rise's foot and are
+    # now climbing into a previous transient). The running-minimum check
+    # only engages after _LEAD_EDGE_RISE_GUARD_MIN_S so the walk has time
+    # to actually reach the foot before any rise can stop it.
+    rise_guard_samples = max(1, int(round(sr * _LEAD_EDGE_RISE_GUARD_MIN_S)))
     i = peak_local
-    while i > 0 and envelope[i - 1] >= foot_threshold:
+    min_so_far = float(envelope[i])
+    min_pos = i
+    while i > 0:
+        prev = float(envelope[i - 1])
+        if prev < foot_threshold:
+            break
+        if prev < min_so_far:
+            min_so_far = prev
+            min_pos = i - 1
+        elif (
+            (peak_local - i) >= rise_guard_samples
+            and prev > min_so_far * _RISE_BACK_FACTOR
+        ):
+            i = min_pos
+            break
         i -= 1
     return (win_lo + i) / sr
 
