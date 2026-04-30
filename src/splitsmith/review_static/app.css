@@ -132,32 +132,41 @@ header h1 { margin: 0; font-size: 1.1rem; }
 }
 #time-ruler-section {
     position: relative;
-    background: #18181a;
+    background: #1f1f21;
     overflow: hidden;
-    height: 22px;
+    height: 26px;
     border-bottom: 1px solid #2c2c2e;
 }
 #time-ruler {
     position: absolute;
     top: 0;
     left: 0;
-    height: 22px;
+    height: 26px;
     will-change: transform;
 }
 .time-tick {
     position: absolute;
     top: 0;
-    bottom: 0;
     width: 1px;
-    background: #3a3a3c;
-    color: #888;
+    height: 6px;
+    background: #4a4a4c;
+    color: transparent; /* minor ticks have no label */
     font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.7rem;
-    padding-left: 3px;
-    white-space: nowrap;
+    font-size: 0.72rem;
+    pointer-events: none;
 }
 .time-tick.major {
-    background: #5a5a5c;
+    height: 12px;
+    background: #8a8a8c;
+    color: #d0d0d2;
+}
+.time-tick.major::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: -14px;
+    left: 4px;
+    white-space: nowrap;
+    font-size: 0.72rem;
     color: #c0c0c2;
 }
 .marker-label {

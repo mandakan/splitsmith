@@ -319,7 +319,7 @@
             const isMajor = Math.abs(Math.round(t / major) * major - t) < minor / 2;
             tick.className = `time-tick${isMajor ? " major" : ""}`;
             tick.style.left = (t / dur) * totalContentWidth + "px";
-            if (isMajor) tick.textContent = formatTime(t);
+            if (isMajor) tick.dataset.label = formatTime(t);
             els.timeRuler.appendChild(tick);
         }
     }

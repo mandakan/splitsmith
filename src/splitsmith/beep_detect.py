@@ -1,15 +1,23 @@
 """Detect the start beep timestamp via bandpass + envelope peak detection.
 
-Strategy (per SPEC.md):
+Strategy:
 1. Bandpass to [freq_min_hz, freq_max_hz] (typical shot-timer beep ~2.5-4 kHz).
 2. Hilbert envelope, lightly smoothed.
 3. Find runs where the smoothed envelope (normalized to its global peak) exceeds
    ``min_amplitude`` for at least ``min_duration_ms``. Pick the strongest run.
-4. Estimate the in-band noise floor in a window before that run, then **backtrack**
-   from the run's threshold-crossing to the earliest sample where the smoothed
-   envelope exceeds K * noise_p95. That index is the leading edge of the tone --
-   substantially earlier and more accurate than the 30%-of-peak crossing, which
-   under-anchors slow-attack timer beeps.
+4. **Rise-foot leading edge** (matches shot_detect): locate the peak of the
+   smoothed envelope inside the strong run, then walk backward through the
+   envelope. Walking stops when the envelope drops below 5 % of peak (silence
+   before the tone) or starts rising again (entering an earlier transient).
+
+This shares the "leading edge" definition with shot_detect: peak-relative,
+insensitive to gain / distance / ambient noise, and lands at the visibly
+audible start of the rise.
+
+Note on draw-time interpretation: rise-foot may sit a bit earlier or later
+than the previous noise-floor backtrack depending on the beep's ramp shape
+and noise floor. ``draw_time = first_shot - beep_time`` shifts accordingly;
+splits BETWEEN shots are unaffected (beep_time cancels).
 
 Pure function: takes audio + sample rate + config, returns a BeepDetection. No
 file I/O. ``load_audio`` is provided as a thin convenience for callers.
@@ -25,12 +33,11 @@ from scipy.signal import butter, hilbert, sosfiltfilt
 
 from .config import BeepDetectConfig, BeepDetection
 
-# Noise-floor backtracking parameters. These are intentionally not in the YAML
-# config: they're algorithmic constants, not knobs the user should tune.
-_BACKTRACK_WINDOW_S = 0.5  # how far before the strong run we'll search for the true onset
-_NOISE_WINDOW_LO_S = 1.5  # noise estimate is taken from [run_start - hi, run_start - lo]
-_NOISE_WINDOW_HI_S = 0.2  # ...so the noise window ends 200 ms before the run starts
-_NOISE_K = 5.0  # leading edge = first sample where smoothed env > K * noise_p95
+# Rise-foot leading-edge parameters. Same definition as shot_detect (the
+# burst's own peak is the reference, so detection is insensitive to gain /
+# distance / ambient noise). Tied to the smoothed bandpass envelope -- the
+# tone's amplitude profile, not the raw oscillation.
+_RISE_FOOT_FRAC = 0.05
 _SMOOTHING_S = 0.010  # 10 ms moving-average smoothing of the envelope
 
 
@@ -105,7 +112,7 @@ def detect_beep(
 
     run_start, run_end, run_peak = max(candidates, key=lambda c: c[2])
 
-    leading_idx = _backtrack_to_leading_edge(env, run_start, sample_rate)
+    leading_idx = _rise_foot_leading_edge(env, run_start, run_end)
 
     return BeepDetection(
         time=leading_idx / sample_rate,
@@ -114,27 +121,20 @@ def detect_beep(
     )
 
 
-def _backtrack_to_leading_edge(env: np.ndarray, run_start: int, sample_rate: int) -> int:
-    """Walk backwards from ``run_start`` to find the earliest sample whose envelope
-    exceeds K times the pre-beep noise p95.
-
-    Falls back to ``run_start`` if no valid noise window exists or no crossing is
-    found within the backtrack window.
+def _rise_foot_leading_edge(env: np.ndarray, run_start: int, run_end: int) -> int:
+    """Rise-foot of the tone: walk backward from the envelope peak (within the
+    strong run) while the envelope stays at or above ``_RISE_FOOT_FRAC * peak``.
+    The earliest such sample is the foot of the rise.
     """
-    noise_lo = max(0, run_start - int(sample_rate * _NOISE_WINDOW_LO_S))
-    noise_hi = max(0, run_start - int(sample_rate * _NOISE_WINDOW_HI_S))
-    noise_window = env[noise_lo:noise_hi]
-    if noise_window.size == 0:
+    if run_end <= run_start:
         return run_start
-
-    noise_p95 = float(np.percentile(noise_window, 95))
-    threshold = _NOISE_K * noise_p95
-    if threshold <= 0.0:
+    peak_offset = int(np.argmax(env[run_start:run_end]))
+    peak_idx = run_start + peak_offset
+    peak = float(env[peak_idx])
+    if peak <= 0.0:
         return run_start
-
-    search_lo = max(0, run_start - int(sample_rate * _BACKTRACK_WINDOW_S))
-    segment = env[search_lo:run_start]
-    above = segment > threshold
-    if not above.any():
-        return run_start
-    return search_lo + int(np.argmax(above))
+    foot = peak * _RISE_FOOT_FRAC
+    i = peak_idx
+    while i > 0 and env[i - 1] >= foot:
+        i -= 1
+    return i

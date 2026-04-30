@@ -9,19 +9,24 @@ Pipeline:
 4. Echo refractory: drop onsets within 150 ms of a kept one whose peak
    amplitude is below 40 % of the previous peak (catches quieter intra-bay
    echoes that survive min-gap).
-5. **Half-rise leading-edge refinement** (the per-onset time you actually
-   see in the output): for each kept onset, find the local peak |audio| in
-   a 30 ms window and walk forward to the first sample reaching 50 % of
-   that peak. This is the "leading edge" definition used for all timing.
+5. **Rise-foot leading-edge refinement** (the per-onset time you actually
+   see in the output): for each kept onset, build a smoothed envelope
+   (2 ms moving max of |audio|), find the local peak in a window anchored
+   on the librosa frame, and walk BACKWARD from that peak to the foot of
+   the rise. Walking stops when the envelope either drops below 5 % of
+   peak (silence at the foot) or starts rising again (entering an earlier
+   transient). The window extends up to 100 ms before the librosa frame
+   so the foot is reachable even when librosa fires well into the rise.
 
-Why half-rise (not amplitude threshold or noise-floor crossing):
+Why rise-foot (not half-rise, amplitude threshold, or noise-floor crossing):
 - INSENSITIVE to ambient noise and AGC: the burst's own peak is the reference,
   so a quiet AGC-ducked shot lands at the same fractional point on its rise as
   a loud unducked shot. This keeps timing consistent across stages, matches,
   and recording conditions.
-- DEFENSIBLE: half-rise is the standard onset definition in audio-engineering
-  literature for sharp transients. It's also approximately where the human
-  eye picks the leading edge when scrubbing a waveform in a UI.
+- TARGETS THE VISIBLE START of the transient -- where your eye picks the
+  leading edge when scrubbing a waveform. Half-rise (50 %) lands mid-rise,
+  visibly later than the audible onset; users dragging UI markers
+  consistently pull them earlier toward the rise foot.
 - NOT directly comparable to a CED7000 (which uses an absolute threshold),
   but SPLITS (differences between consecutive shots) ARE comparable since
   any constant detection offset cancels.
@@ -44,6 +49,7 @@ from __future__ import annotations
 
 import librosa
 import numpy as np
+from scipy.ndimage import maximum_filter1d
 
 from .config import Shot, ShotDetectConfig
 
@@ -57,16 +63,23 @@ _PEAK_WIN_MS = 5.0  # half-width of the window used to read peak amplitude per s
 # late-stage onsets, so this is also a detection-quality fix.
 _POST_BEEP_SKIP_S = 0.5
 
-# Half-rise leading-edge refinement. For each kept onset:
-#   1. find the peak |audio| within ``_LEAD_EDGE_PEAK_WINDOW_S`` of the
-#      librosa-frame onset time (a small backward pad accommodates frame
-#      quantization and any pre-peak slack);
-#   2. walk forward from the start of that window to the first sample whose
-#      |audio| reaches ``_LEAD_EDGE_HALF_RISE_FRAC * peak``.
-# That sample is the reported leading edge.
-_LEAD_EDGE_PRE_PAD_S = 0.005  # backward pad before the librosa frame
-_LEAD_EDGE_PEAK_WINDOW_S = 0.030  # forward span used to locate the local peak
-_LEAD_EDGE_HALF_RISE_FRAC = 0.5  # the "half" in half-rise
+# Rise-foot leading-edge refinement. For each kept onset:
+#   1. Build a smoothed envelope (2 ms moving max of |audio|) over a window
+#      that spans up to 100 ms BEFORE the librosa frame and 30 ms after.
+#   2. Find the peak of the envelope in [onset - 5 ms, onset + 30 ms] -- the
+#      transient that librosa flagged.
+#   3. Walk BACKWARD from that peak, sample by sample. Stop when:
+#      a. the envelope drops below ``_RISE_FOOT_FRAC * peak`` (we've reached
+#         the silence at the foot of the rise); OR
+#      b. the envelope starts rising as we go back (we'd be entering an
+#         earlier transient).
+# The reported leading edge is that stop sample -- the foot of the rise that
+# leads to the local peak.
+_LEAD_EDGE_PRE_PAD_S = 0.005  # peak-search anchor BEFORE the librosa frame
+_LEAD_EDGE_PEAK_WINDOW_S = 0.030  # peak-search anchor AFTER the librosa frame
+_LEAD_EDGE_BACKWARD_MAX_S = 0.100  # max backward walk (caps if librosa fires late)
+_RISE_FOOT_FRAC = 0.05  # rise-foot threshold (fraction of local peak)
+_LEAD_EDGE_SMOOTH_S = 0.002  # 2 ms moving-max smoothing of |audio| -> envelope
 
 
 def detect_shots(
@@ -152,7 +165,7 @@ def detect_shots(
     # Refine each kept onset's time to its half-rise leading edge. Min-gap
     # and refractory operate on the librosa-frame times above (preserving
     # ordering and candidate count); only the OUTPUT time changes.
-    kept_times = [_half_rise_leading_edge(audio, t, sample_rate) for t in kept_times]
+    kept_times = [_leading_edge(audio, t, sample_rate) for t in kept_times]
     # Re-measure peak amplitude at the backtracked times (the actual transient
     # peak is typically a few ms past the leading edge, still inside the peak
     # window since _PEAK_WIN_MS is symmetric).
@@ -187,32 +200,47 @@ def detect_shots(
     return shots
 
 
-def _half_rise_leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
-    """Return the half-rise time of the transient surrounding ``onset_t``.
+def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
+    """Return the rise-foot leading edge of the transient surrounding ``onset_t``.
 
-    The window starts a few ms BEFORE the librosa frame (to accommodate frame
-    quantization, since the actual transient often begins slightly before the
-    frame at which spectral flux peaks) and extends ~30 ms after. Within that
-    window we find the absolute peak |audio| (the burst's transient peak),
-    then walk forward from the window's start to the first sample at or above
-    HALF that peak. That's the reported leading edge.
-
-    Falls back to ``onset_t`` if the audio in the window is silent.
+    The window extends up to 100 ms BEFORE the librosa frame (so we can find
+    the foot even if librosa fired well into the rise) and 30 ms after. Peak
+    search is anchored to ``[onset - 5 ms, onset + 30 ms]`` to lock onto the
+    transient librosa flagged. Walking backward from the peak stops when the
+    envelope either:
+    * drops below ``_RISE_FOOT_FRAC * peak`` (silence at the foot), or
+    * rises again (we'd be entering an earlier transient).
     """
     onset_idx = int(round(onset_t * sr))
-    win_lo = max(0, onset_idx - int(_LEAD_EDGE_PRE_PAD_S * sr))
+    win_lo = max(0, onset_idx - int(_LEAD_EDGE_BACKWARD_MAX_S * sr))
     win_hi = min(audio.size, onset_idx + int(_LEAD_EDGE_PEAK_WINDOW_S * sr))
     if win_hi <= win_lo:
         return onset_t
-    window = np.abs(audio[win_lo:win_hi])
-    peak = float(window.max()) if window.size else 0.0
+
+    raw = np.abs(audio[win_lo:win_hi]).astype(np.float32)
+    if raw.size == 0:
+        return onset_t
+
+    smooth_n = max(1, int(round(sr * _LEAD_EDGE_SMOOTH_S)))
+    envelope = maximum_filter1d(raw, size=smooth_n, mode="nearest")
+
+    peak_search_lo_abs = max(win_lo, onset_idx - int(_LEAD_EDGE_PRE_PAD_S * sr))
+    peak_search_lo = peak_search_lo_abs - win_lo
+    if peak_search_lo >= envelope.size:
+        return onset_t
+    peak_local = peak_search_lo + int(np.argmax(envelope[peak_search_lo:]))
+    peak = float(envelope[peak_local])
     if peak <= 0.0:
         return onset_t
-    half = peak * _LEAD_EDGE_HALF_RISE_FRAC
-    above = window >= half
-    if not above.any():
-        return onset_t
-    return (win_lo + int(np.argmax(above))) / sr
+    foot_threshold = peak * _RISE_FOOT_FRAC
+
+    # Walk back while envelope stays at-or-above the foot threshold. Bounded
+    # by win_lo (the 100 ms backward limit), which protects against drifting
+    # into a previous transient's tail.
+    i = peak_local
+    while i > 0 and envelope[i - 1] >= foot_threshold:
+        i -= 1
+    return (win_lo + i) / sr
 
 
 def _ms_to_frames(ms: int, sample_rate: int) -> int:
