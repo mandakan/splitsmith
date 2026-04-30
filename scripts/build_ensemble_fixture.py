@@ -40,6 +40,7 @@ from splitsmith.shot_detect import detect_shots
 DEFAULT_FIXTURES = [
     "stage-shots",
     "stage-shots-blacksmith-h5",
+    "stage-shots-blacksmith-2026-stage2",
     "stage-shots-tallmilan-stage2",
     "stage-shots-tallmilan-stage7",
 ]
