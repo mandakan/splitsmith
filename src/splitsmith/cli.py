@@ -226,6 +226,14 @@ def audit_prep(
     fixture_pre_pad_s: float = typer.Option(0.5, "--pre-pad-seconds"),
     fixture_post_pad_s: float = typer.Option(1.5, "--post-pad-seconds"),
     config_path: Path | None = typer.Option(None, "--config"),
+    beep_time_override: float | None = typer.Option(
+        None,
+        "--beep-time",
+        help=(
+            "Source-time of the beep in seconds. Skips automatic beep detection "
+            "(use when wind / steel rings / other 3 kHz transients fool detect_beep)."
+        ),
+    ),
 ) -> None:
     """Build a review-ready fixture (wav + JSON + audit CSV) from a source video.
 
@@ -278,11 +286,17 @@ def audit_prep(
     audio, sr = beep_detect.load_audio(full_wav)
     full_wav.unlink()  # we keep only the sliced fixture wav
 
-    beep = beep_detect.detect_beep(audio, sr, config.beep_detect)
-    console.print(
-        f"  beep at source t=[cyan]{beep.time:.4f}s[/]  "
-        f"peak={beep.peak_amplitude:.3f}  duration={beep.duration_ms:.0f}ms"
-    )
+    if beep_time_override is not None:
+        from .config import BeepDetection
+
+        beep = BeepDetection(time=beep_time_override, peak_amplitude=0.0, duration_ms=0.0)
+        console.print(f"  beep override: t=[cyan]{beep.time:.4f}s[/]  (detection skipped)")
+    else:
+        beep = beep_detect.detect_beep(audio, sr, config.beep_detect)
+        console.print(
+            f"  beep at source t=[cyan]{beep.time:.4f}s[/]  "
+            f"peak={beep.peak_amplitude:.3f}  duration={beep.duration_ms:.0f}ms"
+        )
 
     fix_lo = max(0.0, beep.time - fixture_pre_pad_s)
     fix_hi = min(len(audio) / sr, beep.time + time + fixture_post_pad_s)

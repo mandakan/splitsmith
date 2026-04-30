@@ -17,6 +17,14 @@ Pipeline:
    peak (silence at the foot) or starts rising again (entering an earlier
    transient). The window extends up to 100 ms before the librosa frame
    so the foot is reachable even when librosa fires well into the rise.
+6. Per-onset HF/LF spectral signature: 30 ms FFT window centred on the
+   refined leading edge, ratio of power in [4 kHz, 12 kHz] to power in
+   [0, 2 kHz]. Real shots into a head-mounted mic arrive as broadband
+   transients with strong HF content; other-bay shots are distance-
+   attenuated and air-absorption-filtered, leaving relatively more LF.
+   Folded into ``confidence`` as the cube root of strength_norm * peak_norm
+   * hf_ratio_norm so AGC-ducked-but-on-mic shots are not pushed to the
+   bottom by amplitude alone.
 
 Why rise-foot (not half-rise, amplitude threshold, or noise-floor crossing):
 - INSENSITIVE to ambient noise and AGC: the burst's own peak is the reference,
@@ -80,6 +88,15 @@ _LEAD_EDGE_PEAK_WINDOW_S = 0.030  # peak-search anchor AFTER the librosa frame
 _LEAD_EDGE_BACKWARD_MAX_S = 0.100  # max backward walk (caps if librosa fires late)
 _RISE_FOOT_FRAC = 0.05  # rise-foot threshold (fraction of local peak)
 _LEAD_EDGE_SMOOTH_S = 0.002  # 2 ms moving-max smoothing of |audio| -> envelope
+
+# HF/LF spectral signature window. Centred on the refined leading edge so the
+# transient body sits inside the window. 30 ms is short enough that the FFT
+# captures the burst itself (not the surrounding ambience) and long enough
+# that the lowest analysed frequency (~33 Hz) is well below the LF band cap.
+_HF_LF_WINDOW_S = 0.030
+_HF_LF_LOW_BAND_HZ = (0.0, 2000.0)  # LF: room rumble, distant-bay thud
+_HF_LF_HIGH_BAND_HZ = (4000.0, 12000.0)  # HF: muzzle crack, on-mic broadband
+_HF_LF_EPS = 1e-9  # guard against division by zero on silent windows
 
 
 def detect_shots(
@@ -170,21 +187,27 @@ def detect_shots(
     # peak is typically a few ms past the leading edge, still inside the peak
     # window since _PEAK_WIN_MS is symmetric).
     kept_peaks = [_peak_amplitude(audio, t, sample_rate, peak_win_samples) for t in kept_times]
+    # HF/LF spectral signature at the refined leading edge. Re-rank only --
+    # nothing is dropped on this feature.
+    kept_hf_lf = [_hf_lf_ratio(audio, t, sample_rate) for t in kept_times]
 
-    # Combined confidence: geometric mean of onset strength and peak amplitude,
-    # each normalized to its own max within the kept set. Sorting CSV rows by
-    # this column ascending puts the most likely false positives at the top.
+    # Combined confidence: cube root of onset strength * peak amplitude *
+    # HF/LF ratio, each normalized to its own max within the kept set.
+    # Sorting CSV rows by this column ascending puts the most likely false
+    # positives at the top.
     max_kept_strength = max(kept_strengths) if kept_strengths else 0.0
     max_kept_peak = max(kept_peaks) if kept_peaks else 0.0
+    max_kept_hf_lf = max(kept_hf_lf) if kept_hf_lf else 0.0
 
     shots: list[Shot] = []
     prev_t = beep_time
-    for i, (t_abs, strength, peak) in enumerate(
-        zip(kept_times, kept_strengths, kept_peaks, strict=True), start=1
+    for i, (t_abs, strength, peak, hf_lf) in enumerate(
+        zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True), start=1
     ):
         s_norm = strength / max_kept_strength if max_kept_strength > 0 else 0.0
         p_norm = peak / max_kept_peak if max_kept_peak > 0 else 0.0
-        confidence = float(np.clip((s_norm * p_norm) ** 0.5, 0.0, 1.0))
+        hf_norm = hf_lf / max_kept_hf_lf if max_kept_hf_lf > 0 else 0.0
+        confidence = float(np.clip((s_norm * p_norm * hf_norm) ** (1.0 / 3.0), 0.0, 1.0))
         shots.append(
             Shot(
                 shot_number=i,
@@ -241,6 +264,30 @@ def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
     while i > 0 and envelope[i - 1] >= foot_threshold:
         i -= 1
     return (win_lo + i) / sr
+
+
+def _hf_lf_ratio(audio: np.ndarray, t: float, sr: int) -> float:
+    """Ratio of HF (4-12 kHz) to LF (0-2 kHz) power in a 30 ms window at ``t``.
+
+    On-mic shots are broadband transients with strong HF content; other-bay
+    shots and ambient thumps have relatively more LF, since high frequencies
+    decay faster in air. Returned as a non-negative float; ``0.0`` for empty
+    or all-silent windows.
+    """
+    half = int(round(sr * _HF_LF_WINDOW_S / 2.0))
+    centre = int(round(t * sr))
+    lo = max(0, centre - half)
+    hi = min(audio.size, centre + half)
+    if hi - lo < 2:
+        return 0.0
+    window = audio[lo:hi].astype(np.float32)
+    # Hann window to reduce spectral leakage of the asymmetric burst shape.
+    spectrum = np.fft.rfft(window * np.hanning(window.size))
+    power = (spectrum.real**2 + spectrum.imag**2).astype(np.float64)
+    freqs = np.fft.rfftfreq(window.size, d=1.0 / sr)
+    lf = power[(freqs >= _HF_LF_LOW_BAND_HZ[0]) & (freqs < _HF_LF_LOW_BAND_HZ[1])].sum()
+    hf = power[(freqs >= _HF_LF_HIGH_BAND_HZ[0]) & (freqs < _HF_LF_HIGH_BAND_HZ[1])].sum()
+    return float(hf / (lf + _HF_LF_EPS))
 
 
 def _ms_to_frames(ms: int, sample_rate: int) -> int:

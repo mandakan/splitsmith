@@ -10,7 +10,7 @@ import pytest
 
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
-from splitsmith.shot_detect import detect_shots
+from splitsmith.shot_detect import _hf_lf_ratio, detect_shots
 
 
 def _load_fixture(fixtures_dir: Path, stem: str = "stage-shots") -> tuple[np.ndarray, int, dict]:
@@ -23,6 +23,7 @@ _AUDITED_FIXTURES = [
     "stage-shots",  # Tallmilan 2026 Stage 3, 15 shots
     "stage-shots-blacksmith-h5",  # Blacksmith Handgun Open 2026 Stage 7, 24 shots (4 manual)
     "stage-shots-tallmilan-stage2",  # Tallmilan 2026 Stage 2, 12 shots (2 manual)
+    "stage-shots-tallmilan-stage7",  # Tallmilan 2026 Stage 7, 20 shots (10 manual; windy)
 ]
 
 
@@ -196,6 +197,40 @@ def test_detect_shots_returns_empty_on_silence() -> None:
     audio = np.zeros(sr * 5, dtype=np.float32)
     shots = detect_shots(audio, sr, beep_time=0.5, stage_time=3.0, config=ShotDetectConfig())
     assert shots == []
+
+
+def test_hf_lf_ratio_white_noise_burst_is_high() -> None:
+    """A broadband (white) burst has roughly equal energy across the spectrum,
+    so the HF band (4-12 kHz, 8 kHz wide) and LF band (0-2 kHz, 2 kHz wide)
+    yield ratio ~4. Anchored well above 1.0 to detect any future regression."""
+    sr = 48000
+    rng = np.random.default_rng(42)
+    audio = (rng.standard_normal(sr) * 0.5).astype(np.float32)
+    ratio = _hf_lf_ratio(audio, t=0.5, sr=sr)
+    assert ratio > 2.5, f"expected white-noise HF/LF >> 1, got {ratio:.3f}"
+
+
+def test_hf_lf_ratio_lowpass_burst_is_low() -> None:
+    """A burst low-pass-filtered below the HF band has nearly all energy in
+    the LF band, so the ratio collapses toward 0."""
+    from scipy.signal import butter, sosfiltfilt
+
+    sr = 48000
+    rng = np.random.default_rng(42)
+    burst = (rng.standard_normal(sr) * 0.5).astype(np.float32)
+    sos = butter(8, 1500.0, btype="low", fs=sr, output="sos")
+    audio = sosfiltfilt(sos, burst).astype(np.float32)
+    ratio = _hf_lf_ratio(audio, t=0.5, sr=sr)
+    assert ratio < 0.05, f"expected LP-filtered HF/LF ~0, got {ratio:.4f}"
+
+
+def test_hf_lf_ratio_silence_does_not_crash() -> None:
+    """Empty/silent windows must return 0.0 without dividing by zero."""
+    sr = 48000
+    audio = np.zeros(sr, dtype=np.float32)
+    assert _hf_lf_ratio(audio, t=0.5, sr=sr) == 0.0
+    # Window entirely outside the audio buffer.
+    assert _hf_lf_ratio(audio, t=100.0, sr=sr) == 0.0
 
 
 def test_detect_shots_validates_inputs() -> None:
