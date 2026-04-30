@@ -86,6 +86,34 @@ header h1 { margin: 0; font-size: 1.1rem; }
 #drag-info:empty::before { content: ""; }
 .hint { color: #888; font-size: 0.85rem; margin-left: auto; }
 
+#filter-section {
+    padding: 0.4rem 1rem;
+    background: #1c1c1e;
+    border-bottom: 1px solid #2c2c2e;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
+}
+.filter-label { color: #888; }
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid #3a3a3c;
+    cursor: pointer;
+    user-select: none;
+    background: #2c2c2e;
+}
+.filter-chip input { margin: 0; cursor: pointer; }
+.filter-chip.keep   { color: #30d158; border-color: rgba(48, 209, 88, 0.5); }
+.filter-chip.reject { color: #ff453a; border-color: rgba(255, 69, 58, 0.5); }
+.filter-chip.manual { color: #ffd60a; border-color: rgba(255, 214, 10, 0.5); }
+.filter-chip.beep   { color: #ffd60a; border-color: rgba(255, 214, 10, 0.5); }
+#filter-counts { color: #a0a0a3; margin-left: auto; font-family: ui-monospace, SFMono-Regular, monospace; }
+
 #waveform-section {
     position: relative;
     background: #18181a;

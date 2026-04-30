@@ -42,6 +42,10 @@
     let suppressInteractionEvent = false;
     /** Loop mode: when true, pause/finish snap the playhead and view back to playAnchor. */
     let loopMode = true;
+    /** Visibility filter per marker category. Hidden categories are skipped in
+     *  both the waveform overlay and the table. State only -- the underlying
+     *  markers array is unchanged, so saving while filtered does not lose data. */
+    const filterState = { keep: true, reject: true, manual: true, beep: true };
 
     // ----- DOM refs -----
     const els = {
@@ -61,6 +65,8 @@
         markersOverlay: document.getElementById("markers-overlay"),
         timeRuler: document.getElementById("time-ruler"),
         listBody: document.querySelector("#marker-list tbody"),
+        filterChips: document.querySelectorAll('#filter-section input[type="checkbox"]'),
+        filterCounts: document.getElementById("filter-counts"),
     };
 
     // ----- Boot -----
@@ -89,6 +95,7 @@
         bindKeyboard();
         bindPlay();
         bindSave();
+        bindFilters();
         savedSignature = markersSignature();
         renderMarkers();
         renderList();
@@ -471,22 +478,40 @@
 
     // ----- Marker rendering + interaction -----
 
+    function categoryOf(m) {
+        if (m.source === "manual") return "manual";
+        return m.keep ? "keep" : "reject";
+    }
+
+    function bindFilters() {
+        for (const cb of els.filterChips) {
+            cb.addEventListener("change", () => {
+                filterState[cb.dataset.cat] = cb.checked;
+                renderMarkers();
+                renderList();
+            });
+        }
+    }
+
     function renderMarkers() {
         const dur = wavesurfer.getDuration();
         if (!dur) return;
         els.markersOverlay.innerHTML = "";
 
         // Beep marker (always present, not editable).
-        els.markersOverlay.appendChild(
-            renderMarkerEl({
-                time: beepTime,
-                classes: ["marker", "beep"],
-                label: "BEEP",
-                duration: dur,
-            })
-        );
+        if (filterState.beep) {
+            els.markersOverlay.appendChild(
+                renderMarkerEl({
+                    time: beepTime,
+                    classes: ["marker", "beep"],
+                    label: "BEEP",
+                    duration: dur,
+                })
+            );
+        }
 
         for (const m of markers) {
+            if (!filterState[categoryOf(m)]) continue;
             const cls = ["marker", m.keep ? "keep" : "reject"];
             if (m.source === "manual") cls.push("manual");
             const label = m.source === "manual" ? "+" : `${m.candidate_number}`;
@@ -626,9 +651,14 @@
     function renderList() {
         els.listBody.innerHTML = "";
         let kept = 0;
+        const counts = { keep: 0, reject: 0, manual: 0, shown: 0 };
         for (let i = 0; i < markers.length; i++) {
             const m = markers[i];
             if (m.keep) kept++;
+            const cat = categoryOf(m);
+            counts[cat]++;
+            if (!filterState[cat]) continue;
+            counts.shown++;
             const tr = document.createElement("tr");
             tr.dataset.id = m.id;
             tr.classList.toggle("keep", m.keep);
@@ -652,6 +682,11 @@
                 renderMarkers();
             });
             els.listBody.appendChild(tr);
+        }
+        if (els.filterCounts) {
+            els.filterCounts.textContent =
+                `showing ${counts.shown} of ${markers.length}  ` +
+                `[keep ${counts.keep}  reject ${counts.reject}  manual ${counts.manual}]`;
         }
     }
 

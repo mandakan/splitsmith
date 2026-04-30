@@ -34,6 +34,15 @@
         <span class="hint">Cmd+1 zoom in / Cmd+2 fit / Cmd+3 zoom out</span>
     </section>
 
+    <section id="filter-section">
+        <span class="filter-label">show:</span>
+        <label class="filter-chip keep"><input type="checkbox" data-cat="keep" checked>keep</label>
+        <label class="filter-chip reject"><input type="checkbox" data-cat="reject" checked>reject</label>
+        <label class="filter-chip manual"><input type="checkbox" data-cat="manual" checked>manual</label>
+        <label class="filter-chip beep"><input type="checkbox" data-cat="beep" checked>beep</label>
+        <span id="filter-counts"></span>
+    </section>
+
     <section id="waveform-section">
         <div id="waveform"></div>
         <div id="markers-overlay"></div>
