@@ -42,3 +42,9 @@ config.yaml
 
 # Review-server save backups (auto-created on every Cmd+S in the audit UI).
 *.json.bak
+
+# Audit safety backups created before destructive fixture migrations.
+*.json.before-*
+
+# Cached PANN embeddings (regenerable via scripts/extract_audio_embeddings.py).
+tests/fixtures/.cache/

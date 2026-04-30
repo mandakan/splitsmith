@@ -37,6 +37,8 @@ dev = [
     "black>=24.0.0",
     "mypy>=1.10.0",
     "scikit-learn>=1.8.0",
+    "torch>=2.11.0",
+    "panns-inference>=0.1.1",
 ]
 
 [tool.ruff]

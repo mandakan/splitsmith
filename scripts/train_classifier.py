@@ -68,6 +68,8 @@ FEATURE_NAMES = [
     "attack_steepness",
 ]
 
+CACHE_DIR = FIXTURES_DIR / ".cache"
+
 
 @dataclass
 class Candidate:
@@ -75,6 +77,8 @@ class Candidate:
     t: float
     label: int
     features: dict[str, float]
+    pann_embedding: np.ndarray | None = None
+    pann_gunshot_prob: float | None = None
 
 
 def _featurize(
@@ -177,8 +181,19 @@ def _label_candidates(
     return labels
 
 
+def _load_pann_cache(fixture: str) -> dict | None:
+    p = CACHE_DIR / f"{fixture}_pann.npz"
+    if not p.exists():
+        return None
+    return dict(np.load(p))
+
+
 def collect_candidates(
-    fixture: str, tolerance_ms: float, config: ShotDetectConfig
+    fixture: str,
+    tolerance_ms: float,
+    config: ShotDetectConfig,
+    *,
+    use_pann: bool = False,
 ) -> list[Candidate]:
     truth = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text())
     audio, sr = load_audio(FIXTURES_DIR / f"{fixture}.wav")
@@ -189,8 +204,24 @@ def collect_candidates(
 
     cwt_env = _cwt_max_envelope(audio, sr)
 
+    pann_cache = _load_pann_cache(fixture) if use_pann else None
+    if use_pann and pann_cache is None:
+        raise SystemExit(
+            f"--use-pann set but no cache for {fixture}; "
+            f"run scripts/extract_audio_embeddings.py first"
+        )
+    if pann_cache is not None:
+        # Sanity: cache built from same detector run should match candidate count
+        # exactly. If you change the detector config, re-run extract first.
+        if pann_cache["embedding"].shape[0] != len(shots):
+            raise SystemExit(
+                f"{fixture}: PANN cache has {pann_cache['embedding'].shape[0]} rows but "
+                f"detector returned {len(shots)} candidates -- "
+                f"re-run extract_audio_embeddings.py --force"
+            )
+
     out = []
-    for shot, label in zip(shots, labels, strict=True):
+    for i, (shot, label) in enumerate(zip(shots, labels, strict=True)):
         feats = _featurize(
             audio=audio,
             sr=sr,
@@ -201,7 +232,18 @@ def collect_candidates(
             confidence=shot.confidence,
             peak_amp=shot.peak_amplitude,
         )
-        out.append(Candidate(fixture=fixture, t=shot.time_absolute, label=label, features=feats))
+        emb = pann_cache["embedding"][i] if pann_cache is not None else None
+        gprob = float(pann_cache["gunshot_prob"][i]) if pann_cache is not None else None
+        out.append(
+            Candidate(
+                fixture=fixture,
+                t=shot.time_absolute,
+                label=label,
+                features=feats,
+                pann_embedding=emb,
+                pann_gunshot_prob=gprob,
+            )
+        )
     n_pos = sum(c.label for c in out)
     n_gt = len(gt_t)
     matched_recall = n_pos / n_gt if n_gt else 0.0
@@ -212,8 +254,17 @@ def collect_candidates(
     return out
 
 
-def _to_xy(cands: list[Candidate]) -> tuple[np.ndarray, np.ndarray]:
-    X = np.array([[c.features[k] for k in FEATURE_NAMES] for c in cands], dtype=np.float64)
+def _to_xy(cands: list[Candidate], *, use_pann: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    rows = []
+    for c in cands:
+        row = [c.features[k] for k in FEATURE_NAMES]
+        if use_pann:
+            if c.pann_embedding is None or c.pann_gunshot_prob is None:
+                raise RuntimeError("use_pann=True but candidate is missing PANN features")
+            row.append(c.pann_gunshot_prob)
+            row.extend(c.pann_embedding.tolist())
+        rows.append(row)
+    X = np.asarray(rows, dtype=np.float64)
     y = np.array([c.label for c in cands], dtype=np.int64)
     return X, y
 
@@ -239,6 +290,12 @@ def main() -> None:
         default="max-recall",
         help="max-recall: cwt + min_confidence=0 (recommended for training input)",
     )
+    p.add_argument(
+        "--use-pann",
+        action="store_true",
+        help="Concatenate PANNs CNN14 embedding + gunshot_prob to hand features. "
+        "Requires running scripts/extract_audio_embeddings.py first.",
+    )
     args = p.parse_args()
 
     if args.detector_config == "max-recall":
@@ -246,13 +303,14 @@ def main() -> None:
     else:
         config = ShotDetectConfig()
     print(f"detector config: {config.model_dump()}")
-    print(f"label tolerance: ±{args.tolerance_ms:.0f} ms\n")
+    print(f"label tolerance: +/-{args.tolerance_ms:.0f} ms")
+    print(f"PANN features: {'on' if args.use_pann else 'off'}\n")
 
     fixtures = args.fixture or DEFAULT_FIXTURES
     print("Collecting candidates per fixture:")
     by_fix: dict[str, list[Candidate]] = {}
     for f in fixtures:
-        by_fix[f] = collect_candidates(f, args.tolerance_ms, config)
+        by_fix[f] = collect_candidates(f, args.tolerance_ms, config, use_pann=args.use_pann)
 
     all_cands = [c for cs in by_fix.values() for c in cs]
     n_pos = sum(c.label for c in all_cands)
@@ -270,8 +328,8 @@ def main() -> None:
         test = by_fix[held]
         if not train or not test:
             continue
-        Xtr, ytr = _to_xy(train)
-        Xte, yte = _to_xy(test)
+        Xtr, ytr = _to_xy(train, use_pann=args.use_pann)
+        Xte, yte = _to_xy(test, use_pann=args.use_pann)
         # If train has no positives or no negatives, can't fit meaningful classifier.
         if len(set(ytr.tolist())) < 2:
             print(f"{held:38s}  (train set has only one class; skipping)")
@@ -319,7 +377,7 @@ def main() -> None:
     # than LOFO; matches the prototype framing that gun-specific is fine
     # for now and per-gun presets come later.
     print("\n=== 5-fold random CV (mixed across fixtures) ===")
-    X, y = _to_xy(all_cands)
+    X, y = _to_xy(all_cands, use_pann=args.use_pann)
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     fold_probs = np.zeros_like(y, dtype=np.float64)
     for tr_idx, te_idx in skf.split(X, y):
@@ -355,10 +413,19 @@ def main() -> None:
         n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
     )
     clf_full.fit(X, y)
-    print("\n=== Feature importance (full-dataset fit) ===")
-    order = np.argsort(clf_full.feature_importances_)[::-1]
+    print("\n=== Feature importance (full-dataset fit, top 20) ===")
+    importances = clf_full.feature_importances_
+    if args.use_pann:
+        names = (
+            FEATURE_NAMES
+            + ["pann_gunshot_prob"]
+            + [f"pann_emb_{i:04d}" for i in range(len(importances) - len(FEATURE_NAMES) - 1)]
+        )
+    else:
+        names = FEATURE_NAMES
+    order = np.argsort(importances)[::-1][:20]
     for i in order:
-        print(f"  {FEATURE_NAMES[i]:24s} {clf_full.feature_importances_[i]:.3f}")
+        print(f"  {names[i]:24s} {importances[i]:.3f}")
 
 
 if __name__ == "__main__":
