@@ -27,6 +27,7 @@
 
     <section id="transport">
         <button id="play-btn">Play (Space)</button>
+        <button id="loop-btn" class="on" title="Loop to anchor: pause snaps the playhead back to where playback started (L)">Loop: ON</button>
         <span id="time-display">0.000 / 0.000s</span>
         <span id="zoom-display">zoom 1.0x</span>
         <span id="drag-info"></span>
@@ -61,10 +62,14 @@
 
     <footer>
         <kbd>Space</kbd> play/pause &middot;
-        <kbd>M</kbd> / <kbd>Shift+M</kbd> next/prev marker &middot;
-        click a marker to toggle keep &middot;
-        drag to adjust time &middot;
-        double-click waveform to add a marker &middot;
+        <kbd>L</kbd> toggle loop-to-anchor &middot;
+        <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step 25ms &middot;
+        <kbd>Shift+&larr;</kbd>/<kbd>Shift+&rarr;</kbd> step 250ms &middot;
+        <kbd>M</kbd>/<kbd>Shift+M</kbd> prev/next marker &middot;
+        click marker = toggle keep &middot;
+        drag = adjust time &middot;
+        double-click marker = reset &middot;
+        double-click waveform = add &middot;
         <kbd>Cmd+Z</kbd> undo &middot;
         <kbd>Cmd+S</kbd> save
     </footer>

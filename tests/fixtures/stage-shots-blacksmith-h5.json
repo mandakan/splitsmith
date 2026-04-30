@@ -10,665 +10,834 @@
   "tolerance_ms": 15,
   "stage_time_seconds": 21.68,
   "stage_window_end_in_fixture": 22.18,
-  "shots": [],
+  "shots": [
+    {
+      "shot_number": 1,
+      "candidate_number": 3,
+      "time": 2.1342,
+      "ms_after_beep": 1634,
+      "source": "detected"
+    },
+    {
+      "shot_number": 2,
+      "candidate_number": 4,
+      "time": 2.5471,
+      "ms_after_beep": 2047,
+      "source": "detected"
+    },
+    {
+      "shot_number": 3,
+      "candidate_number": 6,
+      "time": 3.2258,
+      "ms_after_beep": 2726,
+      "source": "detected"
+    },
+    {
+      "shot_number": 4,
+      "candidate_number": 9,
+      "time": 3.9902,
+      "ms_after_beep": 3490,
+      "source": "detected"
+    },
+    {
+      "shot_number": 5,
+      "candidate_number": 16,
+      "time": 6.7594,
+      "ms_after_beep": 6259,
+      "source": "detected"
+    },
+    {
+      "shot_number": 6,
+      "candidate_number": 25,
+      "time": 8.831,
+      "ms_after_beep": 8331,
+      "source": "detected"
+    },
+    {
+      "shot_number": 7,
+      "candidate_number": null,
+      "time": 9.0251,
+      "ms_after_beep": 8525,
+      "source": "manual"
+    },
+    {
+      "shot_number": 8,
+      "candidate_number": 28,
+      "time": 9.2668,
+      "ms_after_beep": 8767,
+      "source": "detected"
+    },
+    {
+      "shot_number": 9,
+      "candidate_number": 32,
+      "time": 9.9653,
+      "ms_after_beep": 9465,
+      "source": "detected"
+    },
+    {
+      "shot_number": 10,
+      "candidate_number": 35,
+      "time": 10.7926,
+      "ms_after_beep": 10293,
+      "source": "detected"
+    },
+    {
+      "shot_number": 11,
+      "candidate_number": 36,
+      "time": 11.5747,
+      "ms_after_beep": 11075,
+      "source": "detected"
+    },
+    {
+      "shot_number": 12,
+      "candidate_number": 53,
+      "time": 15.1684,
+      "ms_after_beep": 14668,
+      "source": "detected"
+    },
+    {
+      "shot_number": 13,
+      "candidate_number": null,
+      "time": 15.4867,
+      "ms_after_beep": 14987,
+      "source": "manual"
+    },
+    {
+      "shot_number": 14,
+      "candidate_number": 57,
+      "time": 16.0227,
+      "ms_after_beep": 15523,
+      "source": "detected"
+    },
+    {
+      "shot_number": 15,
+      "candidate_number": null,
+      "time": 16.267,
+      "ms_after_beep": 15767,
+      "source": "manual"
+    },
+    {
+      "shot_number": 16,
+      "candidate_number": 63,
+      "time": 17.0279,
+      "ms_after_beep": 16528,
+      "source": "detected"
+    },
+    {
+      "shot_number": 17,
+      "candidate_number": 65,
+      "time": 17.3286,
+      "ms_after_beep": 16829,
+      "source": "detected"
+    },
+    {
+      "shot_number": 18,
+      "candidate_number": 79,
+      "time": 20.0512,
+      "ms_after_beep": 19551,
+      "source": "detected"
+    },
+    {
+      "shot_number": 19,
+      "candidate_number": null,
+      "time": 20.2189,
+      "ms_after_beep": 19719,
+      "source": "manual"
+    },
+    {
+      "shot_number": 20,
+      "candidate_number": 81,
+      "time": 20.9407,
+      "ms_after_beep": 20441,
+      "source": "detected"
+    },
+    {
+      "shot_number": 21,
+      "candidate_number": 82,
+      "time": 21.2877,
+      "ms_after_beep": 20788,
+      "source": "detected"
+    },
+    {
+      "shot_number": 22,
+      "candidate_number": 84,
+      "time": 21.5159,
+      "ms_after_beep": 21016,
+      "source": "detected"
+    },
+    {
+      "shot_number": 23,
+      "candidate_number": 86,
+      "time": 21.8352,
+      "ms_after_beep": 21335,
+      "source": "detected"
+    },
+    {
+      "shot_number": 24,
+      "candidate_number": 89,
+      "time": 22.1792,
+      "ms_after_beep": 21679,
+      "source": "detected"
+    }
+  ],
   "_candidates_pending_audit": {
     "_note": "Auto-detected by current shot_detect (half-rise leading edge). NOT ground truth. Open in `splitsmith review` to audit, or mark audit_keep in the companion -candidates.csv and run `splitsmith audit-apply`.",
     "candidates": [
       {
         "candidate_number": 1,
         "time": 1.06,
-        "ms_after_beep": 560.0,
+        "ms_after_beep": 560,
         "peak_amplitude": 0.086,
         "confidence": 0.202
       },
       {
         "candidate_number": 2,
         "time": 1.316,
-        "ms_after_beep": 816.0,
+        "ms_after_beep": 816,
         "peak_amplitude": 0.1061,
         "confidence": 0.229
       },
       {
         "candidate_number": 3,
         "time": 2.133,
-        "ms_after_beep": 1633.0,
+        "ms_after_beep": 1633,
         "peak_amplitude": 0.6325,
-        "confidence": 1.0
+        "confidence": 1
       },
       {
         "candidate_number": 4,
         "time": 2.5459,
-        "ms_after_beep": 2046.0,
+        "ms_after_beep": 2046,
         "peak_amplitude": 0.4336,
         "confidence": 0.534
       },
       {
         "candidate_number": 5,
         "time": 2.6173,
-        "ms_after_beep": 2117.0,
+        "ms_after_beep": 2117,
         "peak_amplitude": 0.2662,
         "confidence": 0.411
       },
       {
         "candidate_number": 6,
         "time": 3.2245,
-        "ms_after_beep": 2725.0,
+        "ms_after_beep": 2725,
         "peak_amplitude": 0.3611,
         "confidence": 0.525
       },
       {
         "candidate_number": 7,
         "time": 3.4173,
-        "ms_after_beep": 2917.0,
+        "ms_after_beep": 2917,
         "peak_amplitude": 0.1951,
         "confidence": 0.372
       },
       {
         "candidate_number": 8,
         "time": 3.5133,
-        "ms_after_beep": 3013.0,
+        "ms_after_beep": 3013,
         "peak_amplitude": 0.4673,
         "confidence": 0.371
       },
       {
         "candidate_number": 9,
         "time": 3.9884,
-        "ms_after_beep": 3488.0,
+        "ms_after_beep": 3488,
         "peak_amplitude": 0.4486,
         "confidence": 0.706
       },
       {
         "candidate_number": 10,
         "time": 4.164,
-        "ms_after_beep": 3664.0,
+        "ms_after_beep": 3664,
         "peak_amplitude": 0.1051,
         "confidence": 0.267
       },
       {
         "candidate_number": 11,
         "time": 4.5053,
-        "ms_after_beep": 4005.0,
+        "ms_after_beep": 4005,
         "peak_amplitude": 0.2284,
         "confidence": 0.358
       },
       {
         "candidate_number": 12,
         "time": 5.3156,
-        "ms_after_beep": 4816.0,
+        "ms_after_beep": 4816,
         "peak_amplitude": 0.1328,
         "confidence": 0.433
       },
       {
         "candidate_number": 13,
         "time": 5.5293,
-        "ms_after_beep": 5029.0,
+        "ms_after_beep": 5029,
         "peak_amplitude": 0.184,
         "confidence": 0.209
       },
       {
         "candidate_number": 14,
         "time": 5.8385,
-        "ms_after_beep": 5339.0,
+        "ms_after_beep": 5339,
         "peak_amplitude": 0.041,
         "confidence": 0.198
       },
       {
         "candidate_number": 15,
         "time": 6.3667,
-        "ms_after_beep": 5867.0,
+        "ms_after_beep": 5867,
         "peak_amplitude": 0.0641,
         "confidence": 0.24
       },
       {
         "candidate_number": 16,
         "time": 6.7558,
-        "ms_after_beep": 6256.0,
+        "ms_after_beep": 6256,
         "peak_amplitude": 0.1445,
         "confidence": 0.342
       },
       {
         "candidate_number": 17,
         "time": 7.396,
-        "ms_after_beep": 6896.0,
+        "ms_after_beep": 6896,
         "peak_amplitude": 0.0869,
         "confidence": 0.15
       },
       {
         "candidate_number": 18,
         "time": 7.6307,
-        "ms_after_beep": 7131.0,
+        "ms_after_beep": 7131,
         "peak_amplitude": 0.178,
         "confidence": 0.275
       },
       {
         "candidate_number": 19,
         "time": 7.7693,
-        "ms_after_beep": 7269.0,
+        "ms_after_beep": 7269,
         "peak_amplitude": 0.0533,
         "confidence": 0.13
       },
       {
         "candidate_number": 20,
         "time": 7.908,
-        "ms_after_beep": 7408.0,
+        "ms_after_beep": 7408,
         "peak_amplitude": 0.0683,
         "confidence": 0.159
       },
       {
         "candidate_number": 21,
         "time": 8.2067,
-        "ms_after_beep": 7707.0,
+        "ms_after_beep": 7707,
         "peak_amplitude": 0.0536,
         "confidence": 0.127
       },
       {
         "candidate_number": 22,
         "time": 8.3027,
-        "ms_after_beep": 7803.0,
+        "ms_after_beep": 7803,
         "peak_amplitude": 0.0984,
         "confidence": 0.171
       },
       {
         "candidate_number": 23,
         "time": 8.4413,
-        "ms_after_beep": 7941.0,
+        "ms_after_beep": 7941,
         "peak_amplitude": 0.1101,
         "confidence": 0.272
       },
       {
         "candidate_number": 24,
         "time": 8.644,
-        "ms_after_beep": 8144.0,
+        "ms_after_beep": 8144,
         "peak_amplitude": 0.0832,
         "confidence": 0.222
       },
       {
         "candidate_number": 25,
         "time": 8.8294,
-        "ms_after_beep": 8329.0,
+        "ms_after_beep": 8329,
         "peak_amplitude": 0.5396,
         "confidence": 0.726
       },
       {
         "candidate_number": 26,
         "time": 8.9427,
-        "ms_after_beep": 8443.0,
+        "ms_after_beep": 8443,
         "peak_amplitude": 0.382,
         "confidence": 0.474
       },
       {
         "candidate_number": 27,
         "time": 9.0493,
-        "ms_after_beep": 8549.0,
+        "ms_after_beep": 8549,
         "peak_amplitude": 0.5163,
         "confidence": 0.378
       },
       {
         "candidate_number": 28,
         "time": 9.2656,
-        "ms_after_beep": 8766.0,
+        "ms_after_beep": 8766,
         "peak_amplitude": 0.5327,
         "confidence": 0.403
       },
       {
         "candidate_number": 29,
         "time": 9.444,
-        "ms_after_beep": 8944.0,
+        "ms_after_beep": 8944,
         "peak_amplitude": 0.1532,
         "confidence": 0.239
       },
       {
         "candidate_number": 30,
         "time": 9.54,
-        "ms_after_beep": 9040.0,
+        "ms_after_beep": 9040,
         "peak_amplitude": 0.1624,
         "confidence": 0.269
       },
       {
         "candidate_number": 31,
         "time": 9.7853,
-        "ms_after_beep": 9285.0,
+        "ms_after_beep": 9285,
         "peak_amplitude": 0.0326,
         "confidence": 0.113
       },
       {
         "candidate_number": 32,
         "time": 9.9653,
-        "ms_after_beep": 9465.0,
+        "ms_after_beep": 9465,
         "peak_amplitude": 0.352,
         "confidence": 0.671
       },
       {
         "candidate_number": 33,
         "time": 10.148,
-        "ms_after_beep": 9648.0,
+        "ms_after_beep": 9648,
         "peak_amplitude": 0.1143,
         "confidence": 0.151
       },
       {
         "candidate_number": 34,
         "time": 10.6067,
-        "ms_after_beep": 10107.0,
+        "ms_after_beep": 10107,
         "peak_amplitude": 0.0268,
         "confidence": 0.125
       },
       {
         "candidate_number": 35,
         "time": 10.7905,
-        "ms_after_beep": 10291.0,
+        "ms_after_beep": 10291,
         "peak_amplitude": 0.452,
         "confidence": 0.774
       },
       {
         "candidate_number": 36,
         "time": 11.5729,
-        "ms_after_beep": 11073.0,
+        "ms_after_beep": 11073,
         "peak_amplitude": 0.3712,
         "confidence": 0.722
       },
       {
         "candidate_number": 37,
         "time": 11.78,
-        "ms_after_beep": 11280.0,
+        "ms_after_beep": 11280,
         "peak_amplitude": 0.1078,
         "confidence": 0.169
       },
       {
         "candidate_number": 38,
         "time": 11.908,
-        "ms_after_beep": 11408.0,
+        "ms_after_beep": 11408,
         "peak_amplitude": 0.1278,
         "confidence": 0.185
       },
       {
         "candidate_number": 39,
         "time": 12.0573,
-        "ms_after_beep": 11557.0,
+        "ms_after_beep": 11557,
         "peak_amplitude": 0.3163,
         "confidence": 0.324
       },
       {
         "candidate_number": 40,
         "time": 12.2067,
-        "ms_after_beep": 11707.0,
+        "ms_after_beep": 11707,
         "peak_amplitude": 0.2137,
         "confidence": 0.279
       },
       {
         "candidate_number": 41,
         "time": 12.5587,
-        "ms_after_beep": 12059.0,
+        "ms_after_beep": 12059,
         "peak_amplitude": 0.1547,
         "confidence": 0.264
       },
       {
         "candidate_number": 42,
         "time": 12.6867,
-        "ms_after_beep": 12187.0,
+        "ms_after_beep": 12187,
         "peak_amplitude": 0.2311,
         "confidence": 0.295
       },
       {
         "candidate_number": 43,
         "time": 12.7827,
-        "ms_after_beep": 12283.0,
+        "ms_after_beep": 12283,
         "peak_amplitude": 0.301,
         "confidence": 0.342
       },
       {
         "candidate_number": 44,
         "time": 13.0813,
-        "ms_after_beep": 12581.0,
+        "ms_after_beep": 12581,
         "peak_amplitude": 0.394,
         "confidence": 0.468
       },
       {
         "candidate_number": 45,
         "time": 13.3267,
-        "ms_after_beep": 12827.0,
+        "ms_after_beep": 12827,
         "peak_amplitude": 0.1737,
         "confidence": 0.296
       },
       {
         "candidate_number": 46,
         "time": 13.476,
-        "ms_after_beep": 12976.0,
+        "ms_after_beep": 12976,
         "peak_amplitude": 0.1665,
         "confidence": 0.276
       },
       {
         "candidate_number": 47,
         "time": 13.668,
-        "ms_after_beep": 13168.0,
+        "ms_after_beep": 13168,
         "peak_amplitude": 0.2514,
         "confidence": 0.319
       },
       {
         "candidate_number": 48,
         "time": 13.8067,
-        "ms_after_beep": 13307.0,
+        "ms_after_beep": 13307,
         "peak_amplitude": 0.2542,
         "confidence": 0.317
       },
       {
         "candidate_number": 49,
         "time": 13.956,
-        "ms_after_beep": 13456.0,
+        "ms_after_beep": 13456,
         "peak_amplitude": 0.1021,
         "confidence": 0.256
       },
       {
         "candidate_number": 50,
         "time": 14.1773,
-        "ms_after_beep": 13677.0,
+        "ms_after_beep": 13677,
         "peak_amplitude": 0.4054,
         "confidence": 0.628
       },
       {
         "candidate_number": 51,
         "time": 14.2547,
-        "ms_after_beep": 13755.0,
+        "ms_after_beep": 13755,
         "peak_amplitude": 0.1811,
         "confidence": 0.266
       },
       {
         "candidate_number": 52,
         "time": 14.6067,
-        "ms_after_beep": 14107.0,
+        "ms_after_beep": 14107,
         "peak_amplitude": 0.0566,
         "confidence": 0.143
       },
       {
         "candidate_number": 53,
         "time": 15.1492,
-        "ms_after_beep": 14649.0,
+        "ms_after_beep": 14649,
         "peak_amplitude": 0.0352,
         "confidence": 0.126
       },
       {
         "candidate_number": 54,
         "time": 15.332,
-        "ms_after_beep": 14832.0,
+        "ms_after_beep": 14832,
         "peak_amplitude": 0.1339,
         "confidence": 0.246
       },
       {
         "candidate_number": 55,
         "time": 15.6627,
-        "ms_after_beep": 15163.0,
+        "ms_after_beep": 15163,
         "peak_amplitude": 0.1617,
         "confidence": 0.26
       },
       {
         "candidate_number": 56,
         "time": 15.8616,
-        "ms_after_beep": 15362.0,
+        "ms_after_beep": 15362,
         "peak_amplitude": 0.2736,
         "confidence": 0.32
       },
       {
         "candidate_number": 57,
         "time": 16.0227,
-        "ms_after_beep": 15523.0,
+        "ms_after_beep": 15523,
         "peak_amplitude": 0.4898,
         "confidence": 0.679
       },
       {
         "candidate_number": 58,
         "time": 16.0573,
-        "ms_after_beep": 15557.0,
+        "ms_after_beep": 15557,
         "peak_amplitude": 0.1458,
         "confidence": 0.195
       },
       {
         "candidate_number": 59,
         "time": 16.1853,
-        "ms_after_beep": 15685.0,
+        "ms_after_beep": 15685,
         "peak_amplitude": 0.1381,
         "confidence": 0.343
       },
       {
         "candidate_number": 60,
         "time": 16.3667,
-        "ms_after_beep": 15867.0,
+        "ms_after_beep": 15867,
         "peak_amplitude": 0.2364,
         "confidence": 0.32
       },
       {
         "candidate_number": 61,
         "time": 16.7546,
-        "ms_after_beep": 16255.0,
+        "ms_after_beep": 16255,
         "peak_amplitude": 0.313,
         "confidence": 0.438
       },
       {
         "candidate_number": 62,
         "time": 16.8467,
-        "ms_after_beep": 16347.0,
+        "ms_after_beep": 16347,
         "peak_amplitude": 0.1483,
         "confidence": 0.196
       },
       {
         "candidate_number": 63,
         "time": 17.0238,
-        "ms_after_beep": 16524.0,
+        "ms_after_beep": 16524,
         "peak_amplitude": 0.0931,
         "confidence": 0.251
       },
       {
         "candidate_number": 64,
         "time": 17.06,
-        "ms_after_beep": 16560.0,
+        "ms_after_beep": 16560,
         "peak_amplitude": 0.18,
         "confidence": 0.199
       },
       {
         "candidate_number": 65,
         "time": 17.3274,
-        "ms_after_beep": 16827.0,
+        "ms_after_beep": 16827,
         "peak_amplitude": 0.2451,
         "confidence": 0.334
       },
       {
         "candidate_number": 66,
         "time": 17.8707,
-        "ms_after_beep": 17371.0,
+        "ms_after_beep": 17371,
         "peak_amplitude": 0.3186,
         "confidence": 0.356
       },
       {
         "candidate_number": 67,
         "time": 17.988,
-        "ms_after_beep": 17488.0,
+        "ms_after_beep": 17488,
         "peak_amplitude": 0.1239,
         "confidence": 0.209
       },
       {
         "candidate_number": 68,
         "time": 18.2653,
-        "ms_after_beep": 17765.0,
+        "ms_after_beep": 17765,
         "peak_amplitude": 0.1,
         "confidence": 0.185
       },
       {
         "candidate_number": 69,
         "time": 18.5,
-        "ms_after_beep": 18000.0,
+        "ms_after_beep": 18000,
         "peak_amplitude": 0.1601,
         "confidence": 0.226
       },
       {
         "candidate_number": 70,
         "time": 18.628,
-        "ms_after_beep": 18128.0,
+        "ms_after_beep": 18128,
         "peak_amplitude": 0.1234,
         "confidence": 0.23
       },
       {
         "candidate_number": 71,
         "time": 18.7773,
-        "ms_after_beep": 18277.0,
+        "ms_after_beep": 18277,
         "peak_amplitude": 0.1643,
         "confidence": 0.374
       },
       {
         "candidate_number": 72,
         "time": 18.9373,
-        "ms_after_beep": 18437.0,
+        "ms_after_beep": 18437,
         "peak_amplitude": 0.1443,
         "confidence": 0.197
       },
       {
         "candidate_number": 73,
         "time": 19.0973,
-        "ms_after_beep": 18597.0,
+        "ms_after_beep": 18597,
         "peak_amplitude": 0.3033,
         "confidence": 0.378
       },
       {
         "candidate_number": 74,
         "time": 19.2147,
-        "ms_after_beep": 18715.0,
+        "ms_after_beep": 18715,
         "peak_amplitude": 0.2105,
         "confidence": 0.251
       },
       {
         "candidate_number": 75,
         "time": 19.4067,
-        "ms_after_beep": 18907.0,
+        "ms_after_beep": 18907,
         "peak_amplitude": 0.3231,
         "confidence": 0.296
       },
       {
         "candidate_number": 76,
         "time": 19.652,
-        "ms_after_beep": 19152.0,
+        "ms_after_beep": 19152,
         "peak_amplitude": 0.122,
         "confidence": 0.164
       },
       {
         "candidate_number": 77,
         "time": 19.9501,
-        "ms_after_beep": 19450.0,
+        "ms_after_beep": 19450,
         "peak_amplitude": 0.3855,
         "confidence": 0.69
       },
       {
         "candidate_number": 78,
         "time": 19.972,
-        "ms_after_beep": 19472.0,
+        "ms_after_beep": 19472,
         "peak_amplitude": 0.3085,
         "confidence": 0.405
       },
       {
         "candidate_number": 79,
         "time": 20.068,
-        "ms_after_beep": 19568.0,
+        "ms_after_beep": 19568,
         "peak_amplitude": 0.3272,
         "confidence": 0.321
       },
       {
         "candidate_number": 80,
         "time": 20.708,
-        "ms_after_beep": 20208.0,
+        "ms_after_beep": 20208,
         "peak_amplitude": 0.0351,
         "confidence": 0.169
       },
       {
         "candidate_number": 81,
         "time": 20.9376,
-        "ms_after_beep": 20438.0,
+        "ms_after_beep": 20438,
         "peak_amplitude": 0.5161,
         "confidence": 0.801
       },
       {
         "candidate_number": 82,
         "time": 21.2862,
-        "ms_after_beep": 20786.0,
+        "ms_after_beep": 20786,
         "peak_amplitude": 0.5448,
         "confidence": 0.649
       },
       {
         "candidate_number": 83,
         "time": 21.3267,
-        "ms_after_beep": 20827.0,
+        "ms_after_beep": 20827,
         "peak_amplitude": 0.3424,
         "confidence": 0.306
       },
       {
         "candidate_number": 84,
         "time": 21.5149,
-        "ms_after_beep": 21015.0,
+        "ms_after_beep": 21015,
         "peak_amplitude": 0.3179,
         "confidence": 0.305
       },
       {
         "candidate_number": 85,
         "time": 21.604,
-        "ms_after_beep": 21104.0,
+        "ms_after_beep": 21104,
         "peak_amplitude": 0.2657,
         "confidence": 0.297
       },
       {
         "candidate_number": 86,
         "time": 21.8337,
-        "ms_after_beep": 21334.0,
+        "ms_after_beep": 21334,
         "peak_amplitude": 0.3227,
         "confidence": 0.571
       },
       {
         "candidate_number": 87,
         "time": 21.86,
-        "ms_after_beep": 21360.0,
+        "ms_after_beep": 21360,
         "peak_amplitude": 0.2152,
         "confidence": 0.252
       },
       {
         "candidate_number": 88,
         "time": 21.988,
-        "ms_after_beep": 21488.0,
+        "ms_after_beep": 21488,
         "peak_amplitude": 0.1617,
         "confidence": 0.254
       },
       {
         "candidate_number": 89,
         "time": 22.1766,
-        "ms_after_beep": 21677.0,
+        "ms_after_beep": 21677,
         "peak_amplitude": 0.3488,
         "confidence": 0.497
       },
       {
         "candidate_number": 90,
         "time": 22.4311,
-        "ms_after_beep": 21931.0,
+        "ms_after_beep": 21931,
         "peak_amplitude": 0.3139,
         "confidence": 0.352
       },
       {
         "candidate_number": 91,
         "time": 22.4893,
-        "ms_after_beep": 21989.0,
+        "ms_after_beep": 21989,
         "peak_amplitude": 0.2756,
         "confidence": 0.304
       },
       {
         "candidate_number": 92,
         "time": 22.692,
-        "ms_after_beep": 22192.0,
+        "ms_after_beep": 22192,
         "peak_amplitude": 0.116,
         "confidence": 0.165
       },
       {
         "candidate_number": 93,
         "time": 22.8531,
-        "ms_after_beep": 22353.0,
+        "ms_after_beep": 22353,
         "peak_amplitude": 0.3015,
         "confidence": 0.305
       },
       {
         "candidate_number": 94,
         "time": 22.9267,
-        "ms_after_beep": 22427.0,
+        "ms_after_beep": 22427,
         "peak_amplitude": 0.2001,
         "confidence": 0.234
       }

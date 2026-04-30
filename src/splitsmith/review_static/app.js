@@ -37,6 +37,11 @@
     /** Snapshot of markers at last save (or boot) -- compared to current to compute dirty. */
     let savedSignature = "";
     let totalContentWidth = 0; // duration * minPxPerSec; updated on ready/zoom
+    /** Audacity-style play anchor: where Space-play starts and Space-pause snaps back to. */
+    let playAnchor = 0;
+    let suppressInteractionEvent = false;
+    /** Loop mode: when true, pause/finish snap the playhead and view back to playAnchor. */
+    let loopMode = true;
 
     // ----- DOM refs -----
     const els = {
@@ -48,6 +53,7 @@
         video: document.getElementById("video"),
         noVideo: document.getElementById("no-video-msg"),
         play: document.getElementById("play-btn"),
+        loop: document.getElementById("loop-btn"),
         time: document.getElementById("time-display"),
         zoomDisplay: document.getElementById("zoom-display"),
         dragInfo: document.getElementById("drag-info"),
@@ -229,7 +235,21 @@
         wavesurfer.on("audioprocess", onAudioProcess);
         wavesurfer.on("timeupdate", onAudioProcess);
         wavesurfer.on("seeking", onSeek);
-        wavesurfer.on("interaction", onSeek);
+        wavesurfer.on("interaction", () => {
+            // User clicked on the waveform: update the play anchor so the
+            // next pause snaps back here.
+            if (!suppressInteractionEvent) {
+                playAnchor = wavesurfer.getCurrentTime();
+            }
+            onSeek();
+        });
+        wavesurfer.on("pause", () => {
+            // Audacity-style: snap back to where playback started so the user
+            // can re-listen to the same span without re-positioning. Tiny
+            // defer so wavesurfer's internal state is settled.
+            if (video) video.pause();
+            setTimeout(snapBackToAnchor, 0);
+        });
         wavesurfer.on("zoom", () => {
             updateContentWidth();
             renderMarkers();
@@ -253,11 +273,9 @@
         wavesurfer.on("play", () => {
             if (video) video.play().catch(() => {});
         });
-        wavesurfer.on("pause", () => {
-            if (video) video.pause();
-        });
         wavesurfer.on("finish", () => {
             if (video) video.pause();
+            setTimeout(snapBackToAnchor, 0);
         });
         updateContentWidth();
         updateZoomDisplay();
@@ -358,6 +376,54 @@
         if (video && Math.abs(video.currentTime - (t + videoOffset)) > SYNC_DRIFT_THRESHOLD_S) {
             video.currentTime = t + videoOffset;
         }
+    }
+
+    function seekTo(t) {
+        // Programmatic seek that updates the play anchor so subsequent
+        // play -> pause snaps back to this position. Used by all non-interaction
+        // navigation (marker-list click, M/Shift+M, arrow stepping, etc).
+        suppressInteractionEvent = true;
+        wavesurfer.setTime(t);
+        suppressInteractionEvent = false;
+        playAnchor = t;
+    }
+
+    function centerViewOn(t) {
+        // Scroll the waveform horizontally so time `t` sits near the centre of
+        // the visible viewport. Used by the snap-back so the user actually
+        // SEES where the anchor is after a long playback.
+        const wrapper = wavesurfer.getWrapper();
+        const scrollContainer = wrapper && wrapper.parentElement;
+        if (!scrollContainer) return;
+        const dur = wavesurfer.getDuration();
+        if (!dur || !totalContentWidth) return;
+        const targetPx = (t / dur) * totalContentWidth;
+        const viewportWidth = scrollContainer.clientWidth;
+        let scrollLeft = targetPx - viewportWidth / 2;
+        scrollLeft = Math.max(0, Math.min(totalContentWidth - viewportWidth, scrollLeft));
+        scrollContainer.scrollLeft = scrollLeft;
+    }
+
+    function snapBackToAnchor() {
+        if (!loopMode) return;
+        seekTo(playAnchor);
+        centerViewOn(playAnchor);
+    }
+
+    function toggleLoopMode() {
+        loopMode = !loopMode;
+        els.loop.textContent = `Loop: ${loopMode ? "ON" : "OFF"}`;
+        els.loop.classList.toggle("on", loopMode);
+    }
+
+    function stepPlayhead(direction, fine) {
+        const step = fine ? 0.025 : 0.250; // 25 ms / 250 ms
+        const dur = wavesurfer.getDuration();
+        const target = Math.max(
+            0,
+            Math.min(dur, wavesurfer.getCurrentTime() + direction * step)
+        );
+        seekTo(target);
     }
 
     function startSyncLoop() {
@@ -580,7 +646,7 @@
                 <td>${m.keep ? "[KEEP]" : "[reject]"}</td>
             `;
             tr.addEventListener("click", () => {
-                wavesurfer.setTime(m.time);
+                seekTo(m.time);
                 activeMarkerId = m.id;
                 renderList();
                 renderMarkers();
@@ -635,6 +701,7 @@
             if (wavesurfer.isPlaying()) wavesurfer.pause();
             else wavesurfer.play();
         });
+        els.loop.addEventListener("click", toggleLoopMode);
     }
 
     function bindKeyboard() {
@@ -670,6 +737,15 @@
             } else if (e.key === "m" && !e.shiftKey && !isMod) {
                 e.preventDefault();
                 jumpMarker(1);
+            } else if (e.key === "ArrowLeft" && !isMod) {
+                e.preventDefault();
+                stepPlayhead(-1, !e.shiftKey);
+            } else if (e.key === "ArrowRight" && !isMod) {
+                e.preventDefault();
+                stepPlayhead(+1, !e.shiftKey);
+            } else if ((e.key === "l" || e.key === "L") && !isMod) {
+                e.preventDefault();
+                toggleLoopMode();
             }
         });
     }
@@ -688,7 +764,7 @@
             }
         }
         if (target) {
-            wavesurfer.setTime(target.time);
+            seekTo(target.time);
             activeMarkerId = target.id;
             renderList();
             renderMarkers();

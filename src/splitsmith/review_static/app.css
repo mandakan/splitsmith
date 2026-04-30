@@ -67,13 +67,19 @@ header h1 { margin: 0; font-size: 1.1rem; }
     align-items: center;
     gap: 1rem;
 }
-#play-btn {
+#play-btn, #loop-btn {
     padding: 0.3rem 0.8rem;
     background: #2c2c2e;
     border: 1px solid #3a3a3c;
     border-radius: 4px;
     color: #e7e7e7;
     cursor: pointer;
+    font-size: 0.85rem;
+}
+#loop-btn.on {
+    background: #1a4d2c;
+    border-color: #2a7d4c;
+    color: #d0f0d8;
 }
 #time-display, #zoom-display, #drag-info { font-family: ui-monospace, SFMono-Regular, monospace; }
 #drag-info { color: #ffd60a; min-width: 0; }
