@@ -29,6 +29,10 @@ def _derive_canonical_path(ensemble_path: Path) -> Path:
     -> ``tests/fixtures/<stem>.json``."""
     stem = ensemble_path.stem
     for suffix in (
+        "-ensemble-4of4",
+        "-ensemble-3of4",
+        "-ensemble-2of4",
+        "-ensemble-1of4",
         "-ensemble-3of3",
         "-ensemble-2of3",
         "-ensemble-1of3",

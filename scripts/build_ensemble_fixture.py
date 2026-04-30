@@ -3,24 +3,37 @@
 For each input fixture, produces TWO sibling fixtures under
 ``build/ensemble-review/``:
 
-* ``{stem}-baseline.json``  -- shots[] = baseline (cwt + min_confidence=0.03)
-* ``{stem}-ensemble.json``  -- shots[] = N-of-3 ensemble consensus
+* ``{stem}-baseline.json``         -- shots[] = baseline (cwt + min_confidence=0.03)
+* ``{stem}-ensemble-{N}of4.json``  -- shots[] = N-of-4 ensemble consensus
 
-Both share the same ``_candidates_pending_audit`` (the full max-recall
-candidate set), so opening either in the review SPA shows every detector
-candidate and highlights only the ones that the chosen filter "kept".
+Voters
+------
+A. Baseline detector + min_confidence=0.03  (calibrated, 100 % recall)
+B. CLAP zero-shot, threshold = min(clap_diff over positives)  (100 % recall)
+C. GBDT classifier, threshold for --gbdt-target-recall (default 95 %)
+D. PANNs gunshot_prob, threshold = min(over positives)  (100 % recall)
 
-The WAV file required by the review SPA is symlinked alongside each JSON,
-so opening either fixture in:
+Both written variants share the same ``_candidates_pending_audit`` (the full
+max-recall candidate set), so opening either in the review SPA shows every
+detector candidate and highlights only the ones the chosen filter kept.
 
-    uv run splitsmith review --fixture <path>
+The WAV file required by the review SPA is symlinked alongside each JSON, so
+``uv run splitsmith review --fixture <path>`` Just Works -- no copy of the
+audio, no modification of the originals.
 
-Just Works -- no copy of the audio, no modification of the originals.
+Apriori prior is OPTIONAL
+-------------------------
+The SSI Scoreboard apriori (--expected-rounds N) is an optional soft prior;
+omit the flag and the script runs with no apriori data. No external API call
+or fetch is required at any point in this script -- you supply expected
+rounds yourself if/when you have them.
 
 Run:
     uv run python scripts/build_ensemble_fixture.py
-    uv run python scripts/build_ensemble_fixture.py --consensus 2
-    uv run python scripts/build_ensemble_fixture.py --fixture stage-shots-tallmilan-stage7
+    uv run python scripts/build_ensemble_fixture.py --consensus 4
+    uv run python scripts/build_ensemble_fixture.py \\
+        --include-fixture stage-shots-tallmilan-2026-stage6 \\
+        --expected-rounds 12
 """
 
 from __future__ import annotations
@@ -138,6 +151,18 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float):
         not_mean = sims[:, not_idx].mean(axis=1)
         diff = shot_mean - not_mean
 
+        pann_path = CACHE_DIR / f"{fix}_pann.npz"
+        if not pann_path.exists():
+            raise SystemExit(
+                f"{fix}: PANN cache missing; run scripts/extract_audio_embeddings.py first."
+            )
+        pann = np.load(pann_path)
+        if pann["gunshot_prob"].shape[0] != len(all_shots):
+            raise SystemExit(
+                f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force"
+            )
+        gunshot_prob = pann["gunshot_prob"]
+
         per_fixture[fix] = {
             "truth": truth,
             "shots": all_shots,
@@ -156,6 +181,7 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float):
                 "label": labels[i],
                 "vote_a": int(round(shot.time_absolute, 6) in safe_times),
                 "clap_diff": float(diff[i]),
+                "gunshot_prob": float(gunshot_prob[i]),
                 "hand_feats": feats,
                 "clap_sims": list(sims[i]),
                 "peak_amplitude": float(shot.peak_amplitude),
@@ -167,6 +193,11 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float):
 
 def _vote_b_threshold(calib_universe) -> float:
     pos = [c["clap_diff"] for c in calib_universe if c["label"] == 1]
+    return min(pos) if pos else 0.0
+
+
+def _vote_d_threshold(calib_universe) -> float:
+    pos = [c["gunshot_prob"] for c in calib_universe if c["label"] == 1]
     return min(pos) if pos else 0.0
 
 
@@ -250,17 +281,26 @@ def main() -> None:
         default=[],
         help="Apply the trained ensemble to this fixture too (no labels needed). Repeatable.",
     )
-    p.add_argument("--consensus", type=int, default=3, choices=[1, 2, 3],
-                   help="Consensus threshold for the *-ensemble.json variant (default 3). "
+    p.add_argument("--consensus", type=int, default=3, choices=[1, 2, 3, 4],
+                   help="Consensus threshold for the *-ensemble-{N}of4.json variant. "
+                   "Default 3 (= 3-of-4 strict majority, preserves 100 %% recall). "
                    "Keep if (vote_total + apriori_boost) >= consensus.")
+    p.add_argument(
+        "--gbdt-target-recall",
+        type=float,
+        default=0.95,
+        help="Voter C target recall (default 95 %%). 100 %% can drag the GBDT "
+        "threshold close to 0 at small data scales and crater precision.",
+    )
     p.add_argument(
         "--expected-rounds",
         type=int,
         default=None,
-        help="Soft apriori prior. Candidates ranked top-N by detector confidence "
+        help="OPTIONAL soft apriori prior (no external API call required; "
+        "you supply this value yourself if/when you have it from SSI Scoreboard "
+        "or any other source). Candidates ranked top-N by detector confidence "
         "(within the fixture) get +apriori-boost added to their consensus score. "
-        "Applies only to fixtures listed in --include-fixture (not calibration set). "
-        "Lets a top-confidence candidate survive with one fewer voter agreement.",
+        "Applies only to fixtures listed in --include-fixture (not calibration set).",
     )
     p.add_argument(
         "--apriori-boost",
@@ -287,9 +327,11 @@ def main() -> None:
     )
 
     clap_thr = _vote_b_threshold(calib_universe)
-    clf_c, c_thr = _train_voter_c(calib_universe, target_recall=1.0)
+    pann_thr = _vote_d_threshold(calib_universe)
+    clf_c, c_thr = _train_voter_c(calib_universe, target_recall=args.gbdt_target_recall)
     print(f"Voter B threshold (CLAP shot-notshot, calibrated): {clap_thr:.4f}")
-    print(f"Voter C threshold (GBDT, 5-fold CV target recall 100 %): {c_thr:.4f}")
+    print(f"Voter C threshold (GBDT, target recall {args.gbdt_target_recall*100:.0f} %): {c_thr:.4f}")
+    print(f"Voter D threshold (PANN gunshot_prob, calibrated): {pann_thr:.4f}")
 
     # Apply voter C to the FULL universe using the model trained on calibration.
     X_all = _x_from(universe)
@@ -298,7 +340,8 @@ def main() -> None:
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_thr)
         c["vote_c"] = int(probs[i] >= c_thr)
-        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"]
+        c["vote_d"] = int(c["gunshot_prob"] >= pann_thr)
+        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
         c["score_c"] = float(probs[i])
 
     # Apply per-fixture soft apriori boost (only for --include-fixture targets;
@@ -371,14 +414,14 @@ def main() -> None:
         # Materialize both.
         wav_src = FIXTURES_DIR / f"{fix}.wav"
         baseline_json = OUTPUT_DIR / f"{fix}-baseline.json"
-        ensemble_json = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"
+        ensemble_json = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of4.json"
 
         _materialize(baseline_json, wav_src, _build_fixture_json(
             truth, baseline_shots, all_candidates, label="baseline (cwt + min_confidence=0.03)"
         ))
         _materialize(ensemble_json, wav_src, _build_fixture_json(
             truth, ensemble_shots, all_candidates,
-            label=f"ensemble {args.consensus}-of-3 consensus (A=baseline+0.03, B=CLAP, C=GBDT)",
+            label=f"ensemble {args.consensus}-of-4 consensus (A=baseline+0.03, B=CLAP, C=GBDT, D=PANN)",
         ))
 
         n_total = len(all_candidates)
@@ -404,14 +447,14 @@ def main() -> None:
             )
         print(
             f"  {fix}: cands {n_total}, baseline {n_base}, "
-            f"ensemble({args.consensus}/3) {n_ens}, "
+            f"ensemble({args.consensus}/4) {n_ens}, "
             f"audited {n_audited} (+{n_manual} manual){boost_tag}"
         )
 
     print(f"\nOpen in the review UI -- one fixture per browser tab/window:")
     for fix in apply_fixtures:
         b = OUTPUT_DIR / f"{fix}-baseline.json"
-        e = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"
+        e = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of4.json"
         print(f"\n  uv run splitsmith review --fixture {b}")
         print(f"  uv run splitsmith review --fixture {e} --port 5174")
 

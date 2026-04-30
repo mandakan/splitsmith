@@ -7,12 +7,15 @@ Voters
 ------
 A. Baseline conservative: detector with recall_fallback=cwt and
    min_confidence=0.03 (the empirical safe cap from issue #6 sweeps).
-B. CLAP zero-shot: shot_minus_notshot > 0  -- no training, just whether
-   the candidate's audio is closer to "gunshot" prompts than to
-   "ambient/echo" prompts.
+B. CLAP zero-shot: shot_minus_notshot >= calibrated threshold -- no
+   training; threshold = min(clap_diff over positives) so this voter
+   always retains 100 % recall.
 C. GBDT classifier: hand features + CLAP text similarities, 5-fold
-   stratified CV held-out probabilities, threshold tuned per run for
-   ~95 % recall on the training set.
+   stratified CV held-out probabilities, threshold tuned for the
+   --gbdt-target-recall (default 99 %; relaxed from 100 % so a single
+   stubborn positive doesn't drag the threshold to ~0).
+D. PANNs zero-shot: AudioSet "Gunshot, gunfire" probability, threshold
+   = min(gunshot_prob over positives) -- 100 % recall by construction.
 
 Output
 ------
@@ -134,8 +137,12 @@ def main() -> None:
     p.add_argument(
         "--gbdt-target-recall",
         type=float,
-        default=1.00,
-        help="Voter C target recall; threshold chosen to hit it (default 100 %%).",
+        default=0.95,
+        help="Voter C target recall; threshold chosen to hit it (default 95 %%). "
+        "100 %% is overly strict at small data scales: one stubborn positive drags "
+        "the threshold close to zero and kills voter C's precision. At 84 total "
+        "positives, 95 %% allows losing up to 4 -- recovered by other voters in "
+        "consensus.",
     )
     p.add_argument(
         "--show-disagreements",
@@ -185,6 +192,19 @@ def main() -> None:
         not_mean = sims[:, not_idx].mean(axis=1)
         diff = shot_mean - not_mean
 
+        pann_path = CACHE_DIR / f"{fix}_pann.npz"
+        if not pann_path.exists():
+            raise SystemExit(
+                f"Missing PANN cache for {fix}. Run scripts/extract_audio_embeddings.py first."
+            )
+        pann = np.load(pann_path)
+        if pann["gunshot_prob"].shape[0] != len(all_shots):
+            raise SystemExit(
+                f"{fix}: PANN cache has {pann['gunshot_prob'].shape[0]} rows but detector "
+                f"returned {len(all_shots)}. Re-run extract_audio_embeddings.py --force."
+            )
+        gunshot_prob = pann["gunshot_prob"]
+
         for i, shot in enumerate(all_shots):
             feats = _hand_features(
                 audio,
@@ -202,6 +222,7 @@ def main() -> None:
                     "label": labels[i],
                     "vote_a": int(round(shot.time_absolute, 6) in safe_times),
                     "clap_diff": float(diff[i]),
+                    "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": feats,
                     "clap_sims": list(sims[i]),
                 }
@@ -233,6 +254,19 @@ def main() -> None:
         f"Voter B (CLAP shot - notshot >= {clap_threshold:.4f}): kept {b_kept}, recall "
         f"{b_pos}/{n_pos} = {b_pos/n_pos*100:.1f}%, precision "
         f"{b_pos}/{b_kept} = {b_pos/b_kept*100:.1f}%"
+    )
+
+    # Voter D: PANN gunshot_prob >= calibrated threshold (auto-tuned for 100 % recall).
+    pos_pann = [c["gunshot_prob"] for c in universe if c["label"] == 1]
+    pann_threshold = min(pos_pann) if pos_pann else 0.0
+    d_kept = sum(1 for c in universe if c["gunshot_prob"] >= pann_threshold)
+    d_pos = sum(
+        1 for c in universe if c["gunshot_prob"] >= pann_threshold and c["label"] == 1
+    )
+    print(
+        f"Voter D (PANN gunshot_prob >= {pann_threshold:.4f}): kept {d_kept}, recall "
+        f"{d_pos}/{n_pos} = {d_pos/n_pos*100:.1f}%, precision "
+        f"{d_pos}/{d_kept} = {d_pos/d_kept*100:.1f}%"
     )
 
     # Voter C: GBDT 5-fold on hand + clap-sims + diff.
@@ -273,17 +307,18 @@ def main() -> None:
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_threshold)
         c["vote_c"] = int(probs[i] >= threshold_c)
-        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"]
+        c["vote_d"] = int(c["gunshot_prob"] >= pann_threshold)
+        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
 
-    print("\n=== Consensus levels (overall) ===")
+    print("\n=== Consensus levels (overall, N-of-4) ===")
     print(f"{'level':>10s} {'kept':>5s} {'recall':>8s} {'prec':>8s} {'F1':>6s}")
-    for lvl in [1, 2, 3]:
+    for lvl in [1, 2, 3, 4]:
         kept = sum(1 for c in universe if c["vote_total"] >= lvl)
         pos = sum(1 for c in universe if c["vote_total"] >= lvl and c["label"] == 1)
         rec = pos / n_pos if n_pos else 0.0
         prec = pos / kept if kept else 0.0
         f1 = (2 * rec * prec) / (rec + prec) if (rec + prec) else 0.0
-        label = {1: "1-of-3", 2: "2-of-3", 3: "3-of-3"}[lvl]
+        label = f"{lvl}-of-4"
         print(f"{label:>10s} {kept:5d} {rec*100:7.1f}% {prec*100:7.1f}% {f1:6.2f}")
 
     print("\nReference: baseline (cwt + min_confidence=0.03) =")
@@ -292,12 +327,12 @@ def main() -> None:
         f"{a_pos/a_kept*100:7.1f}% {(2*(a_pos/n_pos)*(a_pos/a_kept))/((a_pos/n_pos)+(a_pos/a_kept)):6.2f}"
     )
 
-    print("\n=== Per-fixture breakdown (consensus 2-of-3) ===")
+    print("\n=== Per-fixture breakdown (consensus 3-of-4) ===")
     print(f"{'fixture':38s} {'kept':>5s} {'recall':>8s} {'prec':>8s} {'gt':>4s}")
     for fix in fixtures:
         rows = [c for c in universe if c["fixture"] == fix]
-        kept = sum(1 for c in rows if c["vote_total"] >= 2)
-        pos = sum(1 for c in rows if c["vote_total"] >= 2 and c["label"] == 1)
+        kept = sum(1 for c in rows if c["vote_total"] >= 3)
+        pos = sum(1 for c in rows if c["vote_total"] >= 3 and c["label"] == 1)
         gt = sum(c["label"] for c in rows)
         rec = pos / gt if gt else 0.0
         prec = pos / kept if kept else 0.0
@@ -308,11 +343,15 @@ def main() -> None:
         [c for c in universe if c["vote_total"] == 1],
         key=lambda c: (c["fixture"], c["t"]),
     )
-    print(f"{'fixture':38s} {'t':>9s} {'label':>5s} {'A':>2s} {'B':>2s} {'C':>2s} {'clap_diff':>10s}")
+    print(
+        f"{'fixture':38s} {'t':>9s} {'label':>5s} {'A':>2s} {'B':>2s} {'C':>2s} {'D':>2s} "
+        f"{'clap_diff':>10s} {'pann_p':>8s}"
+    )
     for c in disagreements[: args.show_disagreements]:
         print(
             f"{c['fixture']:38s} {c['t']:9.4f} {c['label']:5d} {c['vote_a']:2d} "
-            f"{c['vote_b']:2d} {c['vote_c']:2d} {c['clap_diff']:10.4f}"
+            f"{c['vote_b']:2d} {c['vote_c']:2d} {c['vote_d']:2d} "
+            f"{c['clap_diff']:10.4f} {c['gunshot_prob']:8.4f}"
         )
     if len(disagreements) > args.show_disagreements:
         print(f"  ... and {len(disagreements) - args.show_disagreements} more")
@@ -322,15 +361,14 @@ def main() -> None:
         f"of which {n_disagree_pos} are real shots ({n_disagree_pos/max(len(disagreements),1)*100:.1f} %)"
     )
 
-    # Quick "where each voter is right alone" diagnostic.
     print("\n=== Solo-correct shots (would be lost without that voter) ===")
-    for voter in ("a", "b", "c"):
+    for voter in ("a", "b", "c", "d"):
         solo = [
             c
             for c in universe
             if c["label"] == 1
             and c[f"vote_{voter}"] == 1
-            and c["vote_a"] + c["vote_b"] + c["vote_c"] == 1
+            and c["vote_total"] == 1
         ]
         print(f"  voter {voter.upper()}: {len(solo)} real shots saved only by this voter")
 
