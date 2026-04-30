@@ -19,21 +19,21 @@ def _load_fixture(fixtures_dir: Path, stem: str = "stage-shots") -> tuple[np.nda
     return audio, sr, truth
 
 
-@pytest.mark.parametrize(
-    "fixture_stem",
-    [
-        "stage-shots",  # Tallmilan 2026 Stage 3, 14 shots
-        "stage-shots-blacksmith-h5",  # Blacksmith Handgun Open 2026 Stage 7, 24 shots
-    ],
-)
-def test_detect_shots_finds_all_audited_shots(fixtures_dir: Path, fixture_stem: str) -> None:
-    """Every hand-audited shot must appear in the detection output, within tolerance.
+_AUDITED_FIXTURES = [
+    "stage-shots",  # Tallmilan 2026 Stage 3, 15 shots
+    "stage-shots-blacksmith-h5",  # Blacksmith Handgun Open 2026 Stage 7, 24 shots (4 manual)
+    "stage-shots-tallmilan-stage2",  # Tallmilan 2026 Stage 2, 12 shots (2 manual)
+]
 
-    The detector is allowed to return extras (false positives from echoes,
-    neighbouring bays, etc.); precision is handled at the report layer.
 
-    Both fixtures are required to maintain 100% recall: any change that drops
-    a real shot from either run is a regression.
+@pytest.mark.parametrize("fixture_stem", _AUDITED_FIXTURES)
+def test_detect_shots_reproduces_fixture_candidates(fixtures_dir: Path, fixture_stem: str) -> None:
+    """The detector must reproduce the fixture's recorded candidate list to
+    within 1 ms, so audited ``candidate_number`` references stay valid.
+
+    This is a determinism gate: any change to the detection algorithm requires
+    regenerating fixtures with ``splitsmith audit-prep``. Without it, prior
+    audit work would silently bind to different physical onsets.
     """
     audio, sr, truth = _load_fixture(fixtures_dir, fixture_stem)
     shots = detect_shots(
@@ -44,19 +44,49 @@ def test_detect_shots_finds_all_audited_shots(fixtures_dir: Path, fixture_stem: 
         config=ShotDetectConfig(),
     )
     detected_times = sorted(s.time_absolute for s in shots)
-    audited = [s["time"] for s in truth["shots"]]
-    tol_s = truth["tolerance_ms"] / 1000.0
+    fixture_times = sorted(c["time"] for c in truth["_candidates_pending_audit"]["candidates"])
 
-    misses: list[tuple[float, float]] = []
-    for t in audited:
-        nearest = min(detected_times, key=lambda d: abs(d - t))
-        if abs(nearest - t) > tol_s:
-            misses.append((t, nearest))
-
-    assert not misses, (
-        f"{fixture_stem}: missed {len(misses)} of {len(audited)} hand-audited shots "
-        f"(tolerance {truth['tolerance_ms']} ms): {misses}"
+    assert len(detected_times) == len(fixture_times), (
+        f"{fixture_stem}: detector returned {len(detected_times)} shots, "
+        f"fixture has {len(fixture_times)} candidates -- regenerate with audit-prep"
     )
+    for d, c in zip(detected_times, fixture_times, strict=True):
+        assert abs(d - c) < 0.001, (
+            f"{fixture_stem}: detector at {d:.4f}s vs fixture {c:.4f}s "
+            f"(delta {abs(d - c) * 1000:.2f} ms) -- regenerate with audit-prep"
+        )
+
+
+@pytest.mark.parametrize("fixture_stem", _AUDITED_FIXTURES)
+def test_audited_shots_are_well_formed(fixtures_dir: Path, fixture_stem: str) -> None:
+    """Audit integrity: every kept shot has a valid source, detected shots
+    reference a real candidate_number, and drag distances are within a sane
+    bound (100 ms; anything beyond that suggests a mistaken candidate pick)."""
+    _, _, truth = _load_fixture(fixtures_dir, fixture_stem)
+    cands_by_num = {
+        c["candidate_number"]: c for c in truth["_candidates_pending_audit"]["candidates"]
+    }
+    audited = truth.get("shots", [])
+    if not audited:
+        pytest.skip(f"{fixture_stem}: no audited shots yet")
+
+    for s in audited:
+        source = s.get("source")
+        assert source in ("detected", "manual"), f"{fixture_stem}: invalid source {source!r}"
+        if source == "manual":
+            assert (
+                s.get("candidate_number") is None
+            ), f"{fixture_stem}: manual shot should not reference a candidate"
+            continue
+        cn = s.get("candidate_number")
+        assert cn is not None, f"{fixture_stem}: detected shot missing candidate_number"
+        cand = cands_by_num.get(cn)
+        assert cand is not None, f"{fixture_stem}: candidate_number {cn} not in candidates list"
+        drag_ms = abs(s["time"] - cand["time"]) * 1000.0
+        assert drag_ms < 100.0, (
+            f"{fixture_stem}: shot {s.get('shot_number')} dragged {drag_ms:.1f} ms from "
+            f"candidate {cn} -- suspiciously large, likely the wrong candidate was kept"
+        )
 
 
 def test_detect_shots_constrains_to_search_window(fixtures_dir: Path) -> None:
