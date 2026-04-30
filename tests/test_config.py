@@ -20,7 +20,7 @@ def test_default_config_has_spec_values() -> None:
     cfg = Config()
     assert cfg.beep_detect.freq_min_hz == 2000
     assert cfg.beep_detect.freq_max_hz == 5000
-    assert cfg.shot_detect.min_gap_ms == 60
+    assert cfg.shot_detect.min_gap_ms == 80
     assert cfg.video_match.tolerance_minutes == 15
     assert cfg.output.split_color_thresholds.green_max == 0.25
     assert cfg.output.fcpxml_version == "1.10"

@@ -117,7 +117,7 @@ class BeepDetectConfig(BaseModel):
 
 
 class ShotDetectConfig(BaseModel):
-    min_gap_ms: int = 60
+    min_gap_ms: int = 80
     onset_delta: float = 0.07
     pre_max_ms: int = 30
     post_max_ms: int = 30
