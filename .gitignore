@@ -39,3 +39,6 @@ match_raw/
 # out of git -- they're derivable from the video on demand.
 tests/fixtures/stage_sample.wav
 config.yaml
+
+# Review-server save backups (auto-created on every Cmd+S in the audit UI).
+*.json.bak
