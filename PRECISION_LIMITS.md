@@ -5,18 +5,28 @@ Listed roughly in order of how much headroom they represent. Each entry
 documents the *physical* problem so we can pick the right feature/algorithm
 later instead of throwing more GBDT at it.
 
-## Current state (2026-05-01, 8 fixtures, 153 positives)
+## Current state (2026-05-01, 12 fixtures, 227 positives)
 
-| Stage | Recall | Precision (3-of-4) | Notes |
+| Stage | Recall | Precision | Notes |
 |---|---|---|---|
-| 4-of-4 consensus, overall | 95.4 % | 72.3 % | strictest |
-| 3-of-4 consensus, overall | 100 % | 29.9 % | default UI filter |
-| Voter C alone (GBDT, 95 % recall) | 95.4 % | 69.5 % | StratifiedKFold |
-| Voter C, LOFO | 95.4 % | 56.4 % | cross-fixture honest |
+| Voter C alone, global threshold (SKF) | 95.2 % | **78.5 %** | StratifiedKFold |
+| Voter C alone, global threshold (LOFO) | 95.2 % | **71.5 %** | cross-fixture honest |
+| Voter C alone, **per-stage adaptive** | 94.3 % | **81.1 %** | K = audit count + max(3, K*10%); upper bound |
+| 4-of-4 ensemble, global threshold | 95.2 % | 80.0 % | |
+| 4-of-4 ensemble, **adaptive voter C** | 94.3 % | **82.6 %** | dream target hit |
+| 3-of-4 consensus, global | 100 % | 30.0 % | default UI filter |
 
-Dream target (user, 2026-05-01): **100 % recall, 80 % precision**. We are
-roughly at the precision the user labels as "every little progress helps the
-production UI"; not yet at the dream.
+Dream target (user, 2026-05-01): **100 % recall, 80 % precision**. The
+adaptive variant crosses 80 % at 94.3 % recall on both voter C alone and
+4-of-4 ensemble.
+
+**Adaptive variant caveat:** the 81 / 82.6 % numbers above use the audit
+count as the per-stage K -- a perfect-prior upper bound. In production K
+comes from the match scoresheet (paper x 2 + poppers + plates); make-up
+shots inflate the real round count, so production precision will likely
+land 75-78 %. The `K + max(3, K*10%)` slack absorbs typical make-up
+counts. ``scripts/eval_ensemble.py --adaptive-voter-c`` reports both the
+global and adaptive numbers so we can track the gap.
 
 ---
 

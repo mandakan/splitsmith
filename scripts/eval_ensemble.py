@@ -247,6 +247,14 @@ def main() -> None:
         default=15,
         help="Print this many candidates from the disagreement set (lowest vote count).",
     )
+    p.add_argument(
+        "--adaptive-voter-c",
+        action="store_true",
+        help="Use per-stage adaptive voter C threshold: keep top-(K + max(3, K*10%%)) "
+        "by GBDT prob per fixture, where K = audit count. Reports both global and "
+        "adaptive numbers; the adaptive numbers are an upper bound (perfect prior). "
+        "Production would use --expected-rounds from the match scoresheet.",
+    )
     args = p.parse_args()
 
     fixtures = args.fixture or DEFAULT_FIXTURES
@@ -423,9 +431,46 @@ def main() -> None:
         f"{c_pos}/{c_kept} = {c_pos/c_kept*100:.1f}%"
     )
 
+    # Voter C adaptive variant: per-stage top-(K + max(3, K*10%)) by GBDT prob.
+    # Equalizes precision across fixtures; cross-bay-heavy stages get a much
+    # tighter cutoff than the single global threshold gives them.
+    voter_c_adaptive = [False] * len(universe)
+    if args.adaptive_voter_c:
+        per_fixture_indices: dict[str, list[int]] = {}
+        for i, c in enumerate(universe):
+            per_fixture_indices.setdefault(c["fixture"], []).append(i)
+        ad_kept = ad_pos = 0
+        per_fix_audit: dict[str, int] = {}
+        for fix, idxs in per_fixture_indices.items():
+            audit_count = sum(1 for i in idxs if universe[i]["label"] == 1)
+            per_fix_audit[fix] = audit_count
+            slack = max(3, int(audit_count * 0.10 + 0.5))
+            k = audit_count + slack
+            fix_probs = np.array([probs[i] for i in idxs])
+            order = np.argsort(-fix_probs)
+            keep_local = set(order[:min(k, len(order))].tolist())
+            for li, gi in enumerate(idxs):
+                if li in keep_local:
+                    voter_c_adaptive[gi] = True
+            kept_here = sum(1 for li, gi in enumerate(idxs) if li in keep_local)
+            tp_here = sum(
+                1 for li, gi in enumerate(idxs)
+                if li in keep_local and universe[gi]["label"] == 1
+            )
+            ad_kept += kept_here
+            ad_pos += tp_here
+        print(
+            f"Voter C ADAPTIVE (per-stage top-K+max(3,10%) by GBDT prob, "
+            f"K = audit count -- perfect-prior upper bound): "
+            f"kept {ad_kept}, recall {ad_pos}/{n_pos} = {ad_pos/n_pos*100:.1f}%, "
+            f"precision {ad_pos}/{ad_kept} = {ad_pos/ad_kept*100:.1f}%"
+        )
+
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_threshold)
-        c["vote_c"] = int(probs[i] >= threshold_c)
+        c["vote_c"] = (
+            int(voter_c_adaptive[i]) if args.adaptive_voter_c else int(probs[i] >= threshold_c)
+        )
         c["vote_d"] = int(c["gunshot_prob"] >= pann_threshold)
         c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
 
