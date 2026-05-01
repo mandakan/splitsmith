@@ -258,6 +258,89 @@ The `fcpxml` regeneration command matters — the user will manually fix detecti
 
 These might be valuable later but are explicitly out of scope for v1. Ship the boring useful core first.
 
+## Production UI v1 (issue #11/#12) — match-project on-disk layout
+
+The production UI (`splitsmith ui --project PATH`) treats a *match* as the persistence unit. A match project is a directory on disk with a fixed layout; the UI is just a view over it. Videos can be added to an existing match at any time (head-cam now, bay-cam from a friend a day later) without invalidating prior audit work — the model is intentionally append-friendly.
+
+### Directory layout
+
+```
+<project-root>/
+  project.json              # MatchProject metadata + per-stage index
+  raw/                      # original video files (or symlinks)
+  audio/                    # extracted .wav cache
+  trimmed/                  # per-stage trimmed MP4s (Sub 5 / #16)
+  audit/                    # per-stage audit JSON (same shape as fixture format)
+  exports/                  # CSV / FCPXML / report.txt
+  scoreboard/               # cached SSI JSON + raw fetch responses
+```
+
+### `project.json` shape
+
+Pydantic model `splitsmith.ui.project.MatchProject`. All writes go through `atomic_write_json` (temp file + `os.replace`) so a crashed save can never corrupt the file.
+
+```jsonc
+{
+  "schema_version": 1,
+  "name": "Tallmilan 2026",
+  "created_at": "2026-04-30T08:10:32+00:00",
+  "updated_at": "2026-05-01T19:28:21+00:00",
+  "competitor_name": "Mathias",
+  "scoreboard_match_id": "ssi-12345",
+  "stages": [
+    {
+      "stage_number": 3,
+      "stage_name": "Per told me to do it",
+      "time_seconds": 14.74,
+      "scorecard_updated_at": "2026-04-26T16:41:00+00:00",
+      "skipped": false,
+      "videos": [
+        {
+          "path": "raw/VID_20260426_162417.mp4",
+          "role": "primary",
+          "added_at": "2026-04-26T18:00:00+00:00",
+          "processed": { "beep": true, "shot_detect": true, "trim": true },
+          "beep_time": 12.453,
+          "notes": ""
+        },
+        {
+          "path": "raw/baycam_friend.mp4",
+          "role": "secondary",
+          "added_at": "2026-04-28T09:14:00+00:00",
+          "processed": { "beep": true, "shot_detect": false, "trim": true },
+          "beep_time": 12.501,
+          "notes": "bay cam from friend, added 2 days post-match"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Per-video role and pipeline
+
+| `role`    | beep detect | shot detect | trim |
+|-----------|:-----------:|:-----------:|:----:|
+| primary   |     ✓       |     ✓       |  ✓   |
+| secondary |     ✓       |     —       |  ✓   |
+| ignored   |     —       |     —       |  —   |
+
+The **primary** is the audit truth — detection runs on its audio and audit JSON timestamps live on its timeline. **Secondaries** are alternate viewing angles; their beep is detected so they can be aligned to the primary by beep offset, but their shots are not detected (the primary's audit is the truth). **Ignored** videos are skipped entirely (warmups, neighbor-bay grabs).
+
+The pipeline is **idempotent**: re-entering ingest only processes videos with `processed.* == false`. Adding a secondary to an audited stage runs only beep + trim for that file; the audit JSON is untouched.
+
+### Implementation status
+
+Sub 1 (#12, this commit) lands:
+- `MatchProject` Pydantic model + atomic write
+- FastAPI backend at `splitsmith.ui.server`
+- React + Vite + shadcn/ui SPA at `src/splitsmith/ui_static/`
+- Design tokens locked, `/_design` page renders the visual spec
+- App shell with `/`, `/ingest`, `/audit/:stage`, `/export/:stage`, `/_design`
+- Dark / light / system theme toggle persisted to `localStorage`
+
+Subsequent sub-issues fill in the screens (#13 ingest, #15 audit, #17 export) and add the short-GOP trim mode (#16).
+
 ## References
 
 - librosa onset detection: https://librosa.org/doc/main/generated/librosa.onset.onset_detect.html

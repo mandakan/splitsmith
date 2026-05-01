@@ -81,6 +81,25 @@ uv run splitsmith process \
 
 If videos can't be matched cleanly (multiple candidates for one stage, no candidate, ambiguity across stages), the offending stages and videos are listed and the run aborts. Re-run with the videos renamed/separated, or use `single` for each stage explicitly.
 
+### `ui` -- production UI (issue #11/#12, in progress)
+
+The localhost SPA that orchestrates the full ingest -> audit -> export workflow. State lives on disk under `--project`; closing the browser and re-running resumes where you left off.
+
+```bash
+uv run splitsmith ui --project ~/matches/tallmilan-2026
+```
+
+Opens `http://127.0.0.1:5174/` in your default browser. Sub 1 (#12) ships the foundation: app shell, project model, three-screen navigation, design system at `/_design`. The actual ingest / audit / export screens land in #13, #15, #17.
+
+For frontend development:
+
+```bash
+cd src/splitsmith/ui_static
+pnpm install
+pnpm build           # produces dist/ which the FastAPI backend serves
+pnpm dev             # Vite dev server on :5173, proxies /api to backend on :5174
+```
+
 ### `review` -- audit a fixture in a local web UI
 
 Open a single-page browser UI for reviewing detected shots against the fixture's audio (and optional video). Marker pins on the waveform: click to toggle keep/reject, drag to fine-tune time, double-click empty waveform space to add a manual marker. Save (`Cmd+S`) writes back to the fixture JSON's `shots[]`.

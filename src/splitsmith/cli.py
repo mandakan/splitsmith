@@ -220,6 +220,52 @@ def review(
         server.server_close()
 
 
+@app.command()
+def ui(
+    project: Path = typer.Option(
+        ...,
+        "--project",
+        help="Match-project root directory. Created (with subdirs) if missing.",
+    ),
+    project_name: str | None = typer.Option(
+        None,
+        "--name",
+        help=(
+            "Display name for the match. Defaults to the project directory's "
+            "basename. Ignored if the project already has a name on disk."
+        ),
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(5174, "--port"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Skip auto-opening browser."),
+) -> None:
+    """Start the production UI server (issue #11/#12).
+
+    The UI is a localhost SPA driven by a FastAPI backend that orchestrates
+    the existing engine modules unchanged. State persists to disk under
+    ``--project`` so closing the browser and re-running resumes where you
+    left off.
+    """
+    from .ui.server import serve
+
+    project = project.expanduser().resolve()
+    name = project_name or project.name or "match"
+
+    url = f"http://{host}:{port}/"
+    console.print(f"[green]splitsmith UI[/]: [bold]{url}[/]   (Ctrl+C to stop)")
+    console.print(f"  project: {project}")
+
+    if not no_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+
+    try:
+        serve(project_root=project, project_name=name, host=host, port=port)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
+
+
 @app.command("audit-prep")
 def audit_prep(
     video: Path = typer.Option(..., "--video", help="Source video file (mp4/mov)."),

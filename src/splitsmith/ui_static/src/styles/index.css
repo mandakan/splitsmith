@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+/* ============================================================================
+ * DESIGN TOKENS
+ * ----------------------------------------------------------------------------
+ * Issue #12 (Sub 1) locks the production-UI design system. Tokens live here
+ * as CSS variables, exposed to Tailwind via @theme. The /_design route
+ * renders them all.
+ *
+ * Three groups:
+ *   1. shadcn semantic tokens (background, foreground, primary, ...)
+ *   2. splitsmith-specific tokens (split-*, status-*, marker-*)
+ *   3. Typography + radius + motion
+ *
+ * Splitsmith colors that already appear in fcpxml_gen.py keep the same hex
+ * values so a shot rendered green in the audit UI is the same shot rendered
+ * green in Final Cut Pro.
+ * ========================================================================== */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* shadcn semantic tokens (light mode) */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.5rem;
+
+  /* Splitsmith split colors -- match fcpxml_gen.py */
+  --split-good: #00c853;
+  --split-good-foreground: #ffffff;
+  --split-ok: #ffd600;
+  --split-ok-foreground: #000000;
+  --split-slow: #d50000;
+  --split-slow-foreground: #ffffff;
+  --split-transition: #2962ff;
+  --split-transition-foreground: #ffffff;
+
+  /* Stage status */
+  --status-not-started: oklch(0.65 0 0);
+  --status-in-progress: oklch(0.55 0.18 250);
+  --status-complete: oklch(0.55 0.16 145);
+  --status-warning: oklch(0.65 0.17 75);
+
+  /* Audit markers */
+  --marker-detected: oklch(0.45 0.18 250);
+  --marker-rejected: oklch(0.7 0 0);
+  --marker-manual: oklch(0.65 0.17 75);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.628 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+
+  /* Splitsmith split colors -- slight tweaks for dark-bg legibility */
+  --split-good: #1de87a;
+  --split-good-foreground: #00210d;
+  --split-ok: #ffe347;
+  --split-ok-foreground: #1f1500;
+  --split-slow: #ff5252;
+  --split-slow-foreground: #2a0000;
+  --split-transition: #5b8eff;
+  --split-transition-foreground: #001b4a;
+
+  --status-not-started: oklch(0.55 0 0);
+  --status-in-progress: oklch(0.7 0.18 250);
+  --status-complete: oklch(0.7 0.18 145);
+  --status-warning: oklch(0.75 0.17 75);
+
+  --marker-detected: oklch(0.7 0.18 250);
+  --marker-rejected: oklch(0.5 0 0);
+  --marker-manual: oklch(0.75 0.17 75);
+}
+
+/* ============================================================================
+ * @theme: expose tokens to Tailwind v4 utility classes
+ * ========================================================================== */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-split-good: var(--split-good);
+  --color-split-good-foreground: var(--split-good-foreground);
+  --color-split-ok: var(--split-ok);
+  --color-split-ok-foreground: var(--split-ok-foreground);
+  --color-split-slow: var(--split-slow);
+  --color-split-slow-foreground: var(--split-slow-foreground);
+  --color-split-transition: var(--split-transition);
+  --color-split-transition-foreground: var(--split-transition-foreground);
+
+  --color-status-not-started: var(--status-not-started);
+  --color-status-in-progress: var(--status-in-progress);
+  --color-status-complete: var(--status-complete);
+  --color-status-warning: var(--status-warning);
+
+  --color-marker-detected: var(--marker-detected);
+  --color-marker-rejected: var(--marker-rejected);
+  --color-marker-manual: var(--marker-manual);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+/* ============================================================================
+ * Base
+ * ========================================================================== */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  /* All numeric columns/cells get tabular numerals so digits align. */
+  .tabular-nums,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
