@@ -66,6 +66,15 @@ class StageVideo(BaseModel):
         default_factory=lambda: {"beep": False, "shot_detect": False, "trim": False}
     )
     beep_time: float | None = None
+    # Provenance for ``beep_time``: who set it. ``None`` = not yet detected;
+    # ``"auto"`` = beep_detect.detect_beep() result; ``"manual"`` = user override
+    # via the ingest screen. Manual overrides survive subsequent auto-detect
+    # attempts unless the user explicitly forces re-detection (issue #22).
+    beep_source: Literal["auto", "manual"] | None = None
+    # Diagnostic outputs from ``detect_beep`` -- not used by the pipeline but
+    # surfaced in the UI to help the user judge auto-detection confidence.
+    beep_peak_amplitude: float | None = None
+    beep_duration_ms: float | None = None
     notes: str = ""
 
 

@@ -9,6 +9,9 @@ Endpoints (locked v1 surface):
   POST /api/videos/scan             -- enumerate videos in a folder, register them
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
   POST /api/assignments/move        -- set role / unassign / move between stages
+  POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
+  POST /api/stages/{n}/beep         -- manual beep_time override
+  GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -31,6 +34,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import audio as audio_helpers
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -84,6 +88,10 @@ class MoveRequest(BaseModel):
     video_path: str
     to_stage_number: int | None = None
     role: VideoRole = "secondary"
+
+
+class BeepOverrideRequest(BaseModel):
+    beep_time: float | None  # None clears the override
 
 
 class FsEntry(BaseModel):
@@ -191,6 +199,108 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             registered=registered,
             auto_assigned=auto_assigned,
             skipped=skipped,
+        )
+
+    @app.post("/api/stages/{stage_number}/detect-beep")
+    def detect_beep(stage_number: int, force: bool = False) -> JSONResponse:
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if primary.beep_source == "manual" and not force:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "stage has a manual beep override; pass ?force=true to "
+                    "replace it with auto-detected output"
+                ),
+            )
+
+        source_video = state.project_root / primary.path
+        try:
+            result = audio_helpers.detect_primary_beep(
+                state.project_root, stage_number, source_video
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except audio_helpers.AudioExtractionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        primary.beep_time = result.time
+        primary.beep_source = "auto"
+        primary.beep_peak_amplitude = result.peak_amplitude
+        primary.beep_duration_ms = result.duration_ms
+        primary.processed["beep"] = True
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/beep")
+    def override_beep(stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if req.beep_time is None:
+            # Clear: back to "no beep yet"
+            primary.beep_time = None
+            primary.beep_source = None
+            primary.beep_peak_amplitude = None
+            primary.beep_duration_ms = None
+            primary.processed["beep"] = False
+        else:
+            if req.beep_time < 0.0:
+                raise HTTPException(status_code=400, detail="beep_time must be >= 0")
+            primary.beep_time = req.beep_time
+            primary.beep_source = "manual"
+            primary.processed["beep"] = True
+            # Diagnostics from a previous auto-detect are no longer authoritative.
+            primary.beep_peak_amplitude = None
+            primary.beep_duration_ms = None
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.get("/api/stages/{stage_number}/audio")
+    def stage_audio(stage_number: int) -> FileResponse:
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        try:
+            audio_path = audio_helpers.ensure_primary_audio(
+                state.project_root,
+                stage_number,
+                state.project_root / primary.path,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except audio_helpers.AudioExtractionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # FileResponse handles HTTP Range automatically.
+        return FileResponse(
+            audio_path,
+            media_type="audio/wav",
+            filename=audio_path.name,
         )
 
     @app.get("/api/fs/list", response_model=FsListing)

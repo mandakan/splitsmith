@@ -25,6 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { BeepSection } from "@/components/BeepSection";
 import { FolderPicker } from "@/components/FolderPicker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -160,7 +161,14 @@ export function Ingest() {
             busy={busy}
             onAssign={(path, stage, role) => move(path, stage, role)}
           />
-          <StagesSection project={project} busy={busy} onMove={move} />
+          <StagesSection
+            project={project}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onProjectUpdate={setProject}
+            onMove={move}
+          />
         </>
       ) : null}
     </div>
@@ -347,10 +355,16 @@ function UnassignedSection({
 function StagesSection({
   project,
   busy,
+  setBusy,
+  setError,
+  onProjectUpdate,
   onMove,
 }: {
   project: MatchProject;
   busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (next: MatchProject) => void;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
 }) {
   if (project.stages.length === 0) return null;
@@ -378,6 +392,9 @@ function StagesSection({
             allStages={project.stages}
             busy={busy}
             primaryCounts={primaryCounts}
+            setBusy={setBusy}
+            setError={setError}
+            onProjectUpdate={onProjectUpdate}
             onMove={onMove}
           />
         ))}
@@ -391,12 +408,18 @@ function StageCard({
   allStages,
   busy,
   primaryCounts,
+  setBusy,
+  setError,
+  onProjectUpdate,
   onMove,
 }: {
   stage: StageEntry;
   allStages: StageEntry[];
   busy: boolean;
   primaryCounts: Map<string, number>;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (next: MatchProject) => void;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
 }) {
   const primary = stage.videos.find((v) => v.role === "primary");
@@ -427,27 +450,37 @@ function StageCard({
           <p className="text-sm text-muted-foreground">No videos assigned.</p>
         ) : null}
         {primary ? (
-          <VideoRow
-            video={primary}
-            badge={
-              <Badge
-                variant={hasConflict ? "statusWarning" : "statusInProgress"}
-                className="gap-1"
-              >
-                <Crosshair className="size-3" /> Primary
-              </Badge>
-            }
-            actions={
-              <RoleActions
-                video={primary}
-                stage={stage}
-                allStages={allStages}
-                busy={busy}
-                currentRole="primary"
-                onMove={onMove}
-              />
-            }
-          />
+          <>
+            <VideoRow
+              video={primary}
+              badge={
+                <Badge
+                  variant={hasConflict ? "statusWarning" : "statusInProgress"}
+                  className="gap-1"
+                >
+                  <Crosshair className="size-3" /> Primary
+                </Badge>
+              }
+              actions={
+                <RoleActions
+                  video={primary}
+                  stage={stage}
+                  allStages={allStages}
+                  busy={busy}
+                  currentRole="primary"
+                  onMove={onMove}
+                />
+              }
+            />
+            <BeepSection
+              stageNumber={stage.stage_number}
+              primary={primary}
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onProjectUpdate={onProjectUpdate}
+            />
+          </>
         ) : null}
         {secondaries.map((v) => (
           <VideoRow

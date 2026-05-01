@@ -7,6 +7,7 @@
  */
 
 export type VideoRole = "primary" | "secondary" | "ignored";
+export type BeepSource = "auto" | "manual";
 
 export interface StageVideo {
   path: string;
@@ -14,6 +15,9 @@ export interface StageVideo {
   added_at: string;
   processed: { beep: boolean; shot_detect: boolean; trim: boolean };
   beep_time: number | null;
+  beep_source: BeepSource | null;
+  beep_peak_amplitude: number | null;
+  beep_duration_ms: number | null;
   notes: string;
 }
 
@@ -136,6 +140,20 @@ export const api = {
         role,
       },
     }),
+
+  detectBeep: (stageNumber: number, force = false) =>
+    request<MatchProject>(
+      `/api/stages/${stageNumber}/detect-beep${force ? "?force=true" : ""}`,
+      { method: "POST" },
+    ),
+
+  overrideBeep: (stageNumber: number, beepTime: number | null) =>
+    request<MatchProject>(`/api/stages/${stageNumber}/beep`, {
+      method: "POST",
+      json: { beep_time: beepTime },
+    }),
+
+  stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 };
 
 export { ApiError };
