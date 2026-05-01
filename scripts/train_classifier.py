@@ -50,6 +50,7 @@ DEFAULT_FIXTURES = [
     "stage-shots-blacksmith-2026-stage2",
     "stage-shots-blacksmith-2026-stage3",
     "stage-shots-blacksmith-2026-stage5",
+    "stage-shots-blacksmith-2026-stage6",
     "stage-shots-tallmilan-stage2",
     "stage-shots-tallmilan-stage7",
     "stage-shots-tallmilan-2026-stage5",
