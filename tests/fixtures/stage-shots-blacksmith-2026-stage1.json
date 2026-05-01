@@ -1160,5 +1160,11 @@
   },
   "audit_notes": [
     "Many false positives were low-amplitude movement/handling transients without the gunshot waveform tail. Post-shot envelope tail (50-200 ms reverb decay) is a candidate physical discriminator."
-  ]
+  ],
+  "stage_rounds": {
+    "paper": 14,
+    "poppers": 0,
+    "plates": 3,
+    "expected": 31
+  }
 }

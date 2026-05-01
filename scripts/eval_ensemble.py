@@ -251,9 +251,9 @@ def main() -> None:
         "--adaptive-voter-c",
         action="store_true",
         help="Use per-stage adaptive voter C threshold: keep top-(K + max(3, K*10%%)) "
-        "by GBDT prob per fixture, where K = audit count. Reports both global and "
-        "adaptive numbers; the adaptive numbers are an upper bound (perfect prior). "
-        "Production would use --expected-rounds from the match scoresheet.",
+        "by GBDT prob per fixture. K source: ``stage_rounds.expected`` from the "
+        "fixture JSON if present (production-realistic), else the audit count "
+        "(upper bound -- perfect prior).",
     )
     args = p.parse_args()
 
@@ -436,32 +436,44 @@ def main() -> None:
     # tighter cutoff than the single global threshold gives them.
     voter_c_adaptive = [False] * len(universe)
     if args.adaptive_voter_c:
+        # Cache stage_rounds.expected per fixture (if present in JSON).
+        expected_by_fixture: dict[str, int | None] = {}
+        for fix in fixtures:
+            truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+            rounds = truth.get("stage_rounds", {})
+            expected_by_fixture[fix] = (
+                rounds.get("expected") if isinstance(rounds, dict) else None
+            )
         per_fixture_indices: dict[str, list[int]] = {}
         for i, c in enumerate(universe):
             per_fixture_indices.setdefault(c["fixture"], []).append(i)
         ad_kept = ad_pos = 0
-        per_fix_audit: dict[str, int] = {}
+        n_real_prior = 0
         for fix, idxs in per_fixture_indices.items():
             audit_count = sum(1 for i in idxs if universe[i]["label"] == 1)
-            per_fix_audit[fix] = audit_count
-            slack = max(3, int(audit_count * 0.10 + 0.5))
-            k = audit_count + slack
+            expected = expected_by_fixture.get(fix)
+            if expected is not None and expected > 0:
+                K = expected
+                n_real_prior += 1
+            else:
+                K = audit_count
+            slack = max(3, int(K * 0.10 + 0.5))
+            target = K + slack
             fix_probs = np.array([probs[i] for i in idxs])
             order = np.argsort(-fix_probs)
-            keep_local = set(order[:min(k, len(order))].tolist())
+            keep_local = set(order[:min(target, len(order))].tolist())
             for li, gi in enumerate(idxs):
                 if li in keep_local:
                     voter_c_adaptive[gi] = True
-            kept_here = sum(1 for li, gi in enumerate(idxs) if li in keep_local)
-            tp_here = sum(
+            ad_kept += len(keep_local)
+            ad_pos += sum(
                 1 for li, gi in enumerate(idxs)
                 if li in keep_local and universe[gi]["label"] == 1
             )
-            ad_kept += kept_here
-            ad_pos += tp_here
         print(
             f"Voter C ADAPTIVE (per-stage top-K+max(3,10%) by GBDT prob, "
-            f"K = audit count -- perfect-prior upper bound): "
+            f"{n_real_prior}/{len(per_fixture_indices)} fixtures use real "
+            f"stage_rounds.expected, rest use audit count): "
             f"kept {ad_kept}, recall {ad_pos}/{n_pos} = {ad_pos/n_pos*100:.1f}%, "
             f"precision {ad_pos}/{ad_kept} = {ad_pos/ad_kept*100:.1f}%"
         )

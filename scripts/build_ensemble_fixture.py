@@ -423,8 +423,39 @@ def main() -> None:
         c["vote_b"] = int(c["clap_diff"] >= clap_thr)
         c["vote_c"] = int(probs[i] >= c_thr)
         c["vote_d"] = int(c["gunshot_prob"] >= pann_thr)
-        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
         c["score_c"] = float(probs[i])
+
+    # Per-stage adaptive voter C override: when a fixture's JSON has
+    # ``stage_rounds.expected`` (set by audit-prep --paper/--poppers/--plates),
+    # voter C keeps top-(K + max(3, K*10%)) by GBDT prob within that fixture
+    # instead of using the single global threshold. Cross-bay-heavy stages
+    # get a tighter cutoff; clean stages stay lenient. See PRECISION_LIMITS
+    # current state table for the +9.6 pp LOFO precision lift this gives.
+    adaptive_used: list[str] = []
+    for fix in apply_fixtures:
+        truth = per_fixture[fix]["truth"]
+        rounds = truth.get("stage_rounds", {})
+        K = rounds.get("expected") if isinstance(rounds, dict) else None
+        if K is None or K <= 0:
+            continue
+        slack = max(3, int(K * 0.10 + 0.5))
+        target = K + slack
+        idxs_fix = per_fixture[fix]["indices_in_universe"]
+        fix_probs = np.array([probs[i] for i in idxs_fix])
+        if target >= len(fix_probs):
+            keep_local = set(range(len(fix_probs)))
+        else:
+            keep_local = set(np.argsort(-fix_probs)[:target].tolist())
+        for li, gi in enumerate(idxs_fix):
+            universe[gi]["vote_c"] = 1 if li in keep_local else 0
+        adaptive_used.append(f"{fix} (K={K}+{slack}={target})")
+    if adaptive_used:
+        print(f"\nVoter C adaptive (per-stage K+slack) applied to {len(adaptive_used)} fixture(s):")
+        for line in adaptive_used:
+            print(f"  {line}")
+
+    for c in universe:
+        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
 
     # Apply per-fixture soft apriori boost (only for --include-fixture targets;
     # calibration fixtures are unmodified so their existing eval numbers stand).

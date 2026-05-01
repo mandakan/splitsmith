@@ -506,5 +506,11 @@
         "confidence": 0.058
       }
     ]
+  },
+  "stage_rounds": {
+    "paper": 4,
+    "poppers": 2,
+    "plates": 0,
+    "expected": 10
   }
 }

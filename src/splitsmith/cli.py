@@ -243,6 +243,12 @@ def audit_prep(
             "(use when wind / steel rings / other 3 kHz transients fool detect_beep)."
         ),
     ),
+    paper: int = typer.Option(
+        0, "--paper", min=0,
+        help="Paper-target count for the stage (each scored x2 in IPSC).",
+    ),
+    poppers: int = typer.Option(0, "--poppers", min=0, help="Popper count."),
+    plates: int = typer.Option(0, "--plates", min=0, help="Plate count."),
 ) -> None:
     """Build a review-ready fixture (wav + JSON + audit CSV) from a source video.
 
@@ -331,22 +337,32 @@ def audit_prep(
             }
         )
 
+    fixture_json_data = {
+        "source": (
+            f"{video.name} stage {stage_number} '{stage_name}' "
+            "(audio extracted at 48 kHz mono)"
+        ),
+        "stage_number": stage_number,
+        "stage_name": stage_name,
+        "fixture_window_in_source": [round(fix_lo, 4), round(fix_hi, 4)],
+        "beep_time": round(beep_in_fixture, 4),
+        "tolerance_ms": 15,
+        "stage_time_seconds": time,
+        "stage_window_end_in_fixture": round(beep_in_fixture + time, 4),
+        "shots": [],
+    }
+    if paper or poppers or plates:
+        fixture_json_data["stage_rounds"] = {
+            "paper": paper,
+            "poppers": poppers,
+            "plates": plates,
+            "expected": paper * 2 + poppers + plates,
+        }
     fixture_json = output_dir / f"{stem}.json"
     fixture_json.write_text(
         _json.dumps(
             {
-                "source": (
-                    f"{video.name} stage {stage_number} '{stage_name}' "
-                    "(audio extracted at 48 kHz mono)"
-                ),
-                "stage_number": stage_number,
-                "stage_name": stage_name,
-                "fixture_window_in_source": [round(fix_lo, 4), round(fix_hi, 4)],
-                "beep_time": round(beep_in_fixture, 4),
-                "tolerance_ms": 15,
-                "stage_time_seconds": time,
-                "stage_window_end_in_fixture": round(beep_in_fixture + time, 4),
-                "shots": [],
+                **fixture_json_data,
                 "_candidates_pending_audit": {
                     "_note": (
                         "Auto-detected by current shot_detect (half-rise leading edge). "

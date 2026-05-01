@@ -11,9 +11,11 @@ later instead of throwing more GBDT at it.
 |---|---|---|---|
 | Voter C alone, global threshold (SKF) | 95.2 % | **78.5 %** | StratifiedKFold |
 | Voter C alone, global threshold (LOFO) | 95.2 % | **71.5 %** | cross-fixture honest |
-| Voter C alone, **per-stage adaptive** | 94.3 % | **81.1 %** | K = audit count + max(3, K*10%); upper bound |
+| Voter C alone, **adaptive (audit K)** | 94.3 % | **81.1 %** | K = audit count + max(3, K*10%); upper bound |
+| Voter C alone, **adaptive (real K)** | 90.7 % | **85.8 %** | K = stage_rounds.expected (8/12 fixtures); recall hit from makeups |
 | 4-of-4 ensemble, global threshold | 95.2 % | 80.0 % | |
-| 4-of-4 ensemble, **adaptive voter C** | 94.3 % | **82.6 %** | dream target hit |
+| 4-of-4 ensemble, adaptive (audit K) | 94.3 % | **82.6 %** | |
+| 4-of-4 ensemble, **adaptive (real K)** | 90.7 % | **86.6 %** | |
 | 3-of-4 consensus, global | 100 % | 30.0 % | default UI filter |
 
 Dream target (user, 2026-05-01): **100 % recall, 80 % precision**. The

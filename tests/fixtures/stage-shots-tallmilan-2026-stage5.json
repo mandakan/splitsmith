@@ -663,5 +663,11 @@
   },
   "audit_notes": [
     "Lots of cross-talk from neighboring bays in this recording -- many low-amplitude transients in the candidate set come from other shooters. Useful negative-training material."
-  ]
+  ],
+  "stage_rounds": {
+    "paper": 6,
+    "poppers": 0,
+    "plates": 0,
+    "expected": 12
+  }
 }
