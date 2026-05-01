@@ -105,37 +105,38 @@ training. Each new feature gives it more knobs to overfit on.
 * **Per-shooter normalisation.** When we have multiple shooters, normalise
   features by per-shooter median peak/RMS before the GBDT sees them.
 
-## 4a-followup (2026-05-01): rise-foot tightening attempt -- partial fix, voter regression
+## 4a-resolved (2026-05-01): second-pass refinement in ``shot_refine``
 
-A reverb-chain re-anchor in ``shot_detect._leading_edge`` was added to make
-the candidate generator walk past reverb peaks to the true onset. It does
-fix stage-3 candidate #35 (was 144 ms late, now within 1 ms of the true
-onset; +1 positive added to the calibration set, 164 vs 163), and recall
-held at 100 % across all 9 fixtures.
+History:
+1. First attempt was a reverb-chain re-anchor in
+   ``shot_detect._leading_edge`` (commit 790191a). It DID fix stage-3 cand
+   #35 but tanked voter C precision 72.1 % -> 60.2 % and 4-of-4 ensemble
+   74.9 % -> 62.9 % because it also shifted false-positive candidates'
+   positions, pulling their audio features (peak_amp, attack, tail_amp, MR
+   ratios) toward more shot-like values and dissolving the
+   positive/negative separation. Reverted in 428f407.
+2. Resolved by moving the re-anchor logic into a NEW module
+   ``src/splitsmith/shot_refine.py`` that runs AFTER voter filtering /
+   user audit. It updates ONLY the timestamp; nothing flows back into the
+   voter feature distribution. The candidate generator stays narrow and
+   stable; voter precision is preserved.
 
-**Cost:** voter C precision dropped 72.1 % -> 60.2 % (and 4-of-4 ensemble
-74.9 % -> 62.9 %). Mechanism: when the heuristic fires on FALSE-positive
-candidates, it pulls them backward to the loudest peak in their lookback
-window. The features used by voters (peak_amp, attack, tail_amp, MR
-ratios) are evaluated at the post-anchor position, so negatives end up at
-louder positions with more shot-like features. The voters then have a
-harder time discriminating positives from these "feature-shifted"
-negatives.
+The module exposes ``refine_shot_time(audio, sr, approx_time, config)
+-> RefinedShot`` and supports two methods:
 
-This is a fundamental tension between *candidate timing accuracy* (favoured
-by re-anchor) and *voter feature stability* (penalised by re-anchor moving
-negative candidates to louder peaks). The proper architectural answer is:
+* ``"envelope"`` (default): wide broadband peak + 5 % rise-foot
+  backtrack, gated on ``wide_peak / local_peak >= reanchor_ratio`` so
+  clean shots fall through unchanged. Recovers stage-3 cand #35 from
+  144 ms drift to 1.2 ms drift; leaves the other 153 audited shots
+  untouched.
+* ``"aic"``: Akaike picker on bandpassed raw waveform. Sub-ms accurate
+  on isolated transients but reports low confidence on busy reverb
+  backgrounds (correct rejection in those cases).
 
-* **Candidate generator stays narrow / stable.** Voters see the same
-  feature distribution they were calibrated for.
-* **Timing refinement is a SECOND PASS** that runs after voter filtering
-  (or after user audit), uses AIC picker / matched filter on the raw
-  waveform, and updates ONLY the timestamp -- never the features used
-  upstream. See GitHub issue #7.
-
-Status: rise-foot re-anchor is currently enabled. Stage-3 audit is now
-covered. Voter precision regression accepted pending the second-pass
-refinement work that will let us revert this and recover precision.
+Wiring: not yet called from the production CLI -- the audit UI / CSV
+generator should call this after the user confirms candidates. Eval
+script ``scripts/eval_refinement.py`` measures timing accuracy across
+fixtures.
 
 ## 4a. Candidate generator anchors on reverb peaks instead of onset
 

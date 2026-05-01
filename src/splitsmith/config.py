@@ -173,6 +173,39 @@ class ShotDetectConfig(BaseModel):
     recall_fallback: Literal["none", "cwt"] = "none"
 
 
+class ShotRefineConfig(BaseModel):
+    """Second-pass timing refinement.
+
+    Run AFTER candidate filtering / user audit -- never feeds back into the
+    voter feature distribution. Updates only the timestamp.
+    """
+
+    # ``"envelope"`` = wide broadband peak + rise-foot backtrack (default,
+    # robust on busy IPSC stages). ``"aic"`` = Akaike picker on bandpassed
+    # raw waveform (sub-ms accurate on isolated transients but degrades on
+    # busy reverb backgrounds).
+    method: Literal["envelope", "aic"] = "envelope"
+    # Half-width of the audio window scanned around each approximate time.
+    # 200 ms covers reverb-anchored cases where the candidate generator
+    # placed its rise foot 100-200 ms after the true onset (see
+    # PRECISION_LIMITS.md section 4a).
+    search_half_window_ms: float = 200.0
+    # Reject refinements whose confidence falls below this threshold and
+    # keep the original timestamp instead. 0.0 = always accept.
+    min_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Envelope-only: re-anchor to the wide-window peak only when it is at
+    # least this much louder than the local-position peak. Small ratios
+    # (< 2.0) mean the original was already on a peak; tight rise-foot
+    # adjustment is used instead. Mirrors the same heuristic as the
+    # candidate-time reverb-chain re-anchor (PRECISION_LIMITS section 4a).
+    reanchor_ratio: float = 2.0
+    # AIC-only: bandpass before AIC. Muzzle-blast energy concentrates above
+    # ~500 Hz; bandpassing reduces wind/handling noise that can mask the
+    # variance shift the AIC picker keys on.
+    bandpass_low_hz: float | None = 500.0
+    bandpass_high_hz: float | None = 12000.0
+
+
 class VideoMatchConfig(BaseModel):
     tolerance_minutes: int = 15
     prefer_ctime: bool = True
@@ -193,6 +226,7 @@ class OutputConfig(BaseModel):
 class Config(BaseModel):
     beep_detect: BeepDetectConfig = Field(default_factory=BeepDetectConfig)
     shot_detect: ShotDetectConfig = Field(default_factory=ShotDetectConfig)
+    shot_refine: ShotRefineConfig = Field(default_factory=ShotRefineConfig)
     video_match: VideoMatchConfig = Field(default_factory=VideoMatchConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
