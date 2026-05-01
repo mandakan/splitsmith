@@ -101,32 +101,6 @@ _LEAD_EDGE_SMOOTH_S = 0.002  # 2 ms moving-max smoothing of |audio| -> envelope
 _LEAD_EDGE_RISE_GUARD_MIN_S = 0.020
 _RISE_BACK_FACTOR = 1.5
 
-# Reverb-chain re-anchoring (stage-3 'H1' fixture motivated, 2026-05-01).
-# When librosa's spectral flux fires on a reverb peak instead of the true
-# muzzle blast onset (the onset can sit 100-200 ms before the librosa frame
-# when the muzzle blast is sub-frame fast and AGC ducks it relative to its
-# own reverb), the narrow [-5 ms, +30 ms] peak-search window misses the real
-# transient peak entirely. Before refining, scan a wider lookback window and
-# re-anchor the peak only when:
-#   1. The earlier window's max envelope is at least REANCHOR_RATIO times the
-#      narrow-window peak (real transient is loud, not a quieter neighbour).
-#   2. The envelope between the earlier peak and the current narrow peak
-#      stays above ``earlier_peak * _RISE_FOOT_FRAC`` (continuous reverb
-#      decay, not silence -- so the two peaks belong to one event chain).
-# Both conditions together avoid mis-anchoring on AGC-ducked-after-loud
-# scenarios (where the gap between the two shots reaches near-silence).
-_REANCHOR_LOOKBACK_S = 0.200  # how far back to search for the real peak
-_REANCHOR_GAP_S = 0.030  # leave the immediate 30 ms to the narrow window
-_REANCHOR_RATIO = 2.0  # earlier peak must be at least this much louder
-# Re-anchor lookback is also clamped so it cannot extend back to within
-# ``_REANCHOR_PREV_MARGIN_S`` of the previous kept onset -- otherwise a real
-# shot followed 200-300 ms later by another real shot has its second onset
-# re-anchored to the first shot's peak (their reverbs overlap, so the gap
-# never reaches silence -> heuristic mis-fires). 150 ms covers one typical
-# outdoor-stage reverb decay; tighter values let the lookback window peek
-# into the previous shot's reverb tail and re-anchor to it.
-_REANCHOR_PREV_MARGIN_S = 0.150
-
 # HF/LF spectral signature window. Centred on the refined leading edge so the
 # transient body sits inside the window. 30 ms is short enough that the FFT
 # captures the burst itself (not the surrounding ambience) and long enough
@@ -219,14 +193,8 @@ def detect_shots(
 
     # Refine each kept onset's time to its half-rise leading edge. Min-gap
     # and refractory operate on the librosa-frame times above (preserving
-    # ordering and candidate count); only the OUTPUT time changes. Each
-    # call gets the previous onset's time so the reverb-chain re-anchor
-    # cannot reach into the prior shot's peak.
-    refined_times: list[float] = []
-    for i, t in enumerate(kept_times):
-        prev = kept_times[i - 1] if i > 0 else None
-        refined_times.append(_leading_edge(audio, t, sample_rate, prev_onset_t=prev))
-    kept_times = refined_times
+    # ordering and candidate count); only the OUTPUT time changes.
+    kept_times = [_leading_edge(audio, t, sample_rate) for t in kept_times]
     # Re-measure peak amplitude at the backtracked times (the actual transient
     # peak is typically a few ms past the leading edge, still inside the peak
     # window since _PEAK_WIN_MS is symmetric).
@@ -288,12 +256,7 @@ def detect_shots(
     return shots
 
 
-def _leading_edge(
-    audio: np.ndarray,
-    onset_t: float,
-    sr: int,
-    prev_onset_t: float | None = None,
-) -> float:
+def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
     """Return the rise-foot leading edge of the transient surrounding ``onset_t``.
 
     The window extends up to 100 ms BEFORE the librosa frame (so we can find
@@ -303,20 +266,9 @@ def _leading_edge(
     envelope either:
     * drops below ``_RISE_FOOT_FRAC * peak`` (silence at the foot), or
     * rises again (we'd be entering an earlier transient).
-
-    ``prev_onset_t`` is the previous kept onset's time (or None for the first
-    onset). If provided, the reverb-chain re-anchor lookback is clamped so it
-    cannot extend back to within ``_REANCHOR_PREV_MARGIN_S`` of that onset --
-    preventing the heuristic from re-anchoring shot N onto shot N-1's peak
-    when their reverbs overlap.
     """
     onset_idx = int(round(onset_t * sr))
-    # Backward extent must cover both the re-anchor lookback and the walk
-    # backward from the (possibly re-anchored) peak.
-    win_lo = max(
-        0,
-        onset_idx - int((_LEAD_EDGE_BACKWARD_MAX_S + _REANCHOR_LOOKBACK_S) * sr),
-    )
+    win_lo = max(0, onset_idx - int(_LEAD_EDGE_BACKWARD_MAX_S * sr))
     win_hi = min(audio.size, onset_idx + int(_LEAD_EDGE_PEAK_WINDOW_S * sr))
     if win_hi <= win_lo:
         return onset_t
@@ -336,30 +288,6 @@ def _leading_edge(
     peak = float(envelope[peak_local])
     if peak <= 0.0:
         return onset_t
-
-    # Reverb-chain re-anchor: if a substantially louder peak exists earlier in
-    # the smoothed envelope AND the envelope between them never reaches the
-    # earlier peak's foot threshold (i.e. reverb decay, not separate event),
-    # the librosa frame is on a reverb peak. Re-anchor to the earlier peak so
-    # the backward walk that follows finds the true muzzle-blast foot rather
-    # than the gap between the original shot and its own reverb.
-    earlier_hi = peak_search_lo - int(_REANCHOR_GAP_S * sr)
-    earlier_lo = max(0, peak_search_lo - int(_REANCHOR_LOOKBACK_S * sr))
-    if prev_onset_t is not None:
-        prev_idx = int(round((prev_onset_t + _REANCHOR_PREV_MARGIN_S) * sr))
-        prev_local = prev_idx - win_lo
-        if prev_local > earlier_lo:
-            earlier_lo = prev_local
-    if earlier_hi - earlier_lo > 1:
-        earlier_peak_local = earlier_lo + int(np.argmax(envelope[earlier_lo:earlier_hi]))
-        earlier_peak = float(envelope[earlier_peak_local])
-        if earlier_peak >= _REANCHOR_RATIO * peak:
-            gap_lo = earlier_peak_local
-            gap_hi = peak_local
-            gap_min = float(envelope[gap_lo:gap_hi].min()) if gap_hi > gap_lo else earlier_peak
-            if gap_min >= earlier_peak * _RISE_FOOT_FRAC:
-                peak_local = earlier_peak_local
-                peak = earlier_peak
     foot_threshold = peak * _RISE_FOOT_FRAC
 
     # Walk back from the peak. Stop when the envelope drops below the foot
@@ -549,13 +477,10 @@ def _apply_cwt_recall_fallback(
         return kept_times, kept_strengths, kept_peaks
 
     # Refine each extra to its rise-foot leading edge, then ensure min-gap from
-    # the existing pass-1 candidates. ``prev_onset_t`` is the nearest pass-1
-    # candidate before this extra so reverb-chain re-anchor can't cross it.
-    sorted_kept = sorted(kept_times)
+    # the existing pass-1 candidates.
     refined: list[tuple[float, float]] = []  # (time, cwt_strength)
     for t, s in zip(extras_t, extras_strength, strict=True):
-        prev = max((q for q in sorted_kept if q < t), default=None)
-        t_refined = _leading_edge(audio, t, sr, prev_onset_t=prev)
+        t_refined = _leading_edge(audio, t, sr)
         if all(abs(t_refined - q) >= min_gap_s for q in kept_times):
             refined.append((t_refined, s))
     if not refined:

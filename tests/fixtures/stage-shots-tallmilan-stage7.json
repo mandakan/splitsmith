@@ -156,10 +156,10 @@
     "candidates": [
       {
         "candidate_number": 1,
-        "time": 0.9169,
-        "ms_after_beep": 417.0,
-        "peak_amplitude": 0.3235,
-        "confidence": 0.069
+        "time": 1.0535,
+        "ms_after_beep": 554.0,
+        "peak_amplitude": 0.1063,
+        "confidence": 0.03
       },
       {
         "candidate_number": 2,
@@ -492,10 +492,10 @@
       },
       {
         "candidate_number": 49,
-        "time": 12.8461,
-        "ms_after_beep": 12346.0,
-        "peak_amplitude": 0.2913,
-        "confidence": 0.274
+        "time": 12.9495,
+        "ms_after_beep": 12450.0,
+        "peak_amplitude": 0.1518,
+        "confidence": 0.262
       },
       {
         "candidate_number": 50,
@@ -611,10 +611,10 @@
       },
       {
         "candidate_number": 66,
-        "time": 17.992,
-        "ms_after_beep": 17492.0,
-        "peak_amplitude": 0.0823,
-        "confidence": 0.051
+        "time": 18.2149,
+        "ms_after_beep": 17715.0,
+        "peak_amplitude": 0.0363,
+        "confidence": 0.027
       },
       {
         "candidate_number": 67,

@@ -521,10 +521,10 @@
       },
       {
         "candidate_number": 60,
-        "time": 13.163,
-        "ms_after_beep": 12663.0,
-        "peak_amplitude": 0.1601,
-        "confidence": 0.135
+        "time": 13.2363,
+        "ms_after_beep": 12736.0,
+        "peak_amplitude": 0.1405,
+        "confidence": 0.178
       },
       {
         "candidate_number": 61,

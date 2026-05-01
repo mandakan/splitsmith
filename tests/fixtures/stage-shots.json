@@ -311,10 +311,10 @@
       },
       {
         "candidate_number": 28,
-        "time": 12.105,
-        "ms_after_beep": 11605.0,
-        "peak_amplitude": 0.1283,
-        "confidence": 0.014
+        "time": 12.1707,
+        "ms_after_beep": 11671.0,
+        "peak_amplitude": 0.0836,
+        "confidence": 0.031
       },
       {
         "candidate_number": 29,
@@ -332,10 +332,10 @@
       },
       {
         "candidate_number": 31,
-        "time": 12.6522,
-        "ms_after_beep": 12152.0,
-        "peak_amplitude": 0.1035,
-        "confidence": 0.01
+        "time": 12.6961,
+        "ms_after_beep": 12196.0,
+        "peak_amplitude": 0.0506,
+        "confidence": 0.021
       },
       {
         "candidate_number": 32,
@@ -353,10 +353,10 @@
       },
       {
         "candidate_number": 34,
-        "time": 14.1113,
-        "ms_after_beep": 13611.0,
-        "peak_amplitude": 0.0697,
-        "confidence": 0.023
+        "time": 14.28,
+        "ms_after_beep": 13780.0,
+        "peak_amplitude": 0.0331,
+        "confidence": 0.021
       },
       {
         "candidate_number": 35,
