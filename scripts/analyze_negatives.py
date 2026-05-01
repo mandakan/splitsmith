@@ -29,6 +29,8 @@ from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.shot_detect import detect_shots
 
+_DROP_MR = False  # set by --no-mr CLI flag for ablation runs
+
 DEFAULT_FIXTURES = [
     "stage-shots",
     "stage-shots-blacksmith-h5",
@@ -107,12 +109,48 @@ def _hand_features(audio, sr, t, all_times, beep_time, confidence, peak_amp):
     # timestamp falling inside the rise rather than at the impulse. Both
     # regressed held-out precision and were reverted.
 
+    # PROTOTYPE 2026-05-01: multi-resolution envelope ratios. The candidate
+    # generator smooths the envelope at 10 ms which discards the sub-ms
+    # structure that distinguishes a muzzle blast (sharp 0.5-1 ms pressure
+    # spike) from wind / handling (rounded 5-20 ms onset). Smoothing the
+    # rectified raw signal at multiple scales and taking ratios exposes the
+    # impulsive-vs-sustained character in an amplitude-invariant way.
+    # ratio_1_20 ~ "how peaky is the 1 ms peak relative to its 20 ms
+    # neighbourhood"; impulsive sources -> high, sustained -> ~1.0.
+    mr_lo = max(0, peak_local_idx - int(0.025 * sr))
+    mr_hi = min(n, peak_local_idx + int(0.025 * sr))
+    seg = np.abs(audio[mr_lo:mr_hi].astype(np.float64))
+    p_1 = _smoothed_peak(seg, 1.0, sr)
+    p_5 = _smoothed_peak(seg, 5.0, sr)
+    p_20 = _smoothed_peak(seg, 20.0, sr)
+    ratio_1_20 = p_1 / (p_20 + 1e-9)
+    ratio_5_20 = p_5 / (p_20 + 1e-9)
+
+    if _DROP_MR:
+        return [
+            peak_amp, confidence, rms_pre, rms_post,
+            rms_post / (rms_pre + 1e-6), attack, gap_prev,
+            (t - beep_time) * 1000.0,
+            tail_amp,
+        ]
     return [
         peak_amp, confidence, rms_pre, rms_post,
         rms_post / (rms_pre + 1e-6), attack, gap_prev,
         (t - beep_time) * 1000.0,
         tail_amp,
+        ratio_1_20, ratio_5_20,
     ]
+
+
+def _smoothed_peak(seg: np.ndarray, win_ms: float, sr: int) -> float:
+    """Peak of ``seg`` after a moving-average smoothing of width ``win_ms``."""
+    if seg.size == 0:
+        return 0.0
+    w = max(1, int(round(win_ms * 1e-3 * sr)))
+    if w >= seg.size:
+        return float(seg.mean())
+    k = np.ones(w, dtype=np.float64) / w
+    return float(np.convolve(seg, k, mode="valid").max())
 
 
 def _build_universe(fixtures, tol_ms):
@@ -173,6 +211,28 @@ def _holdout_probs(X, y, sample_weight=None):
     return probs
 
 
+def _lofo_probs(X, y, fixtures):
+    """Leave-one-fixture-out held-out probabilities.
+
+    For each fixture: train on all candidates from the OTHER fixtures, score
+    only the held-out fixture's candidates. This stresses cross-fixture
+    generalization (mic placement, gain, ambient profile) much harder than
+    StratifiedKFold which mixes fixtures across folds.
+    """
+    from sklearn.ensemble import GradientBoostingClassifier
+    fixtures = np.asarray(fixtures)
+    probs = np.zeros_like(y, dtype=np.float64)
+    for fix in np.unique(fixtures):
+        te = fixtures == fix
+        tr = ~te
+        clf = GradientBoostingClassifier(
+            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
+        )
+        clf.fit(X[tr], y[tr])
+        probs[te] = clf.predict_proba(X[te])[:, 1]
+    return probs
+
+
 def _eval_at_target_recall(probs, y, target_recall):
     n_pos = int(y.sum())
     pairs = sorted(zip(probs, y, strict=True), key=lambda x: -x[0])
@@ -199,7 +259,11 @@ def main() -> None:
                    help="Sample weight multiplier for hard negatives (1.0 = off).")
     p.add_argument("--show", type=int, default=15,
                    help="How many top mistakes to print per category.")
+    p.add_argument("--no-mr", action="store_true",
+                   help="Drop multi-resolution envelope ratios (ablation).")
     args = p.parse_args()
+    global _DROP_MR
+    _DROP_MR = args.no_mr
 
     universe = _build_universe(DEFAULT_FIXTURES, args.tolerance_ms)
     X, y = _to_xy(universe)
@@ -207,11 +271,58 @@ def main() -> None:
     n_neg = int((1 - y).sum())
     print(f"universe: {len(universe)} cands, {n_pos} pos, {n_neg} neg\n")
 
+    # Per-feature separation: median(pos) / median(neg) for the hand features
+    # only (CLAP sims dominate the X tail and aren't of interest here).
+    feat_names = [
+        "peak_amp", "confidence", "rms_pre", "rms_post", "rms_post/pre",
+        "attack", "gap_prev", "ms_since_beep", "tail_amp",
+    ]
+    if not _DROP_MR:
+        feat_names += ["mr_ratio_1_20", "mr_ratio_5_20"]
+    pos_mask = y == 1
+    neg_mask = y == 0
+    print("=== Per-feature pos vs neg medians (hand features) ===")
+    print(f"{'feature':18s} {'med_pos':>10s} {'med_neg':>10s} {'pos/neg':>9s}")
+    for i, name in enumerate(feat_names):
+        m_pos = float(np.median(X[pos_mask, i]))
+        m_neg = float(np.median(X[neg_mask, i]))
+        ratio = m_pos / m_neg if abs(m_neg) > 1e-12 else float("inf")
+        print(f"{name:18s} {m_pos:10.4f} {m_neg:10.4f} {ratio:9.3f}")
+    print()
+
     # Pass 1: vanilla GBDT.
     probs = _holdout_probs(X, y)
     thr, kept, pos = _eval_at_target_recall(probs, y, args.target_recall)
     print(f"Pass 1 (unweighted, target recall {args.target_recall*100:.0f} %):")
     print(f"  threshold {thr:.4f}  kept {kept}  recall {pos}/{n_pos} = {pos/n_pos*100:.1f}%  precision {pos/kept*100:.1f}%")
+
+    # Leave-one-fixture-out: stress cross-fixture generalization. If the
+    # StratifiedKFold gain comes from per-fixture overfitting, LOFO will
+    # collapse it; if it comes from physical structure, LOFO will hold.
+    fixture_arr = [c["fixture"] for c in universe]
+    lofo_probs = _lofo_probs(X, y, fixture_arr)
+    lofo_thr, lofo_kept, lofo_pos = _eval_at_target_recall(lofo_probs, y, args.target_recall)
+    print(f"\nLOFO (leave-one-fixture-out, target recall {args.target_recall*100:.0f} %):")
+    print(f"  threshold {lofo_thr:.4f}  kept {lofo_kept}  recall {lofo_pos}/{n_pos} = {lofo_pos/n_pos*100:.1f}%  precision {lofo_pos/lofo_kept*100:.1f}%")
+
+    # Per-fixture LOFO breakdown so we can see which fixtures generalize and
+    # which break -- the average can hide a single fixture collapsing.
+    print(f"\n=== Per-fixture LOFO at threshold {lofo_thr:.4f} ===")
+    print(f"{'fixture':38s} {'pos':>4s} {'kept':>5s} {'tp':>4s} {'recall':>7s} {'prec':>6s}")
+    fixture_arr_np = np.asarray(fixture_arr)
+    for fix in sorted(set(fixture_arr)):
+        mask = fixture_arr_np == fix
+        f_y = y[mask]
+        f_probs = lofo_probs[mask]
+        f_pos = int(f_y.sum())
+        if f_pos == 0:
+            continue
+        f_kept_mask = f_probs >= lofo_thr
+        f_kept = int(f_kept_mask.sum())
+        f_tp = int((f_kept_mask & (f_y == 1)).sum())
+        f_recall = f_tp / f_pos * 100
+        f_prec = (f_tp / f_kept * 100) if f_kept else 0.0
+        print(f"{fix:38s} {f_pos:4d} {f_kept:5d} {f_tp:4d} {f_recall:6.1f}% {f_prec:5.1f}%")
 
     # Show top "hardest negatives" -- model thinks shot, you said no.
     print(f"\n=== Top {args.show} hardest NEGATIVES (model says shot, audit says no) ===")

@@ -129,6 +129,26 @@ def _hand_features(
     tail_lo = min(n, peak_local_idx + int(0.050 * sr))
     tail_hi = min(n, peak_local_idx + int(0.200 * sr))
     tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi]))) if tail_hi > tail_lo else 0.0
+
+    # Multi-resolution envelope ratios (added 2026-05-01). Smooths the
+    # rectified signal at 1 / 5 / 20 ms inside a +/-25 ms window centred on
+    # the local peak and forms amplitude-invariant ratios. Sub-ms peak
+    # vs slower-window peak captures the impulsive vs sustained character
+    # that the candidate generator's 10 ms smoothing hides. Per-feature
+    # medians are weak (~1.14x for ratio_1_20) but the GBDT finds nonlinear
+    # interactions: leave-one-fixture-out gives +2.9 pp precision at the
+    # same recall vs. without these features (5/8 fixtures improve, 2
+    # regress 1.5-3 pp). Cannot help cross-bay shots, which share impulsive
+    # shape with local shots and only differ in amplitude (issue #X).
+    mr_lo = max(0, peak_local_idx - int(0.025 * sr))
+    mr_hi = min(n, peak_local_idx + int(0.025 * sr))
+    seg = np.abs(audio[mr_lo:mr_hi].astype(np.float64))
+    p_1 = _smoothed_peak(seg, 1.0, sr)
+    p_5 = _smoothed_peak(seg, 5.0, sr)
+    p_20 = _smoothed_peak(seg, 20.0, sr)
+    ratio_1_20 = p_1 / (p_20 + 1e-9)
+    ratio_5_20 = p_5 / (p_20 + 1e-9)
+
     return [
         peak_amp,
         confidence,
@@ -139,7 +159,20 @@ def _hand_features(
         gap_prev,
         (t - beep_time) * 1000.0,
         tail_amp,
+        ratio_1_20,
+        ratio_5_20,
     ]
+
+
+def _smoothed_peak(seg: np.ndarray, win_ms: float, sr: int) -> float:
+    """Peak of ``seg`` after a moving-average smoothing of width ``win_ms``."""
+    if seg.size == 0:
+        return 0.0
+    w = max(1, int(round(win_ms * 1e-3 * sr)))
+    if w >= seg.size:
+        return float(seg.mean())
+    k = np.ones(w, dtype=np.float64) / w
+    return float(np.convolve(seg, k, mode="valid").max())
 
 
 def main() -> None:

@@ -127,6 +127,19 @@ def _hand_features(
     tail_lo = min(n, peak_local_idx + int(0.050 * sr))
     tail_hi = min(n, peak_local_idx + int(0.200 * sr))
     tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi]))) if tail_hi > tail_lo else 0.0
+
+    # Multi-resolution envelope ratios (added 2026-05-01). See
+    # eval_ensemble._hand_features for the rationale; LOFO validation showed
+    # +2.9 pp precision at the same recall on the 8-fixture calibration set.
+    mr_lo = max(0, peak_local_idx - int(0.025 * sr))
+    mr_hi = min(n, peak_local_idx + int(0.025 * sr))
+    seg = np.abs(audio[mr_lo:mr_hi].astype(np.float64))
+    p_1 = _smoothed_peak(seg, 1.0, sr)
+    p_5 = _smoothed_peak(seg, 5.0, sr)
+    p_20 = _smoothed_peak(seg, 20.0, sr)
+    ratio_1_20 = p_1 / (p_20 + 1e-9)
+    ratio_5_20 = p_5 / (p_20 + 1e-9)
+
     return [
         peak_amp,
         confidence,
@@ -137,7 +150,20 @@ def _hand_features(
         gap_prev,
         (t - beep_time) * 1000.0,
         tail_amp,
+        ratio_1_20,
+        ratio_5_20,
     ]
+
+
+def _smoothed_peak(seg: np.ndarray, win_ms: float, sr: int) -> float:
+    """Peak of ``seg`` after a moving-average smoothing of width ``win_ms``."""
+    if seg.size == 0:
+        return 0.0
+    w = max(1, int(round(win_ms * 1e-3 * sr)))
+    if w >= seg.size:
+        return float(seg.mean())
+    k = np.ones(w, dtype=np.float64) / w
+    return float(np.convolve(seg, k, mode="valid").max())
 
 
 def _voter_a_floor(fixtures: list[str], tolerance_ms: float) -> float:
