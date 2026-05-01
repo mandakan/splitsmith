@@ -12,23 +12,26 @@ later instead of throwing more GBDT at it.
 | Voter C alone, global threshold (SKF) | 95.2 % | **78.5 %** | StratifiedKFold |
 | Voter C alone, global threshold (LOFO) | 95.2 % | **71.5 %** | cross-fixture honest |
 | Voter C alone, **adaptive (audit K)** | 94.3 % | **81.1 %** | K = audit count + max(3, K*10%); upper bound |
-| Voter C alone, **adaptive (real K)** | 90.7 % | **85.8 %** | K = stage_rounds.expected (8/12 fixtures); recall hit from makeups |
+| Voter C alone, **adaptive (real K)** | 89.0 % | **88.2 %** | K = stage_rounds.expected (12/12 fixtures); recall hit from makeups |
 | 4-of-4 ensemble, global threshold | 95.2 % | 80.0 % | |
 | 4-of-4 ensemble, adaptive (audit K) | 94.3 % | **82.6 %** | |
-| 4-of-4 ensemble, **adaptive (real K)** | 90.7 % | **86.6 %** | |
+| 4-of-4 ensemble, **adaptive (real K)** | 89.0 % | **88.6 %** | |
 | 3-of-4 consensus, global | 100 % | 30.0 % | default UI filter |
 
 Dream target (user, 2026-05-01): **100 % recall, 80 % precision**. The
 adaptive variant crosses 80 % at 94.3 % recall on both voter C alone and
 4-of-4 ensemble.
 
-**Adaptive variant caveat:** the 81 / 82.6 % numbers above use the audit
-count as the per-stage K -- a perfect-prior upper bound. In production K
-comes from the match scoresheet (paper x 2 + poppers + plates); make-up
-shots inflate the real round count, so production precision will likely
-land 75-78 %. The `K + max(3, K*10%)` slack absorbs typical make-up
-counts. ``scripts/eval_ensemble.py --adaptive-voter-c`` reports both the
-global and adaptive numbers so we can track the gap.
+**Adaptive variant caveat:** the audit-K rows are an upper bound (audit
+count baked in). The real-K rows (12/12 fixtures) use
+``stage_rounds.expected = paper * shots_per_paper + poppers + plates``
+straight from the match scoresheet. Production precision now lands at
+**88.2 %** (voter C alone) / **88.6 %** (4-of-4 ensemble), at the cost of
+~5 pp recall vs the global threshold. The recall hit comes from stages
+where make-ups exceed the `max(3, K*10%)` slack -- mainly Blacksmith
+stage 1 (38 audit / 31 expected = +22 %). ``scripts/eval_ensemble.py
+--adaptive-voter-c`` reports both global and adaptive numbers so we can
+track the gap.
 
 ---
 

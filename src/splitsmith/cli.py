@@ -245,10 +245,14 @@ def audit_prep(
     ),
     paper: int = typer.Option(
         0, "--paper", min=0,
-        help="Paper-target count for the stage (each scored x2 in IPSC).",
+        help="Paper-target count for the stage (each scored x2 in IPSC by default).",
     ),
     poppers: int = typer.Option(0, "--poppers", min=0, help="Popper count."),
     plates: int = typer.Option(0, "--plates", min=0, help="Plate count."),
+    shots_per_paper: int = typer.Option(
+        2, "--shots-per-paper", min=1, max=2,
+        help="Shots per paper target. 2 for normal stages, 1 for strong/weak-hand-only.",
+    ),
 ) -> None:
     """Build a review-ready fixture (wav + JSON + audit CSV) from a source video.
 
@@ -356,7 +360,8 @@ def audit_prep(
             "paper": paper,
             "poppers": poppers,
             "plates": plates,
-            "expected": paper * 2 + poppers + plates,
+            "shots_per_paper": shots_per_paper,
+            "expected": paper * shots_per_paper + poppers + plates,
         }
     fixture_json = output_dir / f"{stem}.json"
     fixture_json.write_text(

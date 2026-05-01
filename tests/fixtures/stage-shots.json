@@ -401,5 +401,12 @@
         "confidence": 0.387
       }
     ]
+  },
+  "stage_rounds": {
+    "paper": 5,
+    "poppers": 2,
+    "plates": 0,
+    "shots_per_paper": 2,
+    "expected": 12
   }
 }
