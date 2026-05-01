@@ -32,16 +32,27 @@ import { cn } from "@/lib/utils";
 interface FolderPickerProps {
   initialPath?: string | null;
   onSelect: (path: string) => void;
+  /** Optional callback for multi-file selection. When provided, video rows
+   * gain a checkbox and the action button switches to "Use N files" when any
+   * files are selected. */
+  onSelectFiles?: (paths: string[]) => void;
   onCancel?: () => void;
   /** Render mode: inline (e.g. inside a card) vs. compact. */
   mode?: "inline" | "compact";
 }
 
-export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" }: FolderPickerProps) {
+export function FolderPicker({
+  initialPath,
+  onSelect,
+  onSelectFiles,
+  onCancel,
+  mode = "inline",
+}: FolderPickerProps) {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [path, setPath] = useState<string | null>(initialPath ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
   const load = useCallback(async (next?: string | null) => {
     setBusy(true);
@@ -50,6 +61,8 @@ export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" 
       const data = await api.listFolder(next ?? undefined);
       setListing(data);
       setPath(data.path);
+      // Reset multi-file selection when navigating to a new directory.
+      setSelectedFiles(new Set());
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e));
     } finally {
@@ -66,6 +79,29 @@ export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" 
   const dirEntries = listing?.entries.filter((e) => e.kind === "dir") ?? [];
   const videoEntries = listing?.entries.filter((e) => e.kind === "video") ?? [];
   const videosHere = videoEntries.length;
+  const multiFileMode = onSelectFiles !== undefined;
+  const selectedCount = selectedFiles.size;
+
+  const toggleSelect = (name: string) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedFiles(new Set(videoEntries.map((e) => e.name)));
+  };
+
+  const confirmFiles = () => {
+    if (!path || selectedCount === 0) return;
+    const paths = videoEntries
+      .filter((e) => selectedFiles.has(e.name))
+      .map((e) => joinPath(path, e.name));
+    onSelectFiles!(paths);
+  };
 
   return (
     <div
@@ -119,18 +155,14 @@ export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" 
             </div>
           ) : error ? (
             <div className="p-4 text-sm text-destructive">{error}</div>
-          ) : !listing ? null : dirEntries.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground">
-              {videosHere > 0
-                ? `No subfolders here. ${videosHere} video${videosHere === 1 ? "" : "s"} ready to scan.`
-                : "Empty folder."}
-            </div>
+          ) : !listing ? null : dirEntries.length === 0 && videoEntries.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground">Empty folder.</div>
           ) : (
-            <ul className="max-h-72 divide-y divide-border overflow-y-auto">
+            <ul className="max-h-80 divide-y divide-border overflow-y-auto">
               {dirEntries.map((entry) => {
                 const childPath = path ? joinPath(path, entry.name) : entry.name;
                 return (
-                  <li key={entry.name}>
+                  <li key={`d-${entry.name}`}>
                     <button
                       type="button"
                       className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
@@ -151,13 +183,46 @@ export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" 
                   </li>
                 );
               })}
+              {multiFileMode
+                ? videoEntries.map((entry) => {
+                    const checked = selectedFiles.has(entry.name);
+                    return (
+                      <li key={`v-${entry.name}`}>
+                        <label
+                          className={cn(
+                            "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-accent/40",
+                            checked && "bg-accent/30",
+                          )}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              className="size-4 accent-primary"
+                              checked={checked}
+                              onChange={() => toggleSelect(entry.name)}
+                              disabled={busy}
+                              aria-label={`Select ${entry.name}`}
+                            />
+                            <Film className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate font-mono text-xs">{entry.name}</span>
+                          </span>
+                          {entry.size_bytes != null ? (
+                            <span className="text-xs text-muted-foreground">
+                              {formatBytes(entry.size_bytes)}
+                            </span>
+                          ) : null}
+                        </label>
+                      </li>
+                    );
+                  })
+                : null}
             </ul>
           )}
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {videosHere > 0 ? (
             <span className="inline-flex items-center gap-1">
               <Film className="size-3" />
@@ -166,6 +231,16 @@ export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" 
           ) : (
             <span>No videos directly here. Drill into a subfolder.</span>
           )}
+          {multiFileMode && videosHere > 0 ? (
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 underline-offset-2 hover:underline"
+              onClick={selectedCount === videosHere ? () => setSelectedFiles(new Set()) : selectAll}
+              disabled={busy}
+            >
+              {selectedCount === videosHere ? "Clear selection" : "Select all"}
+            </button>
+          ) : null}
         </div>
         <div className="flex gap-2">
           {onCancel ? (
@@ -173,23 +248,42 @@ export function FolderPicker({ initialPath, onSelect, onCancel, mode = "inline" 
               Cancel
             </Button>
           ) : null}
-          <Button
-            type="button"
-            disabled={busy || !path || videosHere === 0}
-            onClick={() => path && onSelect(path)}
-            title={
-              videosHere === 0
-                ? "Select a folder that contains video files."
-                : `Use ${path}`
-            }
-          >
-            <FolderOpen />
-            Use this folder
-          </Button>
+          {multiFileMode && selectedCount > 0 ? (
+            <Button type="button" disabled={busy} onClick={confirmFiles}>
+              <FolderOpen />
+              Use {selectedCount} file{selectedCount === 1 ? "" : "s"}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              disabled={busy || !path || videosHere === 0}
+              onClick={() => path && onSelect(path)}
+              title={
+                videosHere === 0
+                  ? "Select a folder that contains video files, or drill in."
+                  : `Use ${path}`
+              }
+            >
+              <FolderOpen />
+              Use this folder
+            </Button>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
 }
 
 function PathBar({

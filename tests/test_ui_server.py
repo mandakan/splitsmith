@@ -549,6 +549,105 @@ def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
     assert resp.content.startswith(b"RIFF")
 
 
+def test_scan_videos_with_explicit_source_paths(tmp_path: Path) -> None:
+    """source_paths picks specific files (USB-cam workflow). Only the listed
+    files are registered, even if other videos sit in the same directory."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    keep1 = src_dir / "keep1.mp4"
+    keep2 = src_dir / "keep2.mp4"
+    skip = src_dir / "skip.mp4"
+    for f in (keep1, keep2, skip):
+        f.write_bytes(b"")
+
+    resp = client.post(
+        "/api/videos/scan",
+        json={
+            "source_paths": [str(keep1), str(keep2)],
+            "auto_assign_primary": False,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert sorted(body["registered"]) == ["raw/keep1.mp4", "raw/keep2.mp4"]
+    project = client.get("/api/project").json()
+    assert len(project["unassigned_videos"]) == 2
+    # last_scanned_dir set to the parent of the first picked file.
+    assert project["last_scanned_dir"] == str(src_dir.resolve())
+
+
+def test_scan_400_when_neither_source_dir_nor_paths(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post("/api/videos/scan", json={"auto_assign_primary": False})
+    assert resp.status_code == 400
+
+
+def test_scan_400_when_both_source_dir_and_paths(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(tmp_path), "source_paths": [str(tmp_path / "a.mp4")]},
+    )
+    assert resp.status_code == 400
+
+
+def test_settings_endpoint_persists_overrides(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/project/settings",
+        json={
+            "audio_dir": str(tmp_path / "scratch" / "audio"),
+            "trimmed_dir": str(tmp_path / "scratch" / "trimmed"),
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["audio_dir"] == str(tmp_path / "scratch" / "audio")
+    assert body["trimmed_dir"] == str(tmp_path / "scratch" / "trimmed")
+    # raw_dir / exports_dir untouched.
+    assert body["raw_dir"] is None
+    assert body["exports_dir"] is None
+    # Directories were created.
+    assert (tmp_path / "scratch" / "audio").is_dir()
+    assert (tmp_path / "scratch" / "trimmed").is_dir()
+
+
+def test_settings_empty_string_clears_override(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    client.post(
+        "/api/project/settings",
+        json={"audio_dir": str(tmp_path / "audio-config")},
+    )
+    body = client.post("/api/project/settings", json={"audio_dir": ""}).json()
+    assert body["audio_dir"] is None
+
+
 def test_external_edit_visible_without_restart(tmp_path: Path) -> None:
     """External edits to project.json must appear on the next request -- the
     server doesn't cache the model in memory."""

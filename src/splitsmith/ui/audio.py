@@ -17,14 +17,27 @@ from pathlib import Path
 
 from .. import beep_detect
 from ..config import BeepDetectConfig, BeepDetection
+from .project import MatchProject
 
 
 class AudioExtractionError(RuntimeError):
     """ffmpeg or ffprobe failed during audio extraction."""
 
 
-def primary_audio_path(project_root: Path, stage_number: int) -> Path:
-    return project_root / "audio" / f"stage{stage_number}_primary.wav"
+def primary_audio_path(
+    project_root: Path,
+    stage_number: int,
+    *,
+    project: MatchProject | None = None,
+) -> Path:
+    """Resolve the cached primary-audio path for a stage.
+
+    When ``project`` is provided, its configured ``audio_dir`` (issue #23) is
+    honoured. When omitted, defaults to ``<project_root>/audio/`` for backwards
+    compatibility with callers that don't have the project model handy.
+    """
+    audio_dir = project.audio_path(project_root) if project else project_root / "audio"
+    return audio_dir / f"stage{stage_number}_primary.wav"
 
 
 def ensure_primary_audio(
@@ -34,14 +47,16 @@ def ensure_primary_audio(
     *,
     sample_rate: int = 48000,
     ffmpeg_binary: str = "ffmpeg",
+    project: MatchProject | None = None,
 ) -> Path:
     """Extract a mono WAV from ``source_video`` if not already cached.
 
-    Cache location is ``<project>/audio/stage<N>_primary.wav``. Re-extracts
-    when the source mtime is newer than the cached file's. Returns the path
-    to the cached WAV.
+    Cache location is ``<audio_dir>/stage<N>_primary.wav`` where ``audio_dir``
+    comes from the project's configured ``audio_dir`` override (issue #23) or
+    defaults to ``<project_root>/audio/``. Re-extracts when the source mtime
+    is newer than the cached file's. Returns the path to the cached WAV.
     """
-    audio_path = primary_audio_path(project_root, stage_number)
+    audio_path = primary_audio_path(project_root, stage_number, project=project)
     audio_path.parent.mkdir(parents=True, exist_ok=True)
 
     src_resolved = source_video.resolve()
@@ -85,6 +100,7 @@ def detect_primary_beep(
     *,
     config: BeepDetectConfig | None = None,
     ffmpeg_binary: str = "ffmpeg",
+    project: MatchProject | None = None,
 ) -> BeepDetection:
     """Run ``beep_detect.detect_beep`` against the primary's cached audio.
 
@@ -97,6 +113,7 @@ def detect_primary_beep(
         stage_number,
         source_video,
         ffmpeg_binary=ffmpeg_binary,
+        project=project,
     )
     audio, sr = beep_detect.load_audio(audio_path)
     cfg = config or BeepDetectConfig()

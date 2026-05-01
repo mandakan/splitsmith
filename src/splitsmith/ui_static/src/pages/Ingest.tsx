@@ -100,6 +100,19 @@ export function Ingest() {
     }
   };
 
+  const handleScanFiles = async (sourcePaths: string[]) => {
+    setBusy(true);
+    try {
+      await api.scanFiles(sourcePaths, true);
+      await reload();
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const move = async (videoPath: string, toStage: number | null, role: VideoRole) => {
     setBusy(true);
     try {
@@ -152,7 +165,12 @@ export function Ingest() {
         disabled={busy || !project || project.stages.length === 0}
         initialPath={project?.last_scanned_dir ?? null}
         onScan={handleScan}
+        onScanFiles={handleScanFiles}
       />
+
+      {project ? (
+        <SettingsSection project={project} busy={busy} setBusy={setBusy} setError={setError} onProjectUpdate={setProject} />
+      ) : null}
 
       {project ? (
         <>
@@ -223,10 +241,12 @@ function ScanSection({
   disabled,
   initialPath,
   onScan,
+  onScanFiles,
 }: {
   disabled: boolean;
   initialPath: string | null;
   onScan: (sourceDir: string) => void;
+  onScanFiles: (sourcePaths: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -234,12 +254,13 @@ function ScanSection({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FolderInput className="size-5" />
-          Scan video folder
+          Scan videos
         </CardTitle>
         <CardDescription>
-          Pick a folder containing the match's MP4/MOV files. Videos are
-          symlinked into <code>&lt;project&gt;/raw/</code> — nothing is uploaded.
-          Confident matches are auto-assigned as primary.
+          Pick a folder to scan in bulk, or check specific files (e.g. straight
+          off your camera over USB). Source files are <em>referenced via
+          symlink</em> — splitsmith never copies them. Confident timestamp
+          matches are auto-assigned as primary.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -247,7 +268,7 @@ function ScanSection({
           <div className="flex flex-wrap items-center gap-2">
             <Button disabled={disabled} onClick={() => setOpen(true)}>
               <FolderInput />
-              Browse for folder
+              Browse / pick files
             </Button>
             {initialPath ? (
               <>
@@ -272,6 +293,10 @@ function ScanSection({
               setOpen(false);
               onScan(p);
             }}
+            onSelectFiles={(paths) => {
+              setOpen(false);
+              onScanFiles(paths);
+            }}
             onCancel={() => setOpen(false)}
           />
         )}
@@ -281,6 +306,130 @@ function ScanSection({
           </p>
         ) : null}
       </CardContent>
+    </Card>
+  );
+}
+
+function SettingsSection({
+  project,
+  busy,
+  setBusy,
+  setError,
+  onProjectUpdate,
+}: {
+  project: MatchProject;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (p: MatchProject) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [pickerFor, setPickerFor] = useState<null | "raw" | "audio" | "trimmed" | "exports">(null);
+  const fields: { key: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir"; label: string; help: string }[] = [
+    { key: "raw_dir", label: "Source video links", help: "Symlinks to source files (default: <project>/raw)." },
+    { key: "audio_dir", label: "Audio cache", help: "Extracted WAVs (default: <project>/audio). Heavy intermediate; SSD-friendly." },
+    { key: "trimmed_dir", label: "Trimmed clips", help: "Short-GOP MP4s used by the audit screen (default: <project>/trimmed)." },
+    { key: "exports_dir", label: "Outputs", help: "CSV / FCPXML / report (default: <project>/exports)." },
+  ];
+  const update = async (patch: Partial<Record<typeof fields[number]["key"], string | null>>) => {
+    setBusy(true);
+    try {
+      const updated = await api.updateSettings(patch);
+      onProjectUpdate(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="cursor-pointer" onClick={() => setExpanded((v) => !v)}>
+        <CardTitle className="flex items-center justify-between gap-2 text-base">
+          <span className="flex items-center gap-2">
+            <FolderInput className="size-4" />
+            Project storage
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {expanded ? "Hide" : "Configure paths"}
+          </span>
+        </CardTitle>
+        <CardDescription>
+          Source videos are <em>never copied</em>; the project just references
+          them. Cache and outputs default to subfolders of the project root —
+          override them per project if you want heavy intermediates on a scratch
+          SSD or outputs next to your FCP library.
+        </CardDescription>
+      </CardHeader>
+      {expanded ? (
+        <CardContent className="space-y-3">
+          {fields.map(({ key, label, help }) => {
+            const current = project[key] ?? "";
+            return (
+              <div key={key} className="space-y-1">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium">{label}</span>
+                  <span className="text-xs text-muted-foreground">{help}</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      defaultValue={current}
+                      placeholder={`<project>/${key.replace("_dir", "")}`}
+                      className="flex h-8 flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      disabled={busy}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        if (value === (project[key] ?? "")) return;
+                        void update({ [key]: value || "" } as never);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        setPickerFor(
+                          key.replace("_dir", "") as "raw" | "audio" | "trimmed" | "exports",
+                        )
+                      }
+                    >
+                      Browse
+                    </Button>
+                    {current ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void update({ [key]: "" } as never)}
+                        title="Reset to default (subfolder of project root)"
+                      >
+                        Reset
+                      </Button>
+                    ) : null}
+                  </div>
+                </label>
+              </div>
+            );
+          })}
+          {pickerFor ? (
+            <FolderPicker
+              initialPath={project[`${pickerFor}_dir` as keyof MatchProject] as string | null}
+              onSelect={(p) => {
+                void update({ [`${pickerFor}_dir`]: p } as never);
+                setPickerFor(null);
+              }}
+              onCancel={() => setPickerFor(null)}
+            />
+          ) : null}
+        </CardContent>
+      ) : null}
     </Card>
   );
 }

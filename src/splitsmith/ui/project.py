@@ -117,6 +117,15 @@ class MatchProject(BaseModel):
     # Last folder the user scanned for videos. Persisted so the folder picker
     # in the ingest UI can default back here on the next scan.
     last_scanned_dir: str | None = None
+    # Storage path overrides (issue #23). All four are optional; ``None`` means
+    # "use the default subdirectory under the project root" (raw / audio /
+    # trimmed / exports). Relative paths are resolved against the project root.
+    # Absolute paths are used as-is so users can put heavy intermediates on a
+    # scratch SSD or outputs next to a Final Cut Pro library.
+    raw_dir: str | None = None
+    audio_dir: str | None = None
+    trimmed_dir: str | None = None
+    exports_dir: str | None = None
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
@@ -155,6 +164,34 @@ class MatchProject(BaseModel):
             if s.stage_number == stage_number:
                 return s
         raise KeyError(f"no stage {stage_number} in project {self.name!r}")
+
+    # ------------------------------------------------------------------
+    # Storage path resolvers (issue #23)
+    # ------------------------------------------------------------------
+    #
+    # Each resolver returns an absolute, mkdir-ready path. ``None`` overrides
+    # default to ``<root>/<subdir>`` so existing projects keep working with
+    # zero changes. Relative overrides are resolved against the project root,
+    # which keeps "zip and share" projects portable. Absolute overrides are
+    # used as-is so users can keep heavy intermediates off the project drive.
+
+    def _resolve_dir(self, root: Path, override: str | None, default_subdir: str) -> Path:
+        if override is None:
+            return root / default_subdir
+        candidate = Path(override).expanduser()
+        return candidate if candidate.is_absolute() else root / candidate
+
+    def raw_path(self, root: Path) -> Path:
+        return self._resolve_dir(root, self.raw_dir, "raw")
+
+    def audio_path(self, root: Path) -> Path:
+        return self._resolve_dir(root, self.audio_dir, "audio")
+
+    def trimmed_path(self, root: Path) -> Path:
+        return self._resolve_dir(root, self.trimmed_dir, "trimmed")
+
+    def exports_path(self, root: Path) -> Path:
+        return self._resolve_dir(root, self.exports_dir, "exports")
 
     # ------------------------------------------------------------------
     # Video registry helpers (Sub 2 / #13)
@@ -234,11 +271,17 @@ class MatchProject(BaseModel):
     ) -> StageVideo:
         """Register a video file with the project.
 
-        The file is symlinked (or copied) into ``<root>/raw/`` so the project
-        directory is self-describing. The ``StageVideo`` is appended to
-        ``unassigned_videos``; the caller is responsible for moving it onto a
-        stage via :meth:`assign_video`. If a video at the same destination
-        path is already registered, returns the existing entry unchanged.
+        The file is **referenced** -- a symlink (or copy as fallback on systems
+        without symlink support) is placed under :meth:`raw_path` pointing at
+        the original source. The original is never moved or duplicated by
+        default. This works for USB-camera ingest: source on the cam, symlink
+        in the project. When the cam is unplugged the symlink dangles
+        temporarily but the project keeps working when it's plugged back in.
+
+        The ``StageVideo`` is appended to ``unassigned_videos``; the caller is
+        responsible for moving it onto a stage via :meth:`assign_video`. If a
+        video at the same destination path is already registered, the existing
+        entry is returned unchanged (idempotent).
 
         Raises ``FileNotFoundError`` if the source doesn't exist or isn't a
         video file (mp4 / mov / m4v).
@@ -249,13 +292,22 @@ class MatchProject(BaseModel):
         if source.suffix.lower() not in VIDEO_EXTENSIONS:
             raise ValueError(f"not a video file: {source}")
 
-        raw_dir = root / "raw"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        dest = raw_dir / source.name
-        rel = Path("raw") / source.name
+        raw_dir_abs = self.raw_path(root)
+        raw_dir_abs.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir_abs / source.name
 
-        # Idempotency: if a video at this path is already registered, return it.
-        existing = self.find_video(rel)
+        # The path stored on the StageVideo is project-relative when raw_dir is
+        # under the project root (the common case), absolute otherwise. This
+        # keeps zip-and-share portable for default projects while letting
+        # USB-cam / scratch-SSD setups still work.
+        try:
+            stored = dest.relative_to(root)
+        except ValueError:
+            stored = dest
+
+        # Idempotency: if a video at this stored path is already registered,
+        # return it.
+        existing = self.find_video(stored)
         if existing is not None:
             return existing[1]
 
@@ -272,9 +324,14 @@ class MatchProject(BaseModel):
             else:
                 shutil.copy2(source, dest)
 
-        video = StageVideo(path=rel)
+        video = StageVideo(path=stored)
         self.unassigned_videos.append(video)
         return video
+
+    def resolve_video_path(self, root: Path, video_path: Path) -> Path:
+        """Resolve a ``StageVideo.path`` (which may be project-relative or
+        absolute) to an absolute filesystem path."""
+        return video_path if video_path.is_absolute() else root / video_path
 
     def assign_video(
         self,
@@ -344,7 +401,7 @@ class MatchProject(BaseModel):
         for v in self.unassigned_videos:
             # Resolve project-relative path against the project root, then
             # resolve symlinks so video_match.py's stat() reads the real file.
-            abs_path = v.path if v.path.is_absolute() else (root / v.path).resolve()
+            abs_path = self.resolve_video_path(root, v.path).resolve()
             unassigned_abs[abs_path] = v.path
         if not unassigned_abs:
             return {}

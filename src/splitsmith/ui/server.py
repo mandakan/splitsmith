@@ -6,9 +6,10 @@ Endpoints (locked v1 surface):
   GET  /api/project                 -- full MatchProject dump
   GET  /api/fs/list?path=...        -- list directory entries (folder picker)
   POST /api/scoreboard/import       -- import an SSI Scoreboard JSON
-  POST /api/videos/scan             -- enumerate videos in a folder, register them
+  POST /api/videos/scan             -- register videos (folder or explicit paths)
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
   POST /api/assignments/move        -- set role / unassign / move between stages
+  POST /api/project/settings        -- update raw/audio/trimmed/exports dir overrides
   POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
   POST /api/stages/{n}/beep         -- manual beep_time override
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
@@ -73,7 +74,12 @@ class ScoreboardImportRequest(BaseModel):
 
 
 class ScanRequest(BaseModel):
-    source_dir: str
+    """Either ``source_dir`` (folder scan, current behaviour) or
+    ``source_paths`` (explicit list of files, USB-cam workflow). Exactly one
+    must be provided."""
+
+    source_dir: str | None = None
+    source_paths: list[str] | None = None
     auto_assign_primary: bool = True
     link_mode: str = "symlink"
 
@@ -82,6 +88,17 @@ class ScanResponse(BaseModel):
     registered: list[str]
     auto_assigned: dict[int, str]
     skipped: list[str]
+
+
+class SettingsRequest(BaseModel):
+    """Partial update for project storage overrides (#23). Any field omitted
+    is left unchanged. Pass ``""`` (empty string) to clear an override back to
+    the project-root default."""
+
+    raw_dir: str | None = None
+    audio_dir: str | None = None
+    trimmed_dir: str | None = None
+    exports_dir: str | None = None
 
 
 class MoveRequest(BaseModel):
@@ -157,20 +174,47 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.post("/api/videos/scan", response_model=ScanResponse)
     def scan_videos(req: ScanRequest) -> ScanResponse:
-        source = Path(req.source_dir).expanduser()
-        if not source.exists():
-            raise HTTPException(status_code=400, detail=f"source dir not found: {source}")
-        if not source.is_dir():
-            raise HTTPException(status_code=400, detail=f"not a directory: {source}")
         if req.link_mode not in ("symlink", "copy"):
             raise HTTPException(status_code=400, detail="link_mode must be 'symlink' or 'copy'")
+        if (req.source_dir is None) == (req.source_paths is None):
+            raise HTTPException(
+                status_code=400,
+                detail="exactly one of source_dir or source_paths must be provided",
+            )
+
+        # Build the list of files to register and capture the directory we'll
+        # remember as last_scanned_dir. For source_paths mode we use the parent
+        # of the first file as a sensible default for the picker next time.
+        candidates: list[Path] = []
+        last_dir: Path | None = None
+        if req.source_dir is not None:
+            source = Path(req.source_dir).expanduser()
+            if not source.exists():
+                raise HTTPException(status_code=400, detail=f"source dir not found: {source}")
+            if not source.is_dir():
+                raise HTTPException(status_code=400, detail=f"not a directory: {source}")
+            for entry in sorted(source.iterdir()):
+                if entry.is_dir() or entry.suffix.lower() not in VIDEO_EXTENSIONS:
+                    continue
+                candidates.append(entry)
+            last_dir = source.resolve()
+        else:
+            assert req.source_paths is not None
+            if not req.source_paths:
+                raise HTTPException(status_code=400, detail="source_paths must be non-empty")
+            for raw in req.source_paths:
+                p = Path(raw).expanduser()
+                if not p.exists():
+                    raise HTTPException(status_code=400, detail=f"file not found: {p}")
+                if not p.is_file():
+                    raise HTTPException(status_code=400, detail=f"not a file: {p}")
+                candidates.append(p)
+            last_dir = candidates[0].parent.resolve() if candidates else None
 
         project = state.load()
         registered: list[str] = []
         skipped: list[str] = []
-        for entry in sorted(source.iterdir()):
-            if entry.is_dir() or entry.suffix.lower() not in VIDEO_EXTENSIONS:
-                continue
+        for entry in candidates:
             try:
                 video = project.register_video(
                     entry, state.project_root, link_mode=req.link_mode  # type: ignore[arg-type]
@@ -191,8 +235,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 project.assign_video(video_path, to_stage_number=stage_num, role="primary")
                 auto_assigned[stage_num] = str(video_path)
 
-        # Remember this folder so the picker defaults back here next time.
-        project.last_scanned_dir = str(source.resolve())
+        if last_dir is not None:
+            project.last_scanned_dir = str(last_dir)
 
         project.save(state.project_root)
         return ScanResponse(
@@ -200,6 +244,41 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             auto_assigned=auto_assigned,
             skipped=skipped,
         )
+
+    @app.post("/api/project/settings")
+    def update_settings(req: SettingsRequest) -> JSONResponse:
+        """Update storage path overrides. Any None field is left unchanged;
+        pass an empty string to clear back to the project-root default."""
+        project = state.load()
+        update: dict[str, str | None] = {}
+        for field in ("raw_dir", "audio_dir", "trimmed_dir", "exports_dir"):
+            value = getattr(req, field)
+            if value is None:
+                continue
+            normalized = value.strip() or None
+            update[field] = normalized
+        for field, value in update.items():
+            setattr(project, field, value)
+
+        # Make sure each configured directory is creatable; surface a 400
+        # rather than failing later in detect-beep / trim / export.
+        for resolver in (
+            project.raw_path,
+            project.audio_path,
+            project.trimmed_path,
+            project.exports_path,
+        ):
+            target = resolver(state.project_root)
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"cannot create directory {target}: {exc}",
+                ) from exc
+
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/detect-beep")
     def detect_beep(stage_number: int, force: bool = False) -> JSONResponse:
@@ -223,10 +302,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 ),
             )
 
-        source_video = state.project_root / primary.path
+        source_video = project.resolve_video_path(state.project_root, primary.path)
         try:
             result = audio_helpers.detect_primary_beep(
-                state.project_root, stage_number, source_video
+                state.project_root,
+                stage_number,
+                source_video,
+                project=project,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -290,7 +372,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             audio_path = audio_helpers.ensure_primary_audio(
                 state.project_root,
                 stage_number,
-                state.project_root / primary.path,
+                project.resolve_video_path(state.project_root, primary.path),
+                project=project,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

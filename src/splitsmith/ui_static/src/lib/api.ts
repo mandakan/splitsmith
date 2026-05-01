@@ -40,6 +40,17 @@ export interface MatchProject {
   stages: StageEntry[];
   unassigned_videos: StageVideo[];
   last_scanned_dir: string | null;
+  raw_dir: string | null;
+  audio_dir: string | null;
+  trimmed_dir: string | null;
+  exports_dir: string | null;
+}
+
+export interface ProjectSettingsPatch {
+  raw_dir?: string | null;
+  audio_dir?: string | null;
+  trimmed_dir?: string | null;
+  exports_dir?: string | null;
 }
 
 export interface ScanResponse {
@@ -125,6 +136,18 @@ export const api = {
     request<ScanResponse>("/api/videos/scan", {
       method: "POST",
       json: { source_dir: sourceDir, auto_assign_primary: autoAssignPrimary },
+    }),
+
+  scanFiles: (sourcePaths: string[], autoAssignPrimary = true) =>
+    request<ScanResponse>("/api/videos/scan", {
+      method: "POST",
+      json: { source_paths: sourcePaths, auto_assign_primary: autoAssignPrimary },
+    }),
+
+  updateSettings: (patch: ProjectSettingsPatch) =>
+    request<MatchProject>("/api/project/settings", {
+      method: "POST",
+      json: patch,
     }),
 
   moveAssignment: (

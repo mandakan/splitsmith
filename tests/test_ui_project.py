@@ -461,6 +461,52 @@ def test_auto_match_returns_suggestions_without_mutation(tmp_path: Path) -> None
     assert project.stages[0].videos == []
 
 
+def test_storage_paths_default_to_project_subdirs(tmp_path: Path) -> None:
+    root = tmp_path / "match-paths"
+    project = MatchProject.init(root, name="Paths Match")
+    assert project.raw_path(root) == root / "raw"
+    assert project.audio_path(root) == root / "audio"
+    assert project.trimmed_path(root) == root / "trimmed"
+    assert project.exports_path(root) == root / "exports"
+
+
+def test_storage_paths_relative_resolve_against_root(tmp_path: Path) -> None:
+    root = tmp_path / "match-relative"
+    project = MatchProject.init(root, name="Relative Match")
+    project.audio_dir = "cache/audio"
+    project.trimmed_dir = "cache/trimmed"
+    assert project.audio_path(root) == root / "cache" / "audio"
+    assert project.trimmed_path(root) == root / "cache" / "trimmed"
+
+
+def test_storage_paths_absolute_used_as_is(tmp_path: Path) -> None:
+    root = tmp_path / "match-absolute"
+    project = MatchProject.init(root, name="Absolute Match")
+    scratch = tmp_path / "scratch"
+    project.audio_dir = str(scratch / "audio")
+    project.trimmed_dir = str(scratch / "trimmed")
+    assert project.audio_path(root) == scratch / "audio"
+    assert project.trimmed_path(root) == scratch / "trimmed"
+
+
+def test_register_video_uses_configured_raw_dir(tmp_path: Path) -> None:
+    """When raw_dir points outside the project, the symlink lives there and
+    the StageVideo path is stored as absolute (since it's not under root)."""
+    root = tmp_path / "match-raw-config"
+    project = MatchProject.init(root, name="Raw Config Match")
+    external_raw = tmp_path / "external-raw"
+    project.raw_dir = str(external_raw)
+
+    src = tmp_path / "external" / "VID.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"")
+
+    video = project.register_video(src, root)
+    assert video.path.is_absolute()
+    assert (external_raw / "VID.mp4").exists()
+    assert (external_raw / "VID.mp4").resolve() == src
+
+
 def test_atomic_write_uses_same_directory_for_tmp(tmp_path: Path) -> None:
     """The temp file must live in the destination's directory so ``os.replace``
     is atomic (cross-filesystem renames aren't)."""
