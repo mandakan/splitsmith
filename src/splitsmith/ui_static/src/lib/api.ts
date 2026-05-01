@@ -35,12 +35,30 @@ export interface MatchProject {
   scoreboard_match_id: string | null;
   stages: StageEntry[];
   unassigned_videos: StageVideo[];
+  last_scanned_dir: string | null;
 }
 
 export interface ScanResponse {
   registered: string[];
   auto_assigned: Record<string, string>;
   skipped: string[];
+}
+
+export type FsEntryKind = "dir" | "video" | "file";
+
+export interface FsEntry {
+  name: string;
+  kind: FsEntryKind;
+  video_count: number | null;
+  size_bytes: number | null;
+  mtime: number | null;
+}
+
+export interface FsListing {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
+  suggested_starts: string[];
 }
 
 class ApiError extends Error {
@@ -87,6 +105,11 @@ async function request<T>(
 
 export const api = {
   getProject: () => request<MatchProject>("/api/project"),
+
+  listFolder: (path?: string) => {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+    return request<FsListing>(`/api/fs/list${qs}`);
+  },
 
   importScoreboard: (data: unknown, overwrite = false) =>
     request<MatchProject>("/api/scoreboard/import", {

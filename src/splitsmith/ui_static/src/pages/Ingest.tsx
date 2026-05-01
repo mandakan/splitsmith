@@ -20,12 +20,12 @@ import {
   FileJson,
   FolderInput,
   Loader2,
-  RefreshCw,
   Trash2,
   Video as VideoIcon,
   XCircle,
 } from "lucide-react";
 
+import { FolderPicker } from "@/components/FolderPicker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -149,6 +149,7 @@ export function Ingest() {
 
       <ScanSection
         disabled={busy || !project || project.stages.length === 0}
+        initialPath={project?.last_scanned_dir ?? null}
         onScan={handleScan}
       />
 
@@ -212,12 +213,14 @@ function ScoreboardSection({
 
 function ScanSection({
   disabled,
+  initialPath,
   onScan,
 }: {
   disabled: boolean;
+  initialPath: string | null;
   onScan: (sourceDir: string) => void;
 }) {
-  const [path, setPath] = useState("");
+  const [open, setOpen] = useState(false);
   return (
     <Card>
       <CardHeader>
@@ -226,44 +229,58 @@ function ScanSection({
           Scan video folder
         </CardTitle>
         <CardDescription>
-          Path to a folder containing the match's MP4/MOV files. Videos are
-          symlinked into <code>&lt;project&gt;/raw/</code>; nothing is uploaded.
+          Pick a folder containing the match's MP4/MOV files. Videos are
+          symlinked into <code>&lt;project&gt;/raw/</code> — nothing is uploaded.
           Confident matches are auto-assigned as primary.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <form
-          className="flex flex-col gap-2 sm:flex-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (path.trim()) onScan(path.trim());
-          }}
-        >
-          <input
-            type="text"
-            name="source_dir"
-            placeholder="/Users/me/match-day/videos"
-            className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            disabled={disabled}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
+      <CardContent className="space-y-3">
+        {!open ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button disabled={disabled} onClick={() => setOpen(true)}>
+              <FolderInput />
+              Browse for folder
+            </Button>
+            {initialPath ? (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => onScan(initialPath)}
+                  title={`Re-scan ${initialPath}`}
+                >
+                  Re-scan {shortPath(initialPath)}
+                </Button>
+                <span className="font-mono text-xs text-muted-foreground" title={initialPath}>
+                  last: {initialPath}
+                </span>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <FolderPicker
+            initialPath={initialPath}
+            onSelect={(p) => {
+              setOpen(false);
+              onScan(p);
+            }}
+            onCancel={() => setOpen(false)}
           />
-          <Button type="submit" disabled={disabled || !path.trim()}>
-            <RefreshCw />
-            Scan
-          </Button>
-        </form>
+        )}
         {disabled ? (
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Load a scoreboard first.
           </p>
         ) : null}
       </CardContent>
     </Card>
   );
+}
+
+function shortPath(p: string): string {
+  const parts = p.split("/").filter(Boolean);
+  if (parts.length <= 2) return p;
+  return `…/${parts.slice(-2).join("/")}`;
 }
 
 function UnassignedSection({

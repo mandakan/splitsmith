@@ -290,6 +290,98 @@ def test_move_assignment_404_on_unknown_video(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_fs_list_returns_directory_entries(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    listing_root = tmp_path / "browseable"
+    listing_root.mkdir()
+    (listing_root / "subdir-a").mkdir()
+    (listing_root / "subdir-b").mkdir()
+    (listing_root / "VID_1.mp4").write_bytes(b"")
+    (listing_root / "VID_2.mov").write_bytes(b"")
+    (listing_root / "notes.txt").write_text("hi")
+    (listing_root / ".hidden").mkdir()  # filtered out
+
+    resp = client.get("/api/fs/list", params={"path": str(listing_root)})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["path"] == str(listing_root.resolve())
+    assert body["parent"] == str(listing_root.parent.resolve())
+    names = {e["name"]: e for e in body["entries"]}
+    assert ".hidden" not in names
+    assert names["subdir-a"]["kind"] == "dir"
+    assert names["VID_1.mp4"]["kind"] == "video"
+    assert names["notes.txt"]["kind"] == "file"
+    # Directories sort first.
+    kinds = [e["kind"] for e in body["entries"]]
+    assert kinds.index("dir") < kinds.index("video")
+
+
+def test_fs_list_video_count_for_directories(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    parent = tmp_path / "p"
+    inner = parent / "match-day"
+    inner.mkdir(parents=True)
+    (inner / "v1.mp4").write_bytes(b"")
+    (inner / "v2.mov").write_bytes(b"")
+    (inner / "notes.txt").write_text("hi")
+
+    resp = client.get("/api/fs/list", params={"path": str(parent)})
+    assert resp.status_code == 200
+    entries = {e["name"]: e for e in resp.json()["entries"]}
+    assert entries["match-day"]["kind"] == "dir"
+    assert entries["match-day"]["video_count"] == 2
+
+
+def test_fs_list_default_path_uses_last_scanned_dir(tmp_path: Path) -> None:
+    """Saving last_scanned_dir on the project should change the default path."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+
+    seeded = tmp_path / "videos"
+    seeded.mkdir()
+    project = MatchProject.load(project_root)
+    project.last_scanned_dir = str(seeded.resolve())
+    project.save(project_root)
+
+    resp = client.get("/api/fs/list")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["path"] == str(seeded.resolve())
+    # The seeded dir is suggested first in bookmarks.
+    assert body["suggested_starts"][0] == str(seeded.resolve())
+
+
+def test_fs_list_404_on_missing_path(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.get("/api/fs/list", params={"path": str(tmp_path / "nope")})
+    assert resp.status_code == 404
+
+
+def test_scan_persists_last_scanned_dir(tmp_path: Path) -> None:
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    (src_dir / "VID.mp4").write_bytes(b"")
+
+    resp = client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+    assert resp.status_code == 200
+
+    project = client.get("/api/project").json()
+    assert project["last_scanned_dir"] == str(src_dir.resolve())
+
+
 def test_external_edit_visible_without_restart(tmp_path: Path) -> None:
     """External edits to project.json must appear on the next request -- the
     server doesn't cache the model in memory."""

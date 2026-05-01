@@ -4,6 +4,7 @@ Endpoints (locked v1 surface):
 
   GET  /api/health                  -- project metadata + schema version
   GET  /api/project                 -- full MatchProject dump
+  GET  /api/fs/list?path=...        -- list directory entries (folder picker)
   POST /api/scoreboard/import       -- import an SSI Scoreboard JSON
   POST /api/videos/scan             -- enumerate videos in a folder, register them
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
@@ -23,9 +24,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -83,6 +84,21 @@ class MoveRequest(BaseModel):
     video_path: str
     to_stage_number: int | None = None
     role: VideoRole = "secondary"
+
+
+class FsEntry(BaseModel):
+    name: str
+    kind: Literal["dir", "video", "file"]
+    video_count: int | None = None  # populated for dirs
+    size_bytes: int | None = None  # populated for files
+    mtime: float | None = None
+
+
+class FsListing(BaseModel):
+    path: str
+    parent: str | None
+    entries: list[FsEntry]
+    suggested_starts: list[str]  # bookmarks: home, ~/Movies, last_scanned_dir, etc.
 
 
 def create_app(*, project_root: Path, project_name: str) -> FastAPI:
@@ -167,11 +183,73 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 project.assign_video(video_path, to_stage_number=stage_num, role="primary")
                 auto_assigned[stage_num] = str(video_path)
 
+        # Remember this folder so the picker defaults back here next time.
+        project.last_scanned_dir = str(source.resolve())
+
         project.save(state.project_root)
         return ScanResponse(
             registered=registered,
             auto_assigned=auto_assigned,
             skipped=skipped,
+        )
+
+    @app.get("/api/fs/list", response_model=FsListing)
+    def fs_list(path: str | None = Query(default=None)) -> FsListing:
+        """List a directory's children for the in-app folder picker.
+
+        - ``path=None`` returns the user's home directory plus suggested-start
+          bookmarks (last scanned, ~/Movies, ~/Videos, ~).
+        - Hidden entries (dot-prefixed) are skipped.
+        - Symlinks are resolved before listing; broken symlinks are silently
+          dropped from the entries list.
+        - Per-directory ``video_count`` is computed by a single shallow scan.
+        """
+        project = state.load()
+        target = Path(path).expanduser() if path else _default_start(project.last_scanned_dir)
+        try:
+            target = target.resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"path not found: {target}") from exc
+        if not target.is_dir():
+            raise HTTPException(status_code=400, detail=f"not a directory: {target}")
+
+        entries: list[FsEntry] = []
+        try:
+            children = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+        for child in children:
+            if child.name.startswith("."):
+                continue
+            try:
+                if child.is_dir():
+                    video_count = _count_videos_shallow(child)
+                    entries.append(FsEntry(name=child.name, kind="dir", video_count=video_count))
+                elif child.is_file():
+                    is_video = child.suffix.lower() in VIDEO_EXTENSIONS
+                    stat = child.stat()
+                    entries.append(
+                        FsEntry(
+                            name=child.name,
+                            kind="video" if is_video else "file",
+                            size_bytes=stat.st_size,
+                            mtime=stat.st_mtime,
+                        )
+                    )
+            except (PermissionError, OSError):
+                # Broken symlink, permission issue on a child -- skip rather
+                # than fail the whole listing.
+                continue
+
+        parent = str(target.parent) if target.parent != target else None
+        suggested = _suggested_starts(project.last_scanned_dir)
+
+        return FsListing(
+            path=str(target),
+            parent=parent,
+            entries=entries,
+            suggested_starts=suggested,
         )
 
     @app.post("/api/videos/auto-match")
@@ -229,6 +307,62 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             return FileResponse(index)
 
     return app
+
+
+def _default_start(last_scanned_dir: str | None) -> Path:
+    """Pick a default starting directory for the folder picker.
+
+    Preference: last-scanned-dir (if it still exists) → ~/Movies → ~/Videos → ~.
+    """
+    if last_scanned_dir:
+        p = Path(last_scanned_dir).expanduser()
+        if p.is_dir():
+            return p
+    home = Path.home()
+    for candidate in (home / "Movies", home / "Videos"):
+        if candidate.is_dir():
+            return candidate
+    return home
+
+
+def _suggested_starts(last_scanned_dir: str | None) -> list[str]:
+    """Bookmarks the folder picker shows in a sidebar."""
+    home = Path.home()
+    candidates = []
+    if last_scanned_dir:
+        p = Path(last_scanned_dir).expanduser()
+        if p.is_dir():
+            candidates.append(str(p))
+    for c in (home, home / "Movies", home / "Videos", home / "Downloads", home / "Desktop"):
+        if c.is_dir():
+            candidates.append(str(c))
+    # De-duplicate while preserving order.
+    seen: set[str] = set()
+    result = []
+    for c in candidates:
+        if c in seen:
+            continue
+        seen.add(c)
+        result.append(c)
+    return result
+
+
+def _count_videos_shallow(directory: Path, *, cap: int = 200) -> int:
+    """Count video files directly inside ``directory`` (no recursion).
+
+    Capped at ``cap`` to keep the picker responsive on huge folders. The UI
+    only uses this as a ranking hint ("this folder has videos in it").
+    """
+    count = 0
+    try:
+        for entry in directory.iterdir():
+            if entry.is_file() and entry.suffix.lower() in VIDEO_EXTENSIONS:
+                count += 1
+                if count >= cap:
+                    return count
+    except (PermissionError, OSError):
+        return 0
+    return count
 
 
 def serve(

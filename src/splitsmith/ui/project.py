@@ -105,6 +105,9 @@ class MatchProject(BaseModel):
     # The Sub 2 (#13) ingest screen surfaces these in a "tray" so the user can
     # drag them onto stages or mark them as ignored.
     unassigned_videos: list[StageVideo] = Field(default_factory=list)
+    # Last folder the user scanned for videos. Persisted so the folder picker
+    # in the ingest UI can default back here on the next scan.
+    last_scanned_dir: str | None = None
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
