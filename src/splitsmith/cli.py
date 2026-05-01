@@ -112,9 +112,7 @@ def detect(
     if refine_diffs:
         console.print(
             f"  [cyan]refined {len(refine_diffs)} shot time(s)[/]: "
-            + ", ".join(
-                f"#{d['shot_number']} {d['drift_ms']:+.1f}ms" for d in refine_diffs
-            )
+            + ", ".join(f"#{d['shot_number']} {d['drift_ms']:+.1f}ms" for d in refine_diffs)
         )
     _print_shots_table(shots)
     _print_anomalies(report.detect_anomalies(shots, beep.time, time))
@@ -244,13 +242,18 @@ def audit_prep(
         ),
     ),
     paper: int = typer.Option(
-        0, "--paper", min=0,
+        0,
+        "--paper",
+        min=0,
         help="Paper-target count for the stage (each scored x2 in IPSC by default).",
     ),
     poppers: int = typer.Option(0, "--poppers", min=0, help="Popper count."),
     plates: int = typer.Option(0, "--plates", min=0, help="Plate count."),
     shots_per_paper: int = typer.Option(
-        2, "--shots-per-paper", min=1, max=2,
+        2,
+        "--shots-per-paper",
+        min=1,
+        max=2,
         help="Shots per paper target. 2 for normal stages, 1 for strong/weak-hand-only.",
     ),
 ) -> None:
@@ -343,8 +346,7 @@ def audit_prep(
 
     fixture_json_data = {
         "source": (
-            f"{video.name} stage {stage_number} '{stage_name}' "
-            "(audio extracted at 48 kHz mono)"
+            f"{video.name} stage {stage_number} '{stage_name}' " "(audio extracted at 48 kHz mono)"
         ),
         "stage_number": stage_number,
         "stage_name": stage_name,
@@ -518,9 +520,7 @@ def _process_one(
     if refine_diffs:
         console.print(
             f"  [cyan]refined {len(refine_diffs)} shot time(s)[/]: "
-            + ", ".join(
-                f"#{i + 1} {d['drift_ms']:+.1f}ms" for i, d in enumerate(refine_diffs)
-            )
+            + ", ".join(f"#{i + 1} {d['drift_ms']:+.1f}ms" for i, d in enumerate(refine_diffs))
         )
     _print_shots_table(shots)
 
