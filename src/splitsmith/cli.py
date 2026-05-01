@@ -28,6 +28,7 @@ from . import (
     report,
     review_server,
     shot_detect,
+    shot_refine,
     trim,
     video_match,
 )
@@ -107,6 +108,14 @@ def detect(
     )
 
     shots = shot_detect.detect_shots(audio, sr, beep.time, time, config.shot_detect)
+    shots, refine_diffs = _refine_shot_times(audio, sr, shots, beep.time, config)
+    if refine_diffs:
+        console.print(
+            f"  [cyan]refined {len(refine_diffs)} shot time(s)[/]: "
+            + ", ".join(
+                f"#{d['shot_number']} {d['drift_ms']:+.1f}ms" for d in refine_diffs
+            )
+        )
     _print_shots_table(shots)
     _print_anomalies(report.detect_anomalies(shots, beep.time, time))
 
@@ -484,6 +493,14 @@ def _process_one(
     )
 
     shots = shot_detect.detect_shots(audio, sr, beep.time, stage.time_seconds, config.shot_detect)
+    shots, refine_diffs = _refine_shot_times(audio, sr, shots, beep.time, config)
+    if refine_diffs:
+        console.print(
+            f"  [cyan]refined {len(refine_diffs)} shot time(s)[/]: "
+            + ", ".join(
+                f"#{i + 1} {d['drift_ms']:+.1f}ms" for i, d in enumerate(refine_diffs)
+            )
+        )
     _print_shots_table(shots)
 
     files = ReportFiles()
@@ -531,6 +548,42 @@ def _process_one(
     console.print(f"  [green]report[/]:        {report_path}")
     _print_anomalies(anomalies)
     return files
+
+
+def _refine_shot_times(
+    audio,
+    sr: int,
+    shots: list[Shot],
+    beep_time: float,
+    config: Config,
+) -> tuple[list[Shot], list[dict]]:
+    """Run second-pass timing refinement on each shot.
+
+    Returns (refined_shots, diffs) where ``diffs`` lists only the shots whose
+    timestamp was actually moved (accepted by ``shot_refine`` and non-zero
+    drift). Splits and time_from_beep are recomputed from the refined times.
+    """
+    refined: list[Shot] = []
+    diffs: list[dict] = []
+    prev_t = beep_time
+    for s in shots:
+        r = shot_refine.refine_shot_time(audio, sr, s.time_absolute, config.shot_refine)
+        new_t = r.time if r.accepted else s.time_absolute
+        if r.accepted and abs(r.drift_ms) > 0.01:
+            diffs.append({"shot_number": s.shot_number, "drift_ms": r.drift_ms})
+        refined.append(
+            Shot(
+                shot_number=s.shot_number,
+                time_absolute=new_t,
+                time_from_beep=new_t - beep_time,
+                split=new_t - prev_t,
+                peak_amplitude=s.peak_amplitude,
+                confidence=s.confidence,
+                notes=s.notes,
+            )
+        )
+        prev_t = new_t
+    return refined, diffs
 
 
 def _video_to_audio_path(video: Path) -> Path:
