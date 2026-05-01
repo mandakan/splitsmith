@@ -79,6 +79,18 @@ def _hand_features(audio, sr, t, all_times, beep_time, confidence, peak_amp):
     sorted_t = sorted(all_times)
     j = sorted_t.index(t)
     gap_prev = (sorted_t[j] - sorted_t[j - 1]) if j > 0 else 5.0
+
+    # NOTE: tried adding direct-to-reverb ratio (5ms direct / 45ms tail) and
+    # attack_2ms here on 2026-05-01 to fix cross-bay confusion. attack_2ms is
+    # individually discriminative (pos median 163 vs neg median 31) but
+    # redundant with attack_10ms and the model held-out precision REGRESSED
+    # (199 -> 206 kept, 55.3 % -> 53.4 % at 95 % recall). DRR mean is
+    # essentially identical for pos and neg (0.098 vs 0.094) -- the rise-foot
+    # leading-edge timestamp puts the "direct" window inside the rise itself,
+    # not the impulse, so the metric measures rise/decay ratio instead of
+    # direct/reverb ratio. Both reverted; next step is more labelled fixtures
+    # or per-fixture context features (peak / local-ambient ratio).
+
     return [
         peak_amp, confidence, rms_pre, rms_post,
         rms_post / (rms_pre + 1e-6), attack, gap_prev,
