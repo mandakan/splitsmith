@@ -329,6 +329,15 @@ The **primary** is the audit truth — detection runs on its audio and audit JSO
 
 The pipeline is **idempotent**: re-entering ingest only processes videos with `processed.* == false`. Adding a secondary to an audited stage runs only beep + trim for that file; the audit JSON is untouched.
 
+### Accessibility (locked, see #21)
+
+- **WCAG 2.2 Level AA** is the target across the production UI.
+- **Color is never the only signal** (WCAG 1.4.1). Splits, statuses and audit markers all carry shape, glyph, or text in addition to color.
+- **Color-blind safe palette** (Okabe-Ito derived) for split colors. Distinguishable under deuteranopia, protanopia, and tritanopia.
+- `fcpxml_gen.py` emits band names as text (`[GREEN]` / `[YELLOW]` / `[RED]` / `[BLUE]`); FCP renders marker color from FCP-side preferences. The in-app palette and FCPXML output are decoupled.
+- The `MarkerGlyph` component encodes audit-marker state by shape (filled triangle / outline triangle with strikethrough / dashed diamond) so users who can't perceive color can still distinguish detected / rejected / manual.
+- `prefers-reduced-motion` is respected globally.
+
 ### Implementation status
 
 Sub 1 (#12, this commit) lands:
