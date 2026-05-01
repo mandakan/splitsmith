@@ -118,7 +118,7 @@
     }
   ],
   "_candidates_pending_audit": {
-    "_note": "Auto-detected by current shot_detect (half-rise leading edge). NOT ground truth. Open in `splitsmith review` to audit, or mark audit_keep in the companion -candidates.csv and run `splitsmith audit-apply`.",
+    "_note": "Auto-detected by current shot_detect (rise-foot leading edge with reverb-chain re-anchor). NOT ground truth.",
     "candidates": [
       {
         "candidate_number": 1,
@@ -129,7 +129,7 @@
       },
       {
         "candidate_number": 2,
-        "time": 1.5016,
+        "time": 1.5017,
         "ms_after_beep": 1002.0,
         "peak_amplitude": 0.0571,
         "confidence": 0.165
@@ -143,7 +143,7 @@
       },
       {
         "candidate_number": 4,
-        "time": 2.7188,
+        "time": 2.7189,
         "ms_after_beep": 2219.0,
         "peak_amplitude": 0.373,
         "confidence": 0.275
@@ -171,10 +171,10 @@
       },
       {
         "candidate_number": 8,
-        "time": 5.1441,
+        "time": 5.1442,
         "ms_after_beep": 4644.0,
         "peak_amplitude": 0.1397,
-        "confidence": 0.283
+        "confidence": 0.282
       },
       {
         "candidate_number": 9,
@@ -220,17 +220,17 @@
       },
       {
         "candidate_number": 15,
-        "time": 7.8948,
+        "time": 7.8949,
         "ms_after_beep": 7395.0,
         "peak_amplitude": 0.428,
         "confidence": 0.193
       },
       {
         "candidate_number": 16,
-        "time": 8.5036,
+        "time": 8.5037,
         "ms_after_beep": 8004.0,
         "peak_amplitude": 0.2323,
-        "confidence": 0.214
+        "confidence": 0.215
       },
       {
         "candidate_number": 17,
@@ -249,7 +249,7 @@
       {
         "candidate_number": 19,
         "time": 9.4265,
-        "ms_after_beep": 8926.0,
+        "ms_after_beep": 8927.0,
         "peak_amplitude": 0.0962,
         "confidence": 0.013
       },
@@ -276,14 +276,14 @@
       },
       {
         "candidate_number": 23,
-        "time": 10.1621,
+        "time": 10.1622,
         "ms_after_beep": 9662.0,
         "peak_amplitude": 0.0584,
         "confidence": 0.009
       },
       {
         "candidate_number": 24,
-        "time": 10.5628,
+        "time": 10.5629,
         "ms_after_beep": 10063.0,
         "peak_amplitude": 0.5874,
         "confidence": 0.487
@@ -311,14 +311,14 @@
       },
       {
         "candidate_number": 28,
-        "time": 12.1706,
-        "ms_after_beep": 11671.0,
-        "peak_amplitude": 0.0836,
-        "confidence": 0.031
+        "time": 12.105,
+        "ms_after_beep": 11605.0,
+        "peak_amplitude": 0.1283,
+        "confidence": 0.014
       },
       {
         "candidate_number": 29,
-        "time": 12.3019,
+        "time": 12.302,
         "ms_after_beep": 11802.0,
         "peak_amplitude": 0.0827,
         "confidence": 0.071
@@ -332,10 +332,10 @@
       },
       {
         "candidate_number": 31,
-        "time": 12.696,
-        "ms_after_beep": 12196.0,
-        "peak_amplitude": 0.0506,
-        "confidence": 0.021
+        "time": 12.6522,
+        "ms_after_beep": 12152.0,
+        "peak_amplitude": 0.1035,
+        "confidence": 0.01
       },
       {
         "candidate_number": 32,
@@ -353,14 +353,14 @@
       },
       {
         "candidate_number": 34,
-        "time": 14.28,
-        "ms_after_beep": 13780.0,
-        "peak_amplitude": 0.0331,
-        "confidence": 0.021
+        "time": 14.1113,
+        "ms_after_beep": 13611.0,
+        "peak_amplitude": 0.0697,
+        "confidence": 0.023
       },
       {
         "candidate_number": 35,
-        "time": 14.4004,
+        "time": 14.4005,
         "ms_after_beep": 13900.0,
         "peak_amplitude": 0.2523,
         "confidence": 0.23

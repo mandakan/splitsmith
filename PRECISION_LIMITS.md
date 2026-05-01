@@ -105,6 +105,38 @@ training. Each new feature gives it more knobs to overfit on.
 * **Per-shooter normalisation.** When we have multiple shooters, normalise
   features by per-shooter median peak/RMS before the GBDT sees them.
 
+## 4a-followup (2026-05-01): rise-foot tightening attempt -- partial fix, voter regression
+
+A reverb-chain re-anchor in ``shot_detect._leading_edge`` was added to make
+the candidate generator walk past reverb peaks to the true onset. It does
+fix stage-3 candidate #35 (was 144 ms late, now within 1 ms of the true
+onset; +1 positive added to the calibration set, 164 vs 163), and recall
+held at 100 % across all 9 fixtures.
+
+**Cost:** voter C precision dropped 72.1 % -> 60.2 % (and 4-of-4 ensemble
+74.9 % -> 62.9 %). Mechanism: when the heuristic fires on FALSE-positive
+candidates, it pulls them backward to the loudest peak in their lookback
+window. The features used by voters (peak_amp, attack, tail_amp, MR
+ratios) are evaluated at the post-anchor position, so negatives end up at
+louder positions with more shot-like features. The voters then have a
+harder time discriminating positives from these "feature-shifted"
+negatives.
+
+This is a fundamental tension between *candidate timing accuracy* (favoured
+by re-anchor) and *voter feature stability* (penalised by re-anchor moving
+negative candidates to louder peaks). The proper architectural answer is:
+
+* **Candidate generator stays narrow / stable.** Voters see the same
+  feature distribution they were calibrated for.
+* **Timing refinement is a SECOND PASS** that runs after voter filtering
+  (or after user audit), uses AIC picker / matched filter on the raw
+  waveform, and updates ONLY the timestamp -- never the features used
+  upstream. See GitHub issue #7.
+
+Status: rise-foot re-anchor is currently enabled. Stage-3 audit is now
+covered. Voter precision regression accepted pending the second-pass
+refinement work that will let us revert this and recover precision.
+
 ## 4a. Candidate generator anchors on reverb peaks instead of onset
 
 **Where it bites:** stage-shots-blacksmith-2026-stage3 candidate #35 -- the
