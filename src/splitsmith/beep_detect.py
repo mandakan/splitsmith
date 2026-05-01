@@ -26,6 +26,19 @@ than the previous noise-floor backtrack depending on the beep's ramp shape
 and noise floor. ``draw_time = first_shot - beep_time`` shifts accordingly;
 splits BETWEEN shots are unaffected (beep_time cancels).
 
+Known failure mode -> future production UX:
+The autodetect picks the highest silence-preference-scored candidate inside
+``search_window_s``. When two candidates have similar scores (e.g. a louder
+in-stage shot preceded by a movement gap, or an early non-beep timer chirp),
+the wrong one can win and the WAV trim is silently misaligned. The user-
+facing CLI exposes ``--beep-time`` as the override but the trim has already
+happened by the time you notice in the audit UI. A proper UX should:
+
+* surface the top-N candidates with their times/scores BEFORE trimming, OR
+* delay the WAV trim until after a quick UI confirmation step, OR
+* use a wider initial trim window and let the user nudge the beep marker
+  inside the audit UI (with re-trim on save).
+
 Pure function: takes audio + sample rate + config, returns a BeepDetection. No
 file I/O. ``load_audio`` is provided as a thin convenience for callers.
 """

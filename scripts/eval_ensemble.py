@@ -48,6 +48,7 @@ from splitsmith.shot_detect import detect_shots
 DEFAULT_FIXTURES = [
     "stage-shots",
     "stage-shots-blacksmith-h5",
+    "stage-shots-blacksmith-2026-stage1",
     "stage-shots-blacksmith-2026-stage2",
     "stage-shots-tallmilan-stage2",
     "stage-shots-tallmilan-stage7",
@@ -113,6 +114,21 @@ def _hand_features(
     sorted_t = sorted(all_times)
     j = sorted_t.index(t)
     gap_prev = (sorted_t[j] - sorted_t[j - 1]) if j > 0 else 5.0
+    # Reverb-tail amplitude (user observation 2026-05-01): movement /
+    # handling false positives lack the gunshot's sustained 50-200 ms
+    # decay. Find local peak in the 10 ms after rise-foot timestamp,
+    # measure mean |audio| in [peak + 50 ms, peak + 200 ms]. Used
+    # absolute (not normalised by peak) because cross-bay shots have
+    # low peak + medium tail; the ratio confounds them with shots.
+    peak_search_n = int(0.010 * sr)
+    psearch_hi = min(n, idx + peak_search_n)
+    if psearch_hi > idx:
+        peak_local_idx = idx + int(np.argmax(np.abs(audio[idx:psearch_hi])))
+    else:
+        peak_local_idx = idx
+    tail_lo = min(n, peak_local_idx + int(0.050 * sr))
+    tail_hi = min(n, peak_local_idx + int(0.200 * sr))
+    tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi]))) if tail_hi > tail_lo else 0.0
     return [
         peak_amp,
         confidence,
@@ -122,6 +138,7 @@ def _hand_features(
         attack,
         gap_prev,
         (t - beep_time) * 1000.0,
+        tail_amp,
     ]
 
 
@@ -156,13 +173,35 @@ def main() -> None:
 
     fixtures = args.fixture or DEFAULT_FIXTURES
 
+    # Two-pass: first compute the lowest detector-confidence among audited
+    # positives across the calibration set, so voter A's min_confidence floor
+    # preserves 100 % recall by construction. The hardcoded 0.03 was tuned on
+    # an earlier dataset; the new stage-1 fixture exposed an AGC-ducked shot
+    # at conf ~0.018 that the old floor would silently drop.
+    min_pos_conf = float("inf")
+    for fix in fixtures:
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
+        cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
+        all_shots = detect_shots(
+            audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall
+        )
+        gt_t = [s["time"] for s in truth.get("shots", [])]
+        cand_t = [s.time_absolute for s in all_shots]
+        labels = _label(cand_t, gt_t, args.tolerance_ms)
+        for sh, lbl in zip(all_shots, labels, strict=True):
+            if lbl == 1 and sh.confidence < min_pos_conf:
+                min_pos_conf = float(sh.confidence)
+    voter_a_floor = max(0.0, min_pos_conf - 1e-6)
+    print(f"voter A auto-calibrated min_confidence floor: {voter_a_floor:.4f}\n")
+
     # Build the candidate universe + per-candidate voter signals.
     universe = []  # list of dicts
     for fix in fixtures:
         truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
-        cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.03)
+        cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)
         all_shots = detect_shots(
             audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall
         )

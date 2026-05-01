@@ -32,6 +32,7 @@ from splitsmith.shot_detect import detect_shots
 DEFAULT_FIXTURES = [
     "stage-shots",
     "stage-shots-blacksmith-h5",
+    "stage-shots-blacksmith-2026-stage1",
     "stage-shots-blacksmith-2026-stage2",
     "stage-shots-tallmilan-stage2",
     "stage-shots-tallmilan-stage7",
@@ -80,21 +81,37 @@ def _hand_features(audio, sr, t, all_times, beep_time, confidence, peak_amp):
     j = sorted_t.index(t)
     gap_prev = (sorted_t[j] - sorted_t[j - 1]) if j > 0 else 5.0
 
-    # NOTE: tried adding direct-to-reverb ratio (5ms direct / 45ms tail) and
-    # attack_2ms here on 2026-05-01 to fix cross-bay confusion. attack_2ms is
-    # individually discriminative (pos median 163 vs neg median 31) but
-    # redundant with attack_10ms and the model held-out precision REGRESSED
-    # (199 -> 206 kept, 55.3 % -> 53.4 % at 95 % recall). DRR mean is
-    # essentially identical for pos and neg (0.098 vs 0.094) -- the rise-foot
-    # leading-edge timestamp puts the "direct" window inside the rise itself,
-    # not the impulse, so the metric measures rise/decay ratio instead of
-    # direct/reverb ratio. Both reverted; next step is more labelled fixtures
-    # or per-fixture context features (peak / local-ambient ratio).
+    # Reverb-tail discriminator (user observation 2026-05-01: movement /
+    # handling false positives lack the gunshot's sustained 50-200 ms decay).
+    # ABSOLUTE tail amplitude beats tail/peak ratio: cross-bay shots have low
+    # peak + high tail (high ratio) while real shots have high peak + medium
+    # tail (lower ratio), so normalising obscures the discriminator. Absolute
+    # tail consistently splits pos > neg across all fixtures and amplitude
+    # classes; on the new stage 1 fixture it's a 2.6x ratio.
+    peak_search_n = int(0.010 * sr)
+    psearch_hi = min(n, idx + peak_search_n)
+    if psearch_hi > idx:
+        peak_local_idx = idx + int(np.argmax(np.abs(audio[idx:psearch_hi])))
+    else:
+        peak_local_idx = idx
+    tail_lo = min(n, peak_local_idx + int(0.050 * sr))
+    tail_hi = min(n, peak_local_idx + int(0.200 * sr))
+    if tail_hi > tail_lo:
+        tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi])))
+    else:
+        tail_amp = 0.0
+
+    # NOTE 2026-05-01: tried adding direct-to-reverb ratio (5 ms direct / 45 ms
+    # tail) and attack_2ms. attack_2ms was individually discriminative but
+    # redundant with attack_10ms; DRR was confounded by the rise-foot
+    # timestamp falling inside the rise rather than at the impulse. Both
+    # regressed held-out precision and were reverted.
 
     return [
         peak_amp, confidence, rms_pre, rms_post,
         rms_post / (rms_pre + 1e-6), attack, gap_prev,
         (t - beep_time) * 1000.0,
+        tail_amp,
     ]
 
 

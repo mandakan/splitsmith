@@ -53,6 +53,7 @@ from splitsmith.shot_detect import detect_shots
 DEFAULT_FIXTURES = [
     "stage-shots",
     "stage-shots-blacksmith-h5",
+    "stage-shots-blacksmith-2026-stage1",
     "stage-shots-blacksmith-2026-stage2",
     "stage-shots-tallmilan-stage2",
     "stage-shots-tallmilan-stage7",
@@ -111,6 +112,21 @@ def _hand_features(
     sorted_t = sorted(all_times)
     j = sorted_t.index(t)
     gap_prev = (sorted_t[j] - sorted_t[j - 1]) if j > 0 else 5.0
+    # Reverb-tail amplitude (user observation 2026-05-01): movement /
+    # handling false positives lack the gunshot's sustained 50-200 ms
+    # decay. Find local peak in the 10 ms after rise-foot timestamp,
+    # measure mean |audio| in [peak + 50 ms, peak + 200 ms]. Used
+    # absolute (not normalised by peak) because cross-bay shots have
+    # low peak + medium tail; the ratio confounds them with shots.
+    peak_search_n = int(0.010 * sr)
+    psearch_hi = min(n, idx + peak_search_n)
+    if psearch_hi > idx:
+        peak_local_idx = idx + int(np.argmax(np.abs(audio[idx:psearch_hi])))
+    else:
+        peak_local_idx = idx
+    tail_lo = min(n, peak_local_idx + int(0.050 * sr))
+    tail_hi = min(n, peak_local_idx + int(0.200 * sr))
+    tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi]))) if tail_hi > tail_lo else 0.0
     return [
         peak_amp,
         confidence,
@@ -120,10 +136,36 @@ def _hand_features(
         attack,
         gap_prev,
         (t - beep_time) * 1000.0,
+        tail_amp,
     ]
 
 
-def _compute_universe(fixtures: list[str], tolerance_ms: float):
+def _voter_a_floor(fixtures: list[str], tolerance_ms: float) -> float:
+    """Lowest detector confidence across audited positives in the calibration
+    set. Used as voter A's min_confidence so it preserves 100 % recall by
+    construction (the hardcoded 0.03 was tuned on an earlier dataset and
+    later AGC-ducked shots fall below it)."""
+    min_conf = float("inf")
+    for fix in fixtures:
+        p = FIXTURES_DIR / f"{fix}.json"
+        if not p.exists():
+            continue
+        truth = json.loads(p.read_text())
+        if not truth.get("shots"):
+            continue
+        audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
+        cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
+        shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
+        gt_t = [s["time"] for s in truth["shots"]]
+        cand_t = [s.time_absolute for s in shots]
+        labels = _label(cand_t, gt_t, tolerance_ms)
+        for sh, lbl in zip(shots, labels, strict=True):
+            if lbl == 1 and sh.confidence < min_conf:
+                min_conf = float(sh.confidence)
+    return max(0.0, min_conf - 1e-6) if min_conf != float("inf") else 0.03
+
+
+def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: float):
     """Return list[dict] one per candidate across all fixtures, with voter signals."""
     universe = []
     per_fixture = {}
@@ -131,7 +173,7 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float):
         truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
-        cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.03)
+        cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)
         all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
         safe_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_safe)
         safe_times = {round(s.time_absolute, 6) for s in safe_shots}
@@ -321,7 +363,9 @@ def main() -> None:
     if new_fixtures:
         print(f"Applying ensemble to {len(new_fixtures)} new fixture(s) (no labels): {new_fixtures}")
 
-    universe, per_fixture = _compute_universe(apply_fixtures, args.tolerance_ms)
+    voter_a_floor = _voter_a_floor(calibration_fixtures, args.tolerance_ms)
+    print(f"Voter A floor (auto-calibrated to lowest positive confidence): {voter_a_floor:.4f}")
+    universe, per_fixture = _compute_universe(apply_fixtures, args.tolerance_ms, voter_a_floor)
     calib_universe = [c for c in universe if c["fixture"] in calibration_fixtures]
     print(
         f"Calibration set: {len(calib_universe)} candidates, "
