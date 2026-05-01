@@ -105,6 +105,32 @@ training. Each new feature gives it more knobs to overfit on.
 * **Per-shooter normalisation.** When we have multiple shooters, normalise
   features by per-shooter median peak/RMS before the GBDT sees them.
 
+## 4a. Candidate generator anchors on reverb peaks instead of onset
+
+**Where it bites:** stage-shots-blacksmith-2026-stage3 candidate #35 -- the
+detector placed its anchor 144 ms after the true muzzle blast onset, on a
+reverb peak. The user's audit nudged the timestamp back to the correct
+position, but the candidate's *audio features* still belong to the reverb
+peak (low PANN gunshot probability, low CLAP shot-similarity, low detector
+confidence, low attack). Surfaced by ``eval_ensemble.py`` as a "candidate-
+generator miss".
+
+**Why it can't be papered over with feature engineering:** including such
+candidates as positives in voter calibration drags the auto-calibrated
+thresholds down (voters require 100 % recall, so they lower their threshold
+to admit the reverb-feature positive) and tanks precision across the board.
+4-of-4 dropped from 74.9 % to 27.9 % when this was tried. We now exclude
+linked-but-shifted audits from positives and report them separately so
+recall accounting is honest without poisoning the feature distribution.
+
+**Real fix is in the candidate generator, not the voter layer:**
+* Tighten the rise-foot backtracking in ``shot_detect`` so it walks past
+  reverb peaks to the true onset.
+* OR, run an AIC picker / matched filter on the raw waveform inside
+  ~30 ms windows around each candidate to refine the anchor (this is the
+  same machinery proposed for the confirmation-time second pass in
+  GitHub issue #7, but applied at candidate-generation time instead).
+
 ## 4. Candidate timing precision is capped by 10 ms envelope smoothing
 
 **Where it bites:** AGC-ducked shots whose envelope rise is slow can have

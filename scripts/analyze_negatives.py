@@ -53,9 +53,20 @@ _CLAP_PROMPTS_SHOT = {
 }
 
 
-def _label(cand_t, gt_t, tol_ms):
+def _label(cand_t, truth_shots, tol_ms):
+    """Map candidates to GT shots. Returns (labels, generator_misses).
+
+    Time matching first (robust to stale candidate_number links from older
+    fixtures whose candidate ordering changed as shot_detect evolved). Linked
+    audits where time matching fails are recorded as candidate-generator
+    misses, NOT as positives -- their reverb-peak audio features would poison
+    voter calibration. See eval_ensemble._label for full rationale.
+    """
+    labels = [0] * len(cand_t)
     used = set()
-    for t in sorted(gt_t):
+    misses = []
+    for s in sorted(truth_shots, key=lambda x: x["time"]):
+        t = s["time"]
         best_i, best_d = None, None
         for i, c in enumerate(cand_t):
             if i in used:
@@ -65,7 +76,10 @@ def _label(cand_t, gt_t, tol_ms):
                 best_i, best_d = i, d
         if best_i is not None:
             used.add(best_i)
-    return [1 if i in used else 0 for i in range(len(cand_t))]
+            labels[best_i] = 1
+        else:
+            misses.append({"audit_time": t})
+    return labels, misses
 
 
 def _hand_features(audio, sr, t, all_times, beep_time, confidence, peak_amp):
@@ -161,9 +175,8 @@ def _build_universe(fixtures, tol_ms):
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
-        gt_t = [s["time"] for s in truth.get("shots", [])]
         cand_t = [s.time_absolute for s in shots]
-        labels = _label(cand_t, gt_t, tol_ms)
+        labels, _ = _label(cand_t, truth.get("shots", []), tol_ms)
 
         clap = np.load(CACHE_DIR / f"{fix}_clap.npz", allow_pickle=True)
         prompts = [str(p) for p in clap["prompts"].tolist()]

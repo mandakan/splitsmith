@@ -67,9 +67,33 @@ _CLAP_PROMPTS_SHOT = {
 }
 
 
-def _label(cand_t: list[float], gt_t: list[float], tol_ms: float) -> list[int]:
+def _label(
+    cand_t: list[float], truth_shots: list[dict], tol_ms: float
+) -> tuple[list[int], list[dict]]:
+    """Map candidates to GT shots. Returns (labels, generator_misses).
+
+    Strategy per audit shot:
+    1. Try greedy nearest-time matching within ``tol_ms``. If a candidate is
+       found, label it positive. (Robust to stale candidate_number links from
+       older fixtures whose candidate ordering changed as shot_detect evolved.)
+    2. If time matching fails AND the audit shot has a candidate_number link:
+       this is a genuine candidate-generator miss -- the user verified a shot
+       there, but the detector's anchor for it sits more than ``tol_ms`` away
+       (typically because it latched onto a reverb peak instead of the onset).
+       Record as a miss; do NOT label its linked candidate positive (the
+       candidate's audio features would poison voter calibration).
+    3. If time matching fails AND no link: also a miss (manual entry the
+       generator missed entirely).
+
+    Misses are reported separately so recall can be counted honestly without
+    using reverb-anchor features as positive training data.
+    """
+    labels = [0] * len(cand_t)
     used: set[int] = set()
-    for t in sorted(gt_t):
+    misses: list[dict] = []
+    sorted_shots = sorted(truth_shots, key=lambda s: s["time"])
+    for s in sorted_shots:
+        t = s["time"]
         best_i, best_d = None, None
         for i, c in enumerate(cand_t):
             if i in used:
@@ -79,7 +103,24 @@ def _label(cand_t: list[float], gt_t: list[float], tol_ms: float) -> list[int]:
                 best_i, best_d = i, d
         if best_i is not None:
             used.add(best_i)
-    return [1 if i in used else 0 for i in range(len(cand_t))]
+            labels[best_i] = 1
+            continue
+        cn = s.get("candidate_number")
+        if cn is not None and 1 <= cn <= len(cand_t):
+            misses.append({
+                "audit_time": t,
+                "candidate_number": cn,
+                "candidate_time": cand_t[cn - 1],
+                "drift_ms": abs(cand_t[cn - 1] - t) * 1000.0,
+            })
+        else:
+            misses.append({
+                "audit_time": t,
+                "candidate_number": None,
+                "candidate_time": None,
+                "drift_ms": None,
+            })
+    return labels, misses
 
 
 def _hand_features(
@@ -220,9 +261,8 @@ def main() -> None:
         all_shots = detect_shots(
             audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall
         )
-        gt_t = [s["time"] for s in truth.get("shots", [])]
         cand_t = [s.time_absolute for s in all_shots]
-        labels = _label(cand_t, gt_t, args.tolerance_ms)
+        labels, _ = _label(cand_t, truth.get("shots", []), args.tolerance_ms)
         for sh, lbl in zip(all_shots, labels, strict=True):
             if lbl == 1 and sh.confidence < min_pos_conf:
                 min_pos_conf = float(sh.confidence)
@@ -231,6 +271,7 @@ def main() -> None:
 
     # Build the candidate universe + per-candidate voter signals.
     universe = []  # list of dicts
+    all_misses: list[dict] = []  # candidate-generator misses (linked-but-shifted audits)
     for fix in fixtures:
         truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
@@ -244,9 +285,9 @@ def main() -> None:
         )
         safe_times = {round(s.time_absolute, 6) for s in safe_shots}
 
-        gt_t = [s["time"] for s in truth.get("shots", [])]
         cand_t = [s.time_absolute for s in all_shots]
-        labels = _label(cand_t, gt_t, args.tolerance_ms)
+        labels, fix_misses = _label(cand_t, truth.get("shots", []), args.tolerance_ms)
+        all_misses.extend([{**m, "fixture": fix} for m in fix_misses])
 
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
         if not clap_path.exists():
@@ -435,6 +476,28 @@ def main() -> None:
         f"  Total disagreement-1 candidates: {len(disagreements)}, "
         f"of which {n_disagree_pos} are real shots ({n_disagree_pos/max(len(disagreements),1)*100:.1f} %)"
     )
+
+    if all_misses:
+        print(
+            f"\n=== Candidate-generator misses ({len(all_misses)}) -- audited shots "
+            f"with no candidate within {args.tolerance_ms:.0f} ms ==="
+        )
+        print(
+            "These positives are excluded from voter calibration (their nearest "
+            "candidate has reverb-tail features, not gunshot features). Fixing "
+            "requires a better onset anchor in shot_detect (issue #7)."
+        )
+        print(f"{'fixture':38s} {'audit_t':>9s} {'cand#':>5s} {'cand_t':>9s} {'drift':>10s}")
+        for m in all_misses:
+            cn = m.get("candidate_number")
+            ct = m.get("candidate_time")
+            dr = m.get("drift_ms")
+            cn_s = str(cn) if cn is not None else "-"
+            ct_s = f"{ct:9.4f}" if ct is not None else "        -"
+            dr_s = f"{dr:+.1f} ms" if dr is not None else "-"
+            print(
+                f"{m['fixture']:38s} {m['audit_time']:9.4f} {cn_s:>5s} {ct_s} {dr_s:>10s}"
+            )
 
     print("\n=== Solo-correct shots (would be lost without that voter) ===")
     for voter in ("a", "b", "c", "d"):

@@ -73,9 +73,16 @@ _CLAP_PROMPTS_SHOT = {
 }
 
 
-def _label(cand_t: list[float], gt_t: list[float], tol_ms: float) -> list[int]:
+def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[int]:
+    """Map candidates to GT via greedy nearest-time within ``tol_ms``.
+    Audits with no candidate in range are silently skipped here (they're
+    surfaced as 'candidate-generator misses' by eval_ensemble._label, which
+    is the script that owns the reporting).
+    """
+    labels = [0] * len(cand_t)
     used: set[int] = set()
-    for t in sorted(gt_t):
+    for s in sorted(truth_shots, key=lambda x: x["time"]):
+        t = s["time"]
         best_i, best_d = None, None
         for i, c in enumerate(cand_t):
             if i in used:
@@ -85,7 +92,8 @@ def _label(cand_t: list[float], gt_t: list[float], tol_ms: float) -> list[int]:
                 best_i, best_d = i, d
         if best_i is not None:
             used.add(best_i)
-    return [1 if i in used else 0 for i in range(len(cand_t))]
+            labels[best_i] = 1
+    return labels
 
 
 def _hand_features(
@@ -183,9 +191,8 @@ def _voter_a_floor(fixtures: list[str], tolerance_ms: float) -> float:
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
-        gt_t = [s["time"] for s in truth["shots"]]
         cand_t = [s.time_absolute for s in shots]
-        labels = _label(cand_t, gt_t, tolerance_ms)
+        labels = _label(cand_t, truth["shots"], tolerance_ms)
         for sh, lbl in zip(shots, labels, strict=True):
             if lbl == 1 and sh.confidence < min_conf:
                 min_conf = float(sh.confidence)
@@ -205,9 +212,8 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
         safe_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_safe)
         safe_times = {round(s.time_absolute, 6) for s in safe_shots}
 
-        gt_t = [s["time"] for s in truth.get("shots", [])]
         cand_t = [s.time_absolute for s in all_shots]
-        labels = _label(cand_t, gt_t, tolerance_ms)
+        labels = _label(cand_t, truth.get("shots", []), tolerance_ms)
 
         clap = np.load(CACHE_DIR / f"{fix}_clap.npz", allow_pickle=True)
         if clap["audio_emb"].shape[0] != len(all_shots):
