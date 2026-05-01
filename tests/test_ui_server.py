@@ -84,6 +84,212 @@ def test_spa_serves_index_html_when_built(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_import_scoreboard_endpoint(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    sb = {
+        "match": {"id": "27046", "name": "Imported Match"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "Tester",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S1",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    resp = client.post("/api/scoreboard/import", json={"data": sb})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Imported Match"
+    assert body["scoreboard_match_id"] == "27046"
+    assert body["competitor_name"] == "Tester"
+    assert len(body["stages"]) == 1
+
+
+def test_import_scoreboard_409_on_conflict(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    sb = {
+        "match": {"id": "1", "name": "First"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "Tester",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    assert client.post("/api/scoreboard/import", json={"data": sb}).status_code == 200
+    resp = client.post("/api/scoreboard/import", json={"data": sb})
+    assert resp.status_code == 409
+
+    # overwrite=True succeeds.
+    resp = client.post("/api/scoreboard/import", json={"data": sb, "overwrite": True})
+    assert resp.status_code == 200
+
+
+def test_scan_videos_registers_and_auto_assigns(tmp_path: Path) -> None:
+    """End-to-end test for the scan endpoint: create a stage, drop a video into a
+    source folder with a matching mtime, scan, expect auto-assignment as primary."""
+    import os as _os
+    from datetime import datetime
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="Scan Match")
+    client = TestClient(app)
+
+    scorecard_iso = "2026-04-12T11:30:00+00:00"
+    scorecard_dt = datetime.fromisoformat(scorecard_iso)
+    sb = {
+        "match": {"id": "1", "name": "Scan Match Loaded"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "Tester",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "First",
+                        "time_seconds": 12.0,
+                        "scorecard_updated_at": scorecard_iso,
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    vid = src_dir / "VID.mp4"
+    vid.write_bytes(b"")
+    target_ts = scorecard_dt.timestamp() - 60  # 1 minute before scorecard
+    _os.utime(vid, (target_ts, target_ts))
+
+    resp = client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["registered"] == ["raw/VID.mp4"]
+    assert body["auto_assigned"] == {"1": "raw/VID.mp4"}
+
+    # Verify project state.
+    project = client.get("/api/project").json()
+    assert project["stages"][0]["videos"][0]["role"] == "primary"
+    assert project["unassigned_videos"] == []
+
+
+def test_scan_videos_400_on_missing_dir(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post("/api/videos/scan", json={"source_dir": str(tmp_path / "does-not-exist")})
+    assert resp.status_code == 400
+
+
+def test_move_assignment_endpoint(tmp_path: Path) -> None:
+    """Set role to ignored, verify, then move back to a stage."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="Move Match")
+    client = TestClient(app)
+
+    # Set up: 1 stage, 1 video assigned as primary.
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "Tester",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "First",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    vid = src_dir / "VID.mp4"
+    vid.write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+
+    # Should have one unassigned video.
+    project = client.get("/api/project").json()
+    assert len(project["unassigned_videos"]) == 1
+
+    # Move to stage 1 as primary.
+    resp = client.post(
+        "/api/assignments/move",
+        json={
+            "video_path": "raw/VID.mp4",
+            "to_stage_number": 1,
+            "role": "primary",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unassigned_videos"] == []
+    assert body["stages"][0]["videos"][0]["role"] == "primary"
+
+    # Mark as ignored (still on stage 1).
+    resp = client.post(
+        "/api/assignments/move",
+        json={
+            "video_path": "raw/VID.mp4",
+            "to_stage_number": 1,
+            "role": "ignored",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["stages"][0]["videos"][0]["role"] == "ignored"
+
+    # Back to unassigned.
+    resp = client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": None},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stages"][0]["videos"] == []
+    assert len(body["unassigned_videos"]) == 1
+
+
+def test_move_assignment_404_on_unknown_video(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/nope.mp4", "to_stage_number": None},
+    )
+    assert resp.status_code == 404
+
+
 def test_external_edit_visible_without_restart(tmp_path: Path) -> None:
     """External edits to project.json must appear on the next request -- the
     server doesn't cache the model in memory."""

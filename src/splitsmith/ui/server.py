@@ -1,15 +1,21 @@
 """FastAPI app for the production UI.
 
-This is the v1 (Sub 1 / issue #12) skeleton: app shell, project endpoints,
-static asset serving for the built SPA. Ingest / audit / export endpoints
-land in their own sub-issues (#13, #15, #17) and will be added here as
-separate routers.
+Endpoints (locked v1 surface):
+
+  GET  /api/health                  -- project metadata + schema version
+  GET  /api/project                 -- full MatchProject dump
+  POST /api/scoreboard/import       -- import an SSI Scoreboard JSON
+  POST /api/videos/scan             -- enumerate videos in a folder, register them
+  POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
+  POST /api/assignments/move        -- set role / unassign / move between stages
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
 - The server holds a single ``MatchProject`` open at a time, identified by
   ``project_root`` at startup. Multi-project orchestration lives in the SPA.
 - All on-disk mutations go through the project model's atomic save.
+- The server re-loads the project from disk for every request (no caching), so
+  external edits are visible without restart.
 """
 
 from __future__ import annotations
@@ -17,13 +23,19 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .project import MatchProject
+from .project import (
+    VIDEO_EXTENSIONS,
+    MatchProject,
+    ScoreboardImportConflictError,
+    VideoRole,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +57,32 @@ class HealthResponse(BaseModel):
     project_name: str
     project_root: str
     schema_version: int
+
+
+# Request bodies ----------------------------------------------------------
+
+
+class ScoreboardImportRequest(BaseModel):
+    data: dict[str, Any]
+    overwrite: bool = False
+
+
+class ScanRequest(BaseModel):
+    source_dir: str
+    auto_assign_primary: bool = True
+    link_mode: str = "symlink"
+
+
+class ScanResponse(BaseModel):
+    registered: list[str]
+    auto_assigned: dict[int, str]
+    skipped: list[str]
+
+
+class MoveRequest(BaseModel):
+    video_path: str
+    to_stage_number: int | None = None
+    role: VideoRole = "secondary"
 
 
 def create_app(*, project_root: Path, project_name: str) -> FastAPI:
@@ -80,6 +118,81 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     @app.get("/api/project")
     def get_project() -> JSONResponse:
         return JSONResponse(state.load().model_dump(mode="json"))
+
+    @app.post("/api/scoreboard/import")
+    def import_scoreboard(req: ScoreboardImportRequest) -> JSONResponse:
+        project = state.load()
+        try:
+            project.import_scoreboard(req.data, overwrite=req.overwrite)
+        except ScoreboardImportConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/videos/scan", response_model=ScanResponse)
+    def scan_videos(req: ScanRequest) -> ScanResponse:
+        source = Path(req.source_dir).expanduser()
+        if not source.exists():
+            raise HTTPException(status_code=400, detail=f"source dir not found: {source}")
+        if not source.is_dir():
+            raise HTTPException(status_code=400, detail=f"not a directory: {source}")
+        if req.link_mode not in ("symlink", "copy"):
+            raise HTTPException(status_code=400, detail="link_mode must be 'symlink' or 'copy'")
+
+        project = state.load()
+        registered: list[str] = []
+        skipped: list[str] = []
+        for entry in sorted(source.iterdir()):
+            if entry.is_dir() or entry.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            try:
+                video = project.register_video(
+                    entry, state.project_root, link_mode=req.link_mode  # type: ignore[arg-type]
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                skipped.append(f"{entry.name}: {exc}")
+                continue
+            registered.append(str(video.path))
+
+        auto_assigned: dict[int, str] = {}
+        if req.auto_assign_primary:
+            suggestions = project.auto_match(state.project_root)
+            for stage_num, video_path in suggestions.items():
+                stage = project.stage(stage_num)
+                # Only auto-assign primary when the stage has no primary yet.
+                if stage.primary() is not None:
+                    continue
+                project.assign_video(video_path, to_stage_number=stage_num, role="primary")
+                auto_assigned[stage_num] = str(video_path)
+
+        project.save(state.project_root)
+        return ScanResponse(
+            registered=registered,
+            auto_assigned=auto_assigned,
+            skipped=skipped,
+        )
+
+    @app.post("/api/videos/auto-match")
+    def auto_match() -> JSONResponse:
+        project = state.load()
+        suggestions = project.auto_match(state.project_root)
+        return JSONResponse({str(stage_num): str(path) for stage_num, path in suggestions.items()})
+
+    @app.post("/api/assignments/move")
+    def move_assignment(req: MoveRequest) -> JSONResponse:
+        project = state.load()
+        try:
+            project.assign_video(
+                Path(req.video_path),
+                to_stage_number=req.to_stage_number,
+                role=req.role,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)

@@ -240,6 +240,227 @@ def test_project_file_ends_with_newline(tmp_path: Path) -> None:
     assert contents.endswith("\n")
 
 
+def test_import_scoreboard_populates_stages(tmp_path: Path) -> None:
+    """Dropping an SSI Scoreboard JSON populates stages, match name, and competitor."""
+    root = tmp_path / "match-import"
+    project = MatchProject.init(root, name="placeholder")
+
+    scoreboard = {
+        "match": {"id": "27046", "ct": "22", "name": "Blacksmith Handgun Open 2026"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "Sample Shooter",
+                "division": "Production Optics",
+                "club": "Sample IPSC Club",
+                "stages": [
+                    {
+                        "stage_number": 2,  # intentionally out of order
+                        "stage_name": "100m",
+                        "time_seconds": 12.48,
+                        "scorecard_updated_at": "2026-04-12T12:03:32.729554+00:00",
+                    },
+                    {
+                        "stage_number": 1,
+                        "stage_name": "K-vallen",
+                        "time_seconds": 42.76,
+                        "scorecard_updated_at": "2026-04-12T11:29:28.833034+00:00",
+                    },
+                ],
+            }
+        ],
+    }
+    project.import_scoreboard(scoreboard)
+
+    assert project.name == "Blacksmith Handgun Open 2026"
+    assert project.scoreboard_match_id == "27046"
+    assert project.competitor_name == "Sample Shooter"
+    # Stages sorted by stage_number.
+    assert [s.stage_number for s in project.stages] == [1, 2]
+    assert project.stages[0].stage_name == "K-vallen"
+    assert project.stages[0].time_seconds == 42.76
+
+
+def test_import_scoreboard_refuses_overwrite_by_default(tmp_path: Path) -> None:
+    from splitsmith.ui.project import ScoreboardImportConflictError
+
+    root = tmp_path / "match-conflict"
+    project = MatchProject.init(root, name="x")
+    sb1 = {
+        "match": {"id": "1", "name": "First"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "A",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S1",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    project.import_scoreboard(sb1)
+
+    sb2 = {
+        "match": {"id": "2", "name": "Second"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "A",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S2-different",
+                        "time_seconds": 20.0,
+                        "scorecard_updated_at": "2026-02-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    with pytest.raises(ScoreboardImportConflictError):
+        project.import_scoreboard(sb2)
+
+    # Forced overwrite works.
+    project.import_scoreboard(sb2, overwrite=True)
+    assert project.stages[0].stage_name == "S2-different"
+
+
+def test_register_video_symlinks_into_raw(tmp_path: Path) -> None:
+    """Registering a video creates a symlink in raw/ and adds to unassigned_videos."""
+    root = tmp_path / "match-vid"
+    project = MatchProject.init(root, name="Vid Match")
+
+    source = tmp_path / "external" / "VID_001.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"\x00\x00\x00 ftypisom")  # any bytes; we don't probe in this test
+
+    video = project.register_video(source, root)
+
+    assert video.path == Path("raw") / "VID_001.mp4"
+    assert video.role == "secondary"
+    assert (root / "raw" / "VID_001.mp4").exists()
+    # Symlink resolves back to the source.
+    assert (root / "raw" / "VID_001.mp4").resolve() == source
+    assert len(project.unassigned_videos) == 1
+
+
+def test_register_video_is_idempotent(tmp_path: Path) -> None:
+    root = tmp_path / "match-idem"
+    project = MatchProject.init(root, name="Idempotent Match")
+    source = tmp_path / "external" / "VID_002.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"")
+
+    a = project.register_video(source, root)
+    b = project.register_video(source, root)
+    assert a.path == b.path
+    assert len(project.unassigned_videos) == 1
+
+
+def test_register_video_rejects_non_video(tmp_path: Path) -> None:
+    root = tmp_path / "match-bad"
+    project = MatchProject.init(root, name="Bad Match")
+    bad = tmp_path / "notes.txt"
+    bad.write_text("not a video")
+    with pytest.raises(ValueError):
+        project.register_video(bad, root)
+
+
+def test_assign_video_unassigned_to_stage_as_primary(tmp_path: Path) -> None:
+    root = tmp_path / "match-assign"
+    project = MatchProject.init(root, name="Assign Match")
+    project.stages = [
+        StageEntry(stage_number=1, stage_name="A", time_seconds=10.0),
+    ]
+    src = tmp_path / "VID.mp4"
+    src.write_bytes(b"")
+    video = project.register_video(src, root)
+
+    project.assign_video(video.path, to_stage_number=1, role="primary")
+
+    assert len(project.unassigned_videos) == 0
+    assert len(project.stages[0].videos) == 1
+    assert project.stages[0].videos[0].role == "primary"
+
+
+def test_assign_video_demotes_existing_primary(tmp_path: Path) -> None:
+    root = tmp_path / "match-demote"
+    project = MatchProject.init(root, name="Demote Match")
+    src1 = tmp_path / "VID_a.mp4"
+    src2 = tmp_path / "VID_b.mp4"
+    src1.write_bytes(b"")
+    src2.write_bytes(b"")
+    project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
+    v1 = project.register_video(src1, root)
+    v2 = project.register_video(src2, root)
+    project.assign_video(v1.path, to_stage_number=1, role="primary")
+    project.assign_video(v2.path, to_stage_number=1, role="primary")
+
+    stage = project.stages[0]
+    assert len(stage.videos) == 2
+    primaries = [v for v in stage.videos if v.role == "primary"]
+    secondaries = [v for v in stage.videos if v.role == "secondary"]
+    assert len(primaries) == 1
+    assert len(secondaries) == 1
+    # The newest assignment wins.
+    assert primaries[0].path == v2.path
+
+
+def test_assign_video_back_to_unassigned(tmp_path: Path) -> None:
+    root = tmp_path / "match-back"
+    project = MatchProject.init(root, name="Back Match")
+    project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
+    src = tmp_path / "VID.mp4"
+    src.write_bytes(b"")
+    v = project.register_video(src, root)
+    project.assign_video(v.path, to_stage_number=1, role="primary")
+    project.assign_video(v.path, to_stage_number=None)
+
+    assert project.unassigned_videos[0].path == v.path
+    assert project.stages[0].videos == []
+
+
+def test_auto_match_returns_suggestions_without_mutation(tmp_path: Path) -> None:
+    """auto_match runs the heuristic and returns suggestions; project is unchanged."""
+    from datetime import UTC, datetime, timedelta
+
+    root = tmp_path / "match-auto"
+    project = MatchProject.init(root, name="Auto Match")
+    base = datetime.now(UTC).replace(microsecond=0)
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="A",
+            time_seconds=10.0,
+            scorecard_updated_at=base,
+        ),
+        StageEntry(
+            stage_number=2,
+            stage_name="B",
+            time_seconds=10.0,
+            scorecard_updated_at=base + timedelta(minutes=30),
+        ),
+    ]
+    src = tmp_path / "VID.mp4"
+    src.write_bytes(b"")
+    video = project.register_video(src, root)
+    # Set mtime so it lands in stage 1's window (scorecard - tolerance ≤ mtime ≤ scorecard).
+    target_ts = (base - timedelta(minutes=5)).timestamp()
+    os.utime(src, (target_ts, target_ts))
+
+    suggestions = project.auto_match(root)
+
+    assert suggestions == {1: video.path}
+    # No mutation -- the video is still unassigned.
+    assert len(project.unassigned_videos) == 1
+    assert project.stages[0].videos == []
+
+
 def test_atomic_write_uses_same_directory_for_tmp(tmp_path: Path) -> None:
     """The temp file must live in the destination's directory so ``os.replace``
     is atomic (cross-filesystem renames aren't)."""

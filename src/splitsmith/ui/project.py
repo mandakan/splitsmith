@@ -25,12 +25,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from ..config import StageData, VideoMatchConfig
+from ..video_match import match_videos_to_stages
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
 
 PROJECT_FILE = "project.json"
 SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard")
@@ -81,6 +87,10 @@ class StageEntry(BaseModel):
         return None
 
 
+class ScoreboardImportConflictError(Exception):
+    """Raised when ``import_scoreboard`` would overwrite existing stage data."""
+
+
 class MatchProject(BaseModel):
     """Top-level on-disk match project."""
 
@@ -91,6 +101,10 @@ class MatchProject(BaseModel):
     competitor_name: str | None = None
     scoreboard_match_id: str | None = None
     stages: list[StageEntry] = Field(default_factory=list)
+    # Videos registered with the project but not yet assigned to any stage.
+    # The Sub 2 (#13) ingest screen surfaces these in a "tray" so the user can
+    # drag them onto stages or mark them as ignored.
+    unassigned_videos: list[StageVideo] = Field(default_factory=list)
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
@@ -129,6 +143,215 @@ class MatchProject(BaseModel):
             if s.stage_number == stage_number:
                 return s
         raise KeyError(f"no stage {stage_number} in project {self.name!r}")
+
+    # ------------------------------------------------------------------
+    # Video registry helpers (Sub 2 / #13)
+    # ------------------------------------------------------------------
+
+    def all_videos(self) -> list[StageVideo]:
+        """Every video known to the project, assigned or not."""
+        out: list[StageVideo] = list(self.unassigned_videos)
+        for s in self.stages:
+            out.extend(s.videos)
+        return out
+
+    def find_video(self, path: Path) -> tuple[StageEntry | None, StageVideo] | None:
+        """Locate a video by path. Returns ``(stage_or_None, video)`` or ``None``.
+
+        ``stage`` is ``None`` when the video lives in ``unassigned_videos``.
+        Path comparison uses string equality on the stored value (the project
+        stores paths relative to the project root, so this is unambiguous).
+        """
+        target = str(path)
+        for v in self.unassigned_videos:
+            if str(v.path) == target:
+                return None, v
+        for s in self.stages:
+            for v in s.videos:
+                if str(v.path) == target:
+                    return s, v
+        return None
+
+    def import_scoreboard(self, raw: dict[str, Any], *, overwrite: bool = False) -> None:
+        """Populate ``stages`` (and metadata) from a parsed SSI Scoreboard JSON.
+
+        Picks the first competitor (multi-competitor support is v2 / out of
+        scope per #11). Raises :class:`ScoreboardImportConflictError` if stages
+        already exist and ``overwrite`` is ``False``; overwriting would orphan
+        existing video assignments, so the default is to refuse.
+        """
+        if self.stages and not overwrite:
+            raise ScoreboardImportConflictError(
+                "project already has stages; pass overwrite=True to replace "
+                "(this orphans current video assignments)"
+            )
+        match_meta = raw.get("match", {}) or {}
+        competitors = raw.get("competitors") or []
+        if not competitors:
+            raise ValueError("no competitors in scoreboard JSON")
+        primary_competitor = competitors[0]
+
+        match_name = match_meta.get("name")
+        if match_name:
+            self.name = match_name
+        self.scoreboard_match_id = (
+            match_meta.get("id") or match_meta.get("match_id") or self.scoreboard_match_id
+        )
+        self.competitor_name = primary_competitor.get("name")
+
+        new_stages: list[StageEntry] = []
+        for s in primary_competitor.get("stages", []):
+            stage_data = StageData.model_validate(s)
+            new_stages.append(
+                StageEntry(
+                    stage_number=stage_data.stage_number,
+                    stage_name=stage_data.stage_name,
+                    time_seconds=stage_data.time_seconds,
+                    scorecard_updated_at=stage_data.scorecard_updated_at,
+                )
+            )
+        new_stages.sort(key=lambda s: s.stage_number)
+        self.stages = new_stages
+
+    def register_video(
+        self,
+        source: Path,
+        root: Path,
+        *,
+        link_mode: Literal["symlink", "copy"] = "symlink",
+    ) -> StageVideo:
+        """Register a video file with the project.
+
+        The file is symlinked (or copied) into ``<root>/raw/`` so the project
+        directory is self-describing. The ``StageVideo`` is appended to
+        ``unassigned_videos``; the caller is responsible for moving it onto a
+        stage via :meth:`assign_video`. If a video at the same destination
+        path is already registered, returns the existing entry unchanged.
+
+        Raises ``FileNotFoundError`` if the source doesn't exist or isn't a
+        video file (mp4 / mov / m4v).
+        """
+        source = source.expanduser().resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"source video not found: {source}")
+        if source.suffix.lower() not in VIDEO_EXTENSIONS:
+            raise ValueError(f"not a video file: {source}")
+
+        raw_dir = root / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        dest = raw_dir / source.name
+        rel = Path("raw") / source.name
+
+        # Idempotency: if a video at this path is already registered, return it.
+        existing = self.find_video(rel)
+        if existing is not None:
+            return existing[1]
+
+        # If something is already at the destination, leave it (don't clobber
+        # what the user might have placed there themselves). Otherwise create
+        # a symlink (preferred) or a copy.
+        if not dest.exists():
+            if link_mode == "symlink":
+                try:
+                    dest.symlink_to(source)
+                except OSError:
+                    # Fallback (Windows without dev mode, etc.): copy.
+                    shutil.copy2(source, dest)
+            else:
+                shutil.copy2(source, dest)
+
+        video = StageVideo(path=rel)
+        self.unassigned_videos.append(video)
+        return video
+
+    def assign_video(
+        self,
+        path: Path,
+        *,
+        to_stage_number: int | None,
+        role: VideoRole = "secondary",
+    ) -> StageVideo:
+        """Move a video to a target stage (or back to unassigned if ``None``).
+
+        - ``to_stage_number=None``: move to ``unassigned_videos`` regardless of
+          ``role``.
+        - ``to_stage_number=N, role="primary"``: there can be only one primary
+          per stage; any existing primary is demoted to ``"secondary"``.
+
+        Returns the moved ``StageVideo``. Raises ``KeyError`` if the video or
+        stage doesn't exist.
+        """
+        located = self.find_video(path)
+        if located is None:
+            raise KeyError(f"video {path} not registered with project")
+        current_stage, video = located
+
+        # Detach from current location.
+        if current_stage is None:
+            self.unassigned_videos = [
+                v for v in self.unassigned_videos if str(v.path) != str(video.path)
+            ]
+        else:
+            current_stage.videos = [
+                v for v in current_stage.videos if str(v.path) != str(video.path)
+            ]
+
+        # Reattach.
+        if to_stage_number is None:
+            video.role = "secondary"  # role is meaningless when unassigned
+            self.unassigned_videos.append(video)
+            return video
+
+        target = self.stage(to_stage_number)
+        if role == "primary":
+            for v in target.videos:
+                if v.role == "primary":
+                    v.role = "secondary"
+        video.role = role
+        target.videos.append(video)
+        return video
+
+    def auto_match(
+        self,
+        root: Path,
+        *,
+        config: VideoMatchConfig | None = None,
+    ) -> dict[int, Path]:
+        """Run :func:`video_match.match_videos_to_stages` against unassigned videos
+        and the project's stages.
+
+        ``root`` is the project root directory; needed to resolve the videos'
+        project-relative paths to real filesystem paths so ``os.stat`` works.
+
+        Returns ``{stage_number: video_relative_path}`` for every confident
+        match. **Does not mutate the project**; the caller decides whether to
+        apply via :meth:`assign_video` (and with what role).
+        """
+        cfg = config or VideoMatchConfig()
+        unassigned_abs: dict[Path, Path] = {}
+        for v in self.unassigned_videos:
+            # Resolve project-relative path against the project root, then
+            # resolve symlinks so video_match.py's stat() reads the real file.
+            abs_path = v.path if v.path.is_absolute() else (root / v.path).resolve()
+            unassigned_abs[abs_path] = v.path
+        if not unassigned_abs:
+            return {}
+
+        stage_data = [
+            StageData(
+                stage_number=s.stage_number,
+                stage_name=s.stage_name,
+                time_seconds=s.time_seconds,
+                scorecard_updated_at=s.scorecard_updated_at or datetime.now(UTC),
+            )
+            for s in self.stages
+            if s.scorecard_updated_at is not None
+        ]
+        if not stage_data:
+            return {}
+
+        result = match_videos_to_stages(list(unassigned_abs.keys()), stage_data, cfg)
+        return {m.stage_number: unassigned_abs[m.video_path] for m in result.matches}
 
 
 def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:

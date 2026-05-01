@@ -340,15 +340,15 @@ The pipeline is **idempotent**: re-entering ingest only processes videos with `p
 
 ### Implementation status
 
-Sub 1 (#12, this commit) lands:
-- `MatchProject` Pydantic model + atomic write
-- FastAPI backend at `splitsmith.ui.server`
-- React + Vite + shadcn/ui SPA at `src/splitsmith/ui_static/`
-- Design tokens locked, `/_design` page renders the visual spec
-- App shell with `/`, `/ingest`, `/audit/:stage`, `/export/:stage`, `/_design`
-- Dark / light / system theme toggle persisted to `localStorage`
+Sub 1 (#12) shipped: `MatchProject` Pydantic model + atomic write, FastAPI backend, React + Vite + shadcn/ui SPA, locked design tokens with `/_design` visual spec, app shell, dark/light/system theme toggle.
 
-Subsequent sub-issues fill in the screens (#13 ingest, #15 audit, #17 export) and add the short-GOP trim mode (#16).
+Sub 2 (#13) shipped: ingest screen + supporting backend.
+
+- `MatchProject.unassigned_videos` plus helper methods: `import_scoreboard`, `register_video` (symlinks into `<project>/raw/`, falls back to copy on systems without symlink support), `assign_video` (move between stages or back to unassigned, with primary-demotion semantics), `auto_match` (runs `video_match.py` heuristic, returns suggestions without mutation).
+- API: `POST /api/scoreboard/import`, `POST /api/videos/scan`, `POST /api/videos/auto-match`, `POST /api/assignments/move`. Scoreboard import refuses overwriting existing stages by default (would orphan video assignments) — caller passes `overwrite=true` to force.
+- Ingest screen: drop SSI JSON, scan a folder of videos by path, see auto-suggested primary assignments, drag/click to reassign, mark as ignored, unassign back to tray, conflict highlighting on duplicate primaries.
+
+Subsequent sub-issues fill in the audit screen (#15), short-GOP trim (#16), and analysis/export (#17).
 
 ## References
 
