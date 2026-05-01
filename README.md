@@ -277,12 +277,23 @@ video_match:
 
 output:
   trim_buffer_seconds: 5.0
+  trim_mode: lossless          # "lossless" (CLI default) or "audit"
+  trim_gop_frames: 15          # audit mode: keyframe every N frames (0.5s @ 30fps)
+  trim_audit_crf: 20           # audit mode: x264 CRF (lower = better quality, larger files)
+  trim_audit_preset: fast      # audit mode: x264 preset
   fcpxml_version: "1.10"
   split_color_thresholds:
     green_max: 0.25
     yellow_max: 0.35
     transition_min: 1.0
 ```
+
+`trim_mode` controls how `trim.py` cuts videos:
+
+- `lossless` (default): `ffmpeg -c copy`. Instant; archival quality; inherits the source GOP. Insta360 head-cam typically has keyframes every 1-4 seconds.
+- `audit`: re-encodes with a short GOP (default 0.5s) so browser `<video>` scrubbing in the production UI's audit screen (#15) lands within ~1 frame of the pointer. Encoding cost is roughly 1-2x realtime on Apple Silicon. Audio is stream-copied either way so the detector's input is bit-exact across modes.
+
+Override per command via `--trim-mode lossless|audit` on `splitsmith single` and `splitsmith process`.
 
 Lower `shot_detect.onset_delta` if you're under-detecting shots from a heavily-comped open gun. Tighten `beep_detect.min_amplitude` if a louder ambient noise is being mistaken for the beep.
 

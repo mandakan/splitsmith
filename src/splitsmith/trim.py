@@ -1,8 +1,18 @@
-"""Lossless video trim via ffmpeg subprocess.
+"""Video trim via ffmpeg subprocess.
 
-Produces a clip of ``[beep_time - buffer, beep_time + stage_time + buffer]`` from
-the source video using stream copy. Per SPEC.md, ``-ss`` before ``-i`` is used
-for fast (non-keyframe-exact) seeking; the buffer absorbs any seek imprecision.
+Two modes:
+
+- ``lossless`` (default): stream copy with ``-c copy``. Instant, archival-quality,
+  but inherits the source GOP. Insta360 head-cam footage typically has keyframes
+  every 1-4s, which makes browser-side scrubbing chunky in the production UI.
+
+- ``audit`` (#16): re-encodes the video with a short GOP (default 0.5s at 30fps)
+  so browser ``<video>`` seeks land on a keyframe within ~1 frame of the pointer.
+  Audio is stream-copied so the detector's input is bit-exact regardless of mode.
+
+Per SPEC.md, ``-ss`` before ``-i`` is used for fast (non-keyframe-exact) seeking;
+the buffer absorbs any seek imprecision. In audit mode, the re-encode also
+re-aligns frames, so the seek-imprecision concern is moot anyway.
 
 Pure orchestration: validation + command construction + a single subprocess call.
 The runner is injectable so unit tests can verify the ffmpeg invocation without
@@ -14,10 +24,12 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from .config import TrimResult
 
 Runner = Callable[..., subprocess.CompletedProcess]
+TrimMode = Literal["lossless", "audit"]
 
 
 class FFmpegError(RuntimeError):
@@ -31,14 +43,24 @@ def trim_video(
     stage_time: float,
     *,
     buffer_seconds: float = 5.0,
+    mode: TrimMode = "lossless",
+    gop_frames: int = 15,
+    crf: int = 20,
+    preset: str = "fast",
     ffmpeg_binary: str = "ffmpeg",
     overwrite: bool = False,
     runner: Runner = subprocess.run,
 ) -> TrimResult:
-    """Losslessly cut ``input_path`` to ``output_path`` around ``beep_time``.
+    """Cut ``input_path`` to ``output_path`` around ``beep_time``.
 
-    Returns the absolute-source-time window of the cut. Raises
-    ``FFmpegError`` if ffmpeg fails or is not installed.
+    ``mode`` selects the encoding strategy:
+
+    - ``"lossless"``: stream copy (instant, archival).
+    - ``"audit"``: re-encode video with a short GOP for scrub-friendly playback
+      in the production UI's audit screen. Audio is stream-copied.
+
+    Returns the absolute-source-time window of the cut. Raises ``FFmpegError``
+    if ffmpeg fails or is not installed.
     """
     if beep_time < 0.0:
         raise ValueError(f"beep_time must be non-negative, got {beep_time}")
@@ -46,6 +68,12 @@ def trim_video(
         raise ValueError(f"stage_time must be non-negative, got {stage_time}")
     if buffer_seconds < 0.0:
         raise ValueError(f"buffer_seconds must be non-negative, got {buffer_seconds}")
+    if mode not in ("lossless", "audit"):
+        raise ValueError(f"mode must be 'lossless' or 'audit', got {mode!r}")
+    if gop_frames < 1:
+        raise ValueError(f"gop_frames must be >= 1, got {gop_frames}")
+    if not 0 <= crf <= 51:
+        raise ValueError(f"crf must be 0..51, got {crf}")
     if not input_path.exists():
         raise FileNotFoundError(f"input video not found: {input_path}")
 
@@ -65,10 +93,29 @@ def trim_video(
         str(input_path),
         "-t",
         f"{duration:.3f}",
-        "-c",
-        "copy",
-        str(output_path),
     ]
+    if mode == "lossless":
+        cmd += ["-c", "copy"]
+    else:  # audit
+        cmd += [
+            "-c:v",
+            "libx264",
+            "-preset",
+            preset,
+            "-crf",
+            str(crf),
+            "-g",
+            str(gop_frames),
+            "-keyint_min",
+            str(gop_frames),
+            "-sc_threshold",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "copy",
+        ]
+    cmd.append(str(output_path))
 
     try:
         runner(cmd, check=True, capture_output=True, text=True)

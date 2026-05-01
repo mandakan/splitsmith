@@ -75,9 +75,10 @@ Tuning notes:
 - AGC ducking on Insta360 Go 3S: follow-up shots may have lower amplitude. Don't filter on absolute amplitude; use relative.
 - Open guns / heavy comp: shots blend. May need to lower the onset detection delta parameter.
 
-**`trim.py`** — Lossless video trim via ffmpeg subprocess.
-- Command: `ffmpeg -ss <start> -i <input> -to <duration> -c copy <output>`
-- Note: `-ss` before `-i` is fast but may not be frame-accurate. For our purposes (we want a buffer before the beep anyway) this is fine.
+**`trim.py`** — Video trim via ffmpeg subprocess. Two modes (issue #16):
+- `lossless` (CLI default): `ffmpeg -ss <start> -i <input> -t <duration> -c copy <output>`. Instant, archival, but inherits source GOP (1-4s on Insta360 head-cam).
+- `audit` (UI-screen default for #15): re-encodes with `libx264 -preset fast -crf 20 -g 15 -keyint_min 15 -sc_threshold 0 -pix_fmt yuv420p -c:a copy`. 0.5s keyframe spacing at 30fps so browser scrubbing lands within ~1 frame of the pointer. Audio is stream-copied so the detector input is bit-exact across modes.
+- Note: `-ss` before `-i` is fast but may not be frame-accurate; the buffer absorbs any seek imprecision. In audit mode the re-encode re-aligns frames, so the concern is moot.
 - Start: `max(0, beep_time - 5)`
 - End: `beep_time + stage_time + 5`
 
