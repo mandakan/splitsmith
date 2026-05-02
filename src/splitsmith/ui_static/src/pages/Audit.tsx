@@ -29,7 +29,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CheckCircle2, Crosshair, ListChecks, Loader2, Pause, Play, Save, Undo2 } from "lucide-react";
+import {
+  CheckCircle2,
+  Crosshair,
+  ListChecks,
+  Loader2,
+  Pause,
+  Play,
+  Repeat,
+  Save,
+  Undo2,
+} from "lucide-react";
 
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
@@ -95,6 +105,7 @@ export function Audit() {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
+  const [loopMode, setLoopMode] = useState(false);
   const rafRef = useRef<number | null>(null);
 
   const stageNumber = useMemo(() => {
@@ -267,14 +278,27 @@ export function Audit() {
     if (!isPlaying) return;
     const tick = () => {
       const v = videoRef.current;
-      if (v) setCurrentTime(v.currentTime - beepOffset);
+      if (v) {
+        const auditT = v.currentTime - beepOffset;
+        const dur = peaks?.duration ?? null;
+        // Loop: when we reach the end of the audit clip, snap back to 0
+        // (audit-time) which maps to beepOffset on the active video. Native
+        // <video loop> would only work for the primary trimmed clip; we
+        // express it on the audit timeline so it works for secondaries too.
+        if (loopMode && dur != null && auditT >= dur - 0.05) {
+          v.currentTime = beepOffset;
+          setCurrentTime(0);
+        } else {
+          setCurrentTime(auditT);
+        }
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, beepOffset]);
+  }, [isPlaying, beepOffset, loopMode, peaks]);
 
   const handleScrub = useCallback(
     (primaryTime: number) => {
@@ -575,11 +599,24 @@ export function Audit() {
           setShowDrawer((v) => !v);
           return;
         }
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          // Fine-grained playhead step. Shift = ~1 frame at 30 fps;
+          // unmodified = 250 ms (matches the old review SPA).
+          e.preventDefault();
+          const v = videoRef.current;
+          if (!v) return;
+          const dir = e.key === "ArrowRight" ? 1 : -1;
+          const step = e.shiftKey ? 0.025 : 0.25;
+          const t = v.currentTime - beepOffset;
+          const dur = peaks?.duration ?? t + step;
+          handleScrub(Math.min(dur, Math.max(0, t + dir * step)));
+          return;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, undo, stepShot, performSave]);
+  }, [togglePlay, undo, stepShot, performSave, beepOffset, peaks, handleScrub]);
 
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
@@ -641,9 +678,10 @@ export function Audit() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
           <p className="text-sm text-muted-foreground">
-            Drag the waveform to scrub. Double-click to add a manual marker.
-            Click a marker to toggle keep/reject. M / Shift+M step shots,
-            L toggles the marker list, Cmd+Z undoes.
+            Drag the waveform to scrub. Arrow keys nudge 250 ms (Shift = 25 ms).
+            Double-click to add a manual marker. Click a marker to toggle
+            keep/reject. M / Shift+M step shots, L toggles the marker list,
+            Cmd+Z undoes, Cmd+S saves.
           </p>
         </div>
         <StageSelector
@@ -761,6 +799,16 @@ export function Audit() {
                     ) : (
                       <Play className="size-4" />
                     )}
+                  </Button>
+                  <Button
+                    variant={loopMode ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setLoopMode((v) => !v)}
+                    aria-pressed={loopMode}
+                    title="Loop the audit clip"
+                    aria-label={loopMode ? "Loop on" : "Loop off"}
+                  >
+                    <Repeat className="size-4" />
                   </Button>
                   <span className="font-mono text-muted-foreground">
                     {formatTime(currentTime)} / {formatTime(peaks.duration)}
