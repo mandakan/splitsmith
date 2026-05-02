@@ -783,12 +783,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         # cutoff is conservative -- noise events fall well below, real
         # shots typically land >= 0.4. The user can flip individuals
         # afterward; ``reset=true`` re-runs this seeding from scratch.
-        SEED_KEEP_CONFIDENCE = 0.3
+        seed_keep_confidence = 0.3
         if reset:
             existing_json["shots"] = []
         seeded_shots = False
         if not existing_json.get("shots"):
-            kept = [c for c in candidates if (c.get("confidence") or 0.0) >= SEED_KEEP_CONFIDENCE]
+            kept = [c for c in candidates if (c.get("confidence") or 0.0) >= seed_keep_confidence]
             existing_json["shots"] = [
                 {
                     "shot_number": i,
