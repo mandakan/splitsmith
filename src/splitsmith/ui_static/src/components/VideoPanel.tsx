@@ -130,7 +130,13 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
           <video
             ref={internalRef}
             src={videoSrc}
-            preload="auto"
+            // preload="metadata" only -- "auto" makes the browser eagerly
+            // buffer the entire 4K trimmed clip in the background even when
+            // the user is just scrolling around or sitting on the page,
+            // which leaves the audit screen feeling sticky on big sources.
+            // Headers + the moov atom are enough for us to know duration
+            // and seek; bytes for actual playback stream on demand.
+            preload="metadata"
             playsInline
             controls={false}
             className="block h-auto w-full max-h-[60vh]"
