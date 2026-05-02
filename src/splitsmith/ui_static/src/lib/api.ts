@@ -164,7 +164,9 @@ export interface MatchAnalysis {
 
 /** Per-stage status row for the Analysis & Export overview (#17).
  *  Mirrors splitsmith.ui.project.StageExportStatus. The SPA renders one
- *  card per row; ``ready_to_export`` decides whether Generate is enabled. */
+ *  card per row; ``ready_to_export`` decides whether Generate is enabled.
+ *  ``source_reachable`` flags the dangling-symlink case (USB unplugged) so
+ *  the row can warn before the user clicks Generate. */
 export interface StageExportStatus {
   stage_number: number;
   stage_name: string;
@@ -172,15 +174,20 @@ export interface StageExportStatus {
   has_primary: boolean;
   primary_processed: { beep: boolean; shot_detect: boolean; trim: boolean };
   audit_shot_count: number;
-  pending_candidate_count: number;
+  /** Size of the detector's candidate pool. NOT "pending" -- once shot
+   *  detection has run, every candidate is kept (in shots[]) or rejected
+   *  (not in shots[]). Render as "X shots audited from Y candidates". */
+  total_candidate_count: number;
   audit_path: string | null;
   trimmed_video_path: string | null;
+  lossless_trim_present: boolean;
   csv_path: string | null;
   fcpxml_path: string | null;
   report_path: string | null;
   has_exports: boolean;
   last_export_at: string | null;
   ready_to_export: boolean;
+  source_reachable: boolean | null;
 }
 
 export interface ExportOverview {
@@ -188,6 +195,7 @@ export interface ExportOverview {
 }
 
 export interface ExportStageRequestPayload {
+  write_trim?: boolean;
   write_csv?: boolean;
   write_fcpxml?: boolean;
   write_report?: boolean;
@@ -195,10 +203,10 @@ export interface ExportStageRequestPayload {
 
 export interface ExportStageResult {
   stage_number: number;
+  trimmed_video_path: string | null;
   csv_path: string | null;
   fcpxml_path: string | null;
   report_path: string | null;
-  trimmed_video_path: string | null;
   shots_written: number;
   anomalies: string[];
 }
@@ -305,6 +313,30 @@ export interface Job {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+/** Structured error payload emitted by source-bound endpoints (detect-beep,
+ *  trim, beep-preview, video stream, export) when the primary's source file
+ *  is not reachable on disk -- typically because external storage is
+ *  unplugged. Status code is 424 (Failed Dependency); ``code`` is the
+ *  discriminator the SPA matches on. */
+export interface SourceUnreachableDetail {
+  code: "source_unreachable";
+  stage_number: number | null;
+  path: string;
+  message: string;
+}
+
+/** Pull a SourceUnreachableDetail out of an ApiError if the body matches.
+ *  Returns null otherwise so callers can fall through to generic display. */
+export function asSourceUnreachable(err: unknown): SourceUnreachableDetail | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.status !== 424) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object") return null;
+  const code = (body as { code?: unknown }).code;
+  if (code !== "source_unreachable") return null;
+  return body as SourceUnreachableDetail;
 }
 
 class ApiError extends Error {
@@ -565,6 +597,7 @@ export const api = {
     request<ExportStageResult>(`/api/stages/${stageNumber}/export`, {
       method: "POST",
       json: {
+        write_trim: opts.write_trim ?? true,
         write_csv: opts.write_csv ?? true,
         write_fcpxml: opts.write_fcpxml ?? true,
         write_report: opts.write_report ?? true,

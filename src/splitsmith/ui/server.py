@@ -77,6 +77,34 @@ from .project import (
 )
 
 
+def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
+    """Raise a structured 424 when ``source`` doesn't exist on disk.
+
+    The SPA reads ``detail.code == "source_unreachable"`` to render a
+    uniform "reconnect the USB / SD card" message wherever a source-bound
+    operation is invoked (detect-beep, audit-mode trim, beep preview,
+    video stream, export). Callers handle the "no primary" check with
+    their endpoint-specific status code before calling this -- the helper
+    only handles the upstream-dependency-offline case.
+    """
+    if source.exists():
+        return
+    raise HTTPException(
+        status_code=424,
+        detail={
+            "code": "source_unreachable",
+            "stage_number": stage_number,
+            "path": str(source),
+            "message": (
+                f"Source video"
+                + (f" for stage {stage_number}" if stage_number is not None else "")
+                + f" is not reachable: {source}. If it lives on external "
+                f"storage (USB drive, SD card), reconnect and try again."
+            ),
+        },
+    )
+
+
 def _cancellable_runner(handle: JobHandle):
     """Build a ``trim.Runner`` that registers ffmpeg with the job for cancel.
 
@@ -335,11 +363,13 @@ class ExportStageRequest(BaseModel):
     """Body for POST /api/stages/{n}/export.
 
     Each toggle defaults True; turning one off skips that artefact while
-    leaving the others on. The trimmed video itself is never regenerated
-    here -- it lives at ``<project>/trimmed/stage<N>_trimmed.mp4`` from the
-    audit-mode trim and is referenced as-is.
+    leaving the others on. ``write_trim`` produces the lossless stream-copy
+    trim into ``<project>/exports/`` -- distinct from the audit-mode
+    short-GOP scrub copy in ``<project>/trimmed/``. The FCPXML always
+    references the lossless trim so SPA exports match ``splitsmith single``.
     """
 
+    write_trim: bool = True
     write_csv: bool = True
     write_fcpxml: bool = True
     write_report: bool = True
@@ -693,6 +723,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
+        # Reachability pre-flight: surface the same structured 424 the
+        # export pipeline uses, so the SPA renders a consistent "reconnect
+        # external storage" message regardless of which screen kicked
+        # off the work.
+        _ensure_source_reachable(
+            stage_number, project.resolve_video_path(state.project_root, primary.path)
+        )
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -783,6 +820,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
+        # Same source-reachability pre-flight as detect-beep: a 424 with
+        # ``code: "source_unreachable"`` so the SPA can surface a uniform
+        # "reconnect external storage" message before any job is queued.
+        _ensure_source_reachable(
+            stage_number, project.resolve_video_path(state.project_root, primary.path)
+        )
         if primary.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -1257,6 +1300,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
+        # Reuse the structured 424 path so the SPA gets a uniform
+        # "reconnect external storage" message regardless of which surface
+        # invoked the preview.
+        source = project.resolve_video_path(state.project_root, primary.path)
+        _ensure_source_reachable(stage_number, source)
         center = t if t is not None else primary.beep_time
         if center is None:
             raise HTTPException(
@@ -1265,12 +1313,6 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             )
         if center < 0:
             raise HTTPException(status_code=400, detail="t must be >= 0")
-        source = project.resolve_video_path(state.project_root, primary.path)
-        if not source.is_file():
-            raise HTTPException(
-                status_code=404,
-                detail=f"primary video missing on disk: {source}",
-            )
         thumbs_dir = project.thumbs_path(state.project_root)
         try:
             clip = thumbnail_helpers.ensure_clip(
@@ -1532,11 +1574,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 served_path = trimmed.resolve()
         if served_path is None:
             served_path = project.resolve_video_path(state.project_root, video.path).resolve()
-            if not served_path.is_file():
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"video missing on disk: {served_path}",
-                )
+            # Same structured shape as detect-beep / trim / preview so
+            # the SPA's "reconnect external storage" surface is uniform.
+            _ensure_source_reachable(
+                stage.stage_number if stage is not None else None, served_path
+            )
 
         media_type = (
             "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
@@ -1841,8 +1883,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         audit_dir = project.audit_path(state.project_root)
         audit_file = audit_dir / f"stage{stage_number}.json"
         exports_dir = project.exports_path(state.project_root)
-        trimmed_dir = project.trimmed_path(state.project_root)
-        trimmed_video = trimmed_dir / f"stage{stage_number}_trimmed.mp4"
+        # The export pipeline runs a lossless trim from the *source* video
+        # (the symlink under raw_dir resolves through). The audit-mode
+        # short-GOP file in <project>/trimmed/ is a scrub cache and is
+        # never used as the FCP-bound deliverable.
+        source_video = project.resolve_video_path(state.project_root, primary.path)
 
         # Build the engine StageData from the stored stage. ``time_seconds``
         # must be > 0 for the report's anomaly checks to make sense; reject
@@ -1868,15 +1913,18 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             result = export_helpers.export_stage(
                 request=export_helpers.StageExportRequest(
                     stage_number=stage_number,
+                    write_trim=req.write_trim,
                     write_csv=req.write_csv,
                     write_fcpxml=req.write_fcpxml,
                     write_report=req.write_report,
                 ),
                 audit_path=audit_file,
                 exports_dir=exports_dir,
-                trimmed_video_path=trimmed_video if trimmed_video.exists() else None,
+                source_video_path=source_video if source_video.exists() else None,
                 stage_data=engine_stage,
                 beep_time_in_source=primary.beep_time,
+                pre_buffer_seconds=project.trim_pre_buffer_seconds,
+                post_buffer_seconds=project.trim_post_buffer_seconds,
                 config=Config(),
             )
         except export_helpers.StageExportError as exc:

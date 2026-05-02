@@ -1807,8 +1807,12 @@ def test_stream_video_404_on_unregistered_path(tmp_path: Path) -> None:
     assert "not registered" in resp.json()["detail"]
 
 
-def test_stream_video_404_when_target_missing(tmp_path: Path) -> None:
-    """Registered path that no longer exists on disk surfaces as 404."""
+def test_stream_video_424_when_target_missing(tmp_path: Path) -> None:
+    """Registered path that no longer exists on disk surfaces as 424
+    (Failed Dependency) with a structured detail. The SPA reads
+    ``detail.code == "source_unreachable"`` to render a consistent
+    "reconnect the USB / SD card" message across detect-beep, trim,
+    beep preview, video stream, and export."""
     client, _ = _seed_project_with_primary(tmp_path)
     project = MatchProject.load(tmp_path / "match")
     primary = project.stages[0].primary()
@@ -1817,8 +1821,10 @@ def test_stream_video_404_when_target_missing(tmp_path: Path) -> None:
     if resolved.exists() or resolved.is_symlink():
         resolved.unlink()
     resp = client.get(f"/api/videos/stream?path={primary.path}")
-    assert resp.status_code == 404
-    assert "missing" in resp.json()["detail"]
+    assert resp.status_code == 424
+    body = resp.json()
+    assert body["detail"]["code"] == "source_unreachable"
+    assert "not reachable" in body["detail"]["message"]
 
 
 def test_peaks_endpoint_rejects_extreme_bins(tmp_path: Path) -> None:

@@ -132,11 +132,17 @@ def test_export_stage_writes_csv_and_report(tmp_path: Path) -> None:
 
     result = exports_mod.export_stage(
         request=exports_mod.StageExportRequest(
-            stage_number=1, write_csv=True, write_fcpxml=False, write_report=True
+            stage_number=1,
+            write_trim=False,
+            write_csv=True,
+            write_fcpxml=False,
+            write_report=True,
         ),
         audit_path=audit_path,
         exports_dir=exports_dir,
-        trimmed_video_path=None,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
         stage_data=StageData(
             stage_number=1,
             stage_name="Stage 1 -- H1",
@@ -174,7 +180,9 @@ def test_export_stage_refuses_missing_audit(tmp_path: Path) -> None:
             request=exports_mod.StageExportRequest(stage_number=1),
             audit_path=tmp_path / "missing.json",
             exports_dir=tmp_path / "exports",
-            trimmed_video_path=None,
+            source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
             stage_data=StageData(
                 stage_number=1,
                 stage_name="S",
@@ -194,7 +202,9 @@ def test_export_stage_refuses_empty_shots(tmp_path: Path) -> None:
             request=exports_mod.StageExportRequest(stage_number=1),
             audit_path=audit_path,
             exports_dir=tmp_path / "exports",
-            trimmed_video_path=None,
+            source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
             stage_data=StageData(
                 stage_number=1,
                 stage_name="S",
@@ -206,9 +216,10 @@ def test_export_stage_refuses_empty_shots(tmp_path: Path) -> None:
         )
 
 
-def test_export_stage_skips_fcpxml_without_trimmed_video(tmp_path: Path) -> None:
-    """No trimmed clip on disk -> FCPXML is skipped with an anomaly,
-    but CSV / report still write."""
+def test_export_stage_skips_trim_and_fcpxml_when_source_unreachable(tmp_path: Path) -> None:
+    """Source video missing (USB unplugged) -> trim and FCPXML skip with a
+    helpful anomaly, but CSV / report still write so the user gets the
+    audit data even when external storage is offline."""
     audit_path = tmp_path / "stage1.json"
     audit_path.write_text(
         json.dumps(
@@ -223,11 +234,17 @@ def test_export_stage_skips_fcpxml_without_trimmed_video(tmp_path: Path) -> None
 
     result = exports_mod.export_stage(
         request=exports_mod.StageExportRequest(
-            stage_number=1, write_csv=True, write_fcpxml=True, write_report=True
+            stage_number=1,
+            write_trim=True,
+            write_csv=True,
+            write_fcpxml=True,
+            write_report=True,
         ),
         audit_path=audit_path,
         exports_dir=tmp_path / "exports",
-        trimmed_video_path=None,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
         stage_data=StageData(
             stage_number=1,
             stage_name="S",
@@ -239,8 +256,13 @@ def test_export_stage_skips_fcpxml_without_trimmed_video(tmp_path: Path) -> None
     )
 
     assert result.csv_path and result.csv_path.exists()
+    assert result.report_path and result.report_path.exists()
+    assert result.trimmed_video_path is None
     assert result.fcpxml_path is None
-    assert any("FCPXML not written" in a for a in result.anomalies)
+    # Both the trim-skip and fcpxml-skip messages should reference the
+    # source-unreachable cause, not raw ffmpeg errors.
+    assert any("trim not written" in a for a in result.anomalies)
+    assert any("fcpxml not written" in a for a in result.anomalies)
 
 
 def test_slugify_matches_cli_format() -> None:
@@ -289,5 +311,14 @@ def test_export_overview_status(tmp_path: Path) -> None:
     row = overview[0]
     assert row.has_primary
     assert row.audit_shot_count == 1
+    # Total candidate pool from the detector. NOT "pending" -- once shot
+    # detection has run, every candidate is kept (in shots[]) or rejected.
+    # The fixture ships 2 candidates; only 1 was promoted to a shot, so
+    # 1 was implicitly rejected.
+    assert row.total_candidate_count == 2
     assert row.ready_to_export is True
     assert row.has_exports is False
+    # source_reachable is False -- the test fixture's primary path
+    # ``raw/a.mp4`` doesn't exist on disk, mirroring the "USB unplugged"
+    # case the SPA badges with "Source missing".
+    assert row.source_reachable is False

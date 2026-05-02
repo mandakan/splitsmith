@@ -155,15 +155,32 @@ class StageExportStatus(BaseModel):
     has_primary: bool
     primary_processed: dict[str, bool]
     audit_shot_count: int
-    pending_candidate_count: int
+    # Size of the detector's full candidate pool (``_candidates_pending_audit.
+    # candidates`` in the audit JSON). NOT "pending"; once shot detection has
+    # run, every candidate is either in ``shots[]`` (kept) or implicitly
+    # rejected. The SPA renders this as "X shots audited from Y candidates"
+    # so the math makes sense at a glance.
+    total_candidate_count: int
     audit_path: Path | None
+    # The video reference the SPA renders. Prefers the lossless trim under
+    # ``exports/``; falls back to the audit-mode short-GOP copy from
+    # ``trimmed/`` only when no lossless trim exists yet, so the user
+    # always has *something* trimmed to inspect. ``lossless_trim_present``
+    # disambiguates "this is the deliverable" vs "this is the scrub cache".
     trimmed_video_path: Path | None
+    lossless_trim_present: bool = False
     csv_path: Path | None
     fcpxml_path: Path | None
     report_path: Path | None
     has_exports: bool
     last_export_at: datetime | None
     ready_to_export: bool
+    # Whether the primary's source video resolves to a present file.
+    # ``False`` typically means the symlink under ``raw/`` is dangling
+    # because external storage is disconnected; the SPA badges the row
+    # so the user knows Generate will degrade (CSV/report only) without
+    # having to click first. ``None`` when the stage has no primary.
+    source_reachable: bool | None = None
 
 
 class StageMatchWindow(BaseModel):
@@ -368,7 +385,7 @@ class MatchProject(BaseModel):
             primary = stage.primary()
             audit_file = audit_dir / f"stage{stage.stage_number}.json"
             shot_count = 0
-            pending_count = 0
+            total_candidates = 0
             if audit_file.exists():
                 try:
                     raw = json.loads(audit_file.read_text(encoding="utf-8"))
@@ -383,23 +400,35 @@ class MatchProject(BaseModel):
                 if isinstance(cand_block, dict):
                     cands = cand_block.get("candidates")
                     if isinstance(cands, list):
-                        pending_count = len(cands)
+                        total_candidates = len(cands)
 
             base = f"stage{stage.stage_number}_{exports_mod._slugify(stage.stage_name)}"
             csv_p = exports_dir / f"{base}_splits.csv"
             fcpxml_p = exports_dir / f"{base}.fcpxml"
             report_p = exports_dir / f"{base}_report.txt"
-            trimmed_p = trimmed_dir / f"stage{stage.stage_number}_trimmed.mp4"
+            # The "trimmed video" surfaced to the Export screen is the
+            # lossless trim in exports/ (the FCP-bound deliverable), not
+            # the audit-mode short-GOP scrub copy in <project>/trimmed/.
+            # Reference trimmed_dir only when the lossless one is missing
+            # so the row at least shows the user *something* trimmed.
+            lossless_trim_p = exports_dir / f"{base}_trimmed.mp4"
+            audit_trim_p = trimmed_dir / f"stage{stage.stage_number}_trimmed.mp4"
+            trimmed_p = (
+                lossless_trim_p
+                if lossless_trim_p.exists()
+                else (audit_trim_p if audit_trim_p.exists() else lossless_trim_p)
+            )
 
             csv_exists = csv_p.exists()
             fcpxml_exists = fcpxml_p.exists()
             report_exists = report_p.exists()
-            has_exports = csv_exists or fcpxml_exists or report_exists
+            trim_exists = lossless_trim_p.exists()
+            has_exports = csv_exists or fcpxml_exists or report_exists or trim_exists
             last_export_at: datetime | None = None
             if has_exports:
                 mtimes = [
                     p.stat().st_mtime
-                    for p in (csv_p, fcpxml_p, report_p)
+                    for p in (csv_p, fcpxml_p, report_p, lossless_trim_p)
                     if p.exists()
                 ]
                 if mtimes:
@@ -417,6 +446,13 @@ class MatchProject(BaseModel):
                 and processed.get("shot_detect", False)
                 and shot_count > 0
             )
+            source_reachable: bool | None = None
+            if primary is not None:
+                try:
+                    src = self.resolve_video_path(root, primary.path)
+                    source_reachable = src.exists()
+                except OSError:
+                    source_reachable = False
 
             out.append(
                 StageExportStatus(
@@ -426,15 +462,17 @@ class MatchProject(BaseModel):
                     has_primary=primary is not None,
                     primary_processed=processed,
                     audit_shot_count=shot_count,
-                    pending_candidate_count=pending_count,
+                    total_candidate_count=total_candidates,
                     audit_path=audit_file if audit_file.exists() else None,
                     trimmed_video_path=trimmed_p if trimmed_p.exists() else None,
                     csv_path=csv_p if csv_exists else None,
                     fcpxml_path=fcpxml_p if fcpxml_exists else None,
                     report_path=report_p if report_exists else None,
+                    lossless_trim_present=trim_exists,
                     has_exports=has_exports,
                     last_export_at=last_export_at,
                     ready_to_export=ready_to_export,
+                    source_reachable=source_reachable,
                 )
             )
         return out

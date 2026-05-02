@@ -41,6 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
   api,
+  asSourceUnreachable,
   type ExportOverview,
   type ExportStageResult,
   type MatchProject,
@@ -177,9 +178,13 @@ function StageRow({
                 Stage {row.stage_number}: {row.stage_name}
               </CardTitle>
               <CardDescription className="font-mono tabular-nums">
+                {/* Math: 61 shots audited from 91 candidates means 61
+                    were kept, 91 - 61 = 30 were rejected. Every candidate
+                    is decided once shot detection has run -- nothing is
+                    "pending" in the audit_events sense. */}
                 {row.audit_shot_count} shot{row.audit_shot_count === 1 ? "" : "s"} audited
-                {row.pending_candidate_count > 0
-                  ? ` -- ${row.pending_candidate_count} candidate${row.pending_candidate_count === 1 ? "" : "s"} pending`
+                {row.total_candidate_count > 0
+                  ? ` from ${row.total_candidate_count} candidate${row.total_candidate_count === 1 ? "" : "s"}`
                   : ""}
                 {row.last_export_at
                   ? ` -- last export ${new Date(row.last_export_at).toLocaleString()}`
@@ -207,6 +212,13 @@ function StatusBadge({ row }: { row: StageExportStatus }) {
   if (!row.has_primary) {
     return <Badge variant="statusNotStarted">No primary</Badge>;
   }
+  if (row.source_reachable === false) {
+    return (
+      <Badge variant="statusWarning" className="gap-1">
+        <AlertCircle className="size-3" /> Source missing
+      </Badge>
+    );
+  }
   if (row.ready_to_export && row.has_exports) {
     return (
       <Badge variant="statusComplete" className="gap-1">
@@ -221,7 +233,7 @@ function StatusBadge({ row }: { row: StageExportStatus }) {
       </Badge>
     );
   }
-  if (row.audit_shot_count > 0 || row.pending_candidate_count > 0) {
+  if (row.audit_shot_count > 0 || row.total_candidate_count > 0) {
     return <Badge variant="statusInProgress">Auditing</Badge>;
   }
   return <Badge variant="statusNotStarted">Not started</Badge>;
@@ -236,16 +248,21 @@ function StageActions({
   onChanged: () => Promise<void>;
   onError: (msg: string | null) => void;
 }) {
+  const [trim, setTrim] = useState(true);
   const [csv, setCsv] = useState(true);
   const [fcpxml, setFcpxml] = useState(true);
   const [reportFlag, setReportFlag] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<ExportStageResult | null>(null);
 
+  const sourceUnreachable = row.has_primary && row.source_reachable === false;
+  const willDegrade = sourceUnreachable && (trim || fcpxml);
+
   const generate = async () => {
     setBusy(true);
     try {
       const r = await api.exportStage(row.stage_number, {
+        write_trim: trim,
         write_csv: csv,
         write_fcpxml: fcpxml,
         write_report: reportFlag,
@@ -254,13 +271,21 @@ function StageActions({
       onError(null);
       await onChanged();
     } catch (e) {
-      onError(
-        e instanceof ApiError
-          ? `Generate failed: ${e.detail}`
-          : e instanceof Error
-            ? e.message
-            : String(e),
-      );
+      // Source-unreachable: surface the structured message so the user
+      // gets the same wording across detect-beep, trim, beep preview,
+      // and export.
+      const unreachable = asSourceUnreachable(e);
+      if (unreachable) {
+        onError(unreachable.message);
+      } else {
+        onError(
+          e instanceof ApiError
+            ? `Generate failed: ${e.detail}`
+            : e instanceof Error
+              ? e.message
+              : String(e),
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -277,7 +302,31 @@ function StageActions({
 
   return (
     <div className="space-y-3">
+      {sourceUnreachable ? (
+        <div className="rounded-md border border-status-warning/40 bg-status-warning/5 p-3 text-xs">
+          <div className="mb-1 flex items-center gap-1 font-medium">
+            <AlertCircle className="size-3.5 text-status-warning" />
+            Source video not reachable
+          </div>
+          <p className="text-muted-foreground">
+            The primary's symlink is dangling -- typically because the USB
+            drive / SD card is unplugged. CSV and report can still be
+            generated from the audit JSON. Reconnect the source to produce
+            a fresh trim and FCPXML.
+          </p>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3 text-sm">
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={trim}
+            disabled={busy}
+            onChange={(e) => setTrim(e.target.checked)}
+          />
+          Trim (lossless MP4)
+        </label>
         <label className="flex items-center gap-1.5">
           <input
             type="checkbox"
@@ -311,10 +360,17 @@ function StageActions({
         <Button
           size="sm"
           onClick={generate}
-          disabled={busy || !row.ready_to_export || (!csv && !fcpxml && !reportFlag)}
+          disabled={
+            busy ||
+            !row.ready_to_export ||
+            (!trim && !csv && !fcpxml && !reportFlag)
+          }
           title={
             row.ready_to_export
-              ? "Write the selected artefacts (overwrites if present)"
+              ? willDegrade
+                ? "Source is unreachable; trim and FCPXML will be skipped, " +
+                  "CSV/report will still write."
+                : "Write the selected artefacts (overwrites if present)"
               : "Finish the audit first -- need at least one shot in the audit JSON"
           }
         >
@@ -355,8 +411,16 @@ function FileLinks({
   row: StageExportStatus;
   onReveal: (path: string | null) => void;
 }) {
+  // Only call out the lossless trim as the deliverable. The audit-mode
+  // short-GOP scrub copy in <project>/trimmed/ is a cache file and isn't
+  // meant to ship to FCP, so we don't surface it here -- the row falls
+  // back to "(not yet generated)" until the user hits Generate with the
+  // Trim toggle on.
   const items: { label: string; path: string | null }[] = [
-    { label: "Trimmed MP4", path: row.trimmed_video_path },
+    {
+      label: "Trim (lossless MP4)",
+      path: row.lossless_trim_present ? row.trimmed_video_path : null,
+    },
     { label: "Splits CSV", path: row.csv_path },
     { label: "FCPXML", path: row.fcpxml_path },
     { label: "Report", path: row.report_path },

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .. import csv_gen, fcpxml_gen, report
+from .. import csv_gen, fcpxml_gen, report, trim
 from ..config import Config, ReportFiles, Shot, StageAnalysis, StageData
 
 
@@ -28,13 +28,15 @@ from ..config import Config, ReportFiles, Shot, StageAnalysis, StageData
 class StageExportRequest:
     """One stage's export job: which artefacts to write.
 
-    The trimmed video is not regenerated here -- it lives at
-    ``<project>/trimmed/stage<N>_<slug>.mp4`` from the audit-mode trim and
-    is referenced as-is. The FCPXML is only written when that file exists,
-    matching the CLI's ``_process_one`` behaviour.
+    The lossless trim is part of the export -- it's the archival deliverable
+    that ships to FCP, distinct from the audit-mode short-GOP scrub copy
+    that lives in ``<project>/trimmed/``. The FCPXML references the lossless
+    trim, mirroring ``splitsmith single``: the SPA's exports are
+    byte-comparable with the CLI's for the same audit data.
     """
 
     stage_number: int
+    write_trim: bool = True
     write_csv: bool = True
     write_fcpxml: bool = True
     write_report: bool = True
@@ -45,10 +47,10 @@ class StageExportResult:
     """Paths produced (or skipped) by :func:`export_stage`."""
 
     stage_number: int
+    trimmed_video_path: Path | None
     csv_path: Path | None
     fcpxml_path: Path | None
     report_path: Path | None
-    trimmed_video_path: Path | None
     shots_written: int
     anomalies: list[str]
 
@@ -145,18 +147,29 @@ def export_stage(
     request: StageExportRequest,
     audit_path: Path,
     exports_dir: Path,
-    trimmed_video_path: Path | None,
+    source_video_path: Path | None,
     stage_data: StageData,
     beep_time_in_source: float,
+    pre_buffer_seconds: float,
+    post_buffer_seconds: float,
     config: Config,
 ) -> StageExportResult:
     """Run the export for one stage. Pure orchestration over the engine
     modules; never re-detects.
 
+    Produces (subject to the request flags):
+      - ``stage<N>_<slug>_trimmed.mp4`` -- lossless stream-copy trim of the
+        source, matching ``splitsmith single``. This is the FCP-bound
+        deliverable, distinct from the audit-mode short-GOP scrub copy in
+        ``<project>/trimmed/``.
+      - ``stage<N>_<slug>_splits.csv``
+      - ``stage<N>_<slug>.fcpxml`` (references the lossless trim above)
+      - ``stage<N>_<slug>_report.txt``
+
     ``audit_path`` must exist and contain at least one shot. ``exports_dir``
-    is created if missing. The trimmed video is required for FCPXML (the
-    timeline references it) -- when missing the FCPXML step is skipped
-    rather than failing the whole export.
+    is created if missing. ``source_video_path`` is the primary's source
+    file (resolved through any symlink); it is required when ``write_trim``
+    or ``write_fcpxml`` is set.
     """
     if not audit_path.exists():
         raise StageExportError(
@@ -178,52 +191,129 @@ def export_stage(
     exports_dir.mkdir(parents=True, exist_ok=True)
     base = f"stage{stage_data.stage_number}_{_slugify(stage_data.stage_name)}"
 
+    skip_reasons: list[str] = []
+
+    # Source-reachability is the most common reason an export degrades:
+    # the project stores symlinks to a USB drive that's not plugged in.
+    # Build one shared, specific message so the user gets the same hint
+    # regardless of which artefact tripped over the missing source.
+    source_missing = source_video_path is None or not source_video_path.exists()
+    missing_msg: str | None = None
+    if source_missing and (request.write_trim or request.write_fcpxml):
+        if source_video_path is None:
+            missing_msg = (
+                "source video is not registered for this stage; assign a "
+                "primary on the Ingest screen first."
+            )
+        else:
+            missing_msg = (
+                f"source video not reachable: {source_video_path}. If it lives "
+                "on external storage (USB drive, SD card), reconnect and "
+                "re-run Generate. CSV and report still wrote -- they only "
+                "need the audit JSON."
+            )
+
+    # Lossless trim into exports/. Always reference *this* file from FCPXML
+    # so SPA-produced output lines up with ``splitsmith single``. The
+    # audit-mode short-GOP file in <project>/trimmed/ is a scrub cache,
+    # not an export.
+    trimmed_path: Path | None = None
+    if request.write_trim:
+        if source_missing:
+            assert missing_msg is not None  # populated above
+            skip_reasons.append(f"trim not written: {missing_msg}")
+            # If a prior run left a lossless trim, surface it -- the user
+            # has *something* to ship while the source is unreachable.
+            stale = exports_dir / f"{base}_trimmed.mp4"
+            if stale.exists():
+                trimmed_path = stale
+        else:
+            assert source_video_path is not None  # narrowed by source_missing
+            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+            try:
+                trim.trim_video(
+                    source_video_path,
+                    trimmed_path,
+                    beep_time=beep_time_in_source,
+                    stage_time=stage_data.time_seconds,
+                    pre_buffer_seconds=pre_buffer_seconds,
+                    post_buffer_seconds=post_buffer_seconds,
+                    mode="lossless",
+                    overwrite=True,
+                )
+            except (trim.FFmpegError, FileNotFoundError, RuntimeError) as exc:
+                # Don't fail the whole export -- CSV / report are still
+                # useful even if ffmpeg blew up. Surface as anomaly.
+                skip_reasons.append(f"trim not written: {exc}")
+                trimmed_path = None
+                if (exports_dir / f"{base}_trimmed.mp4").exists():
+                    # Stale artefact from a prior run -- still reference it
+                    # from FCPXML so the user gets *something* usable.
+                    trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+
     csv_path: Path | None = None
     if request.write_csv:
         csv_path = exports_dir / f"{base}_splits.csv"
         csv_gen.write_splits_csv(shots, csv_path)
 
     fcpxml_path: Path | None = None
-    fcpxml_skipped_reason: str | None = None
     if request.write_fcpxml:
-        if trimmed_video_path is None or not trimmed_video_path.exists():
-            fcpxml_skipped_reason = (
-                "no trimmed clip on disk; trim the stage from the audit screen first"
-            )
+        # FCPXML needs a video to reference. Prefer the lossless trim we
+        # just produced; fall back to a stale lossless trim from a prior
+        # export if it exists; only as a last resort look for a lossless
+        # trim independent of this run.
+        fcp_video: Path | None = None
+        candidate = exports_dir / f"{base}_trimmed.mp4"
+        if trimmed_path is not None and trimmed_path.exists():
+            fcp_video = trimmed_path
+        elif candidate.exists():
+            fcp_video = candidate
+
+        if fcp_video is None:
+            if missing_msg:
+                # The trim couldn't run because the source is unreachable.
+                # Surface that as the FCPXML reason too -- avoids the user
+                # chasing two separate "no lossless trim" messages.
+                skip_reasons.append(f"fcpxml not written: {missing_msg}")
+            else:
+                skip_reasons.append(
+                    "fcpxml not written: no lossless trim in exports/. "
+                    "Re-run Generate with the Trim toggle enabled."
+                )
         else:
             fcpxml_path = exports_dir / f"{base}.fcpxml"
-            meta = fcpxml_gen.probe_video(trimmed_video_path)
-            # Beep offset *within the trimmed clip*: comes from the audit
-            # JSON (``beep_time``), which the audit pipeline writes as
-            # ``beep_in_clip`` -- not the source beep. Fall back to the
-            # configured trim buffer if missing (matches the CLI default).
-            audit_beep_in_clip = audit_data.get("beep_time")
-            beep_offset_in_clip = (
-                float(audit_beep_in_clip)
-                if isinstance(audit_beep_in_clip, (int, float))
-                else config.output.trim_buffer_seconds
-            )
-            fcpxml_gen.generate_fcpxml(
-                video_path=trimmed_video_path,
-                video=meta,
-                shots=shots,
-                beep_offset_seconds=beep_offset_in_clip,
-                output_path=fcpxml_path,
-                project_name=base,
-                config=config.output,
-            )
+            try:
+                meta = fcpxml_gen.probe_video(fcp_video)
+                # Beep offset within the lossless trim: the trim cut at
+                # ``beep_time - pre_buffer`` from source, so the beep lives
+                # ``pre_buffer`` seconds into the clip.
+                fcpxml_gen.generate_fcpxml(
+                    video_path=fcp_video,
+                    video=meta,
+                    shots=shots,
+                    beep_offset_seconds=pre_buffer_seconds,
+                    output_path=fcpxml_path,
+                    project_name=base,
+                    config=config.output,
+                )
+            except (fcpxml_gen.FFprobeError, OSError) as exc:
+                skip_reasons.append(f"fcpxml not written: {exc}")
+                fcpxml_path = None
 
     anomalies = report.detect_anomalies(shots, beep_time_in_source, stage_data.time_seconds)
-    files = ReportFiles(
-        video=trimmed_video_path if trimmed_video_path and trimmed_video_path.exists() else None,
-        csv=csv_path,
-        fcpxml=fcpxml_path,
-    )
+    if skip_reasons:
+        anomalies = [*anomalies, *skip_reasons]
+
     report_path: Path | None = None
     if request.write_report:
+        files = ReportFiles(
+            video=trimmed_path if trimmed_path and trimmed_path.exists() else None,
+            csv=csv_path,
+            fcpxml=fcpxml_path,
+        )
         analysis = StageAnalysis(
             stage=stage_data,
-            video_path=trimmed_video_path or Path(),
+            video_path=trimmed_path or source_video_path or Path(),
             beep_time=beep_time_in_source,
             shots=shots,
             anomalies=anomalies,
@@ -236,20 +326,14 @@ def export_stage(
             color_thresholds=config.output.split_color_thresholds,
         )
 
-    if fcpxml_skipped_reason and request.write_fcpxml:
-        # Surface as an anomaly so the report lists it without failing the
-        # whole export. The SPA also reads the StageExportResult and shows
-        # the user; this keeps the file-side artefact aligned.
-        anomalies = [*anomalies, f"FCPXML not written: {fcpxml_skipped_reason}"]
-
     return StageExportResult(
         stage_number=stage_data.stage_number,
+        trimmed_video_path=(
+            trimmed_path if trimmed_path is not None and trimmed_path.exists() else None
+        ),
         csv_path=csv_path,
         fcpxml_path=fcpxml_path,
         report_path=report_path,
-        trimmed_video_path=trimmed_video_path
-        if trimmed_video_path and trimmed_video_path.exists()
-        else None,
         shots_written=len(shots),
         anomalies=anomalies,
     )

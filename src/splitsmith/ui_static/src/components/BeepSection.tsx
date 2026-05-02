@@ -35,6 +35,7 @@ import { Waveform } from "@/components/Waveform";
 import {
   ApiError,
   api,
+  asSourceUnreachable,
   type BeepCandidate,
   type Job,
   type MatchProject,
@@ -119,7 +120,15 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
         );
         if (ok) await detect(true);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        // Source-unreachable (424) gets the same friendly wording the
+        // Export page shows, so the user sees one consistent
+        // "reconnect external storage" message everywhere.
+        const unreachable = asSourceUnreachable(e);
+        if (unreachable) {
+          setError(unreachable.message);
+        } else {
+          setError(e instanceof Error ? e.message : String(e));
+        }
       }
     } finally {
       setJobStatus(null);
