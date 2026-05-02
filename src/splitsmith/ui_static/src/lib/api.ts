@@ -9,6 +9,17 @@
 export type VideoRole = "primary" | "secondary" | "ignored";
 export type BeepSource = "auto" | "manual";
 
+/** One ranked beep candidate emitted by ``detect-beep`` (issue #22).
+ *  ``score`` is silence-preference (run_peak / pre-window mean); higher =
+ *  more confident. ``beep_candidates[0]`` matches the promoted ``beep_time``
+ *  on the parent ``StageVideo``. */
+export interface BeepCandidate {
+  time: number;
+  score: number;
+  peak_amplitude: number;
+  duration_ms: number;
+}
+
 export interface StageVideo {
   path: string;
   role: VideoRole;
@@ -18,6 +29,9 @@ export interface StageVideo {
   beep_source: BeepSource | null;
   beep_peak_amplitude: number | null;
   beep_duration_ms: number | null;
+  /** Ranked alternative candidates from the most recent auto-detection run.
+   *  Empty when the project predates issue #22 or after a manual override. */
+  beep_candidates: BeepCandidate[];
   notes: string;
 }
 
@@ -327,6 +341,17 @@ export const api = {
       json: { beep_time: beepTime },
     }),
 
+  /** Promote one of the ranked auto-detected candidates as authoritative.
+   *  ``time`` is matched against ``primary.beep_candidates`` within 1 ms,
+   *  so the SPA can hold a slightly stale snapshot without breaking the
+   *  click. The server keeps the candidate list intact so the user can
+   *  switch again without re-running detection, and re-fires the trim job. */
+  selectBeepCandidate: (stageNumber: number, time: number) =>
+    request<MatchProject>(`/api/stages/${stageNumber}/beep/select`, {
+      method: "POST",
+      json: { time },
+    }),
+
   /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
    *  idempotent on the worker side -- when the cached MP4 is fresh the
    *  job completes near-instantly without re-encoding. */
@@ -369,10 +394,11 @@ export const api = {
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 
-  /** URL for a tiny MP4 around the detected beep (#27). The server keys
-   *  the cache on the source's mtime+size and the beep_time, so the URL
-   *  needs ``beepTime`` as a cache-busting query param: a re-detect
-   *  flips beep_time and the SPA must re-fetch a freshly-encoded clip. */
+  /** URL for a tiny MP4 around a beep timestamp (#27, #22). ``t`` is
+   *  passed to the server (which centres the clip there) AND ms-rounded
+   *  into the cache key, so each distinct ``t`` gets its own MP4. The
+   *  candidate picker uses this with arbitrary candidate times; the
+   *  default flow passes ``primary.beep_time``. */
   stageBeepPreviewUrl: (stageNumber: number, beepTime: number) =>
     `/api/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
 

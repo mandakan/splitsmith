@@ -39,12 +39,33 @@ class StageAnalysis(BaseModel):
     anomalies: list[str] = Field(default_factory=list)
 
 
+class BeepCandidate(BaseModel):
+    """One ranked beep candidate from ``beep_detect``.
+
+    Surfaced to the production UI so the user can pick a different candidate
+    when the auto-winner is wrong (issue #22). The score is silence-preference
+    (``run_peak / pre_window_mean``); higher = stronger candidate.
+    """
+
+    time: float
+    score: float
+    peak_amplitude: float
+    duration_ms: float
+
+
 class BeepDetection(BaseModel):
-    """Result of running beep_detect on a clip; carries diagnostics for the audit report."""
+    """Result of running beep_detect on a clip; carries diagnostics for the audit report.
+
+    ``candidates`` holds the top-N silence-preference-ranked candidates with
+    ``candidates[0]`` matching ``time``/``peak_amplitude``/``duration_ms``.
+    The list is empty for callers that don't request alternatives (kept
+    optional for backwards compatibility with on-disk audit JSON).
+    """
 
     time: float
     peak_amplitude: float
     duration_ms: float
+    candidates: list[BeepCandidate] = Field(default_factory=list)
 
 
 class TrimResult(BaseModel):
@@ -144,6 +165,11 @@ class BeepDetectConfig(BaseModel):
     # alone. Capping the search avoids that failure mode entirely. Override per
     # video in YAML if your recording is longer-leading.
     search_window_s: float = 30.0
+    # Number of ranked candidates to surface alongside the auto-winner.
+    # The production UI shows these as "other candidates" so the user can
+    # pick the right one without typing a timestamp by hand (issue #22).
+    # ``0`` returns just the winner (legacy behaviour).
+    top_n_candidates: int = 5
 
 
 class ShotDetectConfig(BaseModel):

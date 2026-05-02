@@ -51,7 +51,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import butter, hilbert, sosfiltfilt
 
-from .config import BeepDetectConfig, BeepDetection
+from .config import BeepCandidate, BeepDetectConfig, BeepDetection
 
 # Rise-foot leading-edge parameters. Same definition as shot_detect (the
 # burst's own peak is the reference, so detection is insensitive to gain /
@@ -160,14 +160,30 @@ def detect_beep(
             f"{config.freq_max_hz}] Hz"
         )
 
-    run_start, run_end, run_peak, _score = max(candidates, key=lambda c: c[3])
+    # Rank by silence-preference score (highest first). Compute the rise-foot
+    # leading edge for every candidate so the UI can show alternatives without
+    # a second pass.
+    ranked = sorted(candidates, key=lambda c: c[3], reverse=True)
+    ranked_models: list[BeepCandidate] = []
+    for run_start, run_end, run_peak, score in ranked:
+        leading_idx = _rise_foot_leading_edge(env, run_start, run_end)
+        ranked_models.append(
+            BeepCandidate(
+                time=leading_idx / sample_rate,
+                score=score,
+                peak_amplitude=run_peak,
+                duration_ms=(run_end - run_start) * 1000.0 / sample_rate,
+            )
+        )
 
-    leading_idx = _rise_foot_leading_edge(env, run_start, run_end)
-
+    top_n = config.top_n_candidates if config.top_n_candidates > 0 else 1
+    surfaced = ranked_models[:top_n]
+    winner = ranked_models[0]
     return BeepDetection(
-        time=leading_idx / sample_rate,
-        peak_amplitude=run_peak,
-        duration_ms=(run_end - run_start) * 1000.0 / sample_rate,
+        time=winner.time,
+        peak_amplitude=winner.peak_amplitude,
+        duration_ms=winner.duration_ms,
+        candidates=surfaced,
     )
 
 
