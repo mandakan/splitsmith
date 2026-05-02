@@ -67,6 +67,11 @@
   --marker-detected: #0072b2;              /* blue, filled triangle */
   --marker-rejected: oklch(0.55 0 0);      /* neutral gray, outline + strike */
   --marker-manual: #e69f00;                /* orange, dashed diamond */
+
+  /* Waveform (audit screen #15) */
+  --waveform-bar: oklch(0.55 0 0);
+  --waveform-playhead: #d55e00;            /* vermillion; high contrast on bar */
+  --waveform-beep: #0072b2;                /* blue; matches marker-detected */
 }
 
 .dark {
@@ -108,6 +113,10 @@
   --marker-detected: #4f9bd5;
   --marker-rejected: oklch(0.6 0 0);
   --marker-manual: #ffae42;
+
+  --waveform-bar: oklch(0.65 0 0);
+  --waveform-playhead: #ff7733;
+  --waveform-beep: #4f9bd5;
 }
 
 /* ============================================================================

@@ -17,6 +17,7 @@ Endpoints (locked v1 surface):
   POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
   POST /api/stages/{n}/beep         -- manual beep_time override
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
+  GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -43,6 +44,7 @@ from pydantic import BaseModel
 
 from .. import thumbnail as thumbnail_helpers
 from .. import video_probe
+from .. import waveform as waveform_helpers
 from . import audio as audio_helpers
 from .project import (
     VIDEO_EXTENSIONS,
@@ -502,6 +504,41 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             media_type="audio/wav",
             filename=audio_path.name,
         )
+
+    @app.get("/api/stages/{stage_number}/peaks")
+    def stage_peaks(
+        stage_number: int,
+        bins: int = Query(default=1200, ge=16, le=8192),
+    ) -> JSONResponse:
+        """Return ``bins`` peak magnitudes (0..1) for the stage's primary audio.
+
+        Audio extraction happens on demand via ``ensure_primary_audio``; peaks
+        cache as JSON next to the WAV (see :mod:`splitsmith.waveform`).
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        try:
+            audio_path = audio_helpers.ensure_primary_audio(
+                state.project_root,
+                stage_number,
+                project.resolve_video_path(state.project_root, primary.path),
+                project=project,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except audio_helpers.AudioExtractionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        result = waveform_helpers.ensure_peaks(audio_path, bins)
+        return JSONResponse(result.model_dump(mode="json"))
 
     @app.get("/api/fs/list", response_model=FsListing)
     def fs_list(

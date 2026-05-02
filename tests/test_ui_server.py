@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from splitsmith.thumbnail import ThumbnailError
@@ -594,6 +595,60 @@ def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "audio/wav"
     assert resp.content.startswith(b"RIFF")
+
+
+def test_peaks_endpoint_returns_normalized_bins(tmp_path: Path, monkeypatch) -> None:
+    """/peaks asks the audio helper for the cached WAV, then computes peaks.
+
+    We stub ``ensure_primary_audio`` to return a real WAV written by
+    ``soundfile`` so the peaks pipeline runs end-to-end without ffmpeg.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_primary.wav"
+    audio = np.zeros(48_000, dtype="float32")
+    audio[10_000:11_000] = 0.5
+    sf.write(wav, audio, 48_000)
+
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_ensure(root, n, source, **kwargs):  # type: ignore[no-untyped-def]
+        return wav
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", fake_ensure)
+
+    resp = client.get("/api/stages/1/peaks?bins=64")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bins"] == 64
+    assert len(body["peaks"]) == 64
+    assert all(0.0 <= p <= 1.0 for p in body["peaks"])
+    assert body["duration"] == pytest.approx(1.0)
+
+
+def test_peaks_endpoint_404_when_no_primary(tmp_path: Path) -> None:
+    """A stage without a primary video can't have peaks; surface 404 cleanly."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    project = MatchProject.load(project_root)
+    project.init_placeholder_stages(2)
+    project.save(project_root)
+
+    resp = client.get("/api/stages/1/peaks")
+    assert resp.status_code == 404
+    assert "no primary" in resp.json()["detail"]
+
+
+def test_peaks_endpoint_rejects_extreme_bins(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    assert client.get("/api/stages/1/peaks?bins=8").status_code == 422
+    assert client.get("/api/stages/1/peaks?bins=999999").status_code == 422
 
 
 def test_scan_videos_with_explicit_source_paths(tmp_path: Path) -> None:

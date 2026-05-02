@@ -124,6 +124,13 @@ export interface FsListing {
   suggested_starts: string[];
 }
 
+export interface PeaksResult {
+  duration: number;
+  sample_rate: number;
+  bins: number;
+  peaks: number[];
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -247,6 +254,9 @@ export const api = {
     }),
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
+
+  getStagePeaks: (stageNumber: number, bins = 1200) =>
+    request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),
 };
 
 export { ApiError };
