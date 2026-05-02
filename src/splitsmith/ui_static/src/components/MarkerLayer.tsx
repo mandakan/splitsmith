@@ -22,7 +22,7 @@
  * through to the waveform. Each marker re-enables pointer-events for itself.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { MarkerGlyph, type MarkerKind } from "@/components/MarkerGlyph";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,17 @@ import { cn } from "@/lib/utils";
  *  and land on the 1 ms grid. */
 export const DETECTOR_RESOLUTION_S = 0.0107;
 const FINE_NUDGE_S = 0.001;
+
+/** Pointer travel (in CSS pixels) before a press is treated as a drag rather
+ *  than a click. Trackpad clicks routinely register a few stray pixels of
+ *  motion; without this threshold those clicks accidentally moved the marker.
+ *  6px matches the de-facto threshold in FCP / Logic / most native UIs. */
+const DRAG_THRESHOLD_PX = 6;
+
+/** Idle window after the last keyboard nudge before the burst is committed
+ *  as a single undo entry. 350 ms is long enough to chord arrow taps without
+ *  splitting them, short enough that the Cmd+Z right after feels responsive. */
+const NUDGE_COMMIT_IDLE_MS = 350;
 
 export interface AuditMarker {
   id: string;
@@ -53,7 +64,19 @@ export interface MarkerLayerProps {
   onFocusChange: (id: string | null) => void;
   onClick: (marker: AuditMarker) => void;
   onDelete: (marker: AuditMarker) => void;
+  /** Live time update during a drag or nudge. Parent should mutate state
+   *  for visual feedback but NOT push to its undo stack -- intermediate
+   *  positions are noise. Use ``onTimeChangeBegin`` / ``onTimeChangeCommit``
+   *  to bracket the gesture and snapshot the from/to once. */
   onTimeChange: (id: string, time: number) => void;
+  /** Called once at the start of a drag (or first keyboard nudge in a
+   *  burst). Parent records the marker's pre-edit time so the
+   *  matching commit can produce a single from->to undo entry. */
+  onTimeChangeBegin?: (id: string) => void;
+  /** Called once at the end of a drag (pointerup / pointercancel) or at
+   *  the end of a keyboard nudge burst. Parent pushes the bracketed
+   *  edit to its undo stack and audit_events log. */
+  onTimeChangeCommit?: (id: string, time: number) => void;
   /** Categories to render. Hiding ``rejected`` while saving keeps the
    *  rejected markers in the model -- they just don't render. The save
    *  flow still serializes them via the audit JSON. */
@@ -68,14 +91,53 @@ export function MarkerLayer({
   onClick,
   onDelete,
   onTimeChange,
+  onTimeChangeBegin,
+  onTimeChangeCommit,
   visibleKinds,
 }: MarkerLayerProps) {
   if (duration <= 0) return null;
 
-  // Drag state lives here so re-renders driven by external time updates
-  // don't reset the active drag.
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const dragRef = useRef<{ pointerId: number; element: HTMLButtonElement } | null>(null);
+  // Drag state lives in a ref so re-renders driven by external time
+  // updates don't reset the active drag. ``moved`` only flips once the
+  // cursor crosses DRAG_THRESHOLD_PX -- before that, the gesture is
+  // still ambiguous and pointerup will fire as a click.
+  const dragRef = useRef<{
+    pointerId: number;
+    element: HTMLButtonElement;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+
+  // Keyboard-nudge burst tracking: the first arrow key in a burst calls
+  // onTimeChangeBegin; subsequent keys within NUDGE_COMMIT_IDLE_MS just
+  // update live. The trailing-edge timer commits one bracketed entry.
+  const nudgeRef = useRef<{
+    id: string;
+    lastTime: number;
+    timer: number;
+  } | null>(null);
+
+  const flushNudge = useCallback(() => {
+    const n = nudgeRef.current;
+    if (!n) return;
+    window.clearTimeout(n.timer);
+    nudgeRef.current = null;
+    onTimeChangeCommit?.(n.id, n.lastTime);
+  }, [onTimeChangeCommit]);
+
+  // If the focused marker changes mid-burst, commit before the new marker
+  // starts its own burst so the two don't merge into one undo entry.
+  useEffect(() => {
+    const n = nudgeRef.current;
+    if (n && n.id !== focusedId) flushNudge();
+  }, [focusedId, flushNudge]);
+
+  // Final flush on unmount (stage switch, etc.) so a half-typed burst
+  // doesn't disappear without producing an audit event.
+  useEffect(() => {
+    return () => flushNudge();
+  }, [flushNudge]);
 
   // Markers in time order so Tab moves left-to-right naturally. Filtered
   // categories are dropped entirely so they don't intercept pointer events
@@ -108,8 +170,13 @@ export function MarkerLayer({
       e.preventDefault();
       const el = e.currentTarget;
       el.setPointerCapture(e.pointerId);
-      dragRef.current = { pointerId: e.pointerId, element: el };
-      setDraggingId(marker.id);
+      dragRef.current = {
+        pointerId: e.pointerId,
+        element: el,
+        startX: e.clientX,
+        startY: e.clientY,
+        moved: false,
+      };
       onFocusChange(marker.id);
     },
     [onFocusChange],
@@ -117,35 +184,46 @@ export function MarkerLayer({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>, marker: AuditMarker) => {
-      if (dragRef.current?.pointerId !== e.pointerId) return;
+      const drag = dragRef.current;
+      if (drag?.pointerId !== e.pointerId) return;
+      if (!drag.moved) {
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
+        drag.moved = true;
+        // Drag committed past the threshold: tell the parent to snapshot
+        // the pre-edit time. Subsequent onTimeChange calls are visual
+        // only; the matching commit on pointerup brackets the gesture.
+        onTimeChangeBegin?.(marker.id);
+      }
       const parent = e.currentTarget.parentElement;
       if (!parent) return;
       const rect = parent.getBoundingClientRect();
       const t = snap(timeFromClientX(e.clientX, rect), e.shiftKey);
       onTimeChange(marker.id, t);
     },
-    [snap, timeFromClientX, onTimeChange],
+    [snap, timeFromClientX, onTimeChange, onTimeChangeBegin],
   );
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>, marker: AuditMarker) => {
-      if (dragRef.current?.pointerId !== e.pointerId) return;
+      const drag = dragRef.current;
+      if (drag?.pointerId !== e.pointerId) return;
       const el = e.currentTarget;
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      const moved = drag.moved;
       dragRef.current = null;
-      // If the pointer didn't actually move, treat as a click.
-      const moved = draggingId === marker.id;
-      setDraggingId(null);
       if (!moved) {
         onClick(marker);
+        return;
       }
-      // Track 'click vs drag' more carefully via pointer movement deltas would
-      // be nicer, but the simpler heuristic above feels right in practice:
-      // setDraggingId fires on pointerdown so this branch is essentially
-      // "you pressed -> we set drag -> you released". A lightly clicked drag
-      // snaps to the same time it started; harmless.
+      // Commit the drag: parent reads the marker's current time from its
+      // own state (it's been updating live during pointermove) and pushes
+      // a single from->to undo entry plus one audit_events row.
+      const live = markers.find((m) => m.id === marker.id);
+      onTimeChangeCommit?.(marker.id, live?.time ?? marker.time);
     },
-    [draggingId, onClick],
+    [onClick, onTimeChangeCommit, markers],
   );
 
   const handleKeyDown = useCallback(
@@ -156,25 +234,48 @@ export function MarkerLayer({
           e.preventDefault();
           const dir = e.key === "ArrowRight" ? 1 : -1;
           const step = e.shiftKey ? FINE_NUDGE_S : DETECTOR_RESOLUTION_S;
-          const next = Math.max(0, Math.min(duration, marker.time + dir * step));
-          onTimeChange(marker.id, snap(next, e.shiftKey));
+          const next = snap(
+            Math.max(0, Math.min(duration, marker.time + dir * step)),
+            e.shiftKey,
+          );
+          // First key in a burst -> open the bracket. Subsequent keys
+          // just refresh the trailing-edge timer.
+          if (nudgeRef.current?.id !== marker.id) {
+            flushNudge();
+            onTimeChangeBegin?.(marker.id);
+            nudgeRef.current = {
+              id: marker.id,
+              lastTime: next,
+              timer: window.setTimeout(flushNudge, NUDGE_COMMIT_IDLE_MS),
+            };
+          } else {
+            window.clearTimeout(nudgeRef.current.timer);
+            nudgeRef.current.lastTime = next;
+            nudgeRef.current.timer = window.setTimeout(
+              flushNudge,
+              NUDGE_COMMIT_IDLE_MS,
+            );
+          }
+          onTimeChange(marker.id, next);
           return;
         }
         case "Enter":
         case " ":
           e.preventDefault();
+          flushNudge();
           onClick(marker);
           return;
         case "Delete":
         case "Backspace":
           e.preventDefault();
+          flushNudge();
           onDelete(marker);
           return;
         default:
           return;
       }
     },
-    [duration, onClick, onDelete, onTimeChange, snap],
+    [duration, onClick, onDelete, onTimeChange, onTimeChangeBegin, snap, flushNudge],
   );
 
   // Whenever focus moves to a marker, keep ARIA in sync.

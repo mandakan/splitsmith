@@ -31,6 +31,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
+  ChevronsRight,
   Crosshair,
   HelpCircle,
   ListChecks,
@@ -81,6 +82,7 @@ import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
+const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
 
 export function Audit() {
   const { stage: stageParam } = useParams();
@@ -123,6 +125,19 @@ export function Audit() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
+  // Auto-advance to the next visible marker after K toggles a candidate.
+  // Default on (FCP-style "mark and move"); persisted across sessions
+  // because the user audits in long flow blocks and shouldn't have to
+  // re-enable it every reload.
+  const [kAutoProgress, setKAutoProgress] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const v = window.localStorage.getItem(K_AUTO_PROGRESS_KEY);
+    return v == null ? true : v === "1";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(K_AUTO_PROGRESS_KEY, kAutoProgress ? "1" : "0");
+  }, [kAutoProgress]);
   // Anchor for loop-to-start semantics: the audit-timeline position
   // playback last started from (or where the user last scrubbed). On
   // pause / end-of-clip while loopMode is on, the playhead snaps back
@@ -456,38 +471,68 @@ export function Audit() {
     [markers, mutate, recordEvent],
   );
 
-  const handleMarkerTimeChange = useCallback(
-    (id: string, time: number) => {
-      // Drag-during-pointer-move calls this many times. Coalesce by replacing
-      // the head of the undo stack on the same id while a drag is active --
-      // simplest: only push to undo when the time actually differs from the
-      // current snapshot. Here we use an inline check.
-      setMarkers((prev) => {
-        const target = prev.find((x) => x.id === id);
-        if (target && target.time !== time) {
-          // One event per drag commit (rAF-coalesced). Aggregating
-          // pointer-move ticks into a single event would need extra
-          // glue; the log stays useful even with a few entries per drag.
-          sessionEventsRef.current.push({
-            ts: new Date().toISOString(),
-            kind: "marker_time_changed",
-            payload: { id, from_time: target.time, to_time: time },
-          });
-          isDirtyRef.current = true;
-        }
-        const nextList = prev.map((x) => (x.id === id ? { ...x, time } : x));
-        if (
-          undoStackRef.current.length === 0 ||
-          undoStackRef.current[undoStackRef.current.length - 1] !== prev
-        ) {
-          undoStackRef.current.push(prev);
-          if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
-        }
-        return nextList;
-      });
-    },
-    [],
+  // Drag / nudge gestures are bracketed by the MarkerLayer:
+  //   onTimeChangeBegin -> snapshot the pre-edit markers list
+  //   onTimeChange      -> live-mutate state for visual feedback (no undo push)
+  //   onTimeChangeCommit-> push exactly one undo entry + one audit event
+  //
+  // editingSnapshotRef holds the markers snapshot taken at Begin so the
+  // Commit can recover the pre-edit time without depending on the React
+  // state at the moment of the closure.
+  const editingSnapshotRef = useRef<{
+    id: string;
+    fromMarkers: AuditMarker[];
+    fromTime: number;
+  } | null>(null);
+
+  const handleMarkerTimeChange = useCallback((id: string, time: number) => {
+    // Live update for visual feedback only. Undo push happens at Commit.
+    setMarkers((prev) => prev.map((x) => (x.id === id ? { ...x, time } : x)));
+    isDirtyRef.current = true;
+  }, []);
+
+  const handleMarkerTimeChangeBegin = useCallback((id: string) => {
+    setMarkers((prev) => {
+      const target = prev.find((x) => x.id === id);
+      editingSnapshotRef.current = {
+        id,
+        fromMarkers: prev,
+        fromTime: target?.time ?? 0,
+      };
+      return prev;
+    });
+  }, []);
+
+  const handleMarkerTimeChangeCommit = useCallback((id: string, time: number) => {
+    const snap = editingSnapshotRef.current;
+    editingSnapshotRef.current = null;
+    if (!snap || snap.id !== id) return;
+    if (snap.fromTime === time) return; // no-op gesture; don't dirty undo
+    undoStackRef.current.push(snap.fromMarkers);
+    if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+    sessionEventsRef.current.push({
+      ts: new Date().toISOString(),
+      kind: "marker_time_changed",
+      payload: { id, from_time: snap.fromTime, to_time: time },
+    });
+    isDirtyRef.current = true;
+  }, []);
+
+  // Alt+Arrow nudge burst (page-level handler -- fires whether or not a
+  // marker has DOM focus). Uses the same begin/commit bracketing so a
+  // run of nudges produces one undo entry. Mirror of MarkerLayer's
+  // keyboard burst tracking; lives here because the page-level handler
+  // can't see MarkerLayer's internal state.
+  const altNudgeRef = useRef<{ id: string; lastTime: number; timer: number } | null>(
+    null,
   );
+  const flushAltNudge = useCallback(() => {
+    const n = altNudgeRef.current;
+    if (!n) return;
+    window.clearTimeout(n.timer);
+    altNudgeRef.current = null;
+    handleMarkerTimeChangeCommit(n.id, n.lastTime);
+  }, [handleMarkerTimeChangeCommit]);
 
   const handleAddManual = useCallback(
     (time: number) => {
@@ -554,51 +599,81 @@ export function Audit() {
   const stepShot = useCallback(
     (delta: number) => {
       if (keptShots.length === 0) return;
-      const next = Math.min(Math.max(currentShotIndex + delta, 0), keptShots.length - 1);
+      // Anchor on the focused marker (#39): if focus is on a kept shot,
+      // step from there. Otherwise use currentShotIndex as a fallback.
+      // This way, after K rejects the focused marker, M / Shift+M land
+      // on the correct neighbour in the post-mutation list instead of
+      // skipping one because the integer index now addresses i+2.
+      let anchor = currentShotIndex;
+      if (focusedMarkerId) {
+        const idx = keptShots.findIndex((k) => k.id === focusedMarkerId);
+        if (idx >= 0) anchor = idx;
+        // Focus is on a non-kept marker (e.g., just-rejected). Walk to
+        // the kept shot at-or-just-before the playhead so +1 lands on
+        // the next kept after currentTime.
+        else {
+          let preceding = -1;
+          for (let i = 0; i < keptShots.length; i++) {
+            if (keptShots[i].time <= currentTime) preceding = i;
+            else break;
+          }
+          // delta>0: start one step *before* the next kept marker so
+          // anchor+1 lands on it. delta<0: start at the next kept marker
+          // so anchor-1 lands on the preceding one.
+          anchor = delta > 0 ? preceding : Math.max(0, preceding + 1);
+        }
+      }
+      const next = Math.min(Math.max(anchor + delta, 0), keptShots.length - 1);
       setCurrentShotIndex(next);
       setFocusedMarkerId(keptShots[next].id);
       handleScrub(keptShots[next].time);
     },
-    [keptShots, currentShotIndex, handleScrub],
+    [keptShots, currentShotIndex, focusedMarkerId, currentTime, handleScrub],
   );
 
-  // All markers in time order (detected + rejected + manual). The N
-  // shortcut walks this list so the user can revisit a rejected marker
-  // and toggle it back to kept without touching the mouse. M only
-  // visits kept shots (the "real" sequence the export will use).
-  const allMarkersSorted = useMemo(
-    () => markers.slice().sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
-    [markers],
+  const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
+
+  // Markers in time order, filtered to currently-visible kinds. N and
+  // K-auto-progress walk this list -- a marker that's filtered out of
+  // view shouldn't be a navigation target either, otherwise the
+  // playhead jumps to a marker the user can't see.
+  const visibleMarkersSorted = useMemo(
+    () =>
+      markers
+        .filter((m) => visibleKinds.has(m.kind))
+        .slice()
+        .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
+    [markers, visibleKinds],
   );
 
   const stepAnyMarker = useCallback(
     (delta: number) => {
-      if (allMarkersSorted.length === 0) return;
+      if (visibleMarkersSorted.length === 0) return;
       // Anchor: focused marker -> use its index; otherwise pick the
       // marker at-or-just-before the playhead so forward stepping lands
       // on the next one and back-stepping lands on the previous.
       let curIdx = -1;
       if (focusedMarkerId) {
-        curIdx = allMarkersSorted.findIndex((m) => m.id === focusedMarkerId);
+        curIdx = visibleMarkersSorted.findIndex((m) => m.id === focusedMarkerId);
       }
       if (curIdx < 0) {
-        for (let i = 0; i < allMarkersSorted.length; i++) {
-          if (allMarkersSorted[i].time <= currentTime) curIdx = i;
+        for (let i = 0; i < visibleMarkersSorted.length; i++) {
+          if (visibleMarkersSorted[i].time <= currentTime) curIdx = i;
           else break;
         }
         if (curIdx < 0) curIdx = delta > 0 ? -1 : 0;
       }
       const nextIdx = Math.min(
         Math.max(curIdx + delta, 0),
-        allMarkersSorted.length - 1,
+        visibleMarkersSorted.length - 1,
       );
-      const target = allMarkersSorted[nextIdx];
+      const target = visibleMarkersSorted[nextIdx];
       setFocusedMarkerId(target.id);
       handleScrub(target.time);
       const keptIdx = keptShots.findIndex((k) => k.id === target.id);
       if (keptIdx >= 0) setCurrentShotIndex(keptIdx);
     },
-    [allMarkersSorted, focusedMarkerId, currentTime, handleScrub, keptShots],
+    [visibleMarkersSorted, focusedMarkerId, currentTime, handleScrub, keptShots],
   );
 
   const jumpToMarker = useCallback(
@@ -612,7 +687,6 @@ export function Audit() {
     [handleScrub, keptShots],
   );
 
-  const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
   const pixelsPerSecond = useMemo(
     () => zoomToPixelsPerSecond(zoom, waveformViewport, peaks?.duration ?? 0),
     [zoom, waveformViewport, peaks],
@@ -756,6 +830,20 @@ export function Audit() {
         const step = e.shiftKey ? 0.001 : 0.0107;
         const dur = peaks?.duration ?? target.time + step;
         const next = Math.min(dur, Math.max(0, target.time + dir * step));
+        // Burst-coalesce so Cmd+Z reverses the entire burst, not each tap.
+        if (altNudgeRef.current?.id !== target.id) {
+          flushAltNudge();
+          handleMarkerTimeChangeBegin(target.id);
+          altNudgeRef.current = {
+            id: target.id,
+            lastTime: next,
+            timer: window.setTimeout(flushAltNudge, 350),
+          };
+        } else {
+          window.clearTimeout(altNudgeRef.current.timer);
+          altNudgeRef.current.lastTime = next;
+          altNudgeRef.current.timer = window.setTimeout(flushAltNudge, 350);
+        }
         handleMarkerTimeChange(target.id, next);
         handleScrub(next);
         return;
@@ -807,6 +895,13 @@ export function Audit() {
             // K on a manual marker actually does something useful.
             if (target.kind === "manual") handleMarkerDelete(target);
             else handleMarkerClick(target);
+            // Auto-progress: walk the visible marker list (filters
+            // respected) so the user can rip through K-K-K without
+            // moving the mouse. stepAnyMarker anchors on the focused
+            // marker, which is the one we just toggled -- so +1 lands
+            // on the next visible marker even though kept/rejected
+            // membership shifted underneath us.
+            if (kAutoProgress) stepAnyMarker(1);
           }
           return;
         }
@@ -839,11 +934,20 @@ export function Audit() {
     handleMarkerClick,
     handleMarkerDelete,
     handleMarkerTimeChange,
+    handleMarkerTimeChangeBegin,
+    flushAltNudge,
     focusedMarkerId,
     markers,
     keptShots,
     currentShotIndex,
+    kAutoProgress,
   ]);
+
+  // Stage switch / unmount: flush any pending nudge bracket so the
+  // commit doesn't fire after the markers list has been swapped out.
+  useEffect(() => {
+    return () => flushAltNudge();
+  }, [stageNumber, flushAltNudge]);
 
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
@@ -1023,6 +1127,8 @@ export function Audit() {
                       onClick={handleMarkerClick}
                       onDelete={handleMarkerDelete}
                       onTimeChange={handleMarkerTimeChange}
+                      onTimeChangeBegin={handleMarkerTimeChangeBegin}
+                      onTimeChangeCommit={handleMarkerTimeChangeCommit}
                       visibleKinds={visibleKinds}
                     />
                   </Waveform>
@@ -1049,6 +1155,24 @@ export function Audit() {
                     aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
                   >
                     <Repeat className="size-4" />
+                  </Button>
+                  <Button
+                    variant={kAutoProgress ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setKAutoProgress((v) => !v)}
+                    aria-pressed={kAutoProgress}
+                    title={
+                      kAutoProgress
+                        ? "Auto-advance to next marker after K (on)"
+                        : "Auto-advance to next marker after K (off)"
+                    }
+                    aria-label={
+                      kAutoProgress
+                        ? "Auto-progress on K is on"
+                        : "Auto-progress on K is off"
+                    }
+                  >
+                    <ChevronsRight className="size-4" />
                   </Button>
                   <span className="font-mono text-muted-foreground">
                     {formatTime(currentTime)} / {formatTime(peaks.duration)}
