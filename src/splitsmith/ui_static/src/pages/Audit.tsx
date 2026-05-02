@@ -671,6 +671,35 @@ export function Audit() {
         });
         return;
       }
+      // Alt+Arrow nudges the focused marker (or the current shot) by
+      // detector resolution; Alt+Shift+Arrow is sample-precise (~1 ms).
+      // We also scrub the playhead to the new position so the user
+      // immediately hears what the marker is aligned to.
+      if (
+        !inField &&
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        let target: AuditMarker | null = null;
+        if (focusedMarkerId) {
+          target = markers.find((x) => x.id === focusedMarkerId) ?? null;
+        }
+        if (!target && keptShots.length > 0) {
+          const idx = Math.min(currentShotIndex, keptShots.length - 1);
+          target = keptShots[idx];
+        }
+        if (!target) return;
+        const dir = e.key === "ArrowRight" ? 1 : -1;
+        const step = e.shiftKey ? 0.001 : 0.0107;
+        const dur = peaks?.duration ?? target.time + step;
+        const next = Math.min(dur, Math.max(0, target.time + dir * step));
+        handleMarkerTimeChange(target.id, next);
+        handleScrub(next);
+        return;
+      }
       if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (e.key === "m" || e.key === "M") {
           e.preventDefault();
@@ -690,6 +719,24 @@ export function Audit() {
           setLoopMode((v) => !v);
           return;
         }
+        if (e.key === "k" || e.key === "K") {
+          // Keep / reject toggle for the current shot. Lets the user step
+          // through shots with M and decide each one without reaching for
+          // the mouse. Prefers the focused marker (could be a rejected
+          // one the user is reconsidering) and falls back to the kept
+          // shot at the stepper's current position.
+          e.preventDefault();
+          let target: AuditMarker | null = null;
+          if (focusedMarkerId) {
+            target = markers.find((x) => x.id === focusedMarkerId) ?? null;
+          }
+          if (!target && keptShots.length > 0) {
+            const idx = Math.min(currentShotIndex, keptShots.length - 1);
+            target = keptShots[idx];
+          }
+          if (target) handleMarkerClick(target);
+          return;
+        }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           // Fine-grained playhead step. Shift = ~1 frame at 30 fps;
           // unmodified = 250 ms (matches the old review SPA).
@@ -707,7 +754,21 @@ export function Audit() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, undo, stepShot, performSave, beepOffset, peaks, handleScrub]);
+  }, [
+    togglePlay,
+    undo,
+    stepShot,
+    performSave,
+    beepOffset,
+    peaks,
+    handleScrub,
+    handleMarkerClick,
+    handleMarkerTimeChange,
+    focusedMarkerId,
+    markers,
+    keptShots,
+    currentShotIndex,
+  ]);
 
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
@@ -771,8 +832,9 @@ export function Audit() {
           <p className="text-sm text-muted-foreground">
             Drag the waveform to scrub. Arrow keys nudge 250 ms (Shift = 25 ms).
             Double-click to add a manual marker. Click a marker to toggle
-            keep/reject. M / Shift+M step shots, L toggles the marker list,
-            R toggles loop, Cmd+Z undoes, Cmd+S saves.
+            keep/reject. M / Shift+M step shots, K toggles the current shot,
+            Alt+Arrow nudges the selected marker (Shift = 1 ms), L toggles the
+            marker list, R toggles loop, Cmd+Z undoes, Cmd+S saves.
           </p>
         </div>
         <StageSelector

@@ -461,6 +461,31 @@ export function Review() {
         });
         return;
       }
+      if (
+        !inField &&
+        e.altKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        let target: AuditMarker | null = null;
+        if (focusedMarkerId) {
+          target = markers.find((x) => x.id === focusedMarkerId) ?? null;
+        }
+        if (!target && keptShots.length > 0) {
+          const idx = Math.min(currentShotIndex, keptShots.length - 1);
+          target = keptShots[idx];
+        }
+        if (!target) return;
+        const dir = e.key === "ArrowRight" ? 1 : -1;
+        const step = e.shiftKey ? 0.001 : 0.0107;
+        const dur = peaks?.duration ?? target.time + step;
+        const next = Math.min(dur, Math.max(0, target.time + dir * step));
+        handleMarkerTimeChange(target.id, next);
+        handleScrub(next);
+        return;
+      }
       if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (e.key === "m" || e.key === "M") {
           e.preventDefault();
@@ -477,6 +502,19 @@ export function Review() {
           setLoopMode((v) => !v);
           return;
         }
+        if (e.key === "k" || e.key === "K") {
+          e.preventDefault();
+          let target: AuditMarker | null = null;
+          if (focusedMarkerId) {
+            target = markers.find((x) => x.id === focusedMarkerId) ?? null;
+          }
+          if (!target && keptShots.length > 0) {
+            const idx = Math.min(currentShotIndex, keptShots.length - 1);
+            target = keptShots[idx];
+          }
+          if (target) handleMarkerClick(target);
+          return;
+        }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           e.preventDefault();
           const el = playbackEl();
@@ -490,7 +528,20 @@ export function Review() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, undo, performSave, stepShot, peaks, handleScrub]);
+  }, [
+    togglePlay,
+    undo,
+    performSave,
+    stepShot,
+    peaks,
+    handleScrub,
+    handleMarkerClick,
+    handleMarkerTimeChange,
+    focusedMarkerId,
+    markers,
+    keptShots,
+    currentShotIndex,
+  ]);
 
   // ---- Render ------------------------------------------------------------
 
@@ -550,7 +601,9 @@ export function Review() {
           <p className="text-sm text-muted-foreground">
             Standalone fixture review. Drag the waveform to scrub. Arrow keys
             nudge 250 ms (Shift = 25 ms). Double-click adds a manual marker.
-            M / Shift+M step shots, L toggles the marker list, R toggles loop, Cmd+Z undoes,
+            M / Shift+M step shots, K toggles the current shot, Alt+Arrow
+            nudges the selected marker (Shift = 1 ms), L toggles the marker
+            list, R toggles loop, Cmd+Z undoes,
             Cmd+S saves.
           </p>
         </div>
