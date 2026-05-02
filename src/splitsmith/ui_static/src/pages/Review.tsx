@@ -103,6 +103,10 @@ export function Review() {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loopMode, setLoopMode] = useState(false);
+  // Anchor for loop-to-start semantics: position where playback last
+  // started (or where the user last scrubbed). On pause / end-of-clip
+  // while loopMode is on, the playhead snaps back here.
+  const loopAnchorRef = useRef<number | null>(null);
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
   const [zoom, setZoom] = useState<number | null>(null);
   // Callback ref attaches the ResizeObserver exactly when the wrapper
@@ -319,19 +323,26 @@ export function Review() {
     const el = playbackEl();
     if (el) el.currentTime = t;
     setCurrentTime(t);
+    loopAnchorRef.current = t;
   }, []);
 
   const togglePlay = useCallback(() => {
     const el = playbackEl();
     if (!el) return;
     if (el.paused) {
+      loopAnchorRef.current = el.currentTime;
       void el.play();
       setIsPlaying(true);
     } else {
       el.pause();
       setIsPlaying(false);
+      if (loopMode && loopAnchorRef.current != null) {
+        const target = loopAnchorRef.current;
+        el.currentTime = target;
+        setCurrentTime(target);
+      }
     }
-  }, []);
+  }, [loopMode]);
 
   // rAF loop -- pulls currentTime out of whichever element is playing.
   useEffect(() => {
@@ -342,8 +353,9 @@ export function Review() {
         const t = el.currentTime;
         const dur = peaks?.duration ?? null;
         if (loopMode && dur != null && t >= dur - 0.05) {
-          el.currentTime = 0;
-          setCurrentTime(0);
+          const target = loopAnchorRef.current ?? 0;
+          el.currentTime = target;
+          setCurrentTime(target);
         } else {
           setCurrentTime(t);
         }

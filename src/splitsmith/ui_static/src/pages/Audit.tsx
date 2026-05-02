@@ -119,6 +119,12 @@ export function Audit() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
+  // Anchor for loop-to-start semantics: the audit-timeline position
+  // playback last started from (or where the user last scrubbed). On
+  // pause / end-of-clip while loopMode is on, the playhead snaps back
+  // here. Matches the old review SPA's "Loop: pause snaps the playhead
+  // back to where playback started" behavior.
+  const loopAnchorRef = useRef<number | null>(null);
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
   // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
   // relative to fit. Reset on stage change.
@@ -323,13 +329,14 @@ export function Audit() {
       if (v) {
         const auditT = v.currentTime - beepOffset;
         const dur = peaks?.duration ?? null;
-        // Loop: when we reach the end of the audit clip, snap back to 0
-        // (audit-time) which maps to beepOffset on the active video. Native
-        // <video loop> would only work for the primary trimmed clip; we
-        // express it on the audit timeline so it works for secondaries too.
+        // Loop wrap at end-of-clip -- snap to the anchor (where play
+        // started) so the user can hear a section repeatedly without
+        // re-clicking. Falls back to 0 on the rare case the anchor is
+        // unset (loop toggled mid-playback before any anchor recorded).
         if (loopMode && dur != null && auditT >= dur - 0.05) {
-          v.currentTime = beepOffset;
-          setCurrentTime(0);
+          const target = loopAnchorRef.current ?? 0;
+          v.currentTime = target + beepOffset;
+          setCurrentTime(target);
         } else {
           setCurrentTime(auditT);
         }
@@ -347,6 +354,10 @@ export function Audit() {
       const v = videoRef.current;
       if (v) v.currentTime = primaryTime + beepOffset;
       setCurrentTime(primaryTime);
+      // Manual scrub re-anchors the loop. Without this, hitting R, then
+      // dragging to a candidate, then play-pausing would yank the
+      // playhead back to the OLD anchor instead of the new one.
+      loopAnchorRef.current = primaryTime;
     },
     [beepOffset],
   );
@@ -355,13 +366,21 @@ export function Audit() {
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) {
+      // Starting playback -- record the anchor in audit-timeline coords.
+      loopAnchorRef.current = v.currentTime - beepOffset;
       void v.play();
       setIsPlaying(true);
     } else {
       v.pause();
       setIsPlaying(false);
+      // Loop semantics: pause snaps back to where play started.
+      if (loopMode && loopAnchorRef.current != null) {
+        const target = loopAnchorRef.current;
+        v.currentTime = target + beepOffset;
+        setCurrentTime(target);
+      }
     }
-  }, []);
+  }, [beepOffset, loopMode]);
 
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
