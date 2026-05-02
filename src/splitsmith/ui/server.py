@@ -18,6 +18,7 @@ Endpoints (locked v1 surface):
   POST /api/stages/{n}/beep         -- manual beep_time override
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
+  GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -539,6 +540,35 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         result = waveform_helpers.ensure_peaks(audio_path, bins)
         return JSONResponse(result.model_dump(mode="json"))
+
+    @app.get("/api/videos/stream")
+    def stream_video(path: str = Query(...)) -> FileResponse:
+        """Serve a registered video file with HTTP Range support.
+
+        Validates that ``path`` matches a video registered to the project
+        (any stage, any role, or unassigned) so the endpoint cannot be
+        used as a generic file-read primitive. The path is resolved
+        through :meth:`MatchProject.resolve_video_path`, which honours
+        the project-relative storage convention.
+        """
+        project = state.load()
+        located = project.find_video(Path(path))
+        if located is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"video not registered with project: {path}",
+            )
+        _stage, video = located
+        resolved = project.resolve_video_path(state.project_root, video.path).resolve()
+        if not resolved.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"video missing on disk: {resolved}",
+            )
+        media_type = (
+            "video/mp4" if resolved.suffix.lower() == ".mp4" else "application/octet-stream"
+        )
+        return FileResponse(resolved, media_type=media_type, filename=resolved.name)
 
     @app.get("/api/fs/list", response_model=FsListing)
     def fs_list(

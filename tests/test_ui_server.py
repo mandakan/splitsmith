@@ -645,6 +645,46 @@ def test_peaks_endpoint_404_when_no_primary(tmp_path: Path) -> None:
     assert "no primary" in resp.json()["detail"]
 
 
+def test_stream_video_serves_registered_file(tmp_path: Path) -> None:
+    """Stream endpoint serves bytes for a path that's registered with the project."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project = MatchProject.load(tmp_path / "match")
+    primary = project.stages[0].primary()
+    assert primary is not None
+    resolved = project.resolve_video_path(tmp_path / "match", primary.path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_bytes(b"FAKE_MP4_BYTES")
+
+    resp = client.get(f"/api/videos/stream?path={primary.path}")
+    assert resp.status_code == 200
+    assert resp.content == b"FAKE_MP4_BYTES"
+    assert resp.headers["content-type"].startswith("video/")
+
+
+def test_stream_video_404_on_unregistered_path(tmp_path: Path) -> None:
+    """Stream endpoint refuses to serve arbitrary filesystem paths."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    secret = tmp_path / "secret.mp4"
+    secret.write_bytes(b"SECRET")
+    resp = client.get(f"/api/videos/stream?path={secret}")
+    assert resp.status_code == 404
+    assert "not registered" in resp.json()["detail"]
+
+
+def test_stream_video_404_when_target_missing(tmp_path: Path) -> None:
+    """Registered path that no longer exists on disk surfaces as 404."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project = MatchProject.load(tmp_path / "match")
+    primary = project.stages[0].primary()
+    assert primary is not None
+    resolved = project.resolve_video_path(tmp_path / "match", primary.path).resolve()
+    if resolved.exists() or resolved.is_symlink():
+        resolved.unlink()
+    resp = client.get(f"/api/videos/stream?path={primary.path}")
+    assert resp.status_code == 404
+    assert "missing" in resp.json()["detail"]
+
+
 def test_peaks_endpoint_rejects_extreme_bins(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     assert client.get("/api/stages/1/peaks?bins=8").status_code == 422

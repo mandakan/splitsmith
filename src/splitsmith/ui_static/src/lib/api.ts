@@ -255,6 +255,9 @@ export const api = {
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 
+  videoStreamUrl: (videoPath: string) =>
+    `/api/videos/stream?path=${encodeURIComponent(videoPath)}`,
+
   getStagePeaks: (stageNumber: number, bins = 1200) =>
     request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),
 };

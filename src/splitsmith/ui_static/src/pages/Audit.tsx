@@ -1,24 +1,26 @@
 /**
  * Audit screen v2 (#15).
  *
- * Step 1 -- waveform substrate + scrubbing.
+ * Through Step 2 -- single playback source + multi-video viewing tabs.
  *
- * What lands here in this step:
- *   - Stage selector (which primary's audio to audit)
- *   - <Waveform> rendering server-computed peaks for the primary's WAV
- *   - Hidden <audio> element wired to the waveform: drag-scrubbing the
- *     waveform updates audio.currentTime in real time
+ * Contract:
+ *   - Audit truth = primary's audio. The waveform is always the primary's.
+ *   - The active <video> element drives playback time. There is no separate
+ *     <audio> element; audio you hear comes from the active video.
+ *   - The Audit page exposes "primary timeline" times to children. When the
+ *     active video is a secondary, we offset its `currentTime` by
+ *     (secondary.beep_time - primary.beep_time) so the audit timeline lines up.
+ *   - Switching active tab preserves play state and the primary-timeline
+ *     position; the new video.currentTime is set on `loadedmetadata`.
  *
- * Markers, multi-video tabs, the stepper, save flow, and standalone
- * /review mode arrive in subsequent steps. Until then, this screen
- * exercises the playback contract: one element drives time, the
- * waveform scrubs it.
+ * Markers, the stepper, save flow, and standalone /review come in later steps.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Crosshair, Loader2, Pause, Play } from "lucide-react";
 
+import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,7 +31,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ApiError, api, type MatchProject, type PeaksResult } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type MatchProject,
+  type PeaksResult,
+  type StageVideo,
+} from "@/lib/api";
 
 const PEAK_BINS = 1500;
 
@@ -44,9 +52,12 @@ export function Audit() {
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // currentTime is in the **primary's** timeline. Secondary tabs map this
+  // to their own video.currentTime via beep-offset math.
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const rafRef = useRef<number | null>(null);
 
   const stageNumber = useMemo(() => {
@@ -76,7 +87,7 @@ export function Audit() {
     return project.stages.filter((s) => s.videos.some((v) => v.role === "primary"));
   }, [project]);
 
-  // If no stage selected, default to the first one with a primary.
+  // Default to the first stage with a primary if no stage in URL.
   useEffect(() => {
     if (stageNumber != null) return;
     if (stagesWithPrimary.length === 0) return;
@@ -88,10 +99,38 @@ export function Audit() {
     return project.stages.find((s) => s.stage_number === stageNumber) ?? null;
   }, [project, stageNumber]);
 
-  const primary = useMemo(() => {
-    if (!stage) return null;
-    return stage.videos.find((v) => v.role === "primary") ?? null;
+  // Order videos: primary first, secondaries by added_at.
+  const videos = useMemo<StageVideo[]>(() => {
+    if (!stage) return [];
+    const primary = stage.videos.find((v) => v.role === "primary");
+    const secondaries = stage.videos
+      .filter((v) => v.role === "secondary")
+      .slice()
+      .sort((a, b) => a.added_at.localeCompare(b.added_at));
+    return primary ? [primary, ...secondaries] : [...secondaries];
   }, [stage]);
+
+  const primary = videos[0] ?? null;
+  const activeVideo = videos[activeVideoIndex] ?? primary;
+  const primaryBeep = primary?.beep_time ?? null;
+  const activeBeep = activeVideo?.beep_time ?? null;
+  const beepOffset = useMemo(() => {
+    if (activeVideoIndex === 0) return 0;
+    if (activeBeep == null || primaryBeep == null) return 0;
+    return activeBeep - primaryBeep;
+  }, [activeBeep, primaryBeep, activeVideoIndex]);
+
+  // Reset state on stage change.
+  useEffect(() => {
+    setCurrentTime(0);
+    setIsPlaying(false);
+    setActiveVideoIndex(0);
+    const v = videoRef.current;
+    if (v) {
+      v.pause();
+      v.currentTime = 0;
+    }
+  }, [stageNumber]);
 
   // Load peaks whenever the stage changes.
   useEffect(() => {
@@ -121,52 +160,67 @@ export function Audit() {
     };
   }, [stageNumber, primary]);
 
-  // rAF loop pulls audio.currentTime into state while playing.
+  // Tab change: when the <video> src swaps, browsers reset currentTime to 0.
+  // Restore the primary-timeline position (mapped to the new video's clock)
+  // once metadata is loaded so visuals stay in sync with the audit.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const targetVideoTime = currentTime + beepOffset;
+    const seekWhenReady = () => {
+      if (Number.isFinite(targetVideoTime) && targetVideoTime >= 0) {
+        v.currentTime = targetVideoTime;
+      }
+      if (isPlaying) void v.play();
+    };
+    if (v.readyState >= 1) {
+      seekWhenReady();
+    } else {
+      v.addEventListener("loadedmetadata", seekWhenReady, { once: true });
+      return () => v.removeEventListener("loadedmetadata", seekWhenReady);
+    }
+    // Intentionally only react to active video changes; currentTime updates
+    // come from the rAF loop below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeVideoIndex]);
+
+  // rAF loop: pull video.currentTime into state while playing, mapped back
+  // to the primary timeline.
   useEffect(() => {
     if (!isPlaying) return;
     const tick = () => {
-      const a = audioRef.current;
-      if (a) setCurrentTime(a.currentTime);
+      const v = videoRef.current;
+      if (v) setCurrentTime(v.currentTime - beepOffset);
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying]);
+  }, [isPlaying, beepOffset]);
 
-  const audioUrl = stageNumber != null ? api.stageAudioUrl(stageNumber) : null;
-
-  // Reset playback state on stage change.
-  useEffect(() => {
-    setCurrentTime(0);
-    setIsPlaying(false);
-    const a = audioRef.current;
-    if (a) {
-      a.pause();
-      a.currentTime = 0;
-    }
-  }, [stageNumber]);
-
-  const handleScrub = useCallback((t: number) => {
-    const a = audioRef.current;
-    if (a) a.currentTime = t;
-    setCurrentTime(t);
-  }, []);
+  const handleScrub = useCallback(
+    (primaryTime: number) => {
+      const v = videoRef.current;
+      if (v) v.currentTime = primaryTime + beepOffset;
+      setCurrentTime(primaryTime);
+    },
+    [beepOffset],
+  );
 
   const togglePlay = useCallback(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    if (a.paused) {
-      void a.play();
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      void v.play();
       setIsPlaying(true);
     } else {
-      a.pause();
+      v.pause();
       setIsPlaying(false);
     }
   }, []);
 
-  // Spacebar play/pause when focus is anywhere outside form fields.
+  // Spacebar play/pause when not editing a form field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== "Space") return;
@@ -178,6 +232,8 @@ export function Audit() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay]);
+
+  const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
   if (projectError) {
     return (
@@ -231,7 +287,8 @@ export function Audit() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
           <p className="text-sm text-muted-foreground">
-            Drag the waveform to scrub. Spacebar plays / pauses.
+            Drag the waveform to scrub. Spacebar plays / pauses. Tabs switch
+            the viewing angle without changing the audit timeline.
           </p>
         </div>
         <StageSelector
@@ -254,12 +311,23 @@ export function Audit() {
               ) : (
                 <Badge variant="destructive">no beep yet</Badge>
               )}
+              {videos.length > 1 ? (
+                <Badge variant="secondary">{videos.length} videos</Badge>
+              ) : null}
             </CardTitle>
             <CardDescription>
               Primary: <code className="text-xs">{primary.path}</code>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <VideoPanel
+              ref={videoRef}
+              videos={videos}
+              primaryBeepTime={primaryBeep}
+              activeIndex={activeVideoIndex}
+              onActiveIndexChange={setActiveVideoIndex}
+              videoSrc={videoSrc}
+            />
             {peaksLoading ? (
               <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /> Computing waveform...
@@ -294,16 +362,13 @@ export function Audit() {
                   <span className="font-mono text-muted-foreground">
                     {formatTime(currentTime)} / {formatTime(peaks.duration)}
                   </span>
+                  {beepOffset !== 0 ? (
+                    <span className="text-xs text-muted-foreground">
+                      (cam offset {beepOffset >= 0 ? "+" : ""}
+                      {beepOffset.toFixed(3)}s)
+                    </span>
+                  ) : null}
                 </div>
-                {audioUrl ? (
-                  <audio
-                    ref={audioRef}
-                    src={audioUrl}
-                    preload="auto"
-                    onEnded={() => setIsPlaying(false)}
-                    className="sr-only"
-                  />
-                ) : null}
               </>
             ) : null}
           </CardContent>
