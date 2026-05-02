@@ -16,6 +16,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from splitsmith import fcpxml_gen as fcpxml_mod
 from splitsmith.config import (
     OutputConfig,
     Shot,
@@ -113,6 +114,13 @@ def test_generate_fcpxml_minimal_structure(tmp_path: Path) -> None:
     fmt = root.find("./resources/format")
     assert fmt is not None and fmt.attrib["frameDuration"] == "1/30s"
     assert fmt.attrib["width"] == "1920"
+    # colorSpace is required so FCP doesn't warn on import (issue #41).
+    assert fmt.attrib["colorSpace"] == "1-1-1 (Rec. 709)"
+    sequence = root.find("./library/event/project/sequence")
+    assert sequence is not None
+    # audioRate is a DTD-enumerated shorthand ("48k"), NOT integer Hz --
+    # FCP rejects "48000" with a DTD validation error (issue #41).
+    assert sequence.attrib["audioRate"] == "48k"
     asset = root.find("./resources/asset")
     assert asset is not None
     # Asset src URI matches the resolved video path
@@ -205,6 +213,70 @@ def test_2997_frame_alignment_uses_rational_duration(tmp_path: Path) -> None:
     assert marker.attrib["start"] == "180180/30000s"
     # Sanity: the unreduced fraction equals the mathematical 6.006s exactly.
     assert Fraction(180180, 30000) == Fraction(180, 1) * Fraction(1001, 30000)
+
+
+def test_tag_source_application_writes_bplist_via_xattr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The post-write xattr call sends a valid binary plist of the string
+    "Splitsmith" so FCP's import dialog shows the source app instead of
+    "(null)" (issue #41). Best-effort: we verify the payload shape, not
+    that the xattr actually lands on disk (CI doesn't have ``xattr``)."""
+    import plistlib
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(fcpxml_mod.subprocess, "run", fake_run)
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+    )
+
+    assert "cmd" in captured, "xattr was never invoked"
+    cmd = captured["cmd"]
+    assert cmd[0] == "xattr"
+    assert cmd[1:3] == ["-wx", "com.apple.metadata:kMDItemCreator"]
+    payload = bytes.fromhex(cmd[3])
+    assert plistlib.loads(payload) == "Splitsmith"
+
+
+def test_tag_source_application_tolerates_missing_xattr_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Linux / CI / sandboxes where ``xattr`` isn't installed, the
+    write must still succeed -- the tag is best-effort."""
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        raise FileNotFoundError("xattr not installed")
+
+    monkeypatch.setattr(fcpxml_mod.subprocess, "run", fake_run)
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+    )
+    assert out.exists()
 
 
 def test_generate_fcpxml_raises_on_missing_video(tmp_path: Path) -> None:

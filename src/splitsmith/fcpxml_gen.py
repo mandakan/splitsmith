@@ -20,6 +20,7 @@ shot times against the source frame duration before serializing.
 from __future__ import annotations
 
 import json
+import plistlib
 import subprocess
 from collections.abc import Callable
 from fractions import Fraction
@@ -135,6 +136,14 @@ def generate_fcpxml(
 
     fcpxml = ET.Element("fcpxml", {"version": config.fcpxml_version})
 
+    # FCPXML format attributes (per DTD 1.10):
+    #   - id / name / frameDuration / width / height: required for sequence
+    #     formats so FCP can map to a known preset (FFVideoFormat<height>p<fps>).
+    #   - colorSpace: required when the format is referenced by a <sequence>;
+    #     leaving it out triggers FCP's "Encountered an unexpected value
+    #     (format=...)" warning at import (issue #41). "1-1-1 (Rec. 709)" is
+    #     the default for SDR Rec. 709 footage, which matches the head-mounted
+    #     camera output we target.
     resources = ET.SubElement(fcpxml, "resources")
     ET.SubElement(
         resources,
@@ -145,6 +154,7 @@ def generate_fcpxml(
             "frameDuration": frame_duration_str,
             "width": str(video.width),
             "height": str(video.height),
+            "colorSpace": "1-1-1 (Rec. 709)",
         },
     )
     asset = ET.SubElement(
@@ -172,6 +182,10 @@ def generate_fcpxml(
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
+    # Sequence attributes: ``audioRate`` is a DTD-enumerated shorthand
+    # ("32k", "44.1k", "48k", "88.2k", "96k", ...) -- NOT integer Hz. FCP
+    # rejects "48000" with "DTD validation failed (Value '48000' for
+    # attribute audioRate of sequence is not among the enumerated set)".
     sequence = ET.SubElement(
         project,
         "sequence",
@@ -221,6 +235,41 @@ def generate_fcpxml(
     output_path.write_bytes(
         tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :]
     )
+    _tag_source_application(output_path)
+
+
+def _tag_source_application(path: Path) -> None:
+    """Tag the FCPXML file with ``kMDItemCreator`` so FCP's import dialog
+    shows ``Splitsmith`` instead of ``application "(null)"`` (issue #41).
+
+    FCPXML has no in-document attribute for source app -- FCP reads the
+    name from the file's macOS extended attribute, the same channel
+    Resolve / Premiere use to identify themselves in the same dialog.
+    Best-effort: silently skip on non-macOS platforms or if the ``xattr``
+    binary isn't available (CI / Linux).
+
+    ``kMDItemCreator`` is a Spotlight-indexed key whose value must be a
+    binary plist; ``plistlib`` builds it for us so we don't hand-roll
+    bplist00 byte layouts.
+    """
+    payload = plistlib.dumps("Splitsmith", fmt=plistlib.FMT_BINARY)
+    try:
+        subprocess.run(
+            [
+                "xattr",
+                "-wx",
+                "com.apple.metadata:kMDItemCreator",
+                payload.hex(),
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+        )
+    except (FileNotFoundError, OSError):
+        # No xattr binary (Linux/CI) or filesystem doesn't support
+        # extended attributes -- the FCPXML file is still valid; FCP
+        # just falls back to "(null)" in the dialog title.
+        return
 
 
 def _marker_label(shot: Shot, thresholds: SplitColorThresholds) -> str:
