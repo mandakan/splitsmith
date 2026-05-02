@@ -279,6 +279,86 @@ def test_tag_source_application_tolerates_missing_xattr_binary(
     assert out.exists()
 
 
+def test_generate_fcpxml_omits_overlay_clip_when_path_is_none(tmp_path: Path) -> None:
+    """No ``overlay_path`` -> the FCPXML must be byte-identical to the
+    no-overlay v1 output: one asset, no lane-1 connected clip."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    assert len(assets) == 1
+    nested = root.findall(".//spine/asset-clip/asset-clip")
+    assert nested == []
+
+
+def test_generate_fcpxml_omits_overlay_clip_when_file_missing(tmp_path: Path) -> None:
+    """Pointed at a non-existent overlay path -> still no V2 connected clip.
+    Exercise: the FCPXML can be re-generated unconditionally and only sprouts
+    the overlay when the .mov is actually on disk."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        overlay_path=tmp_path / "missing_overlay.mov",
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    assert len(assets) == 1
+    nested = root.findall(".//spine/asset-clip/asset-clip")
+    assert nested == []
+
+
+def test_generate_fcpxml_inserts_overlay_as_lane_1_connected_clip(tmp_path: Path) -> None:
+    """Overlay file present -> a second asset is registered and a lane=1
+    connected ``asset-clip`` lives inside the V1 spine clip on V2."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    overlay = tmp_path / "v_overlay.mov"
+    overlay.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        overlay_path=overlay,
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    assert len(assets) == 2
+    overlay_asset = assets[1]
+    assert overlay_asset.attrib["hasAudio"] == "0"
+    media = overlay_asset.find("media-rep")
+    assert media is not None and media.attrib["src"].endswith("v_overlay.mov")
+    nested = root.findall(".//spine/asset-clip/asset-clip")
+    assert len(nested) == 1
+    overlay_clip = nested[0]
+    assert overlay_clip.attrib["lane"] == "1"
+    assert overlay_clip.attrib["offset"] == "0s"
+    # Same duration as the primary so FCP doesn't truncate the overlay.
+    assert overlay_clip.attrib["duration"] == "600/30s"  # 20s @ 30fps
+
+
 def test_generate_fcpxml_raises_on_missing_video(tmp_path: Path) -> None:
     out = tmp_path / "v.fcpxml"
     with pytest.raises(FileNotFoundError):

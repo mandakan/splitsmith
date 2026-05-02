@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .. import csv_gen, fcpxml_gen, report, trim
+from .. import csv_gen, fcpxml_gen, overlay_render, report, trim
 from ..config import Config, ReportFiles, Shot, StageAnalysis, StageData
 
 
@@ -40,6 +40,7 @@ class StageExportRequest:
     write_csv: bool = True
     write_fcpxml: bool = True
     write_report: bool = True
+    write_overlay: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class StageExportResult:
     csv_path: Path | None
     fcpxml_path: Path | None
     report_path: Path | None
+    overlay_path: Path | None
     shots_written: int
     anomalies: list[str]
 
@@ -252,6 +254,54 @@ def export_stage(
         csv_path = exports_dir / f"{base}_splits.csv"
         csv_gen.write_splits_csv(shots, csv_path)
 
+    # Overlay render (issue #45). Gated on having a trimmed clip to mirror;
+    # the overlay must match the trim frame-for-frame or it will drift on
+    # the FCP timeline. ``write_overlay`` defaults False so existing flows
+    # (and CSV-only re-runs without a source) don't pay the cost.
+    overlay_path: Path | None = None
+    fcp_overlay_path: Path | None = None
+    overlay_target = exports_dir / f"{base}_overlay.mov"
+    if request.write_overlay:
+        # Resolve the trim we'll mirror: prefer the one we just wrote, then
+        # a stale lossless trim from a prior run. If none exists -- e.g.
+        # source unreachable AND no prior trim -- skip with a clear reason.
+        mirror_target: Path | None = None
+        if trimmed_path is not None and trimmed_path.exists():
+            mirror_target = trimmed_path
+        elif (exports_dir / f"{base}_trimmed.mp4").exists():
+            mirror_target = exports_dir / f"{base}_trimmed.mp4"
+
+        if mirror_target is None:
+            if missing_msg:
+                skip_reasons.append(f"overlay not written: {missing_msg}")
+            else:
+                skip_reasons.append(
+                    "overlay not written: no lossless trim in exports/. "
+                    "Re-run Generate with the Trim toggle enabled."
+                )
+        else:
+            try:
+                overlay_render.render_overlay(
+                    audit_path=audit_path,
+                    trimmed_video_path=mirror_target,
+                    output_path=overlay_target,
+                    beep_offset_seconds=pre_buffer_seconds,
+                )
+                overlay_path = overlay_target
+            except (overlay_render.OverlayRenderError, OSError) as exc:
+                skip_reasons.append(f"overlay not written: {exc}")
+                overlay_path = None
+                if overlay_target.exists():
+                    # Stale render from a prior run; still surface so the
+                    # FCPXML can reference it.
+                    overlay_path = overlay_target
+
+    # Whether or not the overlay was just rendered, an existing
+    # ``<base>_overlay.mov`` should be referenced from the FCPXML so the
+    # same XML works regardless of which render produced it.
+    if overlay_target.exists():
+        fcp_overlay_path = overlay_target
+
     fcpxml_path: Path | None = None
     if request.write_fcpxml:
         # FCPXML needs a video to reference. Prefer the lossless trim we
@@ -291,6 +341,7 @@ def export_stage(
                     output_path=fcpxml_path,
                     project_name=base,
                     config=config.output,
+                    overlay_path=fcp_overlay_path,
                 )
             except (fcpxml_gen.FFprobeError, OSError) as exc:
                 skip_reasons.append(f"fcpxml not written: {exc}")
@@ -330,6 +381,7 @@ def export_stage(
         csv_path=csv_path,
         fcpxml_path=fcpxml_path,
         report_path=report_path,
+        overlay_path=overlay_path if overlay_path is not None and overlay_path.exists() else None,
         shots_written=len(shots),
         anomalies=anomalies,
     )

@@ -381,6 +381,11 @@ class ExportStageRequest(BaseModel):
     write_csv: bool = True
     write_fcpxml: bool = True
     write_report: bool = True
+    # Pre-rendered alpha overlay MOV (issue #45). Defaults False because
+    # the render is per-frame PIL + ffmpeg ProRes 4444 -- non-trivially
+    # slower than the other writers. The Analysis & Export checkbox
+    # opts-in per stage.
+    write_overlay: bool = False
 
 
 class RevealRequest(BaseModel):
@@ -2175,6 +2180,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                     write_csv=req.write_csv,
                     write_fcpxml=req.write_fcpxml,
                     write_report=req.write_report,
+                    write_overlay=req.write_overlay,
                 ),
                 audit_path=audit_file,
                 exports_dir=exports_dir,
@@ -2207,6 +2213,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             bits.append("fcpxml")
         if result.report_path is not None:
             bits.append("report")
+        if result.overlay_path is not None:
+            bits.append("overlay")
         summary = ", ".join(bits) if bits else "nothing written"
         if result.anomalies:
             n = len(result.anomalies)

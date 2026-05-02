@@ -189,6 +189,10 @@ export interface StageExportStatus {
   csv_path: string | null;
   fcpxml_path: string | null;
   report_path: string | null;
+  /** Pre-rendered alpha overlay MOV (issue #45). ``null`` until the user
+   *  opts in via the Overlay toggle on Generate. When present, the FCPXML
+   *  references it as a connected clip on V2. */
+  overlay_path: string | null;
   has_exports: boolean;
   last_export_at: string | null;
   ready_to_export: boolean;
@@ -204,6 +208,9 @@ export interface ExportStageRequestPayload {
   write_csv?: boolean;
   write_fcpxml?: boolean;
   write_report?: boolean;
+  /** Render the per-frame PIL + ffmpeg overlay MOV (issue #45). Defaults
+   *  off because it's the slowest writer; opt in per stage. */
+  write_overlay?: boolean;
 }
 
 export interface ExportStageResult {
@@ -212,6 +219,7 @@ export interface ExportStageResult {
   csv_path: string | null;
   fcpxml_path: string | null;
   report_path: string | null;
+  overlay_path: string | null;
   shots_written: number;
   anomalies: string[];
 }
@@ -672,6 +680,7 @@ export const api = {
         write_csv: opts.write_csv ?? true,
         write_fcpxml: opts.write_fcpxml ?? true,
         write_report: opts.write_report ?? true,
+        write_overlay: opts.write_overlay ?? false,
       },
     }),
 

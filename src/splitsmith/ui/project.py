@@ -201,6 +201,11 @@ class StageExportStatus(BaseModel):
     csv_path: Path | None
     fcpxml_path: Path | None
     report_path: Path | None
+    # Pre-rendered alpha overlay MOV (issue #45). ``None`` until the user
+    # ticks the Overlay toggle on Generate at least once for this stage.
+    # The FCPXML references this file as a connected clip on V2 when it
+    # exists; absent, the FCPXML is unchanged.
+    overlay_path: Path | None = None
     has_exports: bool
     last_export_at: datetime | None
     ready_to_export: bool
@@ -433,6 +438,7 @@ class MatchProject(BaseModel):
             csv_p = exports_dir / f"{base}_splits.csv"
             fcpxml_p = exports_dir / f"{base}.fcpxml"
             report_p = exports_dir / f"{base}_report.txt"
+            overlay_p = exports_dir / f"{base}_overlay.mov"
             # The "trimmed video" surfaced to the Export screen is the
             # lossless trim in exports/ (the FCP-bound deliverable), not
             # the audit-mode short-GOP scrub copy in <project>/trimmed/.
@@ -450,12 +456,15 @@ class MatchProject(BaseModel):
             fcpxml_exists = fcpxml_p.exists()
             report_exists = report_p.exists()
             trim_exists = lossless_trim_p.exists()
-            has_exports = csv_exists or fcpxml_exists or report_exists or trim_exists
+            overlay_exists = overlay_p.exists()
+            has_exports = (
+                csv_exists or fcpxml_exists or report_exists or trim_exists or overlay_exists
+            )
             last_export_at: datetime | None = None
             if has_exports:
                 mtimes = [
                     p.stat().st_mtime
-                    for p in (csv_p, fcpxml_p, report_p, lossless_trim_p)
+                    for p in (csv_p, fcpxml_p, report_p, lossless_trim_p, overlay_p)
                     if p.exists()
                 ]
                 if mtimes:
@@ -495,6 +504,7 @@ class MatchProject(BaseModel):
                     csv_path=csv_p if csv_exists else None,
                     fcpxml_path=fcpxml_p if fcpxml_exists else None,
                     report_path=report_p if report_exists else None,
+                    overlay_path=overlay_p if overlay_exists else None,
                     lossless_trim_present=trim_exists,
                     has_exports=has_exports,
                     last_export_at=last_export_at,
