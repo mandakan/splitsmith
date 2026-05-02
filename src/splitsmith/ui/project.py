@@ -27,7 +27,7 @@ import json
 import os
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -87,6 +87,12 @@ class StageEntry(BaseModel):
     scorecard_updated_at: datetime | None = None
     videos: list[StageVideo] = Field(default_factory=list)
     skipped: bool = False
+    # Placeholder stages are created without a scoreboard ("I shot 6 stages,
+    # let me start ingesting"). They carry stage_number + a generic name so the
+    # rest of the pipeline works; importing a real scoreboard later overlays
+    # the proper metadata while preserving any video assignments. See
+    # MatchProject.init_placeholder_stages and import_scoreboard.
+    placeholder: bool = False
 
     def primary(self) -> StageVideo | None:
         """Return the primary video, or ``None`` if no video is the primary yet."""
@@ -109,6 +115,11 @@ class MatchProject(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     competitor_name: str | None = None
     scoreboard_match_id: str | None = None
+    # Optional match date (the day the match was shot). Used as a hint for the
+    # SSI Scoreboard suggestion flow and surfaced in the UI. Auto-filled from
+    # the earliest video mtime when starting source-first; overwritten by
+    # ``import_scoreboard`` when a real scoreboard arrives.
+    match_date: date | None = None
     stages: list[StageEntry] = Field(default_factory=list)
     # Videos registered with the project but not yet assigned to any stage.
     # The Sub 2 (#13) ingest screen surfaces these in a "tray" so the user can
@@ -221,18 +232,81 @@ class MatchProject(BaseModel):
                     return s, v
         return None
 
+    def init_placeholder_stages(
+        self,
+        count: int,
+        *,
+        match_name: str | None = None,
+        match_date: date | None = None,
+    ) -> None:
+        """Create ``count`` placeholder stages with no scoreboard data.
+
+        Used when the user starts source-first ("I shot 6 stages, here are the
+        videos"). Each placeholder gets ``stage_number = 1..count`` and a
+        generic name; ``time_seconds`` is 0.0 and ``scorecard_updated_at`` is
+        None, which keeps :meth:`auto_match` from misfiring (it filters stages
+        without ``scorecard_updated_at``).
+
+        If non-placeholder stages already exist, this raises
+        :class:`ScoreboardImportConflictError` -- placeholders are a
+        bootstrap-only concept and should not stomp real scoreboard data.
+        Existing placeholders are replaced; any video assignments are moved
+        back to ``unassigned_videos`` so the user can re-bind to the new
+        layout.
+        """
+        if count < 1:
+            raise ValueError("placeholder stage count must be >= 1")
+        real = [s for s in self.stages if not s.placeholder]
+        if real:
+            raise ScoreboardImportConflictError(
+                "project already has scoreboard-backed stages; "
+                "clear them or import via overwrite first"
+            )
+        # Move any videos out of existing placeholders -- the new placeholder
+        # layout might have a different stage count.
+        for stage in self.stages:
+            for video in stage.videos:
+                video.role = "secondary"
+                self.unassigned_videos.append(video)
+
+        if match_name:
+            self.name = match_name
+        if match_date is not None:
+            self.match_date = match_date
+
+        self.stages = [
+            StageEntry(
+                stage_number=i,
+                stage_name=f"Stage {i}",
+                time_seconds=0.0,
+                placeholder=True,
+            )
+            for i in range(1, count + 1)
+        ]
+
     def import_scoreboard(self, raw: dict[str, Any], *, overwrite: bool = False) -> None:
         """Populate ``stages`` (and metadata) from a parsed SSI Scoreboard JSON.
 
         Picks the first competitor (multi-competitor support is v2 / out of
-        scope per #11). Raises :class:`ScoreboardImportConflictError` if stages
-        already exist and ``overwrite`` is ``False``; overwriting would orphan
-        existing video assignments, so the default is to refuse.
+        scope per #11). Raises :class:`ScoreboardImportConflictError` if
+        scoreboard-backed stages already exist and ``overwrite`` is ``False``;
+        overwriting would orphan existing video assignments, so the default is
+        to refuse.
+
+        Placeholder stages (created via :meth:`init_placeholder_stages`) are
+        always overlaid: video assignments keyed on ``stage_number`` are
+        preserved, scoreboard metadata replaces the generic placeholder data,
+        and the ``placeholder`` flag clears. If the scoreboard has fewer
+        stages than the placeholders, any extras are dropped; videos in
+        dropped extras are moved back to ``unassigned_videos`` so nothing is
+        lost.
         """
-        if self.stages and not overwrite:
+        real_stages = [s for s in self.stages if not s.placeholder]
+        if real_stages and not overwrite:
             raise ScoreboardImportConflictError(
-                "project already has stages; pass overwrite=True to replace "
-                "(this orphans current video assignments)"
+                "project already has scoreboard-backed stages; pass "
+                "overwrite=True to replace (this orphans current video "
+                "assignments)"
             )
         match_meta = raw.get("match", {}) or {}
         competitors = raw.get("competitors") or []
@@ -248,19 +322,42 @@ class MatchProject(BaseModel):
         )
         self.competitor_name = primary_competitor.get("name")
 
+        # Overlay path: snapshot existing placeholders' videos by stage_number
+        # so we can replant them into the matching scoreboard stage. If
+        # ``overwrite`` was used to wipe real stages, those videos are *not*
+        # preserved (overwrite is the user's explicit "orphan everything"
+        # choice).
+        videos_by_stage: dict[int, list[StageVideo]] = {}
+        if not real_stages:
+            for s in self.stages:
+                if s.videos:
+                    videos_by_stage[s.stage_number] = list(s.videos)
+
         new_stages: list[StageEntry] = []
+        scoreboard_numbers: set[int] = set()
         for s in primary_competitor.get("stages", []):
             stage_data = StageData.model_validate(s)
+            scoreboard_numbers.add(stage_data.stage_number)
             new_stages.append(
                 StageEntry(
                     stage_number=stage_data.stage_number,
                     stage_name=stage_data.stage_name,
                     time_seconds=stage_data.time_seconds,
                     scorecard_updated_at=stage_data.scorecard_updated_at,
+                    videos=videos_by_stage.get(stage_data.stage_number, []),
                 )
             )
         new_stages.sort(key=lambda s: s.stage_number)
         self.stages = new_stages
+
+        # Any placeholder videos whose stage_number didn't survive the import
+        # land back in unassigned_videos -- the user can reassign manually.
+        for stage_number, videos in videos_by_stage.items():
+            if stage_number in scoreboard_numbers:
+                continue
+            for v in videos:
+                v.role = "secondary"
+                self.unassigned_videos.append(v)
 
     def register_video(
         self,

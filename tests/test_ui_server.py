@@ -144,6 +144,50 @@ def test_import_scoreboard_409_on_conflict(tmp_path: Path) -> None:
     assert resp.status_code == 200
 
 
+def test_placeholder_stages_endpoint_creates_stages(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/project/placeholder-stages",
+        json={"stage_count": 5, "match_name": "Test Match", "match_date": "2026-04-12"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Test Match"
+    assert body["match_date"] == "2026-04-12"
+    assert len(body["stages"]) == 5
+    assert all(s["placeholder"] for s in body["stages"])
+
+
+def test_placeholder_stages_endpoint_409_when_real_stages_exist(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    # Real scoreboard import first.
+    sb = {
+        "match": {"id": "1", "name": "Real"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "A",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S1",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    resp = client.post(
+        "/api/project/placeholder-stages",
+        json={"stage_count": 5},
+    )
+    assert resp.status_code == 409
+
+
 def test_scan_videos_registers_and_auto_assigns(tmp_path: Path) -> None:
     """End-to-end test for the scan endpoint: create a stage, drop a video into a
     source folder with a matching mtime, scan, expect auto-assignment as primary."""
@@ -646,6 +690,56 @@ def test_settings_empty_string_clears_override(tmp_path: Path) -> None:
     )
     body = client.post("/api/project/settings", json={"audio_dir": ""}).json()
     assert body["audio_dir"] is None
+
+
+def test_settings_409_when_old_dir_non_empty(tmp_path: Path) -> None:
+    """Changing a path field must surface a 409 ``non_empty_old_dirs`` warning
+    when the old directory still has files -- splitsmith does not migrate."""
+    root = tmp_path / "match"
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    # Default audio_dir is <project>/audio. Drop a stray cache file there.
+    audio_default = root / "audio"
+    audio_default.mkdir(parents=True, exist_ok=True)
+    (audio_default / "stage_1.wav").write_bytes(b"fake")
+
+    new_audio = tmp_path / "scratch-audio"
+    resp = client.post(
+        "/api/project/settings",
+        json={"audio_dir": str(new_audio)},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["code"] == "non_empty_old_dirs"
+    assert len(detail["dirs"]) == 1
+    assert detail["dirs"][0]["field"] == "audio_dir"
+    assert detail["dirs"][0]["path"] == str(audio_default)
+    assert detail["dirs"][0]["file_count"] == 1
+    # Project unchanged on disk.
+    assert MatchProject.load(root).audio_dir is None
+
+    # With confirm=true the change goes through, leaving old files behind.
+    resp = client.post(
+        "/api/project/settings",
+        json={"audio_dir": str(new_audio), "confirm": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["audio_dir"] == str(new_audio)
+    assert (audio_default / "stage_1.wav").exists()  # not migrated
+
+
+def test_settings_no_warning_when_old_dir_empty(tmp_path: Path) -> None:
+    """An empty old directory should not trigger the warning."""
+    root = tmp_path / "match"
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+    # Default <project>/audio doesn't even exist yet.
+    resp = client.post(
+        "/api/project/settings",
+        json={"audio_dir": str(tmp_path / "elsewhere")},
+    )
+    assert resp.status_code == 200
 
 
 def test_external_edit_visible_without_restart(tmp_path: Path) -> None:

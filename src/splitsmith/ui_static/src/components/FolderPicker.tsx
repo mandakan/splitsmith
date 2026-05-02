@@ -34,8 +34,9 @@ interface FolderPickerProps {
   onSelect: (path: string) => void;
   /** Optional callback for multi-file selection. When provided, video rows
    * gain a checkbox and the action button switches to "Use N files" when any
-   * files are selected. */
-  onSelectFiles?: (paths: string[]) => void;
+   * files are selected. The callback receives the selected files with their
+   * filesystem mtime so the parent can pre-fill date hints. */
+  onSelectFiles?: (files: { path: string; mtime: number | null }[]) => void;
   onCancel?: () => void;
   /** Render mode: inline (e.g. inside a card) vs. compact. */
   mode?: "inline" | "compact";
@@ -97,10 +98,10 @@ export function FolderPicker({
 
   const confirmFiles = () => {
     if (!path || selectedCount === 0) return;
-    const paths = videoEntries
+    const files = videoEntries
       .filter((e) => selectedFiles.has(e.name))
-      .map((e) => joinPath(path, e.name));
-    onSelectFiles!(paths);
+      .map((e) => ({ path: joinPath(path, e.name), mtime: e.mtime }));
+    onSelectFiles!(files);
   };
 
   return (

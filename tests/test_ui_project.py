@@ -330,6 +330,157 @@ def test_import_scoreboard_refuses_overwrite_by_default(tmp_path: Path) -> None:
     assert project.stages[0].stage_name == "S2-different"
 
 
+def test_init_placeholder_stages_creates_n_stages(tmp_path: Path) -> None:
+    from datetime import date
+
+    root = tmp_path / "match-placeholder"
+    project = MatchProject.init(root, name="x")
+    project.init_placeholder_stages(
+        6,
+        match_name="Tällmilan Pre-Match",
+        match_date=date(2026, 4, 12),
+    )
+
+    assert project.name == "Tällmilan Pre-Match"
+    assert project.match_date == date(2026, 4, 12)
+    assert [s.stage_number for s in project.stages] == [1, 2, 3, 4, 5, 6]
+    assert all(s.placeholder for s in project.stages)
+    assert project.stages[0].stage_name == "Stage 1"
+    assert project.stages[0].scorecard_updated_at is None
+
+
+def test_init_placeholder_rejects_zero_or_negative(tmp_path: Path) -> None:
+    project = MatchProject.init(tmp_path / "match", name="x")
+    with pytest.raises(ValueError):
+        project.init_placeholder_stages(0)
+
+
+def test_init_placeholder_refuses_when_real_stages_exist(tmp_path: Path) -> None:
+    from splitsmith.ui.project import ScoreboardImportConflictError
+
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    project.import_scoreboard(
+        {
+            "match": {"id": "1", "name": "M"},
+            "competitors": [
+                {
+                    "competitor_id": 1,
+                    "name": "A",
+                    "stages": [
+                        {
+                            "stage_number": 1,
+                            "stage_name": "S1",
+                            "time_seconds": 10.0,
+                            "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(ScoreboardImportConflictError):
+        project.init_placeholder_stages(5)
+
+
+def test_init_placeholder_replaces_existing_placeholders_returning_videos(
+    tmp_path: Path,
+) -> None:
+    """Re-bootstrapping with a different stage count moves existing placeholder
+    videos back to unassigned so the user can re-bind."""
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    project.init_placeholder_stages(3)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/clip.mp4"), role="primary"))
+
+    project.init_placeholder_stages(5)
+    assert len(project.stages) == 5
+    assert all(s.videos == [] for s in project.stages)
+    assert len(project.unassigned_videos) == 1
+    assert str(project.unassigned_videos[0].path) == "raw/clip.mp4"
+
+
+def test_import_scoreboard_overlays_placeholders_preserving_videos(tmp_path: Path) -> None:
+    """A scoreboard import on top of placeholders keeps assignments by stage_number."""
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    project.init_placeholder_stages(2)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v1.mp4"), role="primary"))
+    project.stages[1].videos.append(StageVideo(path=Path("raw/v2.mp4"), role="primary"))
+
+    project.import_scoreboard(
+        {
+            "match": {"id": "5", "name": "Real Match"},
+            "competitors": [
+                {
+                    "competitor_id": 1,
+                    "name": "A",
+                    "stages": [
+                        {
+                            "stage_number": 1,
+                            "stage_name": "Real S1",
+                            "time_seconds": 11.0,
+                            "scorecard_updated_at": "2026-04-01T00:00:00+00:00",
+                        },
+                        {
+                            "stage_number": 2,
+                            "stage_name": "Real S2",
+                            "time_seconds": 22.0,
+                            "scorecard_updated_at": "2026-04-01T00:00:00+00:00",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    assert project.name == "Real Match"
+    assert all(not s.placeholder for s in project.stages)
+    assert project.stages[0].stage_name == "Real S1"
+    assert len(project.stages[0].videos) == 1
+    assert str(project.stages[0].videos[0].path) == "raw/v1.mp4"
+    assert project.stages[0].videos[0].role == "primary"
+    assert len(project.stages[1].videos) == 1
+
+
+def test_import_scoreboard_overlay_drops_extras_to_unassigned(tmp_path: Path) -> None:
+    """When the scoreboard has fewer stages than placeholders, orphaned videos
+    move to unassigned_videos -- we never silently lose user data."""
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    project.init_placeholder_stages(3)
+    project.stages[2].videos.append(StageVideo(path=Path("raw/v3.mp4"), role="primary"))
+
+    project.import_scoreboard(
+        {
+            "match": {"id": "5", "name": "M"},
+            "competitors": [
+                {
+                    "competitor_id": 1,
+                    "name": "A",
+                    "stages": [
+                        {
+                            "stage_number": 1,
+                            "stage_name": "S1",
+                            "time_seconds": 10.0,
+                            "scorecard_updated_at": "2026-04-01T00:00:00+00:00",
+                        },
+                        {
+                            "stage_number": 2,
+                            "stage_name": "S2",
+                            "time_seconds": 20.0,
+                            "scorecard_updated_at": "2026-04-01T00:00:00+00:00",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    assert len(project.stages) == 2
+    assert len(project.unassigned_videos) == 1
+    assert str(project.unassigned_videos[0].path) == "raw/v3.mp4"
+    assert project.unassigned_videos[0].role == "secondary"
+
+
 def test_register_video_symlinks_into_raw(tmp_path: Path) -> None:
     """Registering a video creates a symlink in raw/ and adds to unassigned_videos."""
     root = tmp_path / "match-vid"

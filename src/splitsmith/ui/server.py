@@ -6,6 +6,7 @@ Endpoints (locked v1 surface):
   GET  /api/project                 -- full MatchProject dump
   GET  /api/fs/list?path=...        -- list directory entries (folder picker)
   POST /api/scoreboard/import       -- import an SSI Scoreboard JSON
+  POST /api/project/placeholder-stages -- bootstrap source-first (no scoreboard yet)
   POST /api/videos/scan             -- register videos (folder or explicit paths)
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
   POST /api/assignments/move        -- set role / unassign / move between stages
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -73,6 +75,14 @@ class ScoreboardImportRequest(BaseModel):
     overwrite: bool = False
 
 
+class PlaceholderStagesRequest(BaseModel):
+    """Bootstrap request: create N placeholder stages without a scoreboard."""
+
+    stage_count: int
+    match_name: str | None = None
+    match_date: date | None = None
+
+
 class ScanRequest(BaseModel):
     """Either ``source_dir`` (folder scan, current behaviour) or
     ``source_paths`` (explicit list of files, USB-cam workflow). Exactly one
@@ -93,12 +103,14 @@ class ScanResponse(BaseModel):
 class SettingsRequest(BaseModel):
     """Partial update for project storage overrides (#23). Any field omitted
     is left unchanged. Pass ``""`` (empty string) to clear an override back to
-    the project-root default."""
+    the project-root default. Set ``confirm=True`` to acknowledge that any
+    existing files in the *old* directories will be left behind (no migration)."""
 
     raw_dir: str | None = None
     audio_dir: str | None = None
     trimmed_dir: str | None = None
     exports_dir: str | None = None
+    confirm: bool = False
 
 
 class MoveRequest(BaseModel):
@@ -168,6 +180,25 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         except ScoreboardImportConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/project/placeholder-stages")
+    def create_placeholder_stages(req: PlaceholderStagesRequest) -> JSONResponse:
+        """Create N placeholder stages so source-first ingest works without a
+        scoreboard. A real scoreboard import later overlays the placeholders
+        and preserves video assignments by ``stage_number``."""
+        project = state.load()
+        try:
+            project.init_placeholder_stages(
+                req.stage_count,
+                match_name=req.match_name,
+                match_date=req.match_date,
+            )
+        except ScoreboardImportConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
@@ -248,7 +279,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     @app.post("/api/project/settings")
     def update_settings(req: SettingsRequest) -> JSONResponse:
         """Update storage path overrides. Any None field is left unchanged;
-        pass an empty string to clear back to the project-root default."""
+        pass an empty string to clear back to the project-root default.
+
+        If a path field is changing and the *old* directory contains files,
+        return 409 with a structured ``non_empty_old_dirs`` payload unless
+        ``confirm=True`` is sent. Existing files are not auto-migrated --
+        the warning lets the caller surface "you'll be leaving these behind".
+        """
         project = state.load()
         update: dict[str, str | None] = {}
         for field in ("raw_dir", "audio_dir", "trimmed_dir", "exports_dir"):
@@ -257,6 +294,49 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 continue
             normalized = value.strip() or None
             update[field] = normalized
+
+        # Detect non-empty old dirs for fields that are actually changing.
+        resolver_for = {
+            "raw_dir": project.raw_path,
+            "audio_dir": project.audio_path,
+            "trimmed_dir": project.trimmed_path,
+            "exports_dir": project.exports_path,
+        }
+        non_empty: list[dict[str, object]] = []
+        for field, new_value in update.items():
+            if new_value == getattr(project, field):
+                continue  # no change
+            old_path = resolver_for[field](state.project_root)
+            if not old_path.exists() or not old_path.is_dir():
+                continue
+            try:
+                file_count = sum(1 for _ in old_path.iterdir())
+            except OSError:
+                continue
+            if file_count == 0:
+                continue
+            non_empty.append(
+                {
+                    "field": field,
+                    "path": str(old_path),
+                    "file_count": file_count,
+                }
+            )
+
+        if non_empty and not req.confirm:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "non_empty_old_dirs",
+                    "message": (
+                        "Changing these paths will leave existing files behind "
+                        "in the old location -- splitsmith does not migrate. "
+                        "Resend with confirm=true to proceed."
+                    ),
+                    "dirs": non_empty,
+                },
+            )
+
         for field, value in update.items():
             setattr(project, field, value)
 

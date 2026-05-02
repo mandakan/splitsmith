@@ -28,6 +28,7 @@ export interface StageEntry {
   scorecard_updated_at: string | null;
   videos: StageVideo[];
   skipped: boolean;
+  placeholder: boolean;
 }
 
 export interface MatchProject {
@@ -37,6 +38,7 @@ export interface MatchProject {
   updated_at: string;
   competitor_name: string | null;
   scoreboard_match_id: string | null;
+  match_date: string | null;
   stages: StageEntry[];
   unassigned_videos: StageVideo[];
   last_scanned_dir: string | null;
@@ -46,11 +48,30 @@ export interface MatchProject {
   exports_dir: string | null;
 }
 
+export interface PlaceholderStagesRequest {
+  stage_count: number;
+  match_name?: string | null;
+  match_date?: string | null;
+}
+
 export interface ProjectSettingsPatch {
   raw_dir?: string | null;
   audio_dir?: string | null;
   trimmed_dir?: string | null;
   exports_dir?: string | null;
+  confirm?: boolean;
+}
+
+export interface NonEmptyOldDir {
+  field: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir";
+  path: string;
+  file_count: number;
+}
+
+export interface NonEmptyOldDirsDetail {
+  code: "non_empty_old_dirs";
+  message: string;
+  dirs: NonEmptyOldDir[];
 }
 
 export interface ScanResponse {
@@ -80,6 +101,7 @@ class ApiError extends Error {
   constructor(
     public status: number,
     public detail: string,
+    public body: unknown = null,
   ) {
     super(`${status}: ${detail}`);
   }
@@ -104,15 +126,18 @@ async function request<T>(
   });
   if (!resp.ok) {
     let detail = resp.statusText;
+    let rawDetail: unknown = null;
     try {
       const body = await resp.json();
       if (body && typeof body === "object" && "detail" in body) {
-        detail = String((body as { detail: unknown }).detail);
+        rawDetail = (body as { detail: unknown }).detail;
+        detail =
+          typeof rawDetail === "string" ? rawDetail : JSON.stringify(rawDetail);
       }
     } catch {
       /* ignore */
     }
-    throw new ApiError(resp.status, detail);
+    throw new ApiError(resp.status, detail, rawDetail);
   }
   if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
@@ -130,6 +155,12 @@ export const api = {
     request<MatchProject>("/api/scoreboard/import", {
       method: "POST",
       json: { data, overwrite },
+    }),
+
+  createPlaceholderStages: (req: PlaceholderStagesRequest) =>
+    request<MatchProject>("/api/project/placeholder-stages", {
+      method: "POST",
+      json: req,
     }),
 
   scanVideos: (sourceDir: string, autoAssignPrimary = true) =>

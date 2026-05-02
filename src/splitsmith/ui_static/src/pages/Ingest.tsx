@@ -15,11 +15,13 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertCircle,
+  CalendarDays,
   CheckCircle2,
   Crosshair,
   FileJson,
   FolderInput,
   Loader2,
+  PlayCircle,
   Trash2,
   Video as VideoIcon,
   XCircle,
@@ -37,7 +39,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError, api, type MatchProject, type StageEntry, type StageVideo, type VideoRole } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type MatchProject,
+  type NonEmptyOldDirsDetail,
+  type StageEntry,
+  type StageVideo,
+  type VideoRole,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function Ingest() {
@@ -63,10 +73,13 @@ export function Ingest() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const overwrite = (project?.stages.length ?? 0) > 0;
+      // Real (non-placeholder) stages need explicit overwrite; placeholders
+      // are overlaid automatically without losing video assignments.
+      const realStages = (project?.stages ?? []).filter((s) => !s.placeholder);
+      const overwrite = realStages.length > 0;
       if (overwrite) {
         const ok = window.confirm(
-          "This project already has stages. Importing will replace them and orphan any current video assignments. Continue?",
+          "This project already has scoreboard-backed stages. Importing will replace them and orphan any current video assignments. Continue?",
         );
         if (!ok) {
           setBusy(false);
@@ -75,6 +88,32 @@ export function Ingest() {
       }
       const updated = await api.importScoreboard(data, overwrite);
       setProject(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStartFromVideos = async (
+    files: { path: string; mtime: number | null }[],
+    stageCount: number,
+    matchName: string | null,
+    matchDate: string | null,
+  ) => {
+    setBusy(true);
+    try {
+      await api.createPlaceholderStages({
+        stage_count: stageCount,
+        match_name: matchName,
+        match_date: matchDate,
+      });
+      await api.scanFiles(
+        files.map((f) => f.path),
+        false,
+      );
+      await reload();
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -140,7 +179,9 @@ export function Ingest() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Ingest</h1>
         <p className="text-sm text-muted-foreground">
-          Drop a scoreboard JSON, scan a folder of videos, confirm assignments. Returnable any time to add more videos to existing stages.
+          Bootstrap from a scoreboard JSON or just point at your videos -- a
+          real scoreboard can be uploaded later and will overlay onto the
+          placeholder stages without losing assignments.
         </p>
       </header>
 
@@ -155,11 +196,26 @@ export function Ingest() {
         </Card>
       ) : null}
 
-      <ScoreboardSection
-        project={project}
-        busy={busy}
-        onScoreboard={handleScoreboard}
-      />
+      {project && project.stages.length === 0 ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <ScoreboardSection
+            project={project}
+            busy={busy}
+            onScoreboard={handleScoreboard}
+          />
+          <StartFromVideosSection
+            project={project}
+            busy={busy}
+            onSubmit={handleStartFromVideos}
+          />
+        </div>
+      ) : (
+        <ScoreboardSection
+          project={project}
+          busy={busy}
+          onScoreboard={handleScoreboard}
+        />
+      )}
 
       <ScanSection
         disabled={busy || !project || project.stages.length === 0}
@@ -202,6 +258,19 @@ function ScoreboardSection({
   busy: boolean;
   onScoreboard: (f: File) => void;
 }) {
+  const stages = project?.stages ?? [];
+  const realCount = stages.filter((s) => !s.placeholder).length;
+  const placeholderCount = stages.filter((s) => s.placeholder).length;
+  const description = realCount
+    ? `${realCount} stages loaded for ${project!.competitor_name ?? "the primary competitor"}.`
+    : placeholderCount
+      ? `${placeholderCount} placeholder stages -- upload a real scoreboard to fill in names, competitor metadata, and timestamps.`
+      : "No stages yet. Drop in an SSI Scoreboard JSON to load them.";
+  const dropLabel = realCount
+    ? "Replace scoreboard JSON (warns first)"
+    : placeholderCount
+      ? "Upload scoreboard to overlay placeholders"
+      : "Drop or pick an SSI Scoreboard JSON";
   return (
     <Card>
       <CardHeader>
@@ -209,20 +278,12 @@ function ScoreboardSection({
           <FileJson className="size-5" />
           Scoreboard
         </CardTitle>
-        <CardDescription>
-          {project?.stages.length
-            ? `${project.stages.length} stages loaded for ${project.competitor_name ?? "the primary competitor"}.`
-            : "No stages yet. Drop in an SSI Scoreboard JSON to load them."}
-        </CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <FileDropZone
           accept=".json,application/json"
-          label={
-            project?.stages.length
-              ? "Replace scoreboard JSON (warns first)"
-              : "Drop or pick an SSI Scoreboard JSON"
-          }
+          label={dropLabel}
           icon={<FileJson className="size-5" />}
           disabled={busy}
           onFile={onScoreboard}
@@ -232,6 +293,150 @@ function ScoreboardSection({
             Match id: <code>{project.scoreboard_match_id}</code>
           </p>
         ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StartFromVideosSection({
+  project,
+  busy,
+  onSubmit,
+}: {
+  project: MatchProject;
+  busy: boolean;
+  onSubmit: (
+    files: { path: string; mtime: number | null }[],
+    stageCount: number,
+    matchName: string | null,
+    matchDate: string | null,
+  ) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<
+    { path: string; mtime: number | null }[] | null
+  >(null);
+  const [stageCount, setStageCount] = useState<number>(0);
+  const [matchName, setMatchName] = useState<string>(project.name);
+  const [matchDate, setMatchDate] = useState<string>("");
+
+  const beginPick = () => {
+    setPicking(true);
+  };
+
+  const onFilesChosen = (files: { path: string; mtime: number | null }[]) => {
+    setPicking(false);
+    setPicked(files);
+    setStageCount(files.length);
+    const earliest = files
+      .map((f) => f.mtime)
+      .filter((m): m is number => m !== null)
+      .sort((a, b) => a - b)[0];
+    if (earliest !== undefined) {
+      // mtime is seconds since epoch; toISOString().slice(0, 10) gives YYYY-MM-DD.
+      setMatchDate(new Date(earliest * 1000).toISOString().slice(0, 10));
+    } else {
+      setMatchDate(new Date().toISOString().slice(0, 10));
+    }
+  };
+
+  const submit = () => {
+    if (!picked || stageCount < 1) return;
+    onSubmit(
+      picked,
+      stageCount,
+      matchName.trim() || null,
+      matchDate || null,
+    );
+    setPicked(null);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <PlayCircle className="size-5" />
+          Start from videos
+        </CardTitle>
+        <CardDescription>
+          No scoreboard yet? Pick the videos you shot and tell splitsmith how
+          many stages you ran. Stage count and date are detected from the
+          files; you can adjust before continuing.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {picking ? (
+          <FolderPicker
+            initialPath={project.last_scanned_dir ?? null}
+            onSelect={() => {
+              /* not used: this card always wants files, not a folder. */
+            }}
+            onSelectFiles={onFilesChosen}
+            onCancel={() => setPicking(false)}
+          />
+        ) : picked ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {picked.length} video{picked.length === 1 ? "" : "s"} selected.
+            </p>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Number of stages</span>
+              <span className="text-xs text-muted-foreground">
+                Defaulted to the number of files. Adjust if your camera split a
+                stage across multiple clips, or rolled across stages.
+              </span>
+              <input
+                type="number"
+                min={1}
+                value={stageCount}
+                onChange={(e) => setStageCount(Number(e.target.value))}
+                disabled={busy}
+                className="flex h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Match name</span>
+              <input
+                type="text"
+                value={matchName}
+                onChange={(e) => setMatchName(e.target.value)}
+                disabled={busy}
+                className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="flex items-center gap-1.5 font-medium">
+                <CalendarDays className="size-3.5" />
+                Match date
+              </span>
+              <input
+                type="date"
+                value={matchDate}
+                onChange={(e) => setMatchDate(e.target.value)}
+                disabled={busy}
+                className="flex h-8 w-44 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </label>
+            <div className="flex gap-2">
+              <Button onClick={submit} disabled={busy || stageCount < 1}>
+                Create {stageCount || "?"} placeholder stage
+                {stageCount === 1 ? "" : "s"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setPicked(null)}
+                disabled={busy}
+              >
+                Back
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button onClick={beginPick} disabled={busy}>
+            <FolderInput />
+            Pick videos
+          </Button>
+        )}
       </CardContent>
     </Card>
   );
@@ -293,16 +498,16 @@ function ScanSection({
               setOpen(false);
               onScan(p);
             }}
-            onSelectFiles={(paths) => {
+            onSelectFiles={(files) => {
               setOpen(false);
-              onScanFiles(paths);
+              onScanFiles(files.map((f) => f.path));
             }}
             onCancel={() => setOpen(false)}
           />
         )}
         {disabled ? (
           <p className="text-xs text-muted-foreground">
-            Load a scoreboard first.
+            Bootstrap the project first (upload a scoreboard or start from videos).
           </p>
         ) : null}
       </CardContent>
@@ -331,6 +536,9 @@ function SettingsSection({
     { key: "trimmed_dir", label: "Trimmed clips", help: "Short-GOP MP4s used by the audit screen (default: <project>/trimmed)." },
     { key: "exports_dir", label: "Outputs", help: "CSV / FCPXML / report (default: <project>/exports)." },
   ];
+  const labelFor = (field: string) =>
+    fields.find((f) => f.key === field)?.label ?? field;
+
   const update = async (patch: Partial<Record<typeof fields[number]["key"], string | null>>) => {
     setBusy(true);
     try {
@@ -338,7 +546,39 @@ function SettingsSection({
       onProjectUpdate(updated);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (
+        e instanceof ApiError &&
+        e.status === 409 &&
+        e.body &&
+        typeof e.body === "object" &&
+        (e.body as { code?: string }).code === "non_empty_old_dirs"
+      ) {
+        const detail = e.body as NonEmptyOldDirsDetail;
+        const lines = detail.dirs
+          .map(
+            (d) =>
+              `  - ${labelFor(d.field)}: ${d.path} (${d.file_count} item${d.file_count === 1 ? "" : "s"})`,
+          )
+          .join("\n");
+        const ok = window.confirm(
+          `The following directories contain files that will be left behind ` +
+            `(splitsmith does not migrate cache or exports between paths):\n\n${lines}\n\n` +
+            `Proceed anyway?`,
+        );
+        if (ok) {
+          try {
+            const updated = await api.updateSettings({ ...patch, confirm: true });
+            onProjectUpdate(updated);
+            setError(null);
+          } catch (e2) {
+            setError(e2 instanceof Error ? e2.message : String(e2));
+          }
+        } else {
+          setError(null);
+        }
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setBusy(false);
     }
