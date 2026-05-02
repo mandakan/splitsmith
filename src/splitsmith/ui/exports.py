@@ -172,17 +172,13 @@ def export_stage(
     or ``write_fcpxml`` is set.
     """
     if not audit_path.exists():
-        raise StageExportError(
-            f"no audit JSON at {audit_path}; finish auditing this stage first"
-        )
+        raise StageExportError(f"no audit JSON at {audit_path}; finish auditing this stage first")
     try:
         audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise StageExportError(f"failed to read audit JSON {audit_path}: {exc}") from exc
 
-    shots = audit_shots_to_engine_shots(
-        audit_data, beep_time_in_source=beep_time_in_source
-    )
+    shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=beep_time_in_source)
     if not shots:
         raise StageExportError(
             f"audit JSON {audit_path} has no shots in shots[]; nothing to export"

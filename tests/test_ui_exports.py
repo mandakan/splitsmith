@@ -181,8 +181,8 @@ def test_export_stage_refuses_missing_audit(tmp_path: Path) -> None:
             audit_path=tmp_path / "missing.json",
             exports_dir=tmp_path / "exports",
             source_video_path=None,
-        pre_buffer_seconds=5.0,
-        post_buffer_seconds=5.0,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
             stage_data=StageData(
                 stage_number=1,
                 stage_name="S",
@@ -203,8 +203,8 @@ def test_export_stage_refuses_empty_shots(tmp_path: Path) -> None:
             audit_path=audit_path,
             exports_dir=tmp_path / "exports",
             source_video_path=None,
-        pre_buffer_seconds=5.0,
-        post_buffer_seconds=5.0,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
             stage_data=StageData(
                 stage_number=1,
                 stage_name="S",

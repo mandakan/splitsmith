@@ -394,9 +394,7 @@ class MatchProject(BaseModel):
                 shots = raw.get("shots") if isinstance(raw, dict) else None
                 if isinstance(shots, list):
                     shot_count = len(shots)
-                cand_block = (
-                    raw.get("_candidates_pending_audit") if isinstance(raw, dict) else None
-                )
+                cand_block = raw.get("_candidates_pending_audit") if isinstance(raw, dict) else None
                 if isinstance(cand_block, dict):
                     cands = cand_block.get("candidates")
                     if isinstance(cands, list):
@@ -477,9 +475,7 @@ class MatchProject(BaseModel):
             )
         return out
 
-    def match_analysis(
-        self, *, config: VideoMatchConfig | None = None
-    ) -> MatchAnalysis:
+    def match_analysis(self, *, config: VideoMatchConfig | None = None) -> MatchAnalysis:
         """Run the canonical match heuristic over the project's stored
         timestamps and return per-stage windows + per-video classifications.
 
@@ -507,9 +503,7 @@ class MatchProject(BaseModel):
                 scorecard_updated_at=s.scorecard_updated_at,
                 tolerance_minutes=cfg.tolerance_minutes,
                 lower=(
-                    video_match.match_window(
-                        s.scorecard_updated_at, cfg.tolerance_minutes
-                    )[0]
+                    video_match.match_window(s.scorecard_updated_at, cfg.tolerance_minutes)[0]
                     if s.scorecard_updated_at is not None
                     else None
                 ),
@@ -734,9 +728,7 @@ class MatchProject(BaseModel):
             video = existing[1]
             if video.match_timestamp is None:
                 try:
-                    video.match_timestamp = video_match.video_timestamp(
-                        source, prefer_ctime=True
-                    )
+                    video.match_timestamp = video_match.video_timestamp(source, prefer_ctime=True)
                 except OSError:
                     pass
             return video
@@ -862,9 +854,7 @@ class MatchProject(BaseModel):
         # was already on this stage, it gets pulled out and re-attached; the
         # old primary is demoted inside assign_video. New primary's processed
         # flags are reset because the audio source changed.
-        new_primary = self.assign_video(
-            path, to_stage_number=stage_number, role="primary"
-        )
+        new_primary = self.assign_video(path, to_stage_number=stage_number, role="primary")
         new_primary.processed = {"beep": False, "shot_detect": False, "trim": False}
         new_primary.beep_time = None
         new_primary.beep_source = None

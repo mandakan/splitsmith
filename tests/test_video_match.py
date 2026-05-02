@@ -199,11 +199,13 @@ def test_match_window_is_asymmetric() -> None:
 
 
 def test_classify_video_against_stages_in_window() -> None:
-    from splitsmith.video_match import classify_video_against_stages
     from splitsmith.config import StageData
+    from splitsmith.video_match import classify_video_against_stages
 
     sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
-    stages = [StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)]
+    stages = [
+        StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)
+    ]
     cls, hits = classify_video_against_stages(
         sc - timedelta(minutes=5), stages, tolerance_minutes=15
     )
@@ -212,8 +214,8 @@ def test_classify_video_against_stages_in_window() -> None:
 
 
 def test_classify_video_against_stages_contested() -> None:
-    from splitsmith.video_match import classify_video_against_stages
     from splitsmith.config import StageData
+    from splitsmith.video_match import classify_video_against_stages
 
     # Two stages whose windows overlap.
     sc1 = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
@@ -231,15 +233,15 @@ def test_classify_video_against_stages_contested() -> None:
 
 
 def test_classify_video_against_stages_orphan() -> None:
-    from splitsmith.video_match import classify_video_against_stages
     from splitsmith.config import StageData
+    from splitsmith.video_match import classify_video_against_stages
 
     sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
-    stages = [StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)]
+    stages = [
+        StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)
+    ]
     # Way before any window.
-    cls, hits = classify_video_against_stages(
-        sc - timedelta(hours=3), stages, tolerance_minutes=15
-    )
+    cls, hits = classify_video_against_stages(sc - timedelta(hours=3), stages, tolerance_minutes=15)
     assert cls == "orphan"
     assert hits == []
 

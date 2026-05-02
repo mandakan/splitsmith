@@ -96,7 +96,7 @@ def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
             "stage_number": stage_number,
             "path": str(source),
             "message": (
-                f"Source video"
+                "Source video"
                 + (f" for stage {stage_number}" if stage_number is not None else "")
                 + f" is not reachable: {source}. If it lives on external "
                 f"storage (USB drive, SD card), reconnect and try again."
@@ -1576,9 +1576,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             served_path = project.resolve_video_path(state.project_root, video.path).resolve()
             # Same structured shape as detect-beep / trim / preview so
             # the SPA's "reconnect external storage" surface is uniform.
-            _ensure_source_reachable(
-                stage.stage_number if stage is not None else None, served_path
-            )
+            _ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
         media_type = (
             "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
