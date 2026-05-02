@@ -460,6 +460,11 @@ export function Review() {
           setShowDrawer((v) => !v);
           return;
         }
+        if (e.key === "r" || e.key === "R") {
+          e.preventDefault();
+          setLoopMode((v) => !v);
+          return;
+        }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           e.preventDefault();
           const el = playbackEl();
@@ -533,7 +538,7 @@ export function Review() {
           <p className="text-sm text-muted-foreground">
             Standalone fixture review. Drag the waveform to scrub. Arrow keys
             nudge 250 ms (Shift = 25 ms). Double-click adds a manual marker.
-            M / Shift+M step shots, L toggles the marker list, Cmd+Z undoes,
+            M / Shift+M step shots, L toggles the marker list, R toggles loop, Cmd+Z undoes,
             Cmd+S saves.
           </p>
         </div>
@@ -643,7 +648,8 @@ export function Review() {
                   size="sm"
                   onClick={() => setLoopMode((v) => !v)}
                   aria-pressed={loopMode}
-                  title="Loop the fixture"
+                  title="Loop the fixture (R)"
+                  aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
                 >
                   <Repeat className="size-4" />
                 </Button>

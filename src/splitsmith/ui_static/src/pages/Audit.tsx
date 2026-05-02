@@ -663,6 +663,14 @@ export function Audit() {
           setShowDrawer((v) => !v);
           return;
         }
+        if (e.key === "r" || e.key === "R") {
+          // Old review SPA used L for loop; L is now the drawer here, so
+          // loop moves to R ("repeat"). Visible button next to play/pause
+          // matches the same icon.
+          e.preventDefault();
+          setLoopMode((v) => !v);
+          return;
+        }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           // Fine-grained playhead step. Shift = ~1 frame at 30 fps;
           // unmodified = 250 ms (matches the old review SPA).
@@ -745,7 +753,7 @@ export function Audit() {
             Drag the waveform to scrub. Arrow keys nudge 250 ms (Shift = 25 ms).
             Double-click to add a manual marker. Click a marker to toggle
             keep/reject. M / Shift+M step shots, L toggles the marker list,
-            Cmd+Z undoes, Cmd+S saves.
+            R toggles loop, Cmd+Z undoes, Cmd+S saves.
           </p>
         </div>
         <StageSelector
@@ -885,8 +893,8 @@ export function Audit() {
                     size="sm"
                     onClick={() => setLoopMode((v) => !v)}
                     aria-pressed={loopMode}
-                    title="Loop the audit clip"
-                    aria-label={loopMode ? "Loop on" : "Loop off"}
+                    title="Loop the audit clip (R)"
+                    aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
                   >
                     <Repeat className="size-4" />
                   </Button>
