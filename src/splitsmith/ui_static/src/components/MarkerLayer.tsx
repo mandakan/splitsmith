@@ -227,7 +227,7 @@ export function MarkerLayer({
               )}
             />
             <span className="relative mt-1">
-              <MarkerGlyph kind={m.kind} size={14} />
+              <MarkerGlyph kind={m.kind} size={18} />
             </span>
           </button>
         );

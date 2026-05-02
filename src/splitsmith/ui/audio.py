@@ -14,6 +14,7 @@ source's mtime changes.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -220,6 +221,46 @@ def _extract_audio(
         ) from exc
 
 
+def trim_params_path(output: Path) -> Path:
+    """Sidecar JSON next to the trimmed MP4 recording the inputs that
+    produced it. Used to invalidate the cache when beep_time, stage_time,
+    or the buffer settings change without the source file moving."""
+    return output.with_name(f"{output.stem}.params.json")
+
+
+def _current_trim_params(
+    *,
+    primary_beep_time: float,
+    stage_time_seconds: float,
+    project: MatchProject,
+) -> dict[str, float]:
+    return {
+        "beep_time": round(float(primary_beep_time), 4),
+        "stage_time_seconds": round(float(stage_time_seconds), 4),
+        "pre_buffer_seconds": float(project.trim_pre_buffer_seconds),
+        "post_buffer_seconds": float(project.trim_post_buffer_seconds),
+    }
+
+
+def invalidate_audit_trim(project_root: Path, stage_number: int, *, project: MatchProject) -> None:
+    """Delete the cached trim, audit WAV, and params sidecar.
+
+    Called after beep_time changes (manual override) or stage_time changes
+    (scoreboard re-import) so the next trim job runs from scratch instead
+    of trusting a now-stale cache. Idempotent if any file is missing.
+    """
+    output = trimmed_primary_path(project_root, stage_number, project=project)
+    wav = audit_audio_path(project_root, stage_number, project=project)
+    params = trim_params_path(output)
+    partial = output.with_name(f"{output.stem}.partial{output.suffix}")
+    for p in (output, wav, params, partial):
+        try:
+            if p.exists() or p.is_symlink():
+                p.unlink()
+        except OSError:
+            pass
+
+
 def ensure_audit_trim(
     project_root: Path,
     stage_number: int,
@@ -234,9 +275,13 @@ def ensure_audit_trim(
 
     Re-encodes the primary's source with a short GOP (Sub 5 / #16 audit
     mode) so the audit screen scrubs frame-accurately. The trim window is
-    ``[max(0, beep - buffer), beep + stage_time + buffer]``. Cache key is
-    the primary source's mtime: a re-recorded source triggers a re-trim,
-    and the audit-WAV cache invalidates from there on its own mtime.
+    ``[max(0, beep - pre_buffer), beep + stage_time + post_buffer]``.
+
+    Cache key is the source mtime *and* a sidecar params JSON: when the
+    beep, stage time, or buffer settings change, the next call sees a
+    params mismatch and re-trims even though the source file is
+    untouched. Without that the user could fix a wrong beep, click "Trim
+    now", and still get the old trim served back.
 
     Returns the path to the trimmed MP4. Raises ``AudioExtractionError`` on
     ffmpeg failure (kept under the same error type the audio helpers
@@ -246,30 +291,39 @@ def ensure_audit_trim(
 
     output = trimmed_primary_path(project_root, stage_number, project=project)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: ffmpeg encodes into .partial.mp4, then we rename on success.
-    # The extra ".partial" sits before the real suffix so ffmpeg can still
-    # infer the MP4 muxer from the extension. (An earlier version put
-    # ".partial" *after* the suffix and ffmpeg failed with "Unable to choose
-    # an output format".) Without this, a page reload mid-trim leaves a
-    # half-written .mp4 with no moov atom; the audit endpoints then fail
-    # to extract audio because the cache check trusts the broken file.
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
+    params_file = trim_params_path(output)
+    current_params = _current_trim_params(
+        primary_beep_time=primary_beep_time,
+        stage_time_seconds=stage_time_seconds,
+        project=project,
+    )
 
     src_resolved = primary_source.resolve()
     if not src_resolved.exists():
         raise FileNotFoundError(f"primary video missing on disk: {src_resolved}")
 
-    if output.exists() and output.stat().st_mtime >= src_resolved.stat().st_mtime:
-        # Cleanup any orphaned .partial from a prior crashed run.
-        if partial.exists():
-            partial.unlink()
-        return output
+    cache_hit = (
+        output.exists()
+        and output.stat().st_mtime >= src_resolved.stat().st_mtime
+        and params_file.exists()
+    )
+    if cache_hit:
+        try:
+            existing_params = json.loads(params_file.read_text(encoding="utf-8"))
+            if existing_params == current_params:
+                # Cleanup any orphaned .partial from a prior crashed run.
+                if partial.exists():
+                    partial.unlink()
+                return output
+        except (OSError, ValueError):
+            # Treat unreadable sidecar as cache miss.
+            pass
 
-    # Stale or missing final + any orphaned partial -> remove and re-run.
-    if output.exists():
-        output.unlink()
-    if partial.exists():
-        partial.unlink()
+    # Stale / missing final / params mismatch -> sweep and re-run.
+    for p in (output, partial, params_file):
+        if p.exists():
+            p.unlink()
 
     try:
         trim_module.trim_video(
@@ -290,6 +344,7 @@ def ensure_audit_trim(
         raise AudioExtractionError(str(exc)) from exc
 
     partial.replace(output)
+    params_file.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8")
     return output
 
 

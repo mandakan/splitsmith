@@ -30,9 +30,16 @@ export function MarkerGlyph({ kind, size = 16, className, label }: MarkerGlyphPr
   const aria = label ?? kind;
   const half = size / 2;
 
+  // Stroke + dash pattern scale with size so the same component reads
+  // crisp at the 14 px audit overlay and at the 24 px design-page swatch.
+  // Constants tuned at size=24; smaller sizes shrink proportionally.
+  const stroke = Math.max(0.75, size * 0.08);
+  const dashOn = Math.max(1.5, size * 0.18);
+  const dashOff = Math.max(0.75, size * 0.10);
+
   if (kind === "manual") {
     // Diamond rotated 45° with dashed border.
-    const inset = size * 0.1;
+    const inset = size * 0.12;
     return (
       <svg
         width={size}
@@ -49,8 +56,9 @@ export function MarkerGlyph({ kind, size = 16, className, label }: MarkerGlyphPr
           height={size - inset * 2}
           fill={colorVar}
           stroke={colorVar}
-          strokeWidth={1.5}
-          strokeDasharray="2,1.5"
+          strokeWidth={stroke}
+          strokeDasharray={`${dashOn},${dashOff}`}
+          strokeLinecap="round"
           transform={`rotate(45 ${half} ${half})`}
         />
       </svg>
@@ -75,7 +83,8 @@ export function MarkerGlyph({ kind, size = 16, className, label }: MarkerGlyphPr
         transform={transform}
         fill={isOutline ? "none" : colorVar}
         stroke={colorVar}
-        strokeWidth={isOutline ? 1.5 : 0.5}
+        strokeWidth={isOutline ? stroke : Math.max(0.4, size * 0.03)}
+        strokeLinejoin="round"
       />
       {isOutline ? (
         <line
@@ -84,7 +93,8 @@ export function MarkerGlyph({ kind, size = 16, className, label }: MarkerGlyphPr
           x2={size * 0.85}
           y2={size * 0.5}
           stroke={colorVar}
-          strokeWidth={1.5}
+          strokeWidth={stroke}
+          strokeLinecap="round"
         />
       ) : null}
     </svg>

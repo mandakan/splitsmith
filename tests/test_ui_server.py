@@ -892,6 +892,59 @@ def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
     assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
 
 
+def test_trim_invalidates_when_beep_changes(tmp_path: Path, monkeypatch) -> None:
+    """Changing beep_time without touching the source must re-encode the
+    trim. Cache key includes a sidecar params JSON so a new beep is
+    detected even when the source mtime is unchanged."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import trim
+
+    invocations: list[dict] = []
+
+    def fake_trim_video(**kwargs):  # type: ignore[no-untyped-def]
+        invocations.append(kwargs)
+        out = Path(kwargs["output_path"])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"T")
+        return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+
+    # Run #1: cold cache, ffmpeg fires.
+    resp = client.post("/api/stages/1/trim")
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded"
+    assert len(invocations) == 1
+
+    # Run #2: same params -> cache hit, ffmpeg does NOT fire again.
+    resp = client.post("/api/stages/1/trim")
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded"
+    assert len(invocations) == 1, "second run should be a cache hit"
+
+    # Change beep_time via manual override. override_beep clears the trim
+    # cache and auto-fires a re-trim job; we wait for it to finish.
+    resp = client.post("/api/stages/1/beep", json={"beep_time": 7.5})
+    assert resp.status_code == 200
+    # The auto-fired job is the active trim job.
+    jobs = client.get("/api/jobs").json()
+    active = next((j for j in jobs if j["kind"] == "trim" and j["stage_number"] == 1), None)
+    assert active is not None, "override_beep should auto-fire a trim job"
+    final = _wait_for_job(client, active["id"])
+    assert final["status"] == "succeeded"
+    assert len(invocations) == 2, "new beep_time must invalidate the trim cache"
+    assert invocations[1]["beep_time"] == pytest.approx(7.5)
+
+
 def test_trim_partial_filename_keeps_mp4_extension(tmp_path: Path, monkeypatch) -> None:
     """ffmpeg infers the muxer from the output extension. The atomic-write
     partial must stay an .mp4 (e.g. stage1_trimmed.partial.mp4) -- if it

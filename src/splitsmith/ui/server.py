@@ -556,41 +556,46 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 ),
             )
 
-        def run(handle: JobHandle) -> None:
-            handle.update(progress=0.1, message="Preparing trim...")
-            proj = state.load()
-            stg = proj.stage(stage_number)
-            prim = stg.primary()
-            if prim is None or prim.beep_time is None:
-                raise RuntimeError("primary or beep disappeared mid-flight")
-            source = proj.resolve_video_path(state.project_root, prim.path)
-            handle.update(progress=0.3, message="Encoding short-GOP MP4...")
-            audio_helpers.ensure_audit_trim(
-                state.project_root,
-                stage_number,
-                source,
-                prim.beep_time,
-                stg.time_seconds,
-                project=proj,
-            )
-            handle.update(progress=0.85, message="Saving project...")
-            prim.processed["trim"] = True
-            proj.save(state.project_root)
-            # Auto-chain: a fresh trim invalidates whatever shot-detection
-            # candidates were derived from the old trim, so re-run.
-            if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
-                state.jobs.submit(
-                    kind="shot_detect",
-                    stage_number=stage_number,
-                    fn=lambda h, n=stage_number: _run_shot_detect(h, n),
-                )
-            handle.update(progress=1.0, message="Done")
-
         existing = state.jobs.find_active(kind="trim", stage_number=stage_number)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(kind="trim", stage_number=stage_number, fn=run)
+        job = state.jobs.submit(
+            kind="trim",
+            stage_number=stage_number,
+            fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
+        )
         return JSONResponse(job.model_dump(mode="json"))
+
+    def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:
+        """Worker for the audit-mode trim. Auto-chains shot detection on
+        success so a re-trim (e.g. after manual beep override) refreshes
+        the candidate pool the audit screen reads from."""
+        handle.update(progress=0.1, message="Preparing trim...")
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError("primary or beep disappeared mid-flight")
+        source = proj.resolve_video_path(state.project_root, prim.path)
+        handle.update(progress=0.3, message="Encoding short-GOP MP4...")
+        audio_helpers.ensure_audit_trim(
+            state.project_root,
+            stage_number,
+            source,
+            prim.beep_time,
+            stg.time_seconds,
+            project=proj,
+        )
+        handle.update(progress=0.85, message="Saving project...")
+        prim.processed["trim"] = True
+        proj.save(state.project_root)
+        if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+            state.jobs.submit(
+                kind="shot_detect",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+            )
+        handle.update(progress=1.0, message="Done")
 
     def _run_shot_detect(handle: JobHandle, stage_number: int) -> None:
         """Worker that runs shot detection on the stage's audit clip.
@@ -769,6 +774,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             primary.beep_peak_amplitude = None
             primary.beep_duration_ms = None
             primary.processed["beep"] = False
+            primary.processed["trim"] = False
+            primary.processed["shot_detect"] = False
         else:
             if req.beep_time < 0.0:
                 raise HTTPException(status_code=400, detail="beep_time must be >= 0")
@@ -778,7 +785,28 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             # Diagnostics from a previous auto-detect are no longer authoritative.
             primary.beep_peak_amplitude = None
             primary.beep_duration_ms = None
+            # New beep -> previous trim was cut around the wrong window.
+            # processed.trim flips back so the SPA prompts re-trim.
+            primary.processed["trim"] = False
+            primary.processed["shot_detect"] = False
+
+        # Either branch invalidates the cached trim + audit WAV so the
+        # next audit-screen visit can't serve a stale clip cut around an
+        # outdated beep. Auto-fires a trim job (which auto-chains shot
+        # detection) when we still have enough info to run; otherwise
+        # the user gets the badge on the audit screen.
+        audio_helpers.invalidate_audit_trim(state.project_root, stage_number, project=project)
         project.save(state.project_root)
+        if (
+            req.beep_time is not None
+            and stage.time_seconds > 0
+            and state.jobs.find_active(kind="trim", stage_number=stage_number) is None
+        ):
+            state.jobs.submit(
+                kind="trim",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
+            )
         return JSONResponse(project.model_dump(mode="json"))
 
     def _resolve_audit_audio(
