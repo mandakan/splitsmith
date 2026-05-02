@@ -270,6 +270,7 @@ def ensure_audit_trim(
     *,
     project: MatchProject,
     ffmpeg_binary: str = "ffmpeg",
+    runner: object | None = None,
 ) -> Path:
     """Produce ``stage<N>_trimmed.mp4`` for the audit screen if not cached.
 
@@ -325,18 +326,25 @@ def ensure_audit_trim(
         if p.exists():
             p.unlink()
 
+    encoder = trim_module.select_audit_encoder(
+        project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary
+    )
+    trim_kwargs: dict[str, object] = {
+        "input_path": src_resolved,
+        "output_path": partial,
+        "beep_time": primary_beep_time,
+        "stage_time": stage_time_seconds,
+        "pre_buffer_seconds": project.trim_pre_buffer_seconds,
+        "post_buffer_seconds": project.trim_post_buffer_seconds,
+        "mode": "audit",
+        "video_encoder": encoder,
+        "ffmpeg_binary": ffmpeg_binary,
+        "overwrite": True,
+    }
+    if runner is not None:
+        trim_kwargs["runner"] = runner
     try:
-        trim_module.trim_video(
-            input_path=src_resolved,
-            output_path=partial,
-            beep_time=primary_beep_time,
-            stage_time=stage_time_seconds,
-            pre_buffer_seconds=project.trim_pre_buffer_seconds,
-            post_buffer_seconds=project.trim_post_buffer_seconds,
-            mode="audit",
-            ffmpeg_binary=ffmpeg_binary,
-            overwrite=True,
-        )
+        trim_module.trim_video(**trim_kwargs)
     except trim_module.FFmpegError as exc:
         # ffmpeg may have written some bytes before bailing; delete them.
         if partial.exists():

@@ -21,8 +21,10 @@ shelling out.
 
 from __future__ import annotations
 
+import platform
 import subprocess
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -31,9 +33,72 @@ from .config import TrimResult
 Runner = Callable[..., subprocess.CompletedProcess]
 TrimMode = Literal["lossless", "audit"]
 
+# Encoders that don't take libx264-style ``-preset`` / ``-crf`` knobs. When the
+# audit-mode trim uses one of these we drop those flags from the command line
+# and let the encoder defaults handle quality (good enough for cache files).
+_HARDWARE_ENCODERS: frozenset[str] = frozenset({"h264_videotoolbox"})
+
 
 class FFmpegError(RuntimeError):
     """ffmpeg exited non-zero or could not be invoked."""
+
+
+@lru_cache(maxsize=4)
+def _probe_available_encoders(ffmpeg_binary: str = "ffmpeg") -> frozenset[str]:
+    """Return the set of video encoder names ffmpeg reports it can use.
+
+    Cached per-binary because ``ffmpeg -encoders`` adds a noticeable ~50ms
+    cold-start to each call. Returns an empty set if ffmpeg can't be invoked
+    so callers can fall back to ``libx264`` (which is the universal default).
+    """
+    try:
+        out = subprocess.run(
+            [ffmpeg_binary, "-hide_banner", "-encoders"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return frozenset()
+    names: set[str] = set()
+    # Lines look like ``" V..... libx264               H.264 / ...``; the
+    # encoder name is the second whitespace-separated token.
+    for line in out.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].startswith("V"):
+            names.add(parts[1])
+    return frozenset(names)
+
+
+def select_audit_encoder(
+    requested: str = "auto",
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+) -> str:
+    """Pick the best audit-mode video encoder available.
+
+    ``requested`` is the user's preference from ``OutputConfig.trim_audit_encoder``:
+
+    - ``"auto"``: probe ffmpeg for ``h264_videotoolbox`` on macOS (~10x speedup
+      on 4K Insta360 footage), otherwise ``libx264``.
+    - explicit name (``"libx264"``, ``"h264_videotoolbox"``, ...): used as-is
+      when the binary advertises it; falls back to ``libx264`` when not.
+
+    Returns a usable encoder name. ``libx264`` is the universal fallback because
+    every realistic ffmpeg build ships it.
+    """
+    if requested != "auto":
+        encoders = _probe_available_encoders(ffmpeg_binary)
+        # If we couldn't probe (no ffmpeg on PATH for the probe call), trust
+        # the explicit choice -- the trim itself will surface a clear error
+        # if the encoder really is unavailable.
+        if encoders and requested not in encoders:
+            return "libx264"
+        return requested
+    encoders = _probe_available_encoders(ffmpeg_binary)
+    if platform.system() == "Darwin" and "h264_videotoolbox" in encoders:
+        return "h264_videotoolbox"
+    return "libx264"
 
 
 def trim_video(
@@ -48,7 +113,8 @@ def trim_video(
     mode: TrimMode = "lossless",
     gop_frames: int = 15,
     crf: int = 20,
-    preset: str = "fast",
+    preset: str = "ultrafast",
+    video_encoder: str = "libx264",
     ffmpeg_binary: str = "ffmpeg",
     overwrite: bool = False,
     runner: Runner = subprocess.run,
@@ -111,13 +177,17 @@ def trim_video(
     if mode == "lossless":
         cmd += ["-c", "copy"]
     else:  # audit
+        cmd += ["-c:v", video_encoder]
+        # libx264-style knobs only apply to software encoders. Hardware
+        # encoders (videotoolbox / nvenc / qsv) reject ``-preset`` / ``-crf``
+        # or interpret them differently; let the encoder default the
+        # quality knob and rely on its built-in speed/quality tradeoff
+        # (videotoolbox's default is already fast and good enough for a
+        # cache file). Keep GOP + pixel format flags -- those are
+        # codec-level and apply to every H.264 encoder.
+        if video_encoder not in _HARDWARE_ENCODERS:
+            cmd += ["-preset", preset, "-crf", str(crf)]
         cmd += [
-            "-c:v",
-            "libx264",
-            "-preset",
-            preset,
-            "-crf",
-            str(crf),
             "-g",
             str(gop_frames),
             "-keyint_min",

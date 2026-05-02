@@ -260,7 +260,16 @@ class OutputConfig(BaseModel):
     # keyframe every 0.5s; lower for tighter scrub, higher for smaller files.
     trim_gop_frames: int = 15
     trim_audit_crf: int = 20
-    trim_audit_preset: str = "fast"
+    # libx264 preset. Audit clips are throw-away cache files: encode speed
+    # matters, file size doesn't. ``ultrafast`` is ~3-5x faster than ``fast``
+    # on 2K/4K Insta360 footage at the cost of larger output -- a worthwhile
+    # trade for the audit screen feeling responsive (issue #26).
+    trim_audit_preset: str = "ultrafast"
+    # Encoder for audit-mode trims. ``"auto"`` picks ``h264_videotoolbox`` on
+    # macOS when ffmpeg advertises it (~10x speedup on large sources) and
+    # falls back to ``libx264`` everywhere else. Set to a specific encoder
+    # name to override.
+    trim_audit_encoder: str = "auto"
 
 
 class Config(BaseModel):

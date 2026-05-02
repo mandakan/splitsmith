@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from splitsmith.ui.jobs import JobRegistry, JobStatus
+from splitsmith.ui.jobs import JobCancelled, JobRegistry, JobStatus
 
 
 def _wait_until(predicate, *, timeout=2.0, poll=0.01):
@@ -133,3 +133,169 @@ def test_running_jobs_never_evicted() -> None:
 def test_get_returns_none_for_unknown_id() -> None:
     reg = JobRegistry()
     assert reg.get("does-not-exist") is None
+
+
+# ---------------------------------------------------------------------------
+# Cancellation (issue #26)
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_pending_job_skips_worker_and_marks_cancelled() -> None:
+    """A cancel that arrives before the worker thread starts must be
+    observed in ``_run`` and short-circuit straight to CANCELLED. We hold
+    the executor with a slow predecessor so the second submit is still
+    PENDING when we cancel it."""
+    reg = JobRegistry(max_concurrent=1)
+    proceed = threading.Event()
+    started = threading.Event()
+
+    def hold(_h):
+        started.set()
+        proceed.wait(timeout=2.0)
+
+    blocker = reg.submit(kind="hold", fn=hold)
+    assert started.wait(timeout=2.0)
+
+    ran = threading.Event()
+
+    def victim(_h):
+        ran.set()
+
+    queued = reg.submit(kind="victim", fn=victim)
+    assert reg.get(queued.id).status == JobStatus.PENDING
+    snapshot = reg.cancel(queued.id)
+    assert snapshot is not None
+    assert snapshot.cancel_requested is True
+
+    proceed.set()
+    assert _wait_until(lambda: reg.get(queued.id).status == JobStatus.CANCELLED)
+    assert not ran.is_set(), "cancelled-before-start jobs must skip the worker"
+    # Drain the blocker so the suite doesn't leak threads.
+    assert _wait_until(lambda: reg.get(blocker.id).status == JobStatus.SUCCEEDED)
+
+
+def test_cancel_running_job_via_check_cancel() -> None:
+    """A long-running worker observes the cancel via ``check_cancel`` and
+    raises ``JobCancelled``; the registry maps that to status=CANCELLED
+    instead of FAILED."""
+    reg = JobRegistry(max_concurrent=1)
+    started = threading.Event()
+    proceed = threading.Event()
+    finished = threading.Event()
+
+    def slow(handle):
+        handle.update(progress=0.1, message="phase 1")
+        started.set()
+        proceed.wait(timeout=2.0)
+        # Cancel arrived during the wait -- this raises JobCancelled.
+        handle.check_cancel()
+        finished.set()  # never reached
+
+    job = reg.submit(kind="slow", fn=slow)
+    assert started.wait(timeout=2.0)
+    reg.cancel(job.id)
+    proceed.set()
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.CANCELLED)
+    assert finished.is_set() is False
+    snapshot = reg.get(job.id)
+    assert snapshot.cancel_requested is True
+    assert snapshot.error is None  # CANCELLED is not an error
+
+
+def test_cancel_finished_job_is_noop() -> None:
+    """Cancelling an already-succeeded job returns the snapshot unchanged
+    -- idempotent behaviour the SPA can rely on when the user clicks
+    Cancel right as the job completes."""
+    reg = JobRegistry(max_concurrent=1)
+    job = reg.submit(kind="quick", fn=lambda _h: None)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+    snapshot = reg.cancel(job.id)
+    assert snapshot is not None
+    assert snapshot.status == JobStatus.SUCCEEDED
+    assert snapshot.cancel_requested is False
+
+
+def test_cancel_unknown_job_returns_none() -> None:
+    reg = JobRegistry()
+    assert reg.cancel("does-not-exist") is None
+
+
+def test_attach_subprocess_terminates_on_cancel() -> None:
+    """When ffmpeg is registered via ``attach_subprocess`` and a cancel
+    arrives, the registry calls ``terminate()`` so the encoder unblocks
+    promptly. Without this the worker sits inside ``proc.wait()`` until
+    the entire 2-4 minute encode finishes."""
+    reg = JobRegistry(max_concurrent=1)
+
+    class FakePopen:
+        def __init__(self) -> None:
+            self.terminated = threading.Event()
+
+        def poll(self) -> int | None:
+            return None if not self.terminated.is_set() else 1
+
+        def terminate(self) -> None:
+            self.terminated.set()
+
+    fake = FakePopen()
+    started = threading.Event()
+    raised: list[BaseException] = []
+
+    def worker(handle):
+        handle.attach_subprocess(fake)
+        started.set()
+        # Simulate ffmpeg blocking on a long encode; we wait on the
+        # FakePopen's flag which the cancel flips.
+        if not fake.terminated.wait(timeout=2.0):
+            return
+        try:
+            handle.check_cancel()
+        except JobCancelled as exc:  # noqa: PERF203 -- we want to capture it
+            raised.append(exc)
+            raise
+
+    job = reg.submit(kind="ffmpeg", fn=worker)
+    assert started.wait(timeout=2.0)
+    reg.cancel(job.id)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.CANCELLED)
+    assert fake.terminated.is_set(), "registry must terminate the registered subprocess"
+    assert raised, "worker should have observed the cancel after terminate()"
+
+
+def test_attach_after_cancel_terminates_immediately() -> None:
+    """If the worker registers a subprocess after the cancel has already
+    been observed (race: cancel between submit and attach), we still
+    terminate it and the worker bails out."""
+    reg = JobRegistry(max_concurrent=1)
+
+    class FakePopen:
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def poll(self) -> int | None:
+            return 1 if self.terminated else None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    fake = FakePopen()
+    proceed = threading.Event()
+    started = threading.Event()
+    cancel_observed = threading.Event()
+
+    def worker(handle):
+        started.set()
+        proceed.wait(timeout=2.0)
+        try:
+            handle.attach_subprocess(fake)
+        except JobCancelled:
+            cancel_observed.set()
+            raise
+
+    job = reg.submit(kind="ffmpeg", fn=worker)
+    assert started.wait(timeout=2.0)
+    reg.cancel(job.id)  # cancel before attach
+    proceed.set()
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.CANCELLED)
+    assert fake.terminated, "post-cancel attach must still terminate the proc"
+    assert cancel_observed.is_set()

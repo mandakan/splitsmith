@@ -1,6 +1,7 @@
 import { Crosshair, FileBarChart, FolderInput, Home, Palette } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { JobsPanel } from "@/components/JobsPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +81,7 @@ export function AppShell() {
             <ProjectHeader />
           )}
           <div className="flex items-center gap-2">
+            {fixtureMode ? null : <JobsPanel />}
             <ThemeToggle />
           </div>
         </header>
