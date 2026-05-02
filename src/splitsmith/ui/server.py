@@ -9,8 +9,11 @@ Endpoints (locked v1 surface):
   POST /api/project/placeholder-stages -- bootstrap source-first (no scoreboard yet)
   POST /api/videos/scan             -- register videos (folder or explicit paths)
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
+  POST /api/videos/remove           -- remove a registered video + cleanup caches
   POST /api/assignments/move        -- set role / unassign / move between stages
   POST /api/project/settings        -- update raw/audio/trimmed/exports dir overrides
+  GET  /api/fs/probe?path=...       -- probe + thumbnail one source file on demand
+  GET  /api/thumbnails/{key}.jpg    -- serve cached thumbnail
   POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
   POST /api/stages/{n}/beep         -- manual beep_time override
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
@@ -27,6 +30,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -37,6 +41,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import thumbnail as thumbnail_helpers
+from .. import video_probe
 from . import audio as audio_helpers
 from .project import (
     VIDEO_EXTENSIONS,
@@ -110,6 +116,8 @@ class SettingsRequest(BaseModel):
     audio_dir: str | None = None
     trimmed_dir: str | None = None
     exports_dir: str | None = None
+    probes_dir: str | None = None
+    thumbs_dir: str | None = None
     confirm: bool = False
 
 
@@ -123,12 +131,30 @@ class BeepOverrideRequest(BaseModel):
     beep_time: float | None  # None clears the override
 
 
+class RemoveVideoRequest(BaseModel):
+    """Body for POST /api/videos/remove (#24).
+
+    ``reset_audit`` only takes effect when removing a primary; otherwise it
+    is ignored (audit is stage-level state, and non-primary removals do not
+    invalidate it).
+    """
+
+    video_path: str
+    reset_audit: bool = False
+
+
 class FsEntry(BaseModel):
     name: str
     kind: Literal["dir", "video", "file"]
     video_count: int | None = None  # populated for dirs
     size_bytes: int | None = None  # populated for files
     mtime: float | None = None
+    # Populated for videos when probed (issue #24). ``duration`` may be null
+    # if probing was skipped (no ?probe=true) or hit the per-listing budget.
+    # ``thumbnail_url`` points at /api/thumbnails/{key}.jpg when a thumbnail
+    # is cached; the caller can hit /api/fs/probe to generate one on demand.
+    duration: float | None = None
+    thumbnail_url: str | None = None
 
 
 class FsListing(BaseModel):
@@ -288,7 +314,14 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         """
         project = state.load()
         update: dict[str, str | None] = {}
-        for field in ("raw_dir", "audio_dir", "trimmed_dir", "exports_dir"):
+        for field in (
+            "raw_dir",
+            "audio_dir",
+            "trimmed_dir",
+            "exports_dir",
+            "probes_dir",
+            "thumbs_dir",
+        ):
             value = getattr(req, field)
             if value is None:
                 continue
@@ -301,6 +334,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             "audio_dir": project.audio_path,
             "trimmed_dir": project.trimmed_path,
             "exports_dir": project.exports_path,
+            "probes_dir": project.probes_path,
+            "thumbs_dir": project.thumbs_path,
         }
         non_empty: list[dict[str, object]] = []
         for field, new_value in update.items():
@@ -347,6 +382,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             project.audio_path,
             project.trimmed_path,
             project.exports_path,
+            project.probes_path,
+            project.thumbs_path,
         ):
             target = resolver(state.project_root)
             try:
@@ -467,7 +504,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         )
 
     @app.get("/api/fs/list", response_model=FsListing)
-    def fs_list(path: str | None = Query(default=None)) -> FsListing:
+    def fs_list(
+        path: str | None = Query(default=None),
+        probe: bool = Query(default=False),
+    ) -> FsListing:
         """List a directory's children for the in-app folder picker.
 
         - ``path=None`` returns the user's home directory plus suggested-start
@@ -476,6 +516,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         - Symlinks are resolved before listing; broken symlinks are silently
           dropped from the entries list.
         - Per-directory ``video_count`` is computed by a single shallow scan.
+        - When ``probe=true``, video entries get ``duration`` + thumbnail
+          generation via ffprobe / ffmpeg, bounded by a wall-clock budget
+          (~5 s) so a USB-mounted directory with hundreds of clips doesn't
+          stall the picker. Entries past the budget come back with null
+          fields and a per-row Generate affordance in the SPA. Cached
+          probes / thumbnails always populate -- the budget only gates the
+          first-time work.
         """
         project = state.load()
         target = Path(path).expanduser() if path else _default_start(project.last_scanned_dir)
@@ -492,6 +539,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+        probes_dir = project.probes_path(state.project_root)
+        thumbs_dir = project.thumbs_path(state.project_root)
+        budget_deadline = time.monotonic() + 5.0  # wall-clock budget for new probes
+
         for child in children:
             if child.name.startswith("."):
                 continue
@@ -502,12 +553,24 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 elif child.is_file():
                     is_video = child.suffix.lower() in VIDEO_EXTENSIONS
                     stat = child.stat()
+                    duration: float | None = None
+                    thumbnail_url: str | None = None
+                    if is_video:
+                        duration, thumbnail_url = _video_metadata_for(
+                            child,
+                            probes_dir=probes_dir,
+                            thumbs_dir=thumbs_dir,
+                            allow_new=probe and time.monotonic() < budget_deadline,
+                            duration_for_thumb=None,
+                        )
                     entries.append(
                         FsEntry(
                             name=child.name,
                             kind="video" if is_video else "file",
                             size_bytes=stat.st_size,
                             mtime=stat.st_mtime,
+                            duration=duration,
+                            thumbnail_url=thumbnail_url,
                         )
                     )
             except (PermissionError, OSError):
@@ -525,11 +588,125 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             suggested_starts=suggested,
         )
 
+    @app.get("/api/fs/probe")
+    def fs_probe(path: str = Query(...)) -> JSONResponse:
+        """Probe a single video file on demand: ffprobe + thumbnail extraction.
+
+        Used by the SPA when a picker row came back with null fields (the
+        list-time budget was exhausted, or ``probe=true`` wasn't passed).
+        Cached results are returned without re-running the binaries.
+        """
+        target = Path(path).expanduser()
+        try:
+            target = target.resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"path not found: {target}") from exc
+        if not target.is_file():
+            raise HTTPException(status_code=400, detail=f"not a file: {target}")
+        if target.suffix.lower() not in VIDEO_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"not a video: {target}")
+
+        project = state.load()
+        probes_dir = project.probes_path(state.project_root)
+        thumbs_dir = project.thumbs_path(state.project_root)
+        duration, thumbnail_url = _video_metadata_for(
+            target,
+            probes_dir=probes_dir,
+            thumbs_dir=thumbs_dir,
+            allow_new=True,
+            duration_for_thumb=None,
+        )
+        return JSONResponse({"duration": duration, "thumbnail_url": thumbnail_url})
+
+    @app.get("/api/thumbnails/{cache_key}.jpg", include_in_schema=False)
+    def serve_thumbnail(cache_key: str) -> FileResponse:
+        """Serve a cached thumbnail by its content-addressed key.
+
+        Keys are 16-char hex from :func:`video_probe.source_cache_key`. We
+        validate the key shape so we never accept an arbitrary path that
+        could escape the thumbs directory.
+        """
+        if not cache_key.isalnum() or len(cache_key) > 32:
+            raise HTTPException(status_code=400, detail="invalid thumbnail key")
+        project = state.load()
+        thumbs_dir = project.thumbs_path(state.project_root)
+        candidate = thumbs_dir / f"{cache_key}.jpg"
+        if not candidate.exists():
+            raise HTTPException(status_code=404, detail="thumbnail not cached")
+        return FileResponse(candidate, media_type="image/jpeg", filename=candidate.name)
+
     @app.post("/api/videos/auto-match")
     def auto_match() -> JSONResponse:
         project = state.load()
         suggestions = project.auto_match(state.project_root)
         return JSONResponse({str(stage_num): str(path) for stage_num, path in suggestions.items()})
+
+    @app.post("/api/videos/remove")
+    def remove_video(req: RemoveVideoRequest) -> JSONResponse:
+        """Remove a registered video and clean up its caches.
+
+        Walks the :class:`RemovalPlan` returned by the model: unlinks the
+        symlink under ``raw_dir`` (the source on USB / external storage is
+        never touched), and clears the audio + trimmed caches if the removed
+        video was a primary that had been processed. When ``reset_audit`` is
+        set and the video was a primary, the per-stage audit JSON is
+        deleted too -- otherwise audit data is preserved so a re-ingest of
+        the same stage with a different file picks up where the user left
+        off.
+        """
+        project = state.load()
+        try:
+            plan = project.remove_video(
+                Path(req.video_path),
+                state.project_root,
+                reset_audit=req.reset_audit,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        # Symlink under raw_dir: remove only if it's actually a symlink we
+        # created. If the user pointed raw_dir at the source and the link is
+        # in fact the original file, leave it alone.
+        try:
+            if plan.raw_link_path.is_symlink():
+                plan.raw_link_path.unlink()
+            elif plan.raw_link_path.exists():
+                # Treat as a copy splitsmith placed (link_mode="copy"). We
+                # only delete files inside raw_dir; never anything beyond.
+                raw_dir = project.raw_path(state.project_root).resolve()
+                try:
+                    plan.raw_link_path.resolve().relative_to(raw_dir)
+                    plan.raw_link_path.unlink()
+                except ValueError:
+                    logger.debug(
+                        "skipping raw cleanup; %s is outside raw_dir %s",
+                        plan.raw_link_path,
+                        raw_dir,
+                    )
+        except OSError as exc:
+            logger.warning("could not unlink %s: %s", plan.raw_link_path, exc)
+
+        for cache_path in (plan.audio_cache_path, plan.trimmed_cache_path):
+            if cache_path is None:
+                continue
+            try:
+                cache_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("could not remove cache %s: %s", cache_path, exc)
+
+        if plan.audit_path is not None:
+            try:
+                plan.audit_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("could not remove audit %s: %s", plan.audit_path, exc)
+
+        project.save(state.project_root)
+        return JSONResponse(
+            {
+                "project": project.model_dump(mode="json"),
+                "plan": plan.model_dump(mode="json"),
+            }
+        )
 
     @app.post("/api/assignments/move")
     def move_assignment(req: MoveRequest) -> JSONResponse:
@@ -618,6 +795,51 @@ def _suggested_starts(last_scanned_dir: str | None) -> list[str]:
         seen.add(c)
         result.append(c)
     return result
+
+
+def _video_metadata_for(
+    source: Path,
+    *,
+    probes_dir: Path,
+    thumbs_dir: Path,
+    allow_new: bool,
+    duration_for_thumb: float | None,
+) -> tuple[float | None, str | None]:
+    """Return ``(duration, thumbnail_url)`` for a source video.
+
+    Always uses cached results when available. Runs ffprobe / ffmpeg only
+    when ``allow_new`` is True (i.e. the caller wants on-demand work and is
+    OK paying the cost). Failures are swallowed -- the picker's contract is
+    "best effort, never block the listing".
+    """
+    duration: float | None = None
+    cached_probe = video_probe.cached(source, probes_dir)
+    if cached_probe is not None:
+        duration = cached_probe.duration
+    elif allow_new:
+        try:
+            result = video_probe.probe(source, cache_dir=probes_dir)
+            duration = result.duration
+        except video_probe.ProbeError as exc:
+            logger.debug("probe failed for %s: %s", source, exc)
+
+    thumbnail_url: str | None = None
+    cached_thumb = thumbnail_helpers.cached(source, thumbs_dir)
+    if cached_thumb is not None:
+        thumbnail_url = f"/api/thumbnails/{cached_thumb.stem}.jpg"
+    elif allow_new:
+        try:
+            t_dur = duration_for_thumb if duration_for_thumb is not None else duration
+            extracted = thumbnail_helpers.ensure(
+                source,
+                cache_dir=thumbs_dir,
+                duration=t_dur,
+            )
+            thumbnail_url = f"/api/thumbnails/{extracted.stem}.jpg"
+        except thumbnail_helpers.ThumbnailError as exc:
+            logger.debug("thumbnail failed for %s: %s", source, exc)
+
+    return duration, thumbnail_url
 
 
 def _count_videos_shallow(directory: Path, *, cap: int = 200) -> int:

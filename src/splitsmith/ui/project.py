@@ -39,7 +39,7 @@ from ..video_match import match_videos_to_stages
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
 
 PROJECT_FILE = "project.json"
-SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard")
+SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard", "probes", "thumbs")
 
 # Bumped when the on-disk schema changes in a backwards-incompatible way.
 SCHEMA_VERSION = 1
@@ -106,6 +106,25 @@ class ScoreboardImportConflictError(Exception):
     """Raised when ``import_scoreboard`` would overwrite existing stage data."""
 
 
+class RemovalPlan(BaseModel):
+    """Side-effect description returned by :meth:`MatchProject.remove_video`.
+
+    The model mutates project state (drops the StageVideo, optionally clears
+    audit) but never touches the filesystem. The endpoint walks this plan to
+    do the actual deletes -- keeping pure model logic separate from I/O so
+    tests can exercise the model without disk fixtures.
+    """
+
+    video_path: Path  # the path that was removed (project-relative or absolute)
+    raw_link_path: Path  # symlink under raw_dir to unlink
+    audio_cache_path: Path | None = None  # WAV cache to clear if cached
+    trimmed_cache_path: Path | None = None  # trimmed clip to clear if cached
+    audit_path: Path | None = None  # stage audit JSON to clear when reset_audit
+    was_primary: bool = False
+    stage_number: int | None = None
+    audit_reset: bool = False  # caller-facing flag: did we wipe stage audit?
+
+
 class MatchProject(BaseModel):
     """Top-level on-disk match project."""
 
@@ -137,6 +156,11 @@ class MatchProject(BaseModel):
     audio_dir: str | None = None
     trimmed_dir: str | None = None
     exports_dir: str | None = None
+    # Probe + thumbnail caches (issue #24). Same override semantics as the
+    # other path fields: ``None`` -> default subdir under project root,
+    # relative -> resolved against project root, absolute -> as-is.
+    probes_dir: str | None = None
+    thumbs_dir: str | None = None
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
@@ -203,6 +227,17 @@ class MatchProject(BaseModel):
 
     def exports_path(self, root: Path) -> Path:
         return self._resolve_dir(root, self.exports_dir, "exports")
+
+    def probes_path(self, root: Path) -> Path:
+        return self._resolve_dir(root, self.probes_dir, "probes")
+
+    def thumbs_path(self, root: Path) -> Path:
+        return self._resolve_dir(root, self.thumbs_dir, "thumbs")
+
+    def audit_path(self, root: Path) -> Path:
+        # Audit output is always project-local; surface a resolver for the
+        # remove-video flow so it can clean up the per-stage JSON.
+        return root / "audit"
 
     # ------------------------------------------------------------------
     # Video registry helpers (Sub 2 / #13)
@@ -476,6 +511,79 @@ class MatchProject(BaseModel):
         video.role = role
         target.videos.append(video)
         return video
+
+    def remove_video(
+        self,
+        path: Path,
+        root: Path,
+        *,
+        reset_audit: bool = False,
+    ) -> RemovalPlan:
+        """Remove a registered video and return a :class:`RemovalPlan`.
+
+        Drops the ``StageVideo`` from its stage or ``unassigned_videos``. The
+        symlink under ``raw_dir`` is included in the plan so the caller can
+        unlink it; the actual filesystem call is the caller's job (keeps this
+        method pure-mutation on the model).
+
+        ``reset_audit=True`` and the video was a primary clears the per-stage
+        audit JSON path (``<root>/audit/stage<N>.json``) and resets the
+        primary's ``processed`` flags. Default is ``False``: stage audit is
+        preserved so a re-ingest of the same stage with a different file can
+        pick up where the user left off.
+
+        Raises ``KeyError`` if the video isn't registered with the project.
+        """
+        located = self.find_video(path)
+        if located is None:
+            raise KeyError(f"video {path} not registered with project")
+        current_stage, video = located
+        was_primary = video.role == "primary" and current_stage is not None
+        stage_number = current_stage.stage_number if current_stage else None
+
+        if current_stage is None:
+            self.unassigned_videos = [
+                v for v in self.unassigned_videos if str(v.path) != str(video.path)
+            ]
+        else:
+            current_stage.videos = [
+                v for v in current_stage.videos if str(v.path) != str(video.path)
+            ]
+
+        raw_link = self.resolve_video_path(root, video.path)
+
+        audio_cache: Path | None = None
+        trimmed_cache: Path | None = None
+        if was_primary and stage_number is not None:
+            audio_cache = self.audio_path(root) / f"stage{stage_number}_primary.wav"
+            trimmed_cache = self.trimmed_path(root) / f"stage{stage_number}_trimmed.mp4"
+
+        audit_path: Path | None = None
+        audit_reset = False
+        if reset_audit and stage_number is not None:
+            audit_path = self.audit_path(root) / f"stage{stage_number}.json"
+            audit_reset = True
+            if was_primary and current_stage is not None:
+                # No primary remains; reset processed flags on any other
+                # primaries that may have been demoted (defensive -- the data
+                # model only allows one primary at a time).
+                for v in current_stage.videos:
+                    v.processed = {"beep": False, "shot_detect": False, "trim": False}
+                    v.beep_time = None
+                    v.beep_source = None
+                    v.beep_peak_amplitude = None
+                    v.beep_duration_ms = None
+
+        return RemovalPlan(
+            video_path=video.path,
+            raw_link_path=raw_link,
+            audio_cache_path=audio_cache,
+            trimmed_cache_path=trimmed_cache,
+            audit_path=audit_path,
+            was_primary=was_primary,
+            stage_number=stage_number,
+            audit_reset=audit_reset,
+        )
 
     def auto_match(
         self,

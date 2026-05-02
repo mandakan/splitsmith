@@ -54,6 +54,10 @@ export function Ingest() {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<{
+    video: StageVideo;
+    stage: StageEntry | null;
+  } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -152,6 +156,20 @@ export function Ingest() {
     }
   };
 
+  const handleRemove = async (videoPath: string, resetAudit: boolean) => {
+    setBusy(true);
+    try {
+      const resp = await api.removeVideo(videoPath, resetAudit);
+      setProject(resp.project);
+      setRemoveTarget(null);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const move = async (videoPath: string, toStage: number | null, role: VideoRole) => {
     setBusy(true);
     try {
@@ -234,6 +252,7 @@ export function Ingest() {
             project={project}
             busy={busy}
             onAssign={(path, stage, role) => move(path, stage, role)}
+            onRemove={(video, stage) => setRemoveTarget({ video, stage })}
           />
           <StagesSection
             project={project}
@@ -242,8 +261,18 @@ export function Ingest() {
             setError={setError}
             onProjectUpdate={setProject}
             onMove={move}
+            onRemove={(video, stage) => setRemoveTarget({ video, stage })}
           />
         </>
+      ) : null}
+
+      {removeTarget ? (
+        <RemoveVideoDialog
+          target={removeTarget}
+          busy={busy}
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={(resetAudit) => handleRemove(removeTarget.video.path, resetAudit)}
+        />
       ) : null}
     </div>
   );
@@ -529,12 +558,20 @@ function SettingsSection({
   onProjectUpdate: (p: MatchProject) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [pickerFor, setPickerFor] = useState<null | "raw" | "audio" | "trimmed" | "exports">(null);
-  const fields: { key: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir"; label: string; help: string }[] = [
+  const [pickerFor, setPickerFor] = useState<
+    null | "raw" | "audio" | "trimmed" | "exports" | "probes" | "thumbs"
+  >(null);
+  const fields: {
+    key: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir" | "probes_dir" | "thumbs_dir";
+    label: string;
+    help: string;
+  }[] = [
     { key: "raw_dir", label: "Source video links", help: "Symlinks to source files (default: <project>/raw)." },
     { key: "audio_dir", label: "Audio cache", help: "Extracted WAVs (default: <project>/audio). Heavy intermediate; SSD-friendly." },
     { key: "trimmed_dir", label: "Trimmed clips", help: "Short-GOP MP4s used by the audit screen (default: <project>/trimmed)." },
     { key: "exports_dir", label: "Outputs", help: "CSV / FCPXML / report (default: <project>/exports)." },
+    { key: "probes_dir", label: "ffprobe cache", help: "Cached duration / codec metadata (default: <project>/probes)." },
+    { key: "thumbs_dir", label: "Thumbnail cache", help: "Cached preview JPGs (default: <project>/thumbs)." },
   ];
   const labelFor = (field: string) =>
     fields.find((f) => f.key === field)?.label ?? field;
@@ -635,7 +672,13 @@ function SettingsSection({
                       disabled={busy}
                       onClick={() =>
                         setPickerFor(
-                          key.replace("_dir", "") as "raw" | "audio" | "trimmed" | "exports",
+                          key.replace("_dir", "") as
+                            | "raw"
+                            | "audio"
+                            | "trimmed"
+                            | "exports"
+                            | "probes"
+                            | "thumbs",
                         )
                       }
                     >
@@ -684,10 +727,12 @@ function UnassignedSection({
   project,
   busy,
   onAssign,
+  onRemove,
 }: {
   project: MatchProject;
   busy: boolean;
   onAssign: (videoPath: string, stage: number | null, role: VideoRole) => void;
+  onRemove: (video: StageVideo, stage: StageEntry | null) => void;
 }) {
   if (project.unassigned_videos.length === 0) return null;
   return (
@@ -698,7 +743,9 @@ function UnassignedSection({
           Unassigned videos · {project.unassigned_videos.length}
         </CardTitle>
         <CardDescription>
-          Drag onto a stage, or use the menu to pick a stage.
+          Drag onto a stage, or use the menu to pick a stage. Trash removes the
+          video from the project (cache is cleared; the original source on USB
+          / external storage is never touched).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -728,8 +775,9 @@ function UnassignedSection({
                 size="sm"
                 variant="ghost"
                 disabled={busy}
-                onClick={() => onAssign(v.path, null, "secondary")}
-                title="Mark as ignored (warmup, neighbour bay, etc.)"
+                onClick={() => onRemove(v, null)}
+                title="Remove from project"
+                aria-label={`Remove ${v.path}`}
               >
                 <Trash2 />
               </Button>
@@ -748,6 +796,7 @@ function StagesSection({
   setError,
   onProjectUpdate,
   onMove,
+  onRemove,
 }: {
   project: MatchProject;
   busy: boolean;
@@ -755,6 +804,7 @@ function StagesSection({
   setError: (msg: string | null) => void;
   onProjectUpdate: (next: MatchProject) => void;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
+  onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
   if (project.stages.length === 0) return null;
 
@@ -785,6 +835,7 @@ function StagesSection({
             setError={setError}
             onProjectUpdate={onProjectUpdate}
             onMove={onMove}
+            onRemove={onRemove}
           />
         ))}
       </div>
@@ -801,6 +852,7 @@ function StageCard({
   setError,
   onProjectUpdate,
   onMove,
+  onRemove,
 }: {
   stage: StageEntry;
   allStages: StageEntry[];
@@ -810,6 +862,7 @@ function StageCard({
   setError: (msg: string | null) => void;
   onProjectUpdate: (next: MatchProject) => void;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
+  onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
   const primary = stage.videos.find((v) => v.role === "primary");
   const secondaries = stage.videos.filter((v) => v.role === "secondary");
@@ -858,6 +911,7 @@ function StageCard({
                   busy={busy}
                   currentRole="primary"
                   onMove={onMove}
+                  onRemove={onRemove}
                 />
               }
             />
@@ -884,6 +938,7 @@ function StageCard({
                 busy={busy}
                 currentRole="secondary"
                 onMove={onMove}
+                onRemove={onRemove}
               />
             }
           />
@@ -905,6 +960,7 @@ function StageCard({
                 busy={busy}
                 currentRole="ignored"
                 onMove={onMove}
+                onRemove={onRemove}
               />
             }
           />
@@ -956,6 +1012,7 @@ function RoleActions({
   busy,
   currentRole,
   onMove,
+  onRemove,
 }: {
   video: StageVideo;
   stage: StageEntry;
@@ -963,6 +1020,7 @@ function RoleActions({
   busy: boolean;
   currentRole: VideoRole;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
+  onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
   return (
     <>
@@ -1019,7 +1077,120 @@ function RoleActions({
             ))}
         </select>
       ) : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => onRemove(video, stage)}
+        title="Remove from project (clears caches; source on disk is untouched)"
+        aria-label={`Remove ${video.path}`}
+      >
+        <Trash2 />
+      </Button>
     </>
+  );
+}
+
+function RemoveVideoDialog({
+  target,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  target: { video: StageVideo; stage: StageEntry | null };
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (resetAudit: boolean) => void;
+}) {
+  const { video, stage } = target;
+  const filename = video.path.split("/").pop() ?? video.path;
+  const isPrimary = video.role === "primary" && stage !== null;
+  const hasAudit = video.processed.beep || video.processed.shot_detect || video.processed.trim;
+  const offerAuditChoice = isPrimary && hasAudit;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="remove-dialog-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
+      onClick={onCancel}
+    >
+      <Card
+        className="w-full max-w-lg shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CardHeader>
+          <CardTitle id="remove-dialog-title" className="flex items-center gap-2">
+            <Trash2 className="size-5" />
+            Remove video
+          </CardTitle>
+          <CardDescription>
+            <span className="font-mono text-xs">{filename}</span>
+            {stage ? (
+              <>
+                {" "}
+                from Stage {stage.stage_number}: {stage.stage_name}
+              </>
+            ) : (
+              " (unassigned)"
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p>
+            The symlink in the project's <code>raw/</code> folder is removed
+            and any cached audio / trimmed clip for this video is cleared.{" "}
+            <strong>The original source file is never touched.</strong>
+          </p>
+          {offerAuditChoice ? (
+            <div className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-xs">
+              <p className="mb-2 font-semibold">
+                Stage {stage!.stage_number} has audit data.
+              </p>
+              <p>
+                <em>Keep audit</em> preserves detected beep / shot times so you
+                can re-ingest a different file for this stage and pick up
+                where you left off.{" "}
+                <em>Reset audit</em> wipes the stage audit JSON and clears the
+                processed flags.
+              </p>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <Button variant="ghost" disabled={busy} onClick={onCancel}>
+              Cancel
+            </Button>
+            {offerAuditChoice ? (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => onConfirm(false)}
+                >
+                  Remove, keep audit
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => onConfirm(true)}
+                >
+                  Remove and reset audit
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={busy}
+                onClick={() => onConfirm(false)}
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

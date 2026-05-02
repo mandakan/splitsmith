@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type FsListing } from "@/lib/api";
+import { ApiError, api, type FsEntry, type FsListing } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface FolderPickerProps {
@@ -55,21 +55,26 @@ export function FolderPicker({
   const [busy, setBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async (next?: string | null) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const data = await api.listFolder(next ?? undefined);
-      setListing(data);
-      setPath(data.path);
-      // Reset multi-file selection when navigating to a new directory.
-      setSelectedFiles(new Set());
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const wantMetadata = onSelectFiles !== undefined;
+
+  const load = useCallback(
+    async (next?: string | null) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const data = await api.listFolder(next ?? undefined, { probe: wantMetadata });
+        setListing(data);
+        setPath(data.path);
+        // Reset multi-file selection when navigating to a new directory.
+        setSelectedFiles(new Set());
+      } catch (e) {
+        setError(e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [wantMetadata],
+  );
 
   useEffect(() => {
     void load(initialPath ?? null);
@@ -187,33 +192,33 @@ export function FolderPicker({
               {multiFileMode
                 ? videoEntries.map((entry) => {
                     const checked = selectedFiles.has(entry.name);
+                    const fullPath = path ? joinPath(path, entry.name) : entry.name;
                     return (
-                      <li key={`v-${entry.name}`}>
-                        <label
-                          className={cn(
-                            "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-accent/40",
-                            checked && "bg-accent/30",
-                          )}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-primary"
-                              checked={checked}
-                              onChange={() => toggleSelect(entry.name)}
-                              disabled={busy}
-                              aria-label={`Select ${entry.name}`}
-                            />
-                            <Film className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="truncate font-mono text-xs">{entry.name}</span>
-                          </span>
-                          {entry.size_bytes != null ? (
-                            <span className="text-xs text-muted-foreground">
-                              {formatBytes(entry.size_bytes)}
-                            </span>
-                          ) : null}
-                        </label>
-                      </li>
+                      <VideoRowMulti
+                        key={`v-${entry.name}`}
+                        entry={entry}
+                        fullPath={fullPath}
+                        checked={checked}
+                        busy={busy}
+                        onToggle={() => toggleSelect(entry.name)}
+                        onProbed={(duration, thumbnail_url) => {
+                          // Patch the listing in-place so the row remembers
+                          // its on-demand probe result without forcing a
+                          // refresh.
+                          setListing((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  entries: prev.entries.map((e) =>
+                                    e.name === entry.name && e.kind === "video"
+                                      ? { ...e, duration, thumbnail_url }
+                                      : e,
+                                  ),
+                                }
+                              : prev,
+                          );
+                        }}
+                      />
                     );
                   })
                 : null}
@@ -273,6 +278,95 @@ export function FolderPicker({
       </div>
     </div>
   );
+}
+
+function VideoRowMulti({
+  entry,
+  fullPath,
+  checked,
+  busy,
+  onToggle,
+  onProbed,
+}: {
+  entry: FsEntry;
+  fullPath: string;
+  checked: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onProbed: (duration: number | null, thumbnail_url: string | null) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [probing, setProbing] = useState(false);
+
+  const ensureProbe = useCallback(async () => {
+    if (entry.duration != null && entry.thumbnail_url != null) return;
+    if (probing) return;
+    setProbing(true);
+    try {
+      const r = await api.probeFile(fullPath);
+      onProbed(r.duration, r.thumbnail_url);
+    } catch {
+      // Best effort; leave fields null so the row still shows what it can.
+    } finally {
+      setProbing(false);
+    }
+  }, [entry.duration, entry.thumbnail_url, fullPath, onProbed, probing]);
+
+  return (
+    <li
+      onMouseEnter={() => {
+        setHover(true);
+        void ensureProbe();
+      }}
+      onMouseLeave={() => setHover(false)}
+      className="relative"
+    >
+      <label
+        className={cn(
+          "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-accent/40",
+          checked && "bg-accent/30",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={checked}
+            onChange={onToggle}
+            disabled={busy}
+            aria-label={`Select ${entry.name}`}
+          />
+          <Film className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono text-xs">{entry.name}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground tabular-nums">
+          {entry.duration != null ? <span>{formatDuration(entry.duration)}</span> : null}
+          {entry.size_bytes != null ? <span>{formatBytes(entry.size_bytes)}</span> : null}
+        </span>
+      </label>
+      {hover && entry.thumbnail_url ? (
+        <div className="pointer-events-none absolute right-2 top-full z-10 mt-1 rounded-md border border-border bg-popover p-1 shadow-lg">
+          <img
+            src={entry.thumbnail_url}
+            alt={`${entry.name} thumbnail`}
+            className="h-32 rounded"
+          />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "?";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function formatBytes(bytes: number): string {

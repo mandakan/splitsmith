@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from splitsmith.thumbnail import ThumbnailError
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
+from splitsmith.video_probe import ProbeError, ProbeResult
 
 
 def test_health_returns_project_info(tmp_path: Path) -> None:
@@ -740,6 +743,307 @@ def test_settings_no_warning_when_old_dir_empty(tmp_path: Path) -> None:
         json={"audio_dir": str(tmp_path / "elsewhere")},
     )
     assert resp.status_code == 200
+
+
+def test_remove_video_unassigned(tmp_path: Path) -> None:
+    """Removing an unassigned video drops it from the project and unlinks
+    its symlink under raw_dir. The original source on USB / external storage
+    is never touched."""
+    root = tmp_path / "match"
+    src_dir = tmp_path / "ext"
+    src_dir.mkdir()
+    src = src_dir / "clip.mp4"
+    src.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/videos/scan",
+        json={"source_paths": [str(src)], "auto_assign_primary": False},
+    )
+    assert resp.status_code == 200
+    registered_path = resp.json()["registered"][0]
+    raw_link = root / "raw" / "clip.mp4"
+    assert raw_link.is_symlink()
+
+    resp = client.post("/api/videos/remove", json={"video_path": registered_path})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["plan"]["was_primary"] is False
+    assert body["project"]["unassigned_videos"] == []
+    assert not raw_link.exists()
+    assert src.exists(), "original source must never be touched"
+
+
+def test_remove_primary_clears_caches_and_keeps_audit(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    src_dir = tmp_path / "ext"
+    src_dir.mkdir()
+    src = src_dir / "clip.mp4"
+    src.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "M"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "A",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S1",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    client.post(
+        "/api/videos/scan",
+        json={"source_paths": [str(src)], "auto_assign_primary": False},
+    )
+    project = MatchProject.load(root)
+    project.assign_video(Path("raw/clip.mp4"), to_stage_number=1, role="primary")
+    # Simulate processed state: write fake cached files audit/audio/trimmed.
+    audio_cache = root / "audio" / "stage1_primary.wav"
+    audio_cache.parent.mkdir(parents=True, exist_ok=True)
+    audio_cache.write_bytes(b"wav")
+    trimmed_cache = root / "trimmed" / "stage1_trimmed.mp4"
+    trimmed_cache.parent.mkdir(parents=True, exist_ok=True)
+    trimmed_cache.write_bytes(b"mp4")
+    audit = root / "audit" / "stage1.json"
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    audit.write_text("{}")
+    project.stages[0].videos[0].processed = {
+        "beep": True,
+        "shot_detect": True,
+        "trim": True,
+    }
+    project.save(root)
+
+    resp = client.post(
+        "/api/videos/remove",
+        json={"video_path": "raw/clip.mp4"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["plan"]["was_primary"] is True
+    assert body["plan"]["audit_reset"] is False
+    assert not audio_cache.exists()
+    assert not trimmed_cache.exists()
+    assert audit.exists(), "audit JSON must be preserved by default"
+
+
+def test_remove_primary_with_reset_audit_clears_audit(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    src_dir = tmp_path / "ext"
+    src_dir.mkdir()
+    src = src_dir / "clip.mp4"
+    src.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "M"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "A",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S1",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    client.post(
+        "/api/videos/scan",
+        json={"source_paths": [str(src)], "auto_assign_primary": False},
+    )
+    project = MatchProject.load(root)
+    project.assign_video(Path("raw/clip.mp4"), to_stage_number=1, role="primary")
+    project.save(root)
+    audit = root / "audit" / "stage1.json"
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    audit.write_text("{}")
+
+    resp = client.post(
+        "/api/videos/remove",
+        json={"video_path": "raw/clip.mp4", "reset_audit": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["plan"]["audit_reset"] is True
+    assert not audit.exists()
+
+
+def test_remove_video_404_when_unknown(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/videos/remove",
+        json={"video_path": "raw/no-such.mp4"},
+    )
+    assert resp.status_code == 404
+
+
+def test_fs_list_probe_populates_duration_and_thumbnail(tmp_path: Path) -> None:
+    """When ``probe=true`` is passed, video entries get duration + thumbnail."""
+    root = tmp_path / "match"
+    folder = tmp_path / "videos"
+    folder.mkdir()
+    clip = folder / "clip.mp4"
+    clip.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return ProbeResult(duration=12.5, width=1920, height=1080, codec="h264")
+
+    def _fake_thumb(source: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        from splitsmith.video_probe import source_cache_key
+
+        dest = cache_dir / f"{source_cache_key(source)}.jpg"
+        dest.write_bytes(b"\xff\xd8\xff")
+        return dest
+
+    with (
+        patch("splitsmith.ui.server.video_probe.probe", side_effect=_fake_probe),
+        patch("splitsmith.ui.server.thumbnail_helpers.ensure", side_effect=_fake_thumb),
+    ):
+        resp = client.get(f"/api/fs/list?path={folder}&probe=true")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    [entry] = body["entries"]
+    assert entry["kind"] == "video"
+    assert entry["duration"] == 12.5
+    assert entry["thumbnail_url"].startswith("/api/thumbnails/")
+
+
+def test_fs_probe_endpoint_runs_on_demand(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return ProbeResult(duration=8.0)
+
+    def _fake_thumb(source: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        from splitsmith.video_probe import source_cache_key
+
+        dest = cache_dir / f"{source_cache_key(source)}.jpg"
+        dest.write_bytes(b"\xff")
+        return dest
+
+    with (
+        patch("splitsmith.ui.server.video_probe.probe", side_effect=_fake_probe),
+        patch("splitsmith.ui.server.thumbnail_helpers.ensure", side_effect=_fake_thumb),
+    ):
+        resp = client.get(f"/api/fs/probe?path={clip}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["duration"] == 8.0
+    assert body["thumbnail_url"].startswith("/api/thumbnails/")
+
+
+def test_thumbnail_endpoint_serves_cached(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    thumbs_dir = root / "thumbs"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    (thumbs_dir / "abc123.jpg").write_bytes(b"\xff\xd8\xff jpeg")
+
+    resp = client.get("/api/thumbnails/abc123.jpg")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/jpeg")
+
+    resp_404 = client.get("/api/thumbnails/missing.jpg")
+    assert resp_404.status_code == 404
+
+
+def test_thumbnail_endpoint_rejects_path_traversal(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    # Slashes in the path component aren't possible thanks to FastAPI's
+    # path matcher, but '..' as a key should be rejected by our shape check.
+    resp = client.get("/api/thumbnails/..jpg")
+    assert resp.status_code == 400
+
+
+def test_fs_list_probe_skipped_when_falsy(tmp_path: Path) -> None:
+    """Without ?probe=true and without cached results, video entries should
+    have null duration / thumbnail and probe / ensure must not run."""
+    root = tmp_path / "match"
+    folder = tmp_path / "videos"
+    folder.mkdir()
+    (folder / "clip.mp4").write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    with (
+        patch(
+            "splitsmith.ui.server.video_probe.probe",
+            side_effect=AssertionError("probe must not run"),
+        ),
+        patch(
+            "splitsmith.ui.server.thumbnail_helpers.ensure",
+            side_effect=AssertionError("thumb must not run"),
+        ),
+    ):
+        resp = client.get(f"/api/fs/list?path={folder}")
+
+    assert resp.status_code == 200
+    [entry] = resp.json()["entries"]
+    assert entry["duration"] is None
+    assert entry["thumbnail_url"] is None
+
+
+def test_fs_list_probe_failure_swallowed(tmp_path: Path) -> None:
+    """A probe failure must not break the listing; the entry just gets nulls."""
+    root = tmp_path / "match"
+    folder = tmp_path / "videos"
+    folder.mkdir()
+    (folder / "clip.mp4").write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    with (
+        patch(
+            "splitsmith.ui.server.video_probe.probe",
+            side_effect=ProbeError("boom"),
+        ),
+        patch(
+            "splitsmith.ui.server.thumbnail_helpers.ensure",
+            side_effect=ThumbnailError("thumb fails too"),
+        ),
+    ):
+        resp = client.get(f"/api/fs/list?path={folder}&probe=true")
+
+    assert resp.status_code == 200
+    [entry] = resp.json()["entries"]
+    assert entry["duration"] is None
 
 
 def test_external_edit_visible_without_restart(tmp_path: Path) -> None:

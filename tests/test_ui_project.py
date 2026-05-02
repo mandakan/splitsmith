@@ -481,6 +481,106 @@ def test_import_scoreboard_overlay_drops_extras_to_unassigned(tmp_path: Path) ->
     assert project.unassigned_videos[0].role == "secondary"
 
 
+def test_remove_video_unassigned_returns_plan(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    src = tmp_path / "ext" / "clip.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"fake")
+    video = project.register_video(src, root)
+
+    plan = project.remove_video(video.path, root)
+
+    assert project.find_video(video.path) is None
+    assert plan.was_primary is False
+    assert plan.stage_number is None
+    assert plan.audio_cache_path is None
+    assert plan.trimmed_cache_path is None
+    assert plan.audit_path is None
+    assert plan.raw_link_path == (root / "raw" / "clip.mp4")
+
+
+def test_remove_primary_includes_audio_and_trimmed_paths(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    project.import_scoreboard(
+        {
+            "match": {"id": "1", "name": "M"},
+            "competitors": [
+                {
+                    "competitor_id": 1,
+                    "name": "A",
+                    "stages": [
+                        {
+                            "stage_number": 1,
+                            "stage_name": "S1",
+                            "time_seconds": 10.0,
+                            "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    src = tmp_path / "ext" / "clip.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"fake")
+    video = project.register_video(src, root)
+    project.assign_video(video.path, to_stage_number=1, role="primary")
+    project.stages[0].videos[0].processed = {"beep": True, "shot_detect": True, "trim": True}
+
+    plan = project.remove_video(video.path, root)
+
+    assert plan.was_primary is True
+    assert plan.stage_number == 1
+    assert plan.audio_cache_path == (root / "audio" / "stage1_primary.wav")
+    assert plan.trimmed_cache_path == (root / "trimmed" / "stage1_trimmed.mp4")
+    assert plan.audit_path is None  # default: preserve audit
+    assert plan.audit_reset is False
+    assert project.stages[0].videos == []
+
+
+def test_remove_with_reset_audit_includes_audit_path(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    project.import_scoreboard(
+        {
+            "match": {"id": "1", "name": "M"},
+            "competitors": [
+                {
+                    "competitor_id": 1,
+                    "name": "A",
+                    "stages": [
+                        {
+                            "stage_number": 1,
+                            "stage_name": "S1",
+                            "time_seconds": 10.0,
+                            "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    src = tmp_path / "ext" / "clip.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"fake")
+    video = project.register_video(src, root)
+    project.assign_video(video.path, to_stage_number=1, role="primary")
+
+    plan = project.remove_video(video.path, root, reset_audit=True)
+
+    assert plan.audit_reset is True
+    assert plan.audit_path == (root / "audit" / "stage1.json")
+
+
+def test_remove_video_unknown_path_raises(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="x")
+    with pytest.raises(KeyError):
+        project.remove_video(Path("raw/missing.mp4"), root)
+
+
 def test_register_video_symlinks_into_raw(tmp_path: Path) -> None:
     """Registering a video creates a symlink in raw/ and adds to unassigned_videos."""
     root = tmp_path / "match-vid"

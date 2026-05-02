@@ -46,6 +46,8 @@ export interface MatchProject {
   audio_dir: string | null;
   trimmed_dir: string | null;
   exports_dir: string | null;
+  probes_dir: string | null;
+  thumbs_dir: string | null;
 }
 
 export interface PlaceholderStagesRequest {
@@ -59,11 +61,13 @@ export interface ProjectSettingsPatch {
   audio_dir?: string | null;
   trimmed_dir?: string | null;
   exports_dir?: string | null;
+  probes_dir?: string | null;
+  thumbs_dir?: string | null;
   confirm?: boolean;
 }
 
 export interface NonEmptyOldDir {
-  field: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir";
+  field: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir" | "probes_dir" | "thumbs_dir";
   path: string;
   file_count: number;
 }
@@ -88,6 +92,29 @@ export interface FsEntry {
   video_count: number | null;
   size_bytes: number | null;
   mtime: number | null;
+  duration: number | null;
+  thumbnail_url: string | null;
+}
+
+export interface FsProbeResponse {
+  duration: number | null;
+  thumbnail_url: string | null;
+}
+
+export interface RemovalPlan {
+  video_path: string;
+  raw_link_path: string;
+  audio_cache_path: string | null;
+  trimmed_cache_path: string | null;
+  audit_path: string | null;
+  was_primary: boolean;
+  stage_number: number | null;
+  audit_reset: boolean;
+}
+
+export interface RemoveVideoResponse {
+  project: MatchProject;
+  plan: RemovalPlan;
 }
 
 export interface FsListing {
@@ -146,10 +173,22 @@ async function request<T>(
 export const api = {
   getProject: () => request<MatchProject>("/api/project"),
 
-  listFolder: (path?: string) => {
-    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-    return request<FsListing>(`/api/fs/list${qs}`);
+  listFolder: (path?: string, opts?: { probe?: boolean }) => {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (opts?.probe) params.set("probe", "true");
+    const qs = params.toString();
+    return request<FsListing>(`/api/fs/list${qs ? `?${qs}` : ""}`);
   },
+
+  probeFile: (path: string) =>
+    request<FsProbeResponse>(`/api/fs/probe?path=${encodeURIComponent(path)}`),
+
+  removeVideo: (videoPath: string, resetAudit = false) =>
+    request<RemoveVideoResponse>("/api/videos/remove", {
+      method: "POST",
+      json: { video_path: videoPath, reset_audit: resetAudit },
+    }),
 
   importScoreboard: (data: unknown, overwrite = false) =>
     request<MatchProject>("/api/scoreboard/import", {
