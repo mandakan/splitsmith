@@ -336,9 +336,13 @@ export const api = {
   /** Submit a shot-detection job for the stage's audit clip. The job
    *  populates _candidates_pending_audit in the audit JSON; the audit
    *  screen renders markers from there. Auto-triggered after trim;
-   *  this endpoint is for manual retrigger. */
-  detectShots: (stageNumber: number) =>
-    request<Job>(`/api/stages/${stageNumber}/shot-detect`, { method: "POST" }),
+   *  this endpoint is for manual retrigger.
+   *  Pass ``reset: true`` to wipe ``shots[]`` first, discarding the user's
+   *  keep / reject decisions so the next pass starts fresh. */
+  detectShots: (stageNumber: number, opts: { reset?: boolean } = {}) => {
+    const qs = opts.reset ? "?reset=true" : "";
+    return request<Job>(`/api/stages/${stageNumber}/shot-detect${qs}`, { method: "POST" });
+  },
 
   listJobs: () => request<Job[]>("/api/jobs"),
   getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),

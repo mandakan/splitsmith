@@ -49,16 +49,44 @@ export function isTypingTextTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+/** Only these element kinds get auto-blurred on pointer click. Anything
+ *  else (native <select>, anchors, our own divs) keeps its focus -- we
+ *  saw the previous "blur whatever's focused" approach close the stage
+ *  selector dropdown on every click. The real goal of this hook is just
+ *  to prevent a clicked button-ish thing from eating the next Space, so
+ *  we restrict the blur to actual buttons + the hidden checkboxes the
+ *  filter chips use. */
+function isButtonish(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  if (el.tagName === "BUTTON") return true;
+  if (el.tagName === "INPUT") {
+    const t = (el as HTMLInputElement).type;
+    return t === "checkbox" || t === "radio" || t === "button" || t === "submit";
+  }
+  // Buttons rendered as div/span with role=button (uncommon here, but be
+  // robust if a future control uses it).
+  return el.getAttribute("role") === "button";
+}
+
 export function useBlurOnPointerClick(): void {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       // detail=0 indicates a synthetic click (keyboard activation, programmatic
       // .click(), accessibility tools). Keep focus in those cases.
       if (e.detail < 1) return;
-      const active = document.activeElement;
-      if (!(active instanceof HTMLElement)) return;
-      if (isTypingTextTarget(active)) return;
-      active.blur();
+      // Defer to a microtask so we don't blur during the click event chain
+      // (which can derail components that move focus on click, e.g. opening
+      // a popover and then focusing its content via useEffect).
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (!(active instanceof HTMLElement)) return;
+        if (!isButtonish(active)) return;
+        // If the active element is inside an open dialog/listbox/menu, leave
+        // it alone -- those popups manage their own focus and a blur would
+        // close them.
+        if (active.closest("[role='dialog'], [role='listbox'], [role='menu']")) return;
+        active.blur();
+      });
     };
     document.addEventListener("click", handler);
     return () => document.removeEventListener("click", handler);

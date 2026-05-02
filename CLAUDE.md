@@ -46,9 +46,32 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 ## What this project is NOT
 
 - A real-time tool. All processing is offline batch.
-- A GUI app. CLI only.
-- A library. Single-purpose CLI tool.
-- An ML project. We use signal processing, not models. (At least for v1.)
+- A library. Single-purpose application.
+
+## Detection pipeline (current, post-ensemble work)
+
+The shot-detection pipeline is a 4-voter ensemble, not raw signal processing:
+
+- **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
+  auto-calibrated ``min_confidence`` floor (the lowest positive-shot
+  confidence across the calibration set). This is the candidate generator;
+  every other voter sees only candidates A emits.
+- **Voter B** -- threshold on a hand-crafted feature vector
+  (see ``scripts/build_ensemble_fixture.py``); calibrated against labeled
+  fixtures.
+- **Voter C** -- trained ``sklearn`` ``GradientBoostingClassifier`` over the
+  same hand features; calibrated to a target recall on the same set.
+- **Voter D** -- PANN audio-tagging features thresholded against the
+  calibration distribution.
+- **Consensus** -- a candidate is kept when ``vote_total + apriori_boost
+  >= consensus`` (default 3-of-4). The apriori boost biases toward
+  expected-shot-count regions when prior info is known.
+
+This pipeline lives in ``scripts/build_ensemble_fixture.py`` and produces
+fixtures under ``build/ensemble-review/``. It is **not yet wired into the
+production UI's shot-detect endpoint** -- doing so is open work; until
+then the UI seeds shots[] from raw voter-A candidates with a static
+confidence cutoff, which under- or over-keeps depending on the clip.
 
 ## Things Claude Code should not do
 

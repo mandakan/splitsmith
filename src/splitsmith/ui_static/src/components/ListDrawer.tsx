@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Trash2, X } from "lucide-react";
 
 import { MarkerGlyph } from "@/components/MarkerGlyph";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ interface ListDrawerProps {
   markers: AuditMarker[];
   currentMarkerId: string | null;
   onJumpTo: (marker: AuditMarker) => void;
+  onDelete?: (marker: AuditMarker) => void;
 }
 
 export function ListDrawer({
@@ -37,6 +38,7 @@ export function ListDrawer({
   markers,
   currentMarkerId,
   onJumpTo,
+  onDelete,
 }: ListDrawerProps) {
   const [sortKey, setSortKey] = useState<SortKey>("time");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -144,6 +146,7 @@ export function ListDrawer({
                 >
                   #
                 </SortHeader>
+                <th scope="col" className="w-8 px-1 py-2" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -185,6 +188,23 @@ export function ListDrawer({
                     </td>
                     <td className="px-2 py-1 text-right font-mono tabular-nums">
                       {m.candidateNumber ?? "--"}
+                    </td>
+                    <td className="px-1 py-1 text-right">
+                      {m.kind === "manual" && onDelete ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 w-6 p-0"
+                          aria-label={`Delete manual marker at ${m.time.toFixed(3)}s`}
+                          title="Delete manual marker"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(m);
+                          }}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      ) : null}
                     </td>
                   </tr>
                 );

@@ -44,6 +44,8 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -72,6 +74,80 @@ from .project import (
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
+UI_SOURCE_DIR = Path(__file__).parent.parent / "ui_static"
+
+
+def _ensure_ui_built() -> None:
+    """Rebuild the SPA bundle if missing or older than any tracked source file.
+
+    Without this, ``splitsmith ui`` happily serves a stale ``dist/`` from a
+    previous build, so source edits never reach the browser. We compare
+    mtimes of every file under ``ui_static/src/`` (plus the manifests that
+    affect the build) against the newest file in ``dist/``; if anything is
+    newer, run ``npm run build``. ``node_modules/`` and ``dist/`` itself are
+    excluded.
+
+    No-op when ``npm`` isn't on PATH (the user might be in a deploy environment
+    that ships dist/ separately) -- log a warning and serve whatever's there.
+    """
+    src_dir = UI_SOURCE_DIR / "src"
+    if not src_dir.exists():
+        return  # not a development checkout
+    tracked: list[Path] = []
+    tracked.extend(src_dir.rglob("*"))
+    for manifest in (
+        "package.json",
+        "package-lock.json",
+        "vite.config.ts",
+        "tsconfig.json",
+        "tsconfig.app.json",
+        "tsconfig.node.json",
+        "tailwind.config.js",
+        "postcss.config.js",
+        "index.html",
+    ):
+        p = UI_SOURCE_DIR / manifest
+        if p.exists():
+            tracked.append(p)
+    src_mtime = max(
+        (p.stat().st_mtime for p in tracked if p.is_file()),
+        default=0.0,
+    )
+
+    dist_index = STATIC_DIR / "index.html"
+    dist_mtime = (
+        min(
+            (p.stat().st_mtime for p in STATIC_DIR.rglob("*") if p.is_file()),
+            default=0.0,
+        )
+        if dist_index.exists()
+        else 0.0
+    )
+
+    if dist_index.exists() and dist_mtime >= src_mtime:
+        return  # already up to date
+
+    npm = shutil.which("npm")
+    if npm is None:
+        logger.warning(
+            "ui_static/dist appears stale but npm is not on PATH; "
+            "serving whatever is in dist/"
+        )
+        return
+
+    logger.info(
+        "Rebuilding SPA bundle (dist mtime %.0f < source %.0f)...",
+        dist_mtime,
+        src_mtime,
+    )
+    try:
+        subprocess.run(
+            [npm, "run", "build"],
+            cwd=UI_SOURCE_DIR,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.error("npm run build failed (exit %d); serving stale bundle", exc.returncode)
 
 
 def _now_iso() -> str:
@@ -602,7 +678,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             )
         handle.update(progress=1.0, message="Done")
 
-    def _run_shot_detect(handle: JobHandle, stage_number: int) -> None:
+    def _run_shot_detect(
+        handle: JobHandle, stage_number: int, reset: bool = False
+    ) -> None:
         """Worker that runs shot detection on the stage's audit clip.
 
         Reads the trimmed clip's WAV (extracting it on demand if needed),
@@ -611,6 +689,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         ``_candidates_pending_audit`` block. Existing ``shots[]`` are not
         touched -- the user has authority over what's kept; this just
         refreshes the candidate pool the audit screen draws markers from.
+
+        If ``reset`` is True, ``shots[]`` is wiped before re-seeding so the
+        user can start over after a bad beep / detector pass.
         """
         proj = state.load()
         stg = proj.stage(stage_number)
@@ -678,12 +759,40 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             "_note": "Auto-detected by shot_detect via the production UI.",
             "candidates": candidates,
         }
+        # Seed shots[] only with high-confidence candidates so the audit
+        # screen lands with a sane keep/reject split instead of either
+        # extreme. The detector emits many low-confidence echoes and AGC
+        # ducks alongside real shots; auto-keeping every candidate produces
+        # 50+ spurious "kept" markers on a typical short course. The 0.3
+        # cutoff is conservative -- noise events fall well below, real
+        # shots typically land >= 0.4. The user can flip individuals
+        # afterward; ``reset=true`` re-runs this seeding from scratch.
+        SEED_KEEP_CONFIDENCE = 0.3
+        if reset:
+            existing_json["shots"] = []
+        seeded_shots = False
+        if not existing_json.get("shots"):
+            kept = [c for c in candidates if (c.get("confidence") or 0.0) >= SEED_KEEP_CONFIDENCE]
+            existing_json["shots"] = [
+                {
+                    "shot_number": i,
+                    "candidate_number": c["candidate_number"],
+                    "time": c["time"],
+                    "ms_after_beep": c["ms_after_beep"],
+                    "source": "detected",
+                }
+                for i, c in enumerate(kept, start=1)
+            ]
+            seeded_shots = True
         events = list(existing_json.get("audit_events") or [])
         events.append(
             {
                 "ts": _now_iso(),
                 "kind": "shot_detect_run",
-                "payload": {"candidate_count": len(candidates)},
+                "payload": {
+                    "candidate_count": len(candidates),
+                    "seeded_shots": seeded_shots,
+                },
             }
         )
         existing_json["audit_events"] = events
@@ -703,13 +812,15 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
 
     @app.post("/api/stages/{stage_number}/shot-detect")
-    def shot_detect_endpoint(stage_number: int) -> JSONResponse:
+    def shot_detect_endpoint(stage_number: int, reset: bool = False) -> JSONResponse:
         """Submit a shot-detection job for the stage's audit clip.
 
         Returns a Job snapshot. Idempotent dedupe via the registry: a second
         click while one is running adopts the existing job. The candidate
         list lands in the audit JSON's ``_candidates_pending_audit`` block,
         which is what the audit screen reads to render markers.
+
+        ``reset=true`` wipes ``shots[]`` first so the user can start over.
         """
         project = state.load()
         try:
@@ -742,7 +853,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         job = state.jobs.submit(
             kind="shot_detect",
             stage_number=stage_number,
-            fn=lambda h: _run_shot_detect(h, stage_number),
+            fn=lambda h, r=reset: _run_shot_detect(h, stage_number, reset=r),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -1468,6 +1579,8 @@ def serve(
 ) -> None:
     """Boot uvicorn synchronously. Used by the ``splitsmith ui`` CLI command."""
     import uvicorn
+
+    _ensure_ui_built()
 
     if reload:
         # Reload mode requires an importable factory; pass the path string and

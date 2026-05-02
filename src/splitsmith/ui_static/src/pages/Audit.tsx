@@ -27,7 +27,7 @@
  * Right-click context menu is still deferred to Step 7 polish.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
@@ -77,6 +77,7 @@ import {
   type StageVideo,
 } from "@/lib/api";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
+import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
@@ -183,6 +184,18 @@ export function Audit() {
     if (!project) return [];
     return project.stages.filter((s) => s.videos.some((v) => v.role === "primary"));
   }, [project]);
+
+  // Stable identity so <StageSelector> can memo: a fresh array each render
+  // makes Chromium close the open <select> dropdown when polling re-renders
+  // the page every 750 ms.
+  const stageSelectorOptions = useMemo(
+    () =>
+      stagesWithPrimary.map((s) => ({
+        stageNumber: s.stage_number,
+        stageName: s.stage_name,
+      })),
+    [stagesWithPrimary],
+  );
 
   useEffect(() => {
     if (stageNumber != null) return;
@@ -789,7 +802,12 @@ export function Audit() {
             const idx = Math.min(currentShotIndex, keptShots.length - 1);
             target = keptShots[idx];
           }
-          if (target) handleMarkerClick(target);
+          if (target) {
+            // Toggle is meaningless for manual markers; route to delete so
+            // K on a manual marker actually does something useful.
+            if (target.kind === "manual") handleMarkerDelete(target);
+            else handleMarkerClick(target);
+          }
           return;
         }
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -819,6 +837,7 @@ export function Audit() {
     peaks,
     handleScrub,
     handleMarkerClick,
+    handleMarkerDelete,
     handleMarkerTimeChange,
     focusedMarkerId,
     markers,
@@ -892,12 +911,9 @@ export function Audit() {
           </p>
         </div>
         <StageSelector
-          stages={stagesWithPrimary.map((s) => ({
-            stageNumber: s.stage_number,
-            stageName: s.stage_name,
-          }))}
+          stages={stageSelectorOptions}
           selected={stageNumber ?? null}
-          onSelect={(n) => void navigateToStage(n)}
+          onSelect={navigateToStage}
         />
       </div>
 
@@ -936,11 +952,12 @@ export function Audit() {
                   }}
                 />
               ) : null}
-              {peaks && peaks.trimmed && markers.length === 0 ? (
+              {peaks && peaks.trimmed ? (
                 <DetectShotsBadge
                   stageNumber={stage.stage_number}
                   hasBeep={primary.beep_time != null}
                   hasStageTime={stage.time_seconds > 0}
+                  hasCandidates={markers.length > 0}
                   onComplete={async () => {
                     // Re-fetch the audit JSON; the SPA derives markers from
                     // _candidates_pending_audit, which the job just wrote.
@@ -1109,6 +1126,7 @@ export function Audit() {
         markers={markers}
         currentMarkerId={focusedMarkerId}
         onJumpTo={jumpToMarker}
+        onDelete={handleMarkerDelete}
       />
       <HelpOverlay
         open={showHelp}
@@ -1211,32 +1229,174 @@ function round3(n: number): number {
 interface StageSelectorProps {
   stages: { stageNumber: number; stageName: string }[];
   selected: number | null;
-  onSelect: (n: number) => void;
+  onSelect: (n: number) => void | Promise<void>;
 }
 
-function StageSelector({ stages, selected, onSelect }: StageSelectorProps) {
-  return (
-    <label className="flex items-center gap-2 text-sm">
-      <span className="text-muted-foreground">Stage</span>
-      <select
-        className="rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        value={selected ?? ""}
-        onChange={(e) => onSelect(Number.parseInt(e.target.value, 10))}
-      >
-        {stages.map((s) => (
-          <option key={s.stageNumber} value={s.stageNumber}>
-            {s.stageNumber} -- {s.stageName}
-          </option>
-        ))}
-      </select>
-    </label>
+// Custom button + popover instead of <select>. The native <select>
+// dropdown was closing immediately on mouse-click in this environment
+// (multiple suspected causes; we stopped fighting native semantics).
+// Keyboard semantics are preserved: ArrowUp/Down/Home/End/Enter/Esc.
+const StageSelector = memo(function StageSelector({
+  stages,
+  selected,
+  onSelect,
+}: StageSelectorProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const selectedIndex = useMemo(
+    () => stages.findIndex((s) => s.stageNumber === selected),
+    [stages, selected],
   );
-}
+  const [highlightIndex, setHighlightIndex] = useState(selectedIndex < 0 ? 0 : selectedIndex);
+
+  useEffect(() => {
+    if (open) setHighlightIndex(selectedIndex < 0 ? 0 : selectedIndex);
+  }, [open, selectedIndex]);
+
+  // Close on outside click + Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Keep the highlighted option in view.
+  useEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+    const child = list.children[highlightIndex] as HTMLElement | undefined;
+    child?.scrollIntoView({ block: "nearest" });
+  }, [open, highlightIndex]);
+
+  // Focus the listbox so ArrowUp/Down/Enter work without a second click.
+  useEffect(() => {
+    if (open) listRef.current?.focus();
+  }, [open]);
+
+  const commit = (idx: number) => {
+    const s = stages[idx];
+    if (!s) return;
+    setOpen(false);
+    void onSelect(s.stageNumber);
+    buttonRef.current?.focus();
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIndex((i) => Math.min(stages.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIndex((i) => Math.max(0, i - 1));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setHighlightIndex(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setHighlightIndex(stages.length - 1);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      commit(highlightIndex);
+    }
+  };
+
+  const onButtonKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setOpen(true);
+    }
+  };
+
+  const current = stages.find((s) => s.stageNumber === selected);
+
+  return (
+    <div className="relative flex items-center gap-2 text-sm" ref={containerRef}>
+      <span className="text-muted-foreground">Stage</span>
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={onButtonKeyDown}
+        className="inline-flex min-w-[14rem] items-center justify-between rounded-md border border-input bg-background px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="truncate">
+          {current ? `${current.stageNumber} -- ${current.stageName}` : "Select stage..."}
+        </span>
+        <span aria-hidden className="ml-2 opacity-60">
+          v
+        </span>
+      </button>
+      {open ? (
+        <div
+          ref={listRef}
+          role="listbox"
+          tabIndex={-1}
+          aria-activedescendant={
+            stages[highlightIndex]
+              ? `audit-stage-opt-${stages[highlightIndex].stageNumber}`
+              : undefined
+          }
+          onKeyDown={onListKeyDown}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute right-0 top-full z-50 mt-1 max-h-72 w-[18rem] overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md focus:outline-none"
+        >
+          {stages.map((s, i) => {
+            const isHighlighted = i === highlightIndex;
+            const isSelected = s.stageNumber === selected;
+            return (
+              <div
+                key={s.stageNumber}
+                id={`audit-stage-opt-${s.stageNumber}`}
+                role="option"
+                aria-selected={isSelected}
+                onMouseEnter={() => setHighlightIndex(i)}
+                onClick={() => commit(i)}
+                className={cn(
+                  "cursor-pointer rounded-sm px-2 py-1",
+                  isHighlighted && "bg-accent text-accent-foreground",
+                  isSelected && "font-medium",
+                )}
+              >
+                {s.stageNumber} -- {s.stageName}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+});
 
 interface DetectShotsBadgeProps {
   stageNumber: number;
   hasBeep: boolean;
   hasStageTime: boolean;
+  hasCandidates: boolean;
   onComplete: () => Promise<void> | void;
 }
 
@@ -1244,6 +1404,7 @@ function DetectShotsBadge({
   stageNumber,
   hasBeep,
   hasStageTime,
+  hasCandidates,
   onComplete,
 }: DetectShotsBadgeProps) {
   const [job, setJob] = useState<Job | null>(null);
@@ -1289,42 +1450,83 @@ function DetectShotsBadge({
     };
   }, [stageNumber, onComplete]);
 
-  const onClick = useCallback(async () => {
-    setError(null);
-    try {
-      const initial = await api.detectShots(stageNumber);
-      setJob(initial);
-      const final = await api.pollJob(initial.id, setJob);
-      if (final.status === "failed") {
-        setError(final.error ?? "Shot detection failed");
-        return;
+  const runDetect = useCallback(
+    async (reset: boolean) => {
+      setError(null);
+      try {
+        const initial = await api.detectShots(stageNumber, { reset });
+        setJob(initial);
+        const final = await api.pollJob(initial.id, setJob);
+        if (final.status === "failed") {
+          setError(final.error ?? "Shot detection failed");
+          return;
+        }
+        await onComplete();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.detail : String(err));
+      } finally {
+        setJob(null);
       }
-      await onComplete();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : String(err));
-    } finally {
-      setJob(null);
-    }
-  }, [stageNumber, onComplete]);
+    },
+    [stageNumber, onComplete],
+  );
+
+  const onClick = useCallback(() => void runDetect(false), [runDetect]);
+  const onResetClick = useCallback(() => {
+    if (
+      !window.confirm(
+        "Reset & re-detect shots for this stage?\n\n" +
+          "This wipes your kept / rejected decisions and runs detection from " +
+          "scratch. Use this when the previous detection went badly (bad beep, " +
+          "wrong stage time, etc.) and you want to start over.",
+      )
+    )
+      return;
+    void runDetect(true);
+  }, [runDetect]);
 
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
+  const idleLabel = hasCandidates ? "Re-run detection" : "Detect shots";
   return (
     <span className="flex items-center gap-2">
-      <Badge variant="secondary" title="No candidates yet -- run shot detection">
-        no candidates
-      </Badge>
+      {hasCandidates ? null : (
+        <Badge variant="secondary" title="No candidates yet -- run shot detection">
+          no candidates
+        </Badge>
+      )}
       <Button
         size="sm"
         variant="outline"
         onClick={onClick}
         disabled={running || blocked}
-        title={reason ?? "Run splitsmith.shot_detect on the audit clip"}
+        // Fixed width: progress text shouldn't reflow the row mid-poll.
+        className="min-w-[12rem] justify-center"
+        title={
+          reason ??
+          (hasCandidates
+            ? "Re-run shot detection (refreshes candidates; kept shots are preserved)"
+            : "Run splitsmith.shot_detect on the audit clip")
+        }
       >
-        {running ? <Loader2 className="size-3 animate-spin" /> : null}
-        {running ? job?.message ?? "Detecting..." : "Detect shots"}
-        {running && pct != null ? ` (${pct}%)` : null}
+        {running ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
+        <span className="tabular-nums">
+          {running ? "Detecting..." : idleLabel}
+          {running && pct != null ? ` (${pct.toString().padStart(2, " ")}%)` : null}
+        </span>
       </Button>
+      {hasCandidates ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onResetClick}
+          disabled={running || blocked}
+          title="Reset & re-detect: wipes kept / rejected decisions and starts over"
+          className="text-destructive hover:text-destructive"
+        >
+          Reset
+        </Button>
+      ) : null}
       {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </span>
   );
@@ -1423,11 +1625,17 @@ function TrimNowBadge({
         variant="outline"
         onClick={onClick}
         disabled={running || blocked}
+        // Fixed width so progress text changes (e.g. "Trimming... (12%)" ->
+        // "(45%)") don't reflow the row. Reflow on Chromium closes any open
+        // native <select> dropdown elsewhere on the page.
+        className="min-w-[12rem] justify-center"
         title={reason ?? "Re-encode with short GOP for scrub-friendly playback"}
       >
-        {running ? <Loader2 className="size-3 animate-spin" /> : null}
-        {running ? job?.message ?? "Trimming..." : "Trim now"}
-        {running && pct != null ? ` (${pct}%)` : null}
+        {running ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
+        <span className="tabular-nums">
+          {running ? "Trimming..." : "Trim now"}
+          {running && pct != null ? ` (${pct.toString().padStart(2, " ")}%)` : null}
+        </span>
       </Button>
       {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </span>
