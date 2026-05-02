@@ -117,10 +117,9 @@ def test_generate_fcpxml_minimal_structure(tmp_path: Path) -> None:
     assert fmt.attrib["colorSpace"] == "1-1-1 (Rec. 709)"
     sequence = root.find("./library/event/project/sequence")
     assert sequence is not None
-    # audioRate must be an integer Hz string per the FCPXML 1.10 spec
-    # (issue #41 -- "48k" was silently accepted but contributed to FCP's
-    # "Encountered an unexpected value" warning).
-    assert sequence.attrib["audioRate"] == "48000"
+    # audioRate is a DTD-enumerated shorthand ("48k"), NOT integer Hz --
+    # FCP rejects "48000" with a DTD validation error (issue #41).
+    assert sequence.attrib["audioRate"] == "48k"
     asset = root.find("./resources/asset")
     assert asset is not None
     # Asset src URI matches the resolved video path

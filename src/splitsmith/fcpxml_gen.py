@@ -181,9 +181,10 @@ def generate_fcpxml(
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
-    # Sequence attributes: ``audioRate`` must be an integer Hz value per the
-    # FCPXML 1.10 spec ("48000", not the "48k" shorthand FCP sometimes accepts
-    # silently).
+    # Sequence attributes: ``audioRate`` is a DTD-enumerated shorthand
+    # ("32k", "44.1k", "48k", "88.2k", "96k", ...) -- NOT integer Hz. FCP
+    # rejects "48000" with "DTD validation failed (Value '48000' for
+    # attribute audioRate of sequence is not among the enumerated set)".
     sequence = ET.SubElement(
         project,
         "sequence",
@@ -193,7 +194,7 @@ def generate_fcpxml(
             "tcStart": "0s",
             "tcFormat": "NDF",
             "audioLayout": "stereo",
-            "audioRate": "48000",
+            "audioRate": "48k",
         },
     )
     spine = ET.SubElement(sequence, "spine")
