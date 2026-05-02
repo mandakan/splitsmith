@@ -221,6 +221,20 @@ class OutputConfig(BaseModel):
     trim_buffer_seconds: float = 5.0
     fcpxml_version: str = "1.10"
     split_color_thresholds: SplitColorThresholds = Field(default_factory=SplitColorThresholds)
+    # Trim mode (issue #16):
+    # - "lossless": ffmpeg -c copy. Instant, archival-quality, but inherits the
+    #   source's 1-4s GOP -- bad for in-browser scrubbing in the audit screen.
+    # - "audit":    re-encodes video with a short GOP (default 0.5s @ 30fps) so
+    #   browser <video> seeks land on a keyframe within ~1 frame of the
+    #   pointer. Audio is stream-copied to keep the detector's input bit-exact.
+    # CLI default stays "lossless" for backward compatibility; the production
+    # UI defaults to "audit" because real-time scrubbing depends on it.
+    trim_mode: Literal["lossless", "audit"] = "lossless"
+    # Audit-mode encoding parameters. ``trim_gop_frames=15`` at 30fps means a
+    # keyframe every 0.5s; lower for tighter scrub, higher for smaller files.
+    trim_gop_frames: int = 15
+    trim_audit_crf: int = 20
+    trim_audit_preset: str = "fast"
 
 
 class Config(BaseModel):

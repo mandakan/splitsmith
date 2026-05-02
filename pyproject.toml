@@ -17,6 +17,8 @@ dependencies = [
     "rich>=13.7.0",
     "pyyaml>=6.0.1",
     "soundfile>=0.12.1",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
 ]
 
 [project.scripts]
@@ -28,6 +30,20 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/splitsmith"]
+# Frontend dev artefacts and node_modules don't belong in the published wheel.
+# The built SPA at src/splitsmith/ui_static/dist/ IS shipped (FastAPI serves it
+# from there); everything else under ui_static/ is build input.
+exclude = [
+  "**/ui_static/node_modules",
+  "**/ui_static/src",
+  "**/ui_static/package.json",
+  "**/ui_static/pnpm-lock.yaml",
+  "**/ui_static/vite.config.ts",
+  "**/ui_static/tsconfig*.json",
+  "**/ui_static/index.html",
+  "**/ui_static/.gitignore",
+  "**/ui_static/dist/**/*.map",
+]
 
 [dependency-groups]
 dev = [

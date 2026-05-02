@@ -66,9 +66,20 @@ def single(
     write_trim: bool = typer.Option(True, "--trim/--no-trim"),
     write_csv: bool = typer.Option(True, "--csv/--no-csv"),
     write_fcpxml: bool = typer.Option(True, "--fcpxml/--no-fcpxml"),
+    trim_mode: str | None = typer.Option(
+        None,
+        "--trim-mode",
+        help=(
+            "Override trim mode: 'lossless' (-c copy, instant, archival) or "
+            "'audit' (re-encode with short GOP for scrub-friendly playback). "
+            "Default: from config (lossless)."
+        ),
+    ),
 ) -> None:
     """Process a single video with an explicit stage time."""
     config = Config.load(config_path)
+    if trim_mode is not None:
+        config = config.model_copy(update={"output": _override_trim_mode(config.output, trim_mode)})
     output.mkdir(parents=True, exist_ok=True)
 
     stage = StageData(
@@ -127,9 +138,16 @@ def process(
     write_trim: bool = typer.Option(True, "--trim/--no-trim"),
     write_csv: bool = typer.Option(True, "--csv/--no-csv"),
     write_fcpxml: bool = typer.Option(True, "--fcpxml/--no-fcpxml"),
+    trim_mode: str | None = typer.Option(
+        None,
+        "--trim-mode",
+        help="Override trim mode: 'lossless' or 'audit'. Default: from config (lossless).",
+    ),
 ) -> None:
     """Batch-process every stage in a stage JSON, matching videos by file timestamp."""
     config = Config.load(config_path)
+    if trim_mode is not None:
+        config = config.model_copy(update={"output": _override_trim_mode(config.output, trim_mode)})
     output.mkdir(parents=True, exist_ok=True)
 
     competitor_stages = _load_stage_json(stages)
@@ -218,6 +236,52 @@ def review(
         console.print("\n[yellow]Stopped.[/]")
     finally:
         server.server_close()
+
+
+@app.command()
+def ui(
+    project: Path = typer.Option(
+        ...,
+        "--project",
+        help="Match-project root directory. Created (with subdirs) if missing.",
+    ),
+    project_name: str | None = typer.Option(
+        None,
+        "--name",
+        help=(
+            "Display name for the match. Defaults to the project directory's "
+            "basename. Ignored if the project already has a name on disk."
+        ),
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(5174, "--port"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Skip auto-opening browser."),
+) -> None:
+    """Start the production UI server (issue #11/#12).
+
+    The UI is a localhost SPA driven by a FastAPI backend that orchestrates
+    the existing engine modules unchanged. State persists to disk under
+    ``--project`` so closing the browser and re-running resumes where you
+    left off.
+    """
+    from .ui.server import serve
+
+    project = project.expanduser().resolve()
+    name = project_name or project.name or "match"
+
+    url = f"http://{host}:{port}/"
+    console.print(f"[green]splitsmith UI[/]: [bold]{url}[/]   (Ctrl+C to stop)")
+    console.print(f"  project: {project}")
+
+    if not no_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+
+    try:
+        serve(project_root=project, project_name=name, host=host, port=port)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
 
 
 @app.command("audit-prep")
@@ -533,6 +597,10 @@ def _process_one(
             beep_time=beep.time,
             stage_time=stage.time_seconds,
             buffer_seconds=config.output.trim_buffer_seconds,
+            mode=config.output.trim_mode,
+            gop_frames=config.output.trim_gop_frames,
+            crf=config.output.trim_audit_crf,
+            preset=config.output.trim_audit_preset,
             overwrite=True,
         )
         console.print(f"  [green]trimmed video[/]: {files.video}")
@@ -667,6 +735,14 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 def _slugify(name: str) -> str:
     return _SLUG_RE.sub("-", name.lower()).strip("-") or "stage"
+
+
+def _override_trim_mode(output_config, value: str):
+    """Validate ``--trim-mode`` against the OutputConfig.trim_mode literal and
+    return a copy with the override applied."""
+    if value not in ("lossless", "audit"):
+        raise typer.BadParameter("--trim-mode must be 'lossless' or 'audit'")
+    return output_config.model_copy(update={"trim_mode": value})
 
 
 def _dummy_scorecard_time():

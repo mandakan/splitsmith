@@ -75,9 +75,10 @@ Tuning notes:
 - AGC ducking on Insta360 Go 3S: follow-up shots may have lower amplitude. Don't filter on absolute amplitude; use relative.
 - Open guns / heavy comp: shots blend. May need to lower the onset detection delta parameter.
 
-**`trim.py`** — Lossless video trim via ffmpeg subprocess.
-- Command: `ffmpeg -ss <start> -i <input> -to <duration> -c copy <output>`
-- Note: `-ss` before `-i` is fast but may not be frame-accurate. For our purposes (we want a buffer before the beep anyway) this is fine.
+**`trim.py`** — Video trim via ffmpeg subprocess. Two modes (issue #16):
+- `lossless` (CLI default): `ffmpeg -ss <start> -i <input> -t <duration> -c copy <output>`. Instant, archival, but inherits source GOP (1-4s on Insta360 head-cam).
+- `audit` (UI-screen default for #15): re-encodes with `libx264 -preset fast -crf 20 -g 15 -keyint_min 15 -sc_threshold 0 -pix_fmt yuv420p -c:a copy`. 0.5s keyframe spacing at 30fps so browser scrubbing lands within ~1 frame of the pointer. Audio is stream-copied so the detector input is bit-exact across modes.
+- Note: `-ss` before `-i` is fast but may not be frame-accurate; the buffer absorbs any seek imprecision. In audit mode the re-encode re-aligns frames, so the concern is moot.
 - Start: `max(0, beep_time - 5)`
 - End: `beep_time + stage_time + 5`
 
@@ -257,6 +258,98 @@ The `fcpxml` regeneration command matters — the user will manually fix detecti
 - Auto-suggesting training drills based on splits.
 
 These might be valuable later but are explicitly out of scope for v1. Ship the boring useful core first.
+
+## Production UI v1 (issue #11/#12) — match-project on-disk layout
+
+The production UI (`splitsmith ui --project PATH`) treats a *match* as the persistence unit. A match project is a directory on disk with a fixed layout; the UI is just a view over it. Videos can be added to an existing match at any time (head-cam now, bay-cam from a friend a day later) without invalidating prior audit work — the model is intentionally append-friendly.
+
+### Directory layout
+
+```
+<project-root>/
+  project.json              # MatchProject metadata + per-stage index
+  raw/                      # original video files (or symlinks)
+  audio/                    # extracted .wav cache
+  trimmed/                  # per-stage trimmed MP4s (Sub 5 / #16)
+  audit/                    # per-stage audit JSON (same shape as fixture format)
+  exports/                  # CSV / FCPXML / report.txt
+  scoreboard/               # cached SSI JSON + raw fetch responses
+```
+
+### `project.json` shape
+
+Pydantic model `splitsmith.ui.project.MatchProject`. All writes go through `atomic_write_json` (temp file + `os.replace`) so a crashed save can never corrupt the file.
+
+```jsonc
+{
+  "schema_version": 1,
+  "name": "Tallmilan 2026",
+  "created_at": "2026-04-30T08:10:32+00:00",
+  "updated_at": "2026-05-01T19:28:21+00:00",
+  "competitor_name": "Mathias",
+  "scoreboard_match_id": "ssi-12345",
+  "stages": [
+    {
+      "stage_number": 3,
+      "stage_name": "Per told me to do it",
+      "time_seconds": 14.74,
+      "scorecard_updated_at": "2026-04-26T16:41:00+00:00",
+      "skipped": false,
+      "videos": [
+        {
+          "path": "raw/VID_20260426_162417.mp4",
+          "role": "primary",
+          "added_at": "2026-04-26T18:00:00+00:00",
+          "processed": { "beep": true, "shot_detect": true, "trim": true },
+          "beep_time": 12.453,
+          "notes": ""
+        },
+        {
+          "path": "raw/baycam_friend.mp4",
+          "role": "secondary",
+          "added_at": "2026-04-28T09:14:00+00:00",
+          "processed": { "beep": true, "shot_detect": false, "trim": true },
+          "beep_time": 12.501,
+          "notes": "bay cam from friend, added 2 days post-match"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Per-video role and pipeline
+
+| `role`    | beep detect | shot detect | trim |
+|-----------|:-----------:|:-----------:|:----:|
+| primary   |     ✓       |     ✓       |  ✓   |
+| secondary |     ✓       |     —       |  ✓   |
+| ignored   |     —       |     —       |  —   |
+
+The **primary** is the audit truth — detection runs on its audio and audit JSON timestamps live on its timeline. **Secondaries** are alternate viewing angles; their beep is detected so they can be aligned to the primary by beep offset, but their shots are not detected (the primary's audit is the truth). **Ignored** videos are skipped entirely (warmups, neighbor-bay grabs).
+
+The pipeline is **idempotent**: re-entering ingest only processes videos with `processed.* == false`. Adding a secondary to an audited stage runs only beep + trim for that file; the audit JSON is untouched.
+
+### Accessibility (locked, see #21)
+
+- **WCAG 2.2 Level AA** is the target across the production UI.
+- **Color is never the only signal** (WCAG 1.4.1). Splits, statuses and audit markers all carry shape, glyph, or text in addition to color.
+- **Color-blind safe palette** (Okabe-Ito derived) for split colors. Distinguishable under deuteranopia, protanopia, and tritanopia.
+- `fcpxml_gen.py` emits band names as text (`[GREEN]` / `[YELLOW]` / `[RED]` / `[BLUE]`); FCP renders marker color from FCP-side preferences. The in-app palette and FCPXML output are decoupled.
+- The `MarkerGlyph` component encodes audit-marker state by shape (filled triangle / outline triangle with strikethrough / dashed diamond) so users who can't perceive color can still distinguish detected / rejected / manual.
+- `prefers-reduced-motion` is respected globally.
+
+### Implementation status
+
+Sub 1 (#12) shipped: `MatchProject` Pydantic model + atomic write, FastAPI backend, React + Vite + shadcn/ui SPA, locked design tokens with `/_design` visual spec, app shell, dark/light/system theme toggle.
+
+Sub 2 (#13) shipped: ingest screen + supporting backend.
+
+- `MatchProject.unassigned_videos` plus helper methods: `import_scoreboard`, `register_video` (symlinks into `<project>/raw/`, falls back to copy on systems without symlink support), `assign_video` (move between stages or back to unassigned, with primary-demotion semantics), `auto_match` (runs `video_match.py` heuristic, returns suggestions without mutation).
+- API: `POST /api/scoreboard/import`, `POST /api/videos/scan`, `POST /api/videos/auto-match`, `POST /api/assignments/move`. Scoreboard import refuses overwriting existing stages by default (would orphan video assignments) — caller passes `overwrite=true` to force.
+- Ingest screen: drop SSI JSON, scan a folder of videos by path, see auto-suggested primary assignments, drag/click to reassign, mark as ignored, unassign back to tray, conflict highlighting on duplicate primaries.
+
+Subsequent sub-issues fill in the audit screen (#15), short-GOP trim (#16), and analysis/export (#17).
 
 ## References
 
