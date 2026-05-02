@@ -48,3 +48,9 @@ config.yaml
 
 # Cached PANN embeddings (regenerable via scripts/extract_audio_embeddings.py).
 tests/fixtures/.cache/
+
+# Waveform peaks caches written by splitsmith.waveform.ensure_peaks (#15).
+# Regenerable from the WAV; sidecar JSON next to the audio file.
+*.peaks-*.json
+# And audit-mode trim params sidecars from splitsmith.ui.audio.
+*_trimmed.params.json
