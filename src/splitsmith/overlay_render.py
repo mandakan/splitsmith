@@ -180,9 +180,7 @@ class DefaultTemplate(Template):
 
         if state.last_split is not None and state.last_shot_time_in_clip is not None:
             since_shot = state.time_seconds - state.last_shot_time_in_clip
-            alpha = _split_alpha(
-                since_shot, self.split_hold_seconds, self.split_fade_seconds
-            )
+            alpha = _split_alpha(since_shot, self.split_hold_seconds, self.split_fade_seconds)
             if alpha > 0:
                 split_text = f"{state.last_split:.2f}s"
                 bbox = d.textbbox((0, 0), split_text, font=self.font_big)
@@ -190,9 +188,7 @@ class DefaultTemplate(Template):
                 th = bbox[3] - bbox[1]
                 x = (self.width - tw) // 2
                 y = self.height - th - self.pad * 2
-                _draw_text_with_shadow(
-                    d, (x, y), split_text, self.font_big, (255, 220, 80, alpha)
-                )
+                _draw_text_with_shadow(d, (x, y), split_text, self.font_big, (255, 220, 80, alpha))
 
 
 def _split_alpha(since_shot: float, hold: float, fade: float) -> int:
@@ -252,9 +248,7 @@ def _draw_text_with_shadow(
     draw.text(xy, text, font=font, fill=fill)
 
 
-def _shot_times_from_audit(
-    audit_data: dict, *, beep_offset_seconds: float
-) -> list[float]:
+def _shot_times_from_audit(audit_data: dict, *, beep_offset_seconds: float) -> list[float]:
     """Convert audit JSON shots to clip-local seconds. Skips shots without
     ``ms_after_beep`` -- those aren't placed on the timer's timeline yet."""
     raw_shots = audit_data.get("shots") if isinstance(audit_data, dict) else None
@@ -303,23 +297,16 @@ def render_overlay(
     Returns the written ``output_path``.
     """
     if not audit_path.exists():
-        raise OverlayRenderError(
-            f"no audit JSON at {audit_path}; finish auditing this stage first"
-        )
+        raise OverlayRenderError(f"no audit JSON at {audit_path}; finish auditing this stage first")
     try:
         audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise OverlayRenderError(
-            f"failed to read audit JSON {audit_path}: {exc}"
-        ) from exc
+        raise OverlayRenderError(f"failed to read audit JSON {audit_path}: {exc}") from exc
 
-    shot_times = _shot_times_from_audit(
-        audit_data, beep_offset_seconds=beep_offset_seconds
-    )
+    shot_times = _shot_times_from_audit(audit_data, beep_offset_seconds=beep_offset_seconds)
     if not shot_times:
         raise OverlayRenderError(
-            f"audit JSON {audit_path} has no shots with ms_after_beep set; "
-            "nothing to render"
+            f"audit JSON {audit_path} has no shots with ms_after_beep set; " "nothing to render"
         )
 
     if probe is None:
@@ -386,17 +373,11 @@ def render_overlay(
     except (BrokenPipeError, OSError) as exc:
         proc.kill()
         proc.wait()
-        stderr = (
-            proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-        )
-        raise OverlayRenderError(
-            f"ffmpeg failed during render: {stderr or exc}"
-        ) from exc
+        stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+        raise OverlayRenderError(f"ffmpeg failed during render: {stderr or exc}") from exc
 
     rc = proc.wait()
     if rc != 0:
-        stderr = (
-            proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-        )
+        stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
         raise OverlayRenderError(f"ffmpeg exited with {rc}: {stderr}")
     return output_path

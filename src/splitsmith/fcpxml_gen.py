@@ -194,12 +194,8 @@ def generate_fcpxml(
     overlay_duration_str: str | None = None
     if use_overlay:
         assert overlay_path is not None  # narrowed by use_overlay
-        overlay_duration_frames = int(
-            round(overlay_meta.duration_seconds / float(frame_duration))
-        )
-        overlay_duration_str = _frame_aligned_str(
-            overlay_duration_frames, fd_num, fd_den
-        )
+        overlay_duration_frames = int(round(overlay_meta.duration_seconds / float(frame_duration)))
+        overlay_duration_str = _frame_aligned_str(overlay_duration_frames, fd_num, fd_den)
         overlay_asset = ET.SubElement(
             resources,
             "asset",

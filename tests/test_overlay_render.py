@@ -292,9 +292,7 @@ def test_render_overlay_raises_when_ffmpeg_returns_nonzero(
         def kill(self) -> None:
             return None
 
-    monkeypatch.setattr(
-        overlay_render.subprocess, "Popen", lambda cmd, **_: StubProc()
-    )
+    monkeypatch.setattr(overlay_render.subprocess, "Popen", lambda cmd, **_: StubProc())
     monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
 
     with pytest.raises(overlay_render.OverlayRenderError, match="prores_ks"):
