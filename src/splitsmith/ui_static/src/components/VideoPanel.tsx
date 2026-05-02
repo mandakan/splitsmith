@@ -13,12 +13,21 @@
  *
  * If a secondary's `beep_time` is missing, audit-timeline sync isn't
  * possible. The tab is still shown but disabled with a "needs beep" hint.
+ *
+ * Buffering UX: an overlay surfaces network-bound waits so the user knows
+ * the system is working and doesn't start re-clicking. Brief seeks (<150 ms)
+ * never flash the spinner.
  */
 
-import { forwardRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { AlertCircle, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { StageVideo } from "@/lib/api";
+
+const BUFFER_FLASH_DELAY_MS = 150;
+
+type LoadStatus = "idle" | "loading" | "buffering" | "ready" | "error";
 
 interface VideoPanelProps {
   videos: StageVideo[];
@@ -34,6 +43,38 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
     { videos, primaryBeepTime, activeIndex, onActiveIndexChange, videoSrc, className },
     ref,
   ) {
+    const internalRef = useRef<HTMLVideoElement | null>(null);
+    useImperativeHandle(ref, () => internalRef.current as HTMLVideoElement, []);
+
+    const [status, setStatus] = useState<LoadStatus>("idle");
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [showBufferIndicator, setShowBufferIndicator] = useState(false);
+
+    // Reset to "loading" whenever the source flips (tab change, stage change).
+    useEffect(() => {
+      if (!videoSrc) {
+        setStatus("idle");
+        return;
+      }
+      setStatus("loading");
+      setErrorMessage(null);
+    }, [videoSrc]);
+
+    // Delay the buffer indicator so quick seeks don't flash a spinner.
+    useEffect(() => {
+      if (status === "loading" || status === "buffering") {
+        const timer = window.setTimeout(
+          () => setShowBufferIndicator(true),
+          BUFFER_FLASH_DELAY_MS,
+        );
+        return () => {
+          window.clearTimeout(timer);
+        };
+      }
+      setShowBufferIndicator(false);
+      return undefined;
+    }, [status]);
+
     if (videos.length === 0) {
       return (
         <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
@@ -85,16 +126,61 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
           </div>
         ) : null}
 
-        <div className="overflow-hidden rounded-md bg-black">
+        <div className="relative overflow-hidden rounded-md bg-black">
           <video
-            ref={ref}
+            ref={internalRef}
             src={videoSrc}
             preload="auto"
             playsInline
             controls={false}
             className="block h-auto w-full max-h-[60vh]"
             data-active-path={active.path}
+            onLoadStart={() => setStatus("loading")}
+            onLoadedData={() => setStatus("ready")}
+            onCanPlay={() => setStatus("ready")}
+            onPlaying={() => setStatus("ready")}
+            onSeeked={() => setStatus("ready")}
+            onWaiting={() => setStatus("buffering")}
+            onSeeking={() => setStatus("buffering")}
+            onStalled={() => setStatus("buffering")}
+            onError={(e) => {
+              setStatus("error");
+              const code = e.currentTarget.error?.code;
+              setErrorMessage(
+                code === 4
+                  ? "Source not found or unsupported"
+                  : code === 2
+                    ? "Network error while loading video"
+                    : "Couldn't play this video",
+              );
+            }}
           />
+
+          {showBufferIndicator && status !== "error" ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="absolute inset-0 flex items-center justify-center bg-black/40 text-white"
+            >
+              <div className="flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-sm">
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                <span>{status === "loading" ? "Loading video..." : "Buffering..."}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {status === "error" ? (
+            <div
+              role="alert"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 p-4 text-center text-white"
+            >
+              <AlertCircle className="size-6 text-destructive" aria-hidden />
+              <div className="text-sm font-medium">{errorMessage ?? "Playback error"}</div>
+              <div className="text-xs text-white/70">
+                <code>{basename(active.path)}</code> -- check the file exists in the project.
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     );
