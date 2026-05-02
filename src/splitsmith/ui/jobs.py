@@ -54,6 +54,18 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+class _Unset:
+    """Sentinel for ``find_active``'s optional ``video_id`` filter.
+
+    ``None`` is a valid match (stage-level jobs have ``video_id=None``); we
+    need a third state for "caller didn't pass it" so legacy primary-only
+    dedupe queries stay role-agnostic.
+    """
+
+
+_UNSET = _Unset()
+
+
 class JobStatus(StrEnum):
     """Job lifecycle states.
 
@@ -90,6 +102,11 @@ class Job(BaseModel):
     id: str
     kind: str  # "detect_beep" | "trim" | etc; used for SPA copy + filtering
     stage_number: int | None = None
+    # Targets a specific ``StageVideo`` when the operation is per-video
+    # (multi-cam beep detect / trim). ``None`` for stage-level jobs that
+    # are intrinsically primary-bound (shot_detect, export). The SPA
+    # disambiguates concurrent per-camera jobs in JobsPanel by this id.
+    video_id: str | None = None
     status: JobStatus
     progress: float | None = None  # 0..1 when known
     message: str | None = None  # human-readable phase, e.g. "Extracting audio..."
@@ -202,6 +219,7 @@ class JobRegistry:
         kind: str,
         fn: Callable[[JobHandle], None],
         stage_number: int | None = None,
+        video_id: str | None = None,
     ) -> Job:
         """Schedule ``fn`` to run on the thread pool.
 
@@ -213,6 +231,7 @@ class JobRegistry:
             id=uuid.uuid4().hex,
             kind=kind,
             stage_number=stage_number,
+            video_id=video_id,
             status=JobStatus.PENDING,
             created_at=now,
             updated_at=now,
@@ -273,12 +292,23 @@ class JobRegistry:
                 logger.warning("cancel: terminate() failed for job %s", job_id, exc_info=True)
         return snapshot
 
-    def find_active(self, *, kind: str, stage_number: int | None = None) -> Job | None:
-        """Return the first PENDING/RUNNING job matching ``(kind, stage_number)``.
+    def find_active(
+        self,
+        *,
+        kind: str,
+        stage_number: int | None = None,
+        video_id: str | None | _Unset = _UNSET,
+    ) -> Job | None:
+        """Return the first PENDING/RUNNING job matching the keys.
 
         Used to dedupe submissions: a second click of "Trim now" while the
         first job is still running should adopt the existing job instead
         of spawning a parallel ffmpeg that races on the same output file.
+
+        ``video_id`` is matched only when explicitly passed; legacy callers
+        that don't know about per-video jobs keep their previous behaviour
+        of "match on (kind, stage_number)" so a stage-level shot_detect
+        dedupe still works against a video_id-less submission.
         """
         with self._lock:
             for jid in self._order:
@@ -288,6 +318,8 @@ class JobRegistry:
                 if j.status not in (JobStatus.PENDING, JobStatus.RUNNING):
                     continue
                 if j.kind != kind or j.stage_number != stage_number:
+                    continue
+                if not isinstance(video_id, _Unset) and j.video_id != video_id:
                     continue
                 return j.model_copy(deep=True)
             return None

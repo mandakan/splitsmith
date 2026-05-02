@@ -16,8 +16,14 @@ Endpoints (locked v1 surface):
   GET  /api/thumbnails/{key}.jpg    -- serve cached thumbnail
   POST /api/stages/{n}/detect-beep  -- submit a beep-detection job (runs in pool)
   POST /api/stages/{n}/beep         -- manual beep_time override (synchronous)
+  POST /api/stages/{n}/beep/select  -- promote one ranked candidate (synchronous)
   POST /api/stages/{n}/trim         -- submit an audit-mode trim job
   POST /api/stages/{n}/shot-detect  -- submit shot detection on the audit clip
+  POST /api/stages/{n}/videos/{vid}/detect-beep -- per-video beep detection
+  POST /api/stages/{n}/videos/{vid}/beep         -- per-video manual override
+  POST /api/stages/{n}/videos/{vid}/beep/select  -- per-video candidate select
+  POST /api/stages/{n}/videos/{vid}/trim         -- per-video audit-mode trim
+  GET  /api/stages/{n}/videos/{vid}/beep-preview -- per-video ~1s preview MP4
   GET  /api/jobs                    -- list all retained jobs
   GET  /api/jobs/{job_id}           -- poll a single job for progress / status
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
@@ -73,6 +79,8 @@ from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
     ScoreboardImportConflictError,
+    StageEntry,
+    StageVideo,
     VideoRole,
 )
 
@@ -699,18 +707,163 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 
+    def _resolve_stage_video(
+        stage_number: int, video_id: str
+    ) -> tuple[MatchProject, StageEntry, StageVideo]:
+        """Load the project + stage + video for a per-video endpoint.
+
+        Returns the trio so the caller doesn't have to re-read state. Raises
+        404 when stage / video doesn't exist; pre-flight check on the
+        source-on-disk lives at the call site so endpoints that don't need
+        a reachable file (clear, manual override) can skip it.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        video = stage.find_video_by_id(video_id)
+        if video is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"stage {stage_number} has no video with id {video_id!r}",
+            )
+        return project, stage, video
+
+    def _run_detect_beep_for_video(handle: JobHandle, stage_number: int, video_id: str) -> None:
+        """Worker: detect ``video``'s beep, then auto-chain trim.
+
+        Generic over role:
+          - primary: detect -> trim -> shot_detect (existing pipeline).
+          - secondary: detect -> trim (no shot_detect; the audit timeline
+            is anchored to the primary's beep).
+
+        Trim is treated as a soft failure: the beep is valuable on its
+        own and the SPA can re-trim later.
+        """
+        handle.update(progress=0.05, message="Loading project...")
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        video = stg.find_video_by_id(video_id)
+        if video is None:
+            raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
+        source = proj.resolve_video_path(state.project_root, video.path)
+        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
+        handle.update(
+            progress=0.15,
+            message=f"Extracting audio + detecting beep ({role_label})...",
+        )
+        beep = audio_helpers.detect_video_beep(
+            state.project_root,
+            stage_number,
+            video,
+            source,
+            project=proj,
+        )
+        handle.update(progress=0.55, message="Saving beep...")
+        video.beep_time = beep.time
+        video.beep_source = "auto"
+        video.beep_peak_amplitude = beep.peak_amplitude
+        video.beep_duration_ms = beep.duration_ms
+        video.beep_candidates = list(beep.candidates)
+        video.processed["beep"] = True
+
+        trimmed_ok = False
+        if stg.time_seconds > 0:
+            handle.check_cancel()
+            handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
+            try:
+                audio_helpers.ensure_video_audit_trim(
+                    state.project_root,
+                    stage_number,
+                    video,
+                    source,
+                    video.beep_time,
+                    stg.time_seconds,
+                    project=proj,
+                    runner=_cancellable_runner(handle),
+                )
+                video.processed["trim"] = True
+                trimmed_ok = True
+            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                # Soft failure: beep alone is still useful, especially for
+                # secondaries (audit alignment works without a trim cache).
+                logger.warning(
+                    "auto-trim failed for stage %d video %s: %s",
+                    stage_number,
+                    video.video_id,
+                    exc,
+                )
+                handle.update(message=f"beep saved; trim failed: {exc}")
+        handle.update(progress=0.85, message="Saving project...")
+        proj.save(state.project_root)
+        if trimmed_ok and video.role == "primary":
+            # Shot detection is primary-only: secondaries don't carry their
+            # own shot timeline; the audit screen reads shots from the
+            # primary regardless of which camera the user is watching.
+            if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+                state.jobs.submit(
+                    kind="shot_detect",
+                    stage_number=stage_number,
+                    fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                )
+        handle.update(progress=1.0, message="Done")
+
+    def _submit_detect_beep(stage_number: int, video: StageVideo) -> JSONResponse:
+        """Validate + dedupe + queue a detect-beep job for ``video``.
+
+        Shared by the per-video endpoint and the primary-only legacy
+        endpoint so both honour the same reachability + manual-override
+        pre-flight checks.
+        """
+        existing = state.jobs.find_active(
+            kind="detect_beep", stage_number=stage_number, video_id=video.video_id
+        )
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="detect_beep",
+            stage_number=stage_number,
+            video_id=video.video_id,
+            fn=lambda h, n=stage_number, vid=video.video_id: _run_detect_beep_for_video(h, n, vid),
+        )
+        return JSONResponse(job.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/videos/{video_id}/detect-beep")
+    def detect_beep_for_video(
+        stage_number: int, video_id: str, force: bool = False
+    ) -> JSONResponse:
+        """Submit a beep-detection job for ``video_id`` on ``stage_number``.
+
+        Generic over role (primary or secondary): each video gets its own
+        detect job, its own beep timestamp, its own short-GOP trim, and
+        its own dedupe slot in the registry so the user can run primary +
+        Cam 2 + Cam 3 in parallel. Shot detection auto-chains only for
+        primary results; secondaries align to the primary timeline by
+        their own beep so they don't need their own shot timeline.
+        """
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        _ensure_source_reachable(
+            stage_number, project.resolve_video_path(state.project_root, video.path)
+        )
+        if video.beep_source == "manual" and not force:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "video has a manual beep override; pass ?force=true to "
+                    "replace it with auto-detected output"
+                ),
+            )
+        return _submit_detect_beep(stage_number, video)
+
     @app.post("/api/stages/{stage_number}/detect-beep")
     def detect_beep(stage_number: int, force: bool = False) -> JSONResponse:
         """Submit a beep-detection job for the stage's primary.
 
-        Returns a Job snapshot (status=PENDING) immediately; the SPA polls
-        ``/api/jobs/{id}`` for progress and refetches ``/api/project`` on
-        completion. The job pipeline is detect-beep -> auto-trim (when
-        the stage time is known); both happen atomically inside one job.
-
-        Validations are still performed up front and surface as HTTP
-        errors before any job is queued, so the SPA can show e.g. a 409
-        for "manual override exists" without spinning a useless job.
+        Backward-compat shim that resolves the primary's id and forwards to
+        the per-video pipeline. Returns a Job snapshot immediately; the SPA
+        polls ``/api/jobs/{id}`` for progress and refetches ``/api/project``
+        on completion.
         """
         project = state.load()
         try:
@@ -723,10 +876,6 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        # Reachability pre-flight: surface the same structured 424 the
-        # export pipeline uses, so the SPA renders a consistent "reconnect
-        # external storage" message regardless of which screen kicked
-        # off the work.
         _ensure_source_reachable(
             stage_number, project.resolve_video_path(state.project_root, primary.path)
         )
@@ -738,76 +887,16 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                     "replace it with auto-detected output"
                 ),
             )
-
-        def run(handle: JobHandle) -> None:
-            handle.update(progress=0.05, message="Loading project...")
-            proj = state.load()
-            stg = proj.stage(stage_number)
-            prim = stg.primary()
-            if prim is None:  # pragma: no cover -- defensive; pre-checked above
-                raise RuntimeError("primary video disappeared mid-flight")
-            source = proj.resolve_video_path(state.project_root, prim.path)
-            handle.update(progress=0.15, message="Extracting audio + detecting beep...")
-            beep = audio_helpers.detect_primary_beep(
-                state.project_root,
-                stage_number,
-                source,
-                project=proj,
-            )
-            handle.update(progress=0.55, message="Saving beep...")
-            prim.beep_time = beep.time
-            prim.beep_source = "auto"
-            prim.beep_peak_amplitude = beep.peak_amplitude
-            prim.beep_duration_ms = beep.duration_ms
-            prim.beep_candidates = list(beep.candidates)
-            prim.processed["beep"] = True
-
-            trimmed_ok = False
-            if stg.time_seconds > 0:
-                handle.check_cancel()
-                handle.update(progress=0.55, message="Trimming audit clip (short GOP)...")
-                try:
-                    audio_helpers.ensure_audit_trim(
-                        state.project_root,
-                        stage_number,
-                        source,
-                        prim.beep_time,
-                        stg.time_seconds,
-                        project=proj,
-                        runner=_cancellable_runner(handle),
-                    )
-                    prim.processed["trim"] = True
-                    trimmed_ok = True
-                except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
-                    # Soft failure: the beep is valuable on its own.
-                    logger.warning("auto-trim failed for stage %d: %s", stage_number, exc)
-                    handle.update(message=f"beep saved; trim failed: {exc}")
-            handle.update(progress=0.85, message="Saving project...")
-            proj.save(state.project_root)
-            # Auto-chain shot detection so the audit screen lands populated.
-            # Dedupe handles the case where the user already kicked one off.
-            if trimmed_ok:
-                if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
-                    state.jobs.submit(
-                        kind="shot_detect",
-                        stage_number=stage_number,
-                        fn=lambda h, n=stage_number: _run_shot_detect(h, n),
-                    )
-            handle.update(progress=1.0, message="Done")
-
-        existing = state.jobs.find_active(kind="detect_beep", stage_number=stage_number)
-        if existing is not None:
-            return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(kind="detect_beep", stage_number=stage_number, fn=run)
-        return JSONResponse(job.model_dump(mode="json"))
+        return _submit_detect_beep(stage_number, primary)
 
     @app.post("/api/stages/{stage_number}/trim")
     def trim_stage(stage_number: int) -> JSONResponse:
         """Submit an audit-mode short-GOP trim job for the stage's primary.
 
-        Returns a Job snapshot. Idempotent on the worker side: when the
-        cached MP4 is newer than the source, the job completes near-
-        instantly without re-encoding.
+        Backward-compat shim: forwards to the per-video pipeline. Returns
+        a Job snapshot. Idempotent on the worker side: when the cached
+        MP4 is newer than the source, the job completes near-instantly
+        without re-encoding.
         """
         project = state.load()
         try:
@@ -820,16 +909,27 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        # Same source-reachability pre-flight as detect-beep: a 424 with
-        # ``code: "source_unreachable"`` so the SPA can surface a uniform
-        # "reconnect external storage" message before any job is queued.
+        return _submit_trim(stage_number, stage, primary, project)
+
+    def _submit_trim(
+        stage_number: int,
+        stage: StageEntry,
+        video: StageVideo,
+        project: MatchProject,
+    ) -> JSONResponse:
+        """Validate + dedupe + queue a trim job for ``video``.
+
+        Pre-flight checks (reachability, beep present, stage_time set)
+        apply equally to primary and secondary -- both need a beep_time
+        and a non-zero stage_time to define the trim window.
+        """
         _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.project_root, primary.path)
+            stage_number, project.resolve_video_path(state.project_root, video.path)
         )
-        if primary.beep_time is None:
+        if video.beep_time is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"stage {stage_number} primary has no beep_time yet",
+                detail=f"stage {stage_number} video has no beep_time yet",
             )
         if stage.time_seconds <= 0:
             raise HTTPException(
@@ -839,49 +939,83 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                     "scoreboard or set the stage time before trimming"
                 ),
             )
-
-        existing = state.jobs.find_active(kind="trim", stage_number=stage_number)
+        existing = state.jobs.find_active(
+            kind="trim", stage_number=stage_number, video_id=video.video_id
+        )
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(
             kind="trim",
             stage_number=stage_number,
-            fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
+            video_id=video.video_id,
+            fn=lambda h, n=stage_number, vid=video.video_id: _run_trim_for_video(h, n, vid),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:
-        """Worker for the audit-mode trim. Auto-chains shot detection on
-        success so a re-trim (e.g. after manual beep override) refreshes
-        the candidate pool the audit screen reads from."""
+    @app.post("/api/stages/{stage_number}/videos/{video_id}/trim")
+    def trim_for_video(stage_number: int, video_id: str) -> JSONResponse:
+        """Submit an audit-mode trim job for ``video_id`` on ``stage_number``."""
+        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        return _submit_trim(stage_number, stage, video, project)
+
+    def _run_trim_for_video(handle: JobHandle, stage_number: int, video_id: str) -> None:
+        """Worker for the audit-mode trim of a specific video.
+
+        Auto-chains shot detection only when the trimmed video is the
+        primary; secondaries align to the primary's audit timeline by
+        their own beep, so they do not need their own shot-detection run.
+        """
         handle.update(progress=0.1, message="Preparing trim...")
         proj = state.load()
         stg = proj.stage(stage_number)
-        prim = stg.primary()
-        if prim is None or prim.beep_time is None:
-            raise RuntimeError("primary or beep disappeared mid-flight")
-        source = proj.resolve_video_path(state.project_root, prim.path)
+        video = stg.find_video_by_id(video_id)
+        if video is None or video.beep_time is None:
+            raise RuntimeError("video or beep disappeared mid-flight")
+        source = proj.resolve_video_path(state.project_root, video.path)
         handle.check_cancel()
-        handle.update(progress=0.3, message="Encoding short-GOP MP4...")
-        audio_helpers.ensure_audit_trim(
+        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
+        handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
+        audio_helpers.ensure_video_audit_trim(
             state.project_root,
             stage_number,
+            video,
             source,
-            prim.beep_time,
+            video.beep_time,
             stg.time_seconds,
             project=proj,
             runner=_cancellable_runner(handle),
         )
         handle.update(progress=0.85, message="Saving project...")
-        prim.processed["trim"] = True
+        video.processed["trim"] = True
         proj.save(state.project_root)
-        if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+        if (
+            video.role == "primary"
+            and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+        ):
             state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
                 fn=lambda h, n=stage_number: _run_shot_detect(h, n),
             )
         handle.update(progress=1.0, message="Done")
+
+    def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:
+        """Backward-compat shim for legacy callers (e.g. beep-override
+        endpoints) that submit a trim by stage_number alone.
+
+        Resolves the stage's primary and forwards to the per-video
+        worker. New callers should pass a ``video_id`` and submit via
+        :func:`_run_trim_for_video` directly.
+        """
+        proj = state.load()
+        try:
+            stg = proj.stage(stage_number)
+        except KeyError as exc:
+            raise RuntimeError(f"stage {stage_number} disappeared mid-flight: {exc}") from exc
+        primary = stg.primary()
+        if primary is None:
+            raise RuntimeError(f"stage {stage_number} has no primary mid-flight")
+        _run_trim_for_video(handle, stage_number, primary.video_id)
 
     def _run_shot_detect(handle: JobHandle, stage_number: int, reset: bool = False) -> None:
         """Worker that runs the 4-voter ensemble on the stage's audit clip.
@@ -1123,8 +1257,132 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
+    def _apply_beep_override(
+        project: MatchProject,
+        stage: StageEntry,
+        video: StageVideo,
+        beep_time: float | None,
+    ) -> None:
+        """Apply a manual beep override to ``video``.
+
+        Generic over role: secondaries also need their cached trim
+        invalidated when the user moves their beep, since the trim window
+        is anchored to that beep. ``beep_time=None`` clears back to "no
+        beep yet"; otherwise sets ``beep_source="manual"`` and drops the
+        candidate list so the UI doesn't keep suggesting a stale auto pick.
+        Shot-detect flag clearing is primary-only -- secondaries don't
+        carry their own shot timeline.
+        """
+        if beep_time is None:
+            video.beep_time = None
+            video.beep_source = None
+            video.beep_peak_amplitude = None
+            video.beep_duration_ms = None
+            video.beep_candidates = []
+            video.processed["beep"] = False
+            video.processed["trim"] = False
+            if video.role == "primary":
+                video.processed["shot_detect"] = False
+        else:
+            video.beep_time = beep_time
+            video.beep_source = "manual"
+            video.beep_peak_amplitude = None
+            video.beep_duration_ms = None
+            video.beep_candidates = []
+            video.processed["beep"] = True
+            video.processed["trim"] = False
+            if video.role == "primary":
+                video.processed["shot_detect"] = False
+
+        audio_helpers.invalidate_video_audit_trim(
+            state.project_root, stage.stage_number, video, project=project
+        )
+
+    def _maybe_chain_trim(stage: StageEntry, video: StageVideo) -> None:
+        """Auto-fire a trim job for ``video`` when conditions allow.
+
+        Used after a beep override / candidate select: if the user just
+        gave us a beep and the stage time is known, the next thing they
+        want is a fresh short-GOP trim. Dedupes through ``find_active``
+        so a still-running job adopts instead of racing.
+        """
+        if video.beep_time is None or stage.time_seconds <= 0:
+            return
+        if (
+            state.jobs.find_active(
+                kind="trim", stage_number=stage.stage_number, video_id=video.video_id
+            )
+            is not None
+        ):
+            return
+        state.jobs.submit(
+            kind="trim",
+            stage_number=stage.stage_number,
+            video_id=video.video_id,
+            fn=lambda h, n=stage.stage_number, vid=video.video_id: _run_trim_for_video(h, n, vid),
+        )
+
+    def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
+        """Promote the candidate at ``time_value`` (within 1 ms) on ``video``.
+
+        Mirrors the v1 primary path: the time still came from the detector
+        so ``beep_source="auto"`` is preserved; only the chosen candidate
+        changes. Raises ``HTTPException`` for caller-facing errors so both
+        the per-video and legacy primary endpoints get the same response
+        shapes.
+        """
+        if not video.beep_candidates:
+            raise HTTPException(
+                status_code=400,
+                detail="video has no candidate list yet; run detect-beep first",
+            )
+        match_eps = 1e-3
+        chosen = None
+        for c in video.beep_candidates:
+            if abs(c.time - time_value) <= match_eps:
+                chosen = c
+                break
+        if chosen is None:
+            available = ", ".join(f"{c.time:.3f}" for c in video.beep_candidates)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"no candidate within {match_eps * 1000:.0f} ms of "
+                    f"{time_value:.3f}s; available: [{available}]"
+                ),
+            )
+        video.beep_time = chosen.time
+        video.beep_source = "auto"
+        video.beep_peak_amplitude = chosen.peak_amplitude
+        video.beep_duration_ms = chosen.duration_ms
+        video.processed["beep"] = True
+        video.processed["trim"] = False
+        if video.role == "primary":
+            video.processed["shot_detect"] = False
+
+    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep")
+    def override_beep_for_video(
+        stage_number: int, video_id: str, req: BeepOverrideRequest
+    ) -> JSONResponse:
+        """Manually set or clear ``video``'s beep timestamp.
+
+        ``req.beep_time = None`` clears back to "no beep yet"; otherwise
+        the value (in seconds, must be >= 0) is taken as authoritative
+        with ``beep_source="manual"``. Same dedupe + auto-trim chain as
+        the legacy primary endpoint, just keyed per video.
+        """
+        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        if req.beep_time is not None and req.beep_time < 0.0:
+            raise HTTPException(status_code=400, detail="beep_time must be >= 0")
+        _apply_beep_override(project, stage, video, req.beep_time)
+        project.save(state.project_root)
+        if req.beep_time is not None:
+            _maybe_chain_trim(stage, video)
+        return JSONResponse(project.model_dump(mode="json"))
+
     @app.post("/api/stages/{stage_number}/beep")
     def override_beep(stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
+        """Backward-compat shim: manually set / clear the primary's beep."""
         project = state.load()
         try:
             stage = project.stage(stage_number)
@@ -1136,62 +1394,36 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        if req.beep_time is None:
-            # Clear: back to "no beep yet"
-            primary.beep_time = None
-            primary.beep_source = None
-            primary.beep_peak_amplitude = None
-            primary.beep_duration_ms = None
-            primary.beep_candidates = []
-            primary.processed["beep"] = False
-            primary.processed["trim"] = False
-            primary.processed["shot_detect"] = False
-        else:
-            if req.beep_time < 0.0:
-                raise HTTPException(status_code=400, detail="beep_time must be >= 0")
-            primary.beep_time = req.beep_time
-            primary.beep_source = "manual"
-            primary.processed["beep"] = True
-            # Diagnostics from a previous auto-detect are no longer authoritative.
-            primary.beep_peak_amplitude = None
-            primary.beep_duration_ms = None
-            # Manual time wins over the ranked-candidate list -- drop it so
-            # the UI doesn't keep offering a different "auto" pick that
-            # contradicts what the user just typed.
-            primary.beep_candidates = []
-            # New beep -> previous trim was cut around the wrong window.
-            # processed.trim flips back so the SPA prompts re-trim.
-            primary.processed["trim"] = False
-            primary.processed["shot_detect"] = False
-
-        # Either branch invalidates the cached trim + audit WAV so the
-        # next audit-screen visit can't serve a stale clip cut around an
-        # outdated beep. Auto-fires a trim job (which auto-chains shot
-        # detection) when we still have enough info to run; otherwise
-        # the user gets the badge on the audit screen.
-        audio_helpers.invalidate_audit_trim(state.project_root, stage_number, project=project)
+        if req.beep_time is not None and req.beep_time < 0.0:
+            raise HTTPException(status_code=400, detail="beep_time must be >= 0")
+        _apply_beep_override(project, stage, primary, req.beep_time)
         project.save(state.project_root)
-        if (
-            req.beep_time is not None
-            and stage.time_seconds > 0
-            and state.jobs.find_active(kind="trim", stage_number=stage_number) is None
-        ):
-            state.jobs.submit(
-                kind="trim",
-                stage_number=stage_number,
-                fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
-            )
+        if req.beep_time is not None:
+            _maybe_chain_trim(stage, primary)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/select")
+    def select_beep_candidate_for_video(
+        stage_number: int, video_id: str, req: BeepSelectRequest
+    ) -> JSONResponse:
+        """Promote one of ``video``'s ranked candidates as authoritative."""
+        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        _select_candidate_on_video(video, req.time)
+        audio_helpers.invalidate_video_audit_trim(
+            state.project_root, stage_number, video, project=project
+        )
+        project.save(state.project_root)
+        _maybe_chain_trim(stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/beep/select")
     def select_beep_candidate(stage_number: int, req: BeepSelectRequest) -> JSONResponse:
-        """Promote one of the ranked auto-detected candidates as authoritative.
+        """Backward-compat shim: promote a ranked candidate on the primary.
 
         Lets the user fix a wrong auto-pick without typing a timestamp.
-        Re-uses the auto-detect provenance because the time still came from
-        the detector -- we only changed which candidate the project trusts.
-        Triggers a re-trim like the manual override path so the cached
-        audit clip lines up with the new beep.
+        Re-uses the auto-detect provenance because the time still came
+        from the detector -- we only changed which candidate the project
+        trusts. Triggers a re-trim so the cached audit clip lines up.
         """
         project = state.load()
         try:
@@ -1204,51 +1436,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        if not primary.beep_candidates:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"stage {stage_number} has no candidate list yet; run " "detect-beep first"
-                ),
-            )
-        # Match by time within 1 ms. Round-tripping floats through JSON +
-        # pydantic preserves the value but a strict equality check is
-        # fragile, so we use the same epsilon the SPA uses to pick the
-        # active row.
-        match_eps = 1e-3
-        chosen = None
-        for c in primary.beep_candidates:
-            if abs(c.time - req.time) <= match_eps:
-                chosen = c
-                break
-        if chosen is None:
-            available = ", ".join(f"{c.time:.3f}" for c in primary.beep_candidates)
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"no candidate within {match_eps * 1000:.0f} ms of "
-                    f"{req.time:.3f}s; available: [{available}]"
-                ),
-            )
-        primary.beep_time = chosen.time
-        primary.beep_source = "auto"
-        primary.beep_peak_amplitude = chosen.peak_amplitude
-        primary.beep_duration_ms = chosen.duration_ms
-        primary.processed["beep"] = True
-        primary.processed["trim"] = False
-        primary.processed["shot_detect"] = False
-
-        audio_helpers.invalidate_audit_trim(state.project_root, stage_number, project=project)
+        _select_candidate_on_video(primary, req.time)
+        audio_helpers.invalidate_video_audit_trim(
+            state.project_root, stage_number, primary, project=project
+        )
         project.save(state.project_root)
-        if (
-            stage.time_seconds > 0
-            and state.jobs.find_active(kind="trim", stage_number=stage_number) is None
-        ):
-            state.jobs.submit(
-                kind="trim",
-                stage_number=stage_number,
-                fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
-            )
+        _maybe_chain_trim(stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
 
     def _resolve_audit_audio(
@@ -1279,9 +1472,51 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         except audio_helpers.AudioExtractionError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    def _serve_beep_preview(
+        project: MatchProject,
+        stage_number: int,
+        video: StageVideo,
+        t: float | None,
+    ) -> FileResponse:
+        """Build the ~1 s MP4 around ``t`` (or ``video.beep_time``) and serve it.
+
+        Shared by the legacy primary endpoint and the per-video endpoint
+        so both honour the same 404 / 424 / cache semantics.
+        """
+        source = project.resolve_video_path(state.project_root, video.path)
+        _ensure_source_reachable(stage_number, source)
+        center = t if t is not None else video.beep_time
+        if center is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"stage {stage_number} video has no beep_time yet",
+            )
+        if center < 0:
+            raise HTTPException(status_code=400, detail="t must be >= 0")
+        thumbs_dir = project.thumbs_path(state.project_root)
+        try:
+            clip = thumbnail_helpers.ensure_clip(
+                source,
+                cache_dir=thumbs_dir,
+                center_time=float(center),
+                duration_s=1.0,
+                width=480,
+            )
+        except thumbnail_helpers.ThumbnailError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return FileResponse(clip, media_type="video/mp4", filename=clip.name)
+
+    @app.get("/api/stages/{stage_number}/videos/{video_id}/beep-preview")
+    def video_beep_preview(
+        stage_number: int, video_id: str, t: float | None = None
+    ) -> FileResponse:
+        """Serve a ~1 s MP4 around ``video``'s beep (or override ``t``)."""
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        return _serve_beep_preview(project, stage_number, video, t)
+
     @app.get("/api/stages/{stage_number}/beep-preview")
     def stage_beep_preview(stage_number: int, t: float | None = None) -> FileResponse:
-        """Serve a tiny MP4 around a beep timestamp (#27, #22).
+        """Serve a tiny MP4 around the primary's beep timestamp (#27, #22).
 
         Default center is the primary's persisted ``beep_time``. The
         optional ``t`` query param overrides it so the BeepCandidates
@@ -1300,31 +1535,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
-        # Reuse the structured 424 path so the SPA gets a uniform
-        # "reconnect external storage" message regardless of which surface
-        # invoked the preview.
-        source = project.resolve_video_path(state.project_root, primary.path)
-        _ensure_source_reachable(stage_number, source)
-        center = t if t is not None else primary.beep_time
-        if center is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"stage {stage_number} has no beep_time yet",
-            )
-        if center < 0:
-            raise HTTPException(status_code=400, detail="t must be >= 0")
-        thumbs_dir = project.thumbs_path(state.project_root)
-        try:
-            clip = thumbnail_helpers.ensure_clip(
-                source,
-                cache_dir=thumbs_dir,
-                center_time=float(center),
-                duration_s=1.0,
-                width=480,
-            )
-        except thumbnail_helpers.ThumbnailError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return FileResponse(clip, media_type="video/mp4", filename=clip.name)
+        return _serve_beep_preview(project, stage_number, primary, t)
 
     @app.get("/api/stages/{stage_number}/audio")
     def stage_audio(stage_number: int) -> FileResponse:
@@ -1566,9 +1777,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         stage, video = located
 
         served_path: Path | None = None
-        if stage is not None and video.role == "primary":
-            trimmed = audio_helpers.trimmed_primary_path(
-                state.project_root, stage.stage_number, project=project
+        if stage is not None:
+            # Prefer the per-video short-GOP trim when one exists. This is
+            # the multi-cam path: each angle gets its own scrub-friendly
+            # cache cut around its own beep, so dragging the audit
+            # playhead doesn't stall on a 4K MOV from a phone.
+            trimmed = audio_helpers.trimmed_video_path(
+                state.project_root, stage.stage_number, video, project=project
             )
             if trimmed.exists():
                 served_path = trimmed.resolve()

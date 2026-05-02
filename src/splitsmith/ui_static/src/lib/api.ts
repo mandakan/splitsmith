@@ -22,6 +22,11 @@ export interface BeepCandidate {
 
 export interface StageVideo {
   path: string;
+  /** Stable URL-safe id derived from ``path``. Used by per-video API
+   *  endpoints (/api/stages/{n}/videos/{video_id}/...) so the SPA can
+   *  target a specific camera without re-encoding the path. Computed
+   *  server-side; do not generate it client-side. */
+  video_id: string;
   role: VideoRole;
   added_at: string;
   /** The recording-finished time the match heuristic uses for this video
@@ -301,6 +306,11 @@ export interface Job {
   id: string;
   kind: string;
   stage_number: number | null;
+  /** Targets a specific StageVideo when the operation is per-camera
+   *  (multi-cam beep / trim). Null for stage-level jobs (shot_detect,
+   *  export). The SPA disambiguates concurrent per-camera jobs in
+   *  JobsPanel by this id. */
+  video_id: string | null;
   status: JobStatus;
   progress: number | null;
   message: string | null;
@@ -478,13 +488,28 @@ export const api = {
       json: { skipped },
     }),
 
-  /** Submit a beep-detection job. Returns a Job snapshot; poll the SPA
-   *  via {@link api.pollJob} (or read /api/jobs/{id} directly) until the
-   *  status flips out of "pending"/"running". On success, the SPA should
-   *  re-fetch /api/project to pick up the new beep_time + processed.trim. */
+  /** Submit a beep-detection job for the stage's primary. Returns a Job
+   *  snapshot; poll via {@link api.pollJob} (or read /api/jobs/{id})
+   *  until the status flips out of "pending"/"running". On success the
+   *  SPA should re-fetch /api/project to pick up the new beep_time +
+   *  processed.trim. Backed by the per-video pipeline; identical to
+   *  ``detectBeepForVideo(stage, primary.video_id)``. */
   detectBeep: (stageNumber: number, force = false) =>
     request<Job>(
       `/api/stages/${stageNumber}/detect-beep${force ? "?force=true" : ""}`,
+      { method: "POST" },
+    ),
+
+  /** Submit a beep-detection job for a specific video on a stage.
+   *  Generic over role: each camera gets its own beep_time, its own
+   *  audit-mode trim, and its own dedupe slot in the registry so
+   *  primary + Cam 2 + Cam 3 can run in parallel. Shot detection
+   *  auto-chains for primary results only. */
+  detectBeepForVideo: (stageNumber: number, videoId: string, force = false) =>
+    request<Job>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/detect-beep${
+        force ? "?force=true" : ""
+      }`,
       { method: "POST" },
     ),
 
@@ -493,6 +518,20 @@ export const api = {
       method: "POST",
       json: { beep_time: beepTime },
     }),
+
+  /** Manually set or clear ``video``'s beep timestamp. ``beepTime=null``
+   *  clears back to "no beep yet"; otherwise the value (>= 0) is taken
+   *  as authoritative with ``beep_source="manual"``. Same auto-trim
+   *  chain as the legacy primary endpoint, just keyed per video. */
+  overrideBeepForVideo: (
+    stageNumber: number,
+    videoId: string,
+    beepTime: number | null,
+  ) =>
+    request<MatchProject>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep`,
+      { method: "POST", json: { beep_time: beepTime } },
+    ),
 
   /** Promote one of the ranked auto-detected candidates as authoritative.
    *  ``time`` is matched against ``primary.beep_candidates`` within 1 ms,
@@ -505,11 +544,33 @@ export const api = {
       json: { time },
     }),
 
+  /** Per-video candidate select. Same matching semantics as the primary
+   *  endpoint (1 ms epsilon) but targets the video carrying the candidate
+   *  list, so secondaries can pick from their own ranked alternatives. */
+  selectBeepCandidateForVideo: (
+    stageNumber: number,
+    videoId: string,
+    time: number,
+  ) =>
+    request<MatchProject>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/select`,
+      { method: "POST", json: { time } },
+    ),
+
   /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
    *  idempotent on the worker side -- when the cached MP4 is fresh the
    *  job completes near-instantly without re-encoding. */
   trimStage: (stageNumber: number) =>
     request<Job>(`/api/stages/${stageNumber}/trim`, { method: "POST" }),
+
+  /** Per-video audit-mode trim. Mirrors ``trimStage`` for primaries but
+   *  targets one specific camera, so multi-cam ingest can refresh a
+   *  single secondary's scrub clip without retriggering the primary. */
+  trimVideo: (stageNumber: number, videoId: string) =>
+    request<Job>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/trim`,
+      { method: "POST" },
+    ),
 
   /** Submit a shot-detection job for the stage's audit clip. The job
    *  populates _candidates_pending_audit in the audit JSON; the audit
@@ -564,6 +625,11 @@ export const api = {
    *  default flow passes ``primary.beep_time``. */
   stageBeepPreviewUrl: (stageNumber: number, beepTime: number) =>
     `/api/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
+
+  /** Per-video beep preview URL. Same caching semantics as the primary
+   *  endpoint (cached on source mtime/size + center time + duration). */
+  videoBeepPreviewUrl: (stageNumber: number, videoId: string, beepTime: number) =>
+    `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-preview?t=${beepTime.toFixed(3)}`,
 
   videoStreamUrl: (videoPath: string) =>
     `/api/videos/stream?path=${encodeURIComponent(videoPath)}`,

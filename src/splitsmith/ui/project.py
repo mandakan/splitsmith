@@ -23,6 +23,7 @@ is the foundation that makes incremental ingest safe.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -31,7 +32,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from .. import video_match
 from ..config import BeepCandidate, StageData, VideoMatchConfig
@@ -91,6 +92,22 @@ class StageVideo(BaseModel):
     beep_candidates: list[BeepCandidate] = Field(default_factory=list)
     notes: str = ""
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def video_id(self) -> str:
+        """Stable URL-safe identifier derived from ``path``.
+
+        Used by per-video API endpoints (``/api/stages/{n}/videos/{video_id}/...``)
+        and by per-video cache filenames (audio WAV, trimmed MP4) so each video
+        on a stage gets its own cache slot. Hash is a 12-char blake2s digest of
+        the stored path string -- stable across restarts, project reloads, and
+        re-registration of the same source.
+
+        Surfaced as a computed field on the wire so the SPA can route
+        per-video requests without re-implementing the hash client-side.
+        """
+        return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
+
 
 class StageEntry(BaseModel):
     """A stage in the match: scoreboard data + assigned videos + audit status."""
@@ -112,6 +129,18 @@ class StageEntry(BaseModel):
         """Return the primary video, or ``None`` if no video is the primary yet."""
         for v in self.videos:
             if v.role == "primary":
+                return v
+        return None
+
+    def find_video_by_id(self, video_id: str) -> StageVideo | None:
+        """Locate a video on this stage by its :attr:`StageVideo.video_id`.
+
+        Returns ``None`` when no video on this stage matches. Per-video beep
+        endpoints use this to resolve the URL-bound id back to the stored
+        ``StageVideo`` so they can mutate beep fields and trigger jobs.
+        """
+        for v in self.videos:
+            if v.video_id == video_id:
                 return v
         return None
 
@@ -930,11 +959,23 @@ class MatchProject(BaseModel):
 
         raw_link = self.resolve_video_path(root, video.path)
 
+        # Cache files are keyed on role: primary keeps the legacy
+        # ``stage<N>_primary.wav`` / ``stage<N>_trimmed.mp4`` filenames;
+        # non-primary cameras live under ``stage<N>_cam_<video_id>.*`` so
+        # each angle has its own slot. Either way the removal plan points
+        # at the per-video files so the endpoint sweeps them on disk.
         audio_cache: Path | None = None
         trimmed_cache: Path | None = None
-        if was_primary and stage_number is not None:
-            audio_cache = self.audio_path(root) / f"stage{stage_number}_primary.wav"
-            trimmed_cache = self.trimmed_path(root) / f"stage{stage_number}_trimmed.mp4"
+        if stage_number is not None:
+            if was_primary:
+                audio_cache = self.audio_path(root) / f"stage{stage_number}_primary.wav"
+                trimmed_cache = self.trimmed_path(root) / f"stage{stage_number}_trimmed.mp4"
+            else:
+                vid = video.video_id
+                audio_cache = self.audio_path(root) / f"stage{stage_number}_cam_{vid}.wav"
+                trimmed_cache = (
+                    self.trimmed_path(root) / f"stage{stage_number}_cam_{vid}_trimmed.mp4"
+                )
 
         audit_path: Path | None = None
         audit_reset = False

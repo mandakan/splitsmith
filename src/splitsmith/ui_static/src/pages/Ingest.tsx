@@ -20,7 +20,6 @@ import {
   Crosshair,
   FileJson,
   FolderInput,
-  Loader2,
   PlayCircle,
   Trash2,
   Video as VideoIcon,
@@ -1199,7 +1198,7 @@ function StageCard({
             />
             <BeepSection
               stageNumber={stage.stage_number}
-              primary={primary}
+              video={primary}
               busy={busy}
               setBusy={setBusy}
               setError={setError}
@@ -1208,24 +1207,33 @@ function StageCard({
           </>
         ) : null}
         {secondaries.map((v) => (
-          <VideoRow
-            key={v.path}
-            video={v}
-            stage={stage}
-            setDragging={setDragging}
-            badge={<Badge variant="secondary">Secondary</Badge>}
-            actions={
-              <RoleActions
-                video={v}
-                stage={stage}
-                allStages={allStages}
-                busy={busy}
-                currentRole="secondary"
-                onMove={onMove}
-                onRemove={onRemove}
-              />
-            }
-          />
+          <div key={v.path} className="space-y-2">
+            <VideoRow
+              video={v}
+              stage={stage}
+              setDragging={setDragging}
+              badge={<Badge variant="secondary">Secondary</Badge>}
+              actions={
+                <RoleActions
+                  video={v}
+                  stage={stage}
+                  allStages={allStages}
+                  busy={busy}
+                  currentRole="secondary"
+                  onMove={onMove}
+                  onRemove={onRemove}
+                />
+              }
+            />
+            <BeepSection
+              stageNumber={stage.stage_number}
+              video={v}
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onProjectUpdate={onProjectUpdate}
+            />
+          </div>
         ))}
         {ignored.map((v) => (
           <VideoRow
@@ -1289,12 +1297,7 @@ function VideoRow({
             >
               <CheckCircle2 className="size-3.5" />
             </span>
-          ) : (
-            <Loader2
-              className="size-3.5 text-muted-foreground"
-              aria-label="beep detection pending"
-            />
-          )}
+          ) : null}
         </div>
         <div className="flex gap-1">{actions}</div>
       </div>
