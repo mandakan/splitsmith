@@ -791,12 +791,8 @@ def test_atomic_write_uses_same_directory_for_tmp(tmp_path: Path) -> None:
 def test_swap_primary_no_audit_no_warning(tmp_path: Path) -> None:
     """primary_swap_warns is False when no audit JSON exists."""
     project = MatchProject.init(tmp_path / "m", name="m")
-    project.stages.append(
-        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
-    )
-    project.stages[0].videos.append(
-        StageVideo(path=Path("raw/a.mp4"), role="primary")
-    )
+    project.stages.append(StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0))
+    project.stages[0].videos.append(StageVideo(path=Path("raw/a.mp4"), role="primary"))
     assert project.primary_swap_warns(tmp_path / "m", stage_number=1) is False
 
 
@@ -804,16 +800,16 @@ def test_swap_primary_warns_when_shots_audited(tmp_path: Path) -> None:
     """primary_swap_warns is True when audit JSON has at least one shot."""
     root = tmp_path / "m"
     project = MatchProject.init(root, name="m")
-    project.stages.append(
-        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
-    )
+    project.stages.append(StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0))
     audit = root / "audit" / "stage1.json"
     audit.write_text(
         json.dumps(
             {
                 "stage_number": 1,
                 "stage_name": "S1",
-                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
+                "shots": [
+                    {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
+                ],
             }
         )
     )
@@ -826,9 +822,7 @@ def test_swap_primary_does_not_warn_for_pending_candidates_only(tmp_path: Path) 
     a fresh candidate list anyway."""
     root = tmp_path / "m"
     project = MatchProject.init(root, name="m")
-    project.stages.append(
-        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
-    )
+    project.stages.append(StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0))
     audit = root / "audit" / "stage1.json"
     audit.write_text(
         json.dumps(
@@ -836,7 +830,9 @@ def test_swap_primary_does_not_warn_for_pending_candidates_only(tmp_path: Path) 
                 "stage_number": 1,
                 "stage_name": "S1",
                 "shots": [],
-                "_candidates_pending_audit": {"candidates": [{"candidate_number": 1, "time": 1.0, "ms_after_beep": 0}]},
+                "_candidates_pending_audit": {
+                    "candidates": [{"candidate_number": 1, "time": 1.0, "ms_after_beep": 0}]
+                },
             }
         )
     )
@@ -848,9 +844,7 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
     clears the new primary's processed flags so detection re-runs."""
     root = tmp_path / "m"
     project = MatchProject.init(root, name="m")
-    project.stages.append(
-        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
-    )
+    project.stages.append(StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0))
     project.stages[0].videos.append(
         StageVideo(
             path=Path("raw/a.mp4"),
@@ -866,7 +860,9 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
             {
                 "stage_number": 1,
                 "stage_name": "S1",
-                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
+                "shots": [
+                    {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
+                ],
             }
         )
     )
@@ -890,9 +886,7 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
 def test_swap_primary_skips_backup_when_no_audit(tmp_path: Path) -> None:
     root = tmp_path / "m"
     project = MatchProject.init(root, name="m")
-    project.stages.append(
-        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
-    )
+    project.stages.append(StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0))
     project.stages[0].videos.append(StageVideo(path=Path("raw/a.mp4"), role="primary"))
     project.stages[0].videos.append(StageVideo(path=Path("raw/b.mp4"), role="secondary"))
 

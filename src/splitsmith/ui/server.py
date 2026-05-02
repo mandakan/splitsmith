@@ -47,6 +47,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -64,7 +65,9 @@ from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
+from ..config import Config
 from . import audio as audio_helpers
+from . import exports as export_helpers
 from .jobs import Job, JobCancelled, JobHandle, JobRegistry
 from .project import (
     VIDEO_EXTENSIONS,
@@ -72,6 +75,34 @@ from .project import (
     ScoreboardImportConflictError,
     VideoRole,
 )
+
+
+def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
+    """Raise a structured 424 when ``source`` doesn't exist on disk.
+
+    The SPA reads ``detail.code == "source_unreachable"`` to render a
+    uniform "reconnect the USB / SD card" message wherever a source-bound
+    operation is invoked (detect-beep, audit-mode trim, beep preview,
+    video stream, export). Callers handle the "no primary" check with
+    their endpoint-specific status code before calling this -- the helper
+    only handles the upstream-dependency-offline case.
+    """
+    if source.exists():
+        return
+    raise HTTPException(
+        status_code=424,
+        detail={
+            "code": "source_unreachable",
+            "stage_number": stage_number,
+            "path": str(source),
+            "message": (
+                "Source video"
+                + (f" for stage {stage_number}" if stage_number is not None else "")
+                + f" is not reachable: {source}. If it lives on external "
+                f"storage (USB drive, SD card), reconnect and try again."
+            ),
+        },
+    )
 
 
 def _cancellable_runner(handle: JobHandle):
@@ -326,6 +357,34 @@ class BeepSelectRequest(BaseModel):
     """
 
     time: float
+
+
+class ExportStageRequest(BaseModel):
+    """Body for POST /api/stages/{n}/export.
+
+    Each toggle defaults True; turning one off skips that artefact while
+    leaving the others on. ``write_trim`` produces the lossless stream-copy
+    trim into ``<project>/exports/`` -- distinct from the audit-mode
+    short-GOP scrub copy in ``<project>/trimmed/``. The FCPXML always
+    references the lossless trim so SPA exports match ``splitsmith single``.
+    """
+
+    write_trim: bool = True
+    write_csv: bool = True
+    write_fcpxml: bool = True
+    write_report: bool = True
+
+
+class RevealRequest(BaseModel):
+    """Body for POST /api/files/reveal.
+
+    Opens the OS file manager at ``path``'s parent, selecting the file when
+    the platform supports it (``open -R`` on macOS). The path must resolve
+    inside the project root for safety -- we don't expose a generic shell
+    out.
+    """
+
+    path: str
 
 
 class SwapPrimaryRequest(BaseModel):
@@ -664,6 +723,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
+        # Reachability pre-flight: surface the same structured 424 the
+        # export pipeline uses, so the SPA renders a consistent "reconnect
+        # external storage" message regardless of which screen kicked
+        # off the work.
+        _ensure_source_reachable(
+            stage_number, project.resolve_video_path(state.project_root, primary.path)
+        )
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -754,6 +820,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
+        # Same source-reachability pre-flight as detect-beep: a 424 with
+        # ``code: "source_unreachable"`` so the SPA can surface a uniform
+        # "reconnect external storage" message before any job is queued.
+        _ensure_source_reachable(
+            stage_number, project.resolve_video_path(state.project_root, primary.path)
+        )
         if primary.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -1228,6 +1300,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
+        # Reuse the structured 424 path so the SPA gets a uniform
+        # "reconnect external storage" message regardless of which surface
+        # invoked the preview.
+        source = project.resolve_video_path(state.project_root, primary.path)
+        _ensure_source_reachable(stage_number, source)
         center = t if t is not None else primary.beep_time
         if center is None:
             raise HTTPException(
@@ -1236,12 +1313,6 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             )
         if center < 0:
             raise HTTPException(status_code=400, detail="t must be >= 0")
-        source = project.resolve_video_path(state.project_root, primary.path)
-        if not source.is_file():
-            raise HTTPException(
-                status_code=404,
-                detail=f"primary video missing on disk: {source}",
-            )
         thumbs_dir = project.thumbs_path(state.project_root)
         try:
             clip = thumbnail_helpers.ensure_clip(
@@ -1503,11 +1574,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 served_path = trimmed.resolve()
         if served_path is None:
             served_path = project.resolve_video_path(state.project_root, video.path).resolve()
-            if not served_path.is_file():
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"video missing on disk: {served_path}",
-                )
+            # Same structured shape as detect-beep / trim / preview so
+            # the SPA's "reconnect external storage" surface is uniform.
+            _ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
         media_type = (
             "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
@@ -1776,6 +1845,196 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
+
+    @app.get("/api/exports/overview")
+    def export_overview() -> JSONResponse:
+        """Match-overview payload for the Analysis & Export screen.
+
+        Returns one row per stage with audit + export status (shot count,
+        pending candidates, file paths, last export time, ready-to-export
+        flag). Pure stat: no detection, no rewriting of audit JSON.
+        """
+        project = state.load()
+        rows = project.export_overview(state.project_root)
+        return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
+
+    @app.post("/api/stages/{stage_number}/export")
+    def export_stage(stage_number: int, req: ExportStageRequest) -> JSONResponse:
+        """Submit a per-stage export job.
+
+        Wraps the ``export_helpers.export_stage`` orchestrator (lossless trim
+        + CSV + FCPXML + report) in a JobRegistry entry so the SPA's
+        JobsPanel surfaces progress alongside detect-beep / trim /
+        shot-detect. Returns a Job snapshot; the SPA polls
+        ``/api/jobs/{id}`` until status leaves running, then re-fetches
+        ``/api/exports/overview`` to refresh paths and ``last_export_at``.
+
+        Pre-flight validations (stage exists, primary present, beep ready,
+        source reachable, scoreboard not placeholder) still raise HTTP
+        errors up front so the SPA can show a clear error before queueing
+        a useless job.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None or primary.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has no primary or no beep yet; "
+                    "finish ingest + audit before exporting"
+                ),
+            )
+        if stage.time_seconds <= 0 or stage.scorecard_updated_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} is a placeholder; import a real "
+                    "scoreboard before exporting"
+                ),
+            )
+        # Source-reachability surfaces as a structured 424 so the SPA
+        # renders the same "reconnect external storage" message used
+        # elsewhere -- even if the user only wants CSV/report (those would
+        # still work, but the explicit 424 lets them re-try after
+        # reconnecting rather than hunting for the partial degradation
+        # message in the per-row anomaly list).
+        if req.write_trim or req.write_fcpxml:
+            _ensure_source_reachable(
+                stage_number, project.resolve_video_path(state.project_root, primary.path)
+            )
+
+        existing = state.jobs.find_active(kind="export", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="export",
+            stage_number=stage_number,
+            fn=lambda h, n=stage_number, r=req: _run_export_for_stage(h, n, r),
+        )
+        return JSONResponse(job.model_dump(mode="json"))
+
+    def _run_export_for_stage(
+        handle: JobHandle, stage_number: int, req: ExportStageRequest
+    ) -> None:
+        """Worker for /api/stages/{n}/export. Phases mirror the user's
+        mental model so the JobsPanel message is meaningful."""
+        from ..config import StageData as EngineStageData
+
+        handle.update(progress=0.05, message="Loading project...")
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError("primary or beep disappeared mid-flight")
+
+        audit_file = proj.audit_path(state.project_root) / f"stage{stage_number}.json"
+        exports_dir = proj.exports_path(state.project_root)
+        source_video = proj.resolve_video_path(state.project_root, prim.path)
+        engine_stage = EngineStageData(
+            stage_number=stg.stage_number,
+            stage_name=stg.stage_name,
+            time_seconds=stg.time_seconds,
+            scorecard_updated_at=stg.scorecard_updated_at,
+        )
+
+        # Phase progress is approximate; trim dominates wall time when the
+        # source is large, so we hold at 0.4 through the trim phase and
+        # then jump on the small writers.
+        if req.write_trim:
+            handle.update(progress=0.15, message="Trimming source (lossless stream copy)...")
+        elif req.write_fcpxml:
+            handle.update(progress=0.15, message="Reading audit + preparing FCPXML...")
+        else:
+            handle.update(progress=0.15, message="Reading audit JSON...")
+        handle.check_cancel()
+
+        try:
+            result = export_helpers.export_stage(
+                request=export_helpers.StageExportRequest(
+                    stage_number=stage_number,
+                    write_trim=req.write_trim,
+                    write_csv=req.write_csv,
+                    write_fcpxml=req.write_fcpxml,
+                    write_report=req.write_report,
+                ),
+                audit_path=audit_file,
+                exports_dir=exports_dir,
+                source_video_path=source_video if source_video.exists() else None,
+                stage_data=engine_stage,
+                beep_time_in_source=prim.beep_time,
+                pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                post_buffer_seconds=proj.trim_post_buffer_seconds,
+                config=Config(),
+            )
+        except export_helpers.StageExportError as exc:
+            # Surface as a job failure with the exporter's own message so
+            # the JobsPanel row reads "audit JSON has no shots in shots[]"
+            # rather than a stack trace.
+            raise RuntimeError(str(exc)) from exc
+
+        handle.update(progress=0.95, message="Saving project...")
+        proj.updated_at = datetime.now(UTC)
+        proj.save(state.project_root)
+
+        # Final message summarises what shipped + flags any skipped
+        # artefacts (FCPXML without a trim, etc). The full list lives in
+        # the report.txt; the user can Reveal it for details.
+        bits: list[str] = []
+        if result.trimmed_video_path is not None:
+            bits.append("trim")
+        if result.csv_path is not None:
+            bits.append("csv")
+        if result.fcpxml_path is not None:
+            bits.append("fcpxml")
+        if result.report_path is not None:
+            bits.append("report")
+        summary = ", ".join(bits) if bits else "nothing written"
+        if result.anomalies:
+            n = len(result.anomalies)
+            word = "anomaly" if n == 1 else "anomalies"
+            summary += f" ({n} {word} -- see report.txt)"
+        handle.update(progress=1.0, message=f"Done: {summary}")
+
+    @app.post("/api/files/reveal")
+    def reveal_file(req: RevealRequest) -> JSONResponse:
+        """Reveal a file in the OS file manager.
+
+        Restricted to paths inside the current project root so the endpoint
+        can never be coerced into opening arbitrary locations. macOS uses
+        ``open -R`` (selects the file in Finder); Linux uses ``xdg-open``
+        on the parent dir; Windows uses ``explorer /select``.
+        """
+        target = Path(req.path).expanduser()
+        try:
+            resolved = target.resolve(strict=True)
+        except (OSError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=f"not found: {target}") from exc
+        try:
+            resolved.relative_to(state.project_root.resolve())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="reveal path must be inside the project root",
+            ) from exc
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", "-R", str(resolved)], check=False)
+            elif sys.platform.startswith("win"):
+                subprocess.run(["explorer", f"/select,{resolved}"], check=False)
+            else:
+                # xdg-open doesn't support file selection; opening the parent
+                # is the closest cross-distro behaviour.
+                parent = resolved.parent if resolved.is_file() else resolved
+                subprocess.run(["xdg-open", str(parent)], check=False)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"failed to launch file manager: {exc}"
+            ) from exc
+        return JSONResponse({"revealed": str(resolved)})
 
     @app.post("/api/stages/{stage_number}/skip")
     def set_stage_skipped(stage_number: int, req: SkipStageRequest) -> JSONResponse:

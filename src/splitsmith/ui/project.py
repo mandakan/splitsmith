@@ -139,6 +139,50 @@ class RemovalPlan(BaseModel):
     audit_reset: bool = False  # caller-facing flag: did we wipe stage audit?
 
 
+class StageExportStatus(BaseModel):
+    """Per-stage audit + export status for the Analysis & Export overview.
+
+    Inferred (no explicit "Done" button per the v1 contract): a stage is
+    ``ready_to_export`` when its primary has run beep + trim + shot detect
+    and the audit JSON has at least one shot. ``has_exports`` flips when
+    the user has clicked Generate at least once for this stage; the SPA
+    uses it to badge stages with stale exports vs. fresh ones.
+    """
+
+    stage_number: int
+    stage_name: str
+    skipped: bool
+    has_primary: bool
+    primary_processed: dict[str, bool]
+    audit_shot_count: int
+    # Size of the detector's full candidate pool (``_candidates_pending_audit.
+    # candidates`` in the audit JSON). NOT "pending"; once shot detection has
+    # run, every candidate is either in ``shots[]`` (kept) or implicitly
+    # rejected. The SPA renders this as "X shots audited from Y candidates"
+    # so the math makes sense at a glance.
+    total_candidate_count: int
+    audit_path: Path | None
+    # The video reference the SPA renders. Prefers the lossless trim under
+    # ``exports/``; falls back to the audit-mode short-GOP copy from
+    # ``trimmed/`` only when no lossless trim exists yet, so the user
+    # always has *something* trimmed to inspect. ``lossless_trim_present``
+    # disambiguates "this is the deliverable" vs "this is the scrub cache".
+    trimmed_video_path: Path | None
+    lossless_trim_present: bool = False
+    csv_path: Path | None
+    fcpxml_path: Path | None
+    report_path: Path | None
+    has_exports: bool
+    last_export_at: datetime | None
+    ready_to_export: bool
+    # Whether the primary's source video resolves to a present file.
+    # ``False`` typically means the symlink under ``raw/`` is dangling
+    # because external storage is disconnected; the SPA badges the row
+    # so the user knows Generate will degrade (CSV/report only) without
+    # having to click first. ``None`` when the stage has no primary.
+    source_reachable: bool | None = None
+
+
 class StageMatchWindow(BaseModel):
     """One stage's match window for the SPA timeline (issue #13).
 
@@ -323,9 +367,115 @@ class MatchProject(BaseModel):
             out.extend(s.videos)
         return out
 
-    def match_analysis(
-        self, *, config: VideoMatchConfig | None = None
-    ) -> MatchAnalysis:
+    def export_overview(self, root: Path) -> list[StageExportStatus]:
+        """Per-stage audit + export status for the Analysis & Export screen.
+
+        Pure: stat-only inspection of the audit/exports directories; never
+        re-runs detection. The returned list mirrors :attr:`stages` order so
+        the SPA can iterate cards directly.
+        """
+        from . import exports as exports_mod  # local: avoid import cycle
+
+        audit_dir = self.audit_path(root)
+        exports_dir = self.exports_path(root)
+        trimmed_dir = self.trimmed_path(root)
+
+        out: list[StageExportStatus] = []
+        for stage in self.stages:
+            primary = stage.primary()
+            audit_file = audit_dir / f"stage{stage.stage_number}.json"
+            shot_count = 0
+            total_candidates = 0
+            if audit_file.exists():
+                try:
+                    raw = json.loads(audit_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    raw = {}
+                shots = raw.get("shots") if isinstance(raw, dict) else None
+                if isinstance(shots, list):
+                    shot_count = len(shots)
+                cand_block = raw.get("_candidates_pending_audit") if isinstance(raw, dict) else None
+                if isinstance(cand_block, dict):
+                    cands = cand_block.get("candidates")
+                    if isinstance(cands, list):
+                        total_candidates = len(cands)
+
+            base = f"stage{stage.stage_number}_{exports_mod._slugify(stage.stage_name)}"
+            csv_p = exports_dir / f"{base}_splits.csv"
+            fcpxml_p = exports_dir / f"{base}.fcpxml"
+            report_p = exports_dir / f"{base}_report.txt"
+            # The "trimmed video" surfaced to the Export screen is the
+            # lossless trim in exports/ (the FCP-bound deliverable), not
+            # the audit-mode short-GOP scrub copy in <project>/trimmed/.
+            # Reference trimmed_dir only when the lossless one is missing
+            # so the row at least shows the user *something* trimmed.
+            lossless_trim_p = exports_dir / f"{base}_trimmed.mp4"
+            audit_trim_p = trimmed_dir / f"stage{stage.stage_number}_trimmed.mp4"
+            trimmed_p = (
+                lossless_trim_p
+                if lossless_trim_p.exists()
+                else (audit_trim_p if audit_trim_p.exists() else lossless_trim_p)
+            )
+
+            csv_exists = csv_p.exists()
+            fcpxml_exists = fcpxml_p.exists()
+            report_exists = report_p.exists()
+            trim_exists = lossless_trim_p.exists()
+            has_exports = csv_exists or fcpxml_exists or report_exists or trim_exists
+            last_export_at: datetime | None = None
+            if has_exports:
+                mtimes = [
+                    p.stat().st_mtime
+                    for p in (csv_p, fcpxml_p, report_p, lossless_trim_p)
+                    if p.exists()
+                ]
+                if mtimes:
+                    last_export_at = datetime.fromtimestamp(max(mtimes), tz=UTC)
+
+            processed = (
+                dict(primary.processed)
+                if primary is not None
+                else {"beep": False, "shot_detect": False, "trim": False}
+            )
+            ready_to_export = (
+                primary is not None
+                and processed.get("beep", False)
+                and processed.get("trim", False)
+                and processed.get("shot_detect", False)
+                and shot_count > 0
+            )
+            source_reachable: bool | None = None
+            if primary is not None:
+                try:
+                    src = self.resolve_video_path(root, primary.path)
+                    source_reachable = src.exists()
+                except OSError:
+                    source_reachable = False
+
+            out.append(
+                StageExportStatus(
+                    stage_number=stage.stage_number,
+                    stage_name=stage.stage_name,
+                    skipped=stage.skipped,
+                    has_primary=primary is not None,
+                    primary_processed=processed,
+                    audit_shot_count=shot_count,
+                    total_candidate_count=total_candidates,
+                    audit_path=audit_file if audit_file.exists() else None,
+                    trimmed_video_path=trimmed_p if trimmed_p.exists() else None,
+                    csv_path=csv_p if csv_exists else None,
+                    fcpxml_path=fcpxml_p if fcpxml_exists else None,
+                    report_path=report_p if report_exists else None,
+                    lossless_trim_present=trim_exists,
+                    has_exports=has_exports,
+                    last_export_at=last_export_at,
+                    ready_to_export=ready_to_export,
+                    source_reachable=source_reachable,
+                )
+            )
+        return out
+
+    def match_analysis(self, *, config: VideoMatchConfig | None = None) -> MatchAnalysis:
         """Run the canonical match heuristic over the project's stored
         timestamps and return per-stage windows + per-video classifications.
 
@@ -353,9 +503,7 @@ class MatchProject(BaseModel):
                 scorecard_updated_at=s.scorecard_updated_at,
                 tolerance_minutes=cfg.tolerance_minutes,
                 lower=(
-                    video_match.match_window(
-                        s.scorecard_updated_at, cfg.tolerance_minutes
-                    )[0]
+                    video_match.match_window(s.scorecard_updated_at, cfg.tolerance_minutes)[0]
                     if s.scorecard_updated_at is not None
                     else None
                 ),
@@ -580,9 +728,7 @@ class MatchProject(BaseModel):
             video = existing[1]
             if video.match_timestamp is None:
                 try:
-                    video.match_timestamp = video_match.video_timestamp(
-                        source, prefer_ctime=True
-                    )
+                    video.match_timestamp = video_match.video_timestamp(source, prefer_ctime=True)
                 except OSError:
                     pass
             return video
@@ -708,9 +854,7 @@ class MatchProject(BaseModel):
         # was already on this stage, it gets pulled out and re-attached; the
         # old primary is demoted inside assign_video. New primary's processed
         # flags are reset because the audio source changed.
-        new_primary = self.assign_video(
-            path, to_stage_number=stage_number, role="primary"
-        )
+        new_primary = self.assign_video(path, to_stage_number=stage_number, role="primary")
         new_primary.processed = {"beep": False, "shot_detect": False, "trim": False}
         new_primary.beep_time = None
         new_primary.beep_source = None
