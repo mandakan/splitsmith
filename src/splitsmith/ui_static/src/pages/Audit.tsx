@@ -118,8 +118,29 @@ export function Audit() {
   // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
   // relative to fit. Reset on stage change.
   const [zoom, setZoom] = useState<number | null>(null);
-  const waveformWrapperRef = useRef<HTMLDivElement | null>(null);
+  // Callback ref so we attach the ResizeObserver exactly when the
+  // wrapper mounts. A useEffect-based ref + ``[]`` deps wouldn't fire
+  // again once peaks load and the conditional render finally inserts
+  // the div, so viewportWidth would stay at 0 and zoom would be a
+  // no-op (zoomToPixelsPerSecond returns null when viewport is 0).
   const [waveformViewport, setWaveformViewport] = useState(0);
+  const waveformObserverRef = useRef<ResizeObserver | null>(null);
+  const waveformWrapperRef = useCallback((el: HTMLDivElement | null) => {
+    waveformObserverRef.current?.disconnect();
+    if (!el) {
+      waveformObserverRef.current = null;
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0) setWaveformViewport(w);
+      }
+    });
+    observer.observe(el);
+    setWaveformViewport(Math.floor(el.getBoundingClientRect().width));
+    waveformObserverRef.current = observer;
+  }, []);
   const rafRef = useRef<number | null>(null);
 
   const stageNumber = useMemo(() => {
@@ -511,24 +532,6 @@ export function Audit() {
     },
     [handleScrub, keptShots],
   );
-
-  // Track the waveform wrapper's viewport width so zoom multipliers can
-  // be converted to absolute pixels-per-second. Bound to the wrapping
-  // div around <Waveform> below; ResizeObserver keeps it accurate during
-  // window resize / drawer toggle.
-  useEffect(() => {
-    const el = waveformWrapperRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w = Math.floor(entry.contentRect.width);
-        if (w > 0) setWaveformViewport(w);
-      }
-    });
-    observer.observe(el);
-    setWaveformViewport(Math.floor(el.getBoundingClientRect().width));
-    return () => observer.disconnect();
-  }, []);
 
   const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
   const pixelsPerSecond = useMemo(

@@ -100,13 +100,19 @@ export function Review() {
   const [loopMode, setLoopMode] = useState(false);
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
   const [zoom, setZoom] = useState<number | null>(null);
-  const waveformWrapperRef = useRef<HTMLDivElement | null>(null);
+  // Callback ref attaches the ResizeObserver exactly when the wrapper
+  // mounts. The wrapper is inside a {peaks ? ...} conditional render;
+  // a useEffect-based observer with [] deps would run before peaks
+  // load, see a null ref, bail, and never re-fire -- leaving zoom
+  // permanently a no-op.
   const [waveformViewport, setWaveformViewport] = useState(0);
-  const rafRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const el = waveformWrapperRef.current;
-    if (!el) return;
+  const waveformObserverRef = useRef<ResizeObserver | null>(null);
+  const waveformWrapperRef = useCallback((el: HTMLDivElement | null) => {
+    waveformObserverRef.current?.disconnect();
+    if (!el) {
+      waveformObserverRef.current = null;
+      return;
+    }
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const w = Math.floor(entry.contentRect.width);
@@ -115,8 +121,9 @@ export function Review() {
     });
     observer.observe(el);
     setWaveformViewport(Math.floor(el.getBoundingClientRect().width));
-    return () => observer.disconnect();
+    waveformObserverRef.current = observer;
   }, []);
+  const rafRef = useRef<number | null>(null);
 
   const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
 
