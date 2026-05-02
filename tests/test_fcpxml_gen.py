@@ -113,6 +113,14 @@ def test_generate_fcpxml_minimal_structure(tmp_path: Path) -> None:
     fmt = root.find("./resources/format")
     assert fmt is not None and fmt.attrib["frameDuration"] == "1/30s"
     assert fmt.attrib["width"] == "1920"
+    # colorSpace is required so FCP doesn't warn on import (issue #41).
+    assert fmt.attrib["colorSpace"] == "1-1-1 (Rec. 709)"
+    sequence = root.find("./library/event/project/sequence")
+    assert sequence is not None
+    # audioRate must be an integer Hz string per the FCPXML 1.10 spec
+    # (issue #41 -- "48k" was silently accepted but contributed to FCP's
+    # "Encountered an unexpected value" warning).
+    assert sequence.attrib["audioRate"] == "48000"
     asset = root.find("./resources/asset")
     assert asset is not None
     # Asset src URI matches the resolved video path

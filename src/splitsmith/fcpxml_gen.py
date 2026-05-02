@@ -135,6 +135,14 @@ def generate_fcpxml(
 
     fcpxml = ET.Element("fcpxml", {"version": config.fcpxml_version})
 
+    # FCPXML format attributes (per DTD 1.10):
+    #   - id / name / frameDuration / width / height: required for sequence
+    #     formats so FCP can map to a known preset (FFVideoFormat<height>p<fps>).
+    #   - colorSpace: required when the format is referenced by a <sequence>;
+    #     leaving it out triggers FCP's "Encountered an unexpected value
+    #     (format=...)" warning at import (issue #41). "1-1-1 (Rec. 709)" is
+    #     the default for SDR Rec. 709 footage, which matches the head-mounted
+    #     camera output we target.
     resources = ET.SubElement(fcpxml, "resources")
     ET.SubElement(
         resources,
@@ -145,6 +153,7 @@ def generate_fcpxml(
             "frameDuration": frame_duration_str,
             "width": str(video.width),
             "height": str(video.height),
+            "colorSpace": "1-1-1 (Rec. 709)",
         },
     )
     asset = ET.SubElement(
@@ -172,6 +181,9 @@ def generate_fcpxml(
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
+    # Sequence attributes: ``audioRate`` must be an integer Hz value per the
+    # FCPXML 1.10 spec ("48000", not the "48k" shorthand FCP sometimes accepts
+    # silently).
     sequence = ET.SubElement(
         project,
         "sequence",
@@ -181,7 +193,7 @@ def generate_fcpxml(
             "tcStart": "0s",
             "tcFormat": "NDF",
             "audioLayout": "stereo",
-            "audioRate": "48k",
+            "audioRate": "48000",
         },
     )
     spine = ET.SubElement(sequence, "spine")
