@@ -786,3 +786,182 @@ def test_atomic_write_uses_same_directory_for_tmp(tmp_path: Path) -> None:
 
     # Touch ``original_mkstemp`` so flake8 doesn't flag it; harmless.
     _ = original_mkstemp
+
+
+def test_swap_primary_no_audit_no_warning(tmp_path: Path) -> None:
+    """primary_swap_warns is False when no audit JSON exists."""
+    project = MatchProject.init(tmp_path / "m", name="m")
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
+    )
+    project.stages[0].videos.append(
+        StageVideo(path=Path("raw/a.mp4"), role="primary")
+    )
+    assert project.primary_swap_warns(tmp_path / "m", stage_number=1) is False
+
+
+def test_swap_primary_warns_when_shots_audited(tmp_path: Path) -> None:
+    """primary_swap_warns is True when audit JSON has at least one shot."""
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
+    )
+    audit = root / "audit" / "stage1.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "S1",
+                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
+            }
+        )
+    )
+    assert project.primary_swap_warns(root, stage_number=1) is True
+
+
+def test_swap_primary_does_not_warn_for_pending_candidates_only(tmp_path: Path) -> None:
+    """A fresh detection run leaves _candidates_pending_audit but no shots; the
+    swap should be silent because re-detection on the new primary will produce
+    a fresh candidate list anyway."""
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
+    )
+    audit = root / "audit" / "stage1.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "S1",
+                "shots": [],
+                "_candidates_pending_audit": {"candidates": [{"candidate_number": 1, "time": 1.0, "ms_after_beep": 0}]},
+            }
+        )
+    )
+    assert project.primary_swap_warns(root, stage_number=1) is False
+
+
+def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> None:
+    """swap_primary renames the audit JSON to .bak when audit existed and
+    clears the new primary's processed flags so detection re-runs."""
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
+    )
+    project.stages[0].videos.append(
+        StageVideo(
+            path=Path("raw/a.mp4"),
+            role="primary",
+            processed={"beep": True, "shot_detect": True, "trim": True},
+            beep_time=1.234,
+        )
+    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/b.mp4"), role="secondary"))
+    audit = root / "audit" / "stage1.json"
+    audit.write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "S1",
+                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
+            }
+        )
+    )
+
+    new_primary = project.swap_primary(
+        Path("raw/b.mp4"), root=root, stage_number=1, backup_audit=True
+    )
+
+    assert new_primary.role == "primary"
+    assert new_primary.path == Path("raw/b.mp4")
+    assert new_primary.processed == {"beep": False, "shot_detect": False, "trim": False}
+    assert new_primary.beep_time is None
+    # Old primary demoted to secondary.
+    old = next(v for v in project.stages[0].videos if v.path == Path("raw/a.mp4"))
+    assert old.role == "secondary"
+    # Audit JSON renamed to .bak.
+    assert not audit.exists()
+    assert (root / "audit" / "stage1.json.bak").exists()
+
+
+def test_swap_primary_skips_backup_when_no_audit(tmp_path: Path) -> None:
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0)
+    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/a.mp4"), role="primary"))
+    project.stages[0].videos.append(StageVideo(path=Path("raw/b.mp4"), role="secondary"))
+
+    project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1, backup_audit=False)
+
+    assert not (root / "audit" / "stage1.json.bak").exists()
+
+
+def test_match_analysis_uses_canonical_heuristic(tmp_path: Path) -> None:
+    """match_analysis runs the same window math as video_match and returns
+    per-stage windows + per-video classification."""
+    from datetime import UTC, datetime, timedelta
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    sc1 = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
+    sc2 = sc1 + timedelta(minutes=30)
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc1)
+    )
+    project.stages.append(
+        StageEntry(stage_number=2, stage_name="S2", time_seconds=10.0, scorecard_updated_at=sc2)
+    )
+    project.stages[0].videos.append(
+        StageVideo(
+            path=Path("raw/a.mp4"),
+            role="primary",
+            match_timestamp=sc1 - timedelta(minutes=2),  # in window 1
+        )
+    )
+    project.unassigned_videos.append(
+        StageVideo(
+            path=Path("raw/b.mp4"),
+            match_timestamp=sc1 - timedelta(hours=2),  # orphan
+        )
+    )
+    project.unassigned_videos.append(
+        StageVideo(
+            path=Path("raw/c.mp4"),
+            match_timestamp=sc2 - timedelta(minutes=1),  # in window 2 only
+        )
+    )
+
+    analysis = project.match_analysis()
+    assert analysis.tolerance_minutes == 15  # VideoMatchConfig default
+    assert len(analysis.stages) == 2
+    assert analysis.stages[0].lower == sc1 - timedelta(minutes=15)
+    assert analysis.stages[0].upper == sc1
+    by_path = {str(e.path): e for e in analysis.videos}
+    assert by_path["raw/a.mp4"].classification == "in_window"
+    assert by_path["raw/a.mp4"].stage_numbers == [1]
+    assert by_path["raw/b.mp4"].classification == "orphan"
+    assert by_path["raw/c.mp4"].classification == "in_window"
+    assert by_path["raw/c.mp4"].stage_numbers == [2]
+
+
+def test_match_analysis_handles_missing_timestamp(tmp_path: Path) -> None:
+    """Videos without ``match_timestamp`` get classification ``no_timestamp``;
+    the rest of the analysis still runs."""
+    from datetime import UTC, datetime
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)
+    )
+    project.unassigned_videos.append(StageVideo(path=Path("raw/legacy.mp4")))
+
+    analysis = project.match_analysis()
+    assert analysis.videos[0].classification == "no_timestamp"
+    assert analysis.videos[0].stage_numbers == []

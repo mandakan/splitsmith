@@ -12,7 +12,7 @@
  * bay-cam dropped in days later) without losing audit work.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -42,26 +42,63 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
   api,
+  type MatchAnalysis,
   type MatchProject,
   type NonEmptyOldDirsDetail,
   type StageEntry,
+  type StageMatchWindow,
   type StageVideo,
+  type VideoMatchAnalysisEntry,
   type VideoRole,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+/** Drag payload mime type: enough to namespace from random file drops, and
+ *  carries the source video path so the drop target can move/remove it. */
+const DRAG_MIME = "application/x-splitsmith-video";
+
 export function Ingest() {
   const [project, setProject] = useState<MatchProject | null>(null);
+  const [analysis, setAnalysis] = useState<MatchAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<{
     video: StageVideo;
     stage: StageEntry | null;
   } | null>(null);
+  // Tracks which video is currently being dragged so we can surface a
+  // floating "remove from project" zone only while a drag is active.
+  const [dragging, setDragging] = useState<{
+    video: StageVideo;
+    stage: StageEntry | null;
+  } | null>(null);
+
+  const refreshAnalysis = useCallback(async () => {
+    // Cheap GET that re-runs the heuristic over current project state. Fire
+    // after any mutation that could change classifications (scan, move,
+    // remove, swap) so the timeline never lags behind reality.
+    try {
+      setAnalysis(await api.getMatchAnalysis());
+    } catch {
+      // Best effort: if the analysis endpoint is unavailable, the SPA
+      // just renders a project without timeline -- the rest of ingest
+      // keeps working.
+    }
+  }, []);
 
   const reload = useCallback(async () => {
     try {
-      setProject(await api.getProject());
+      // Fetch project + match analysis in parallel: the SPA never renders
+      // the timeline from its own state, only from the backend's canonical
+      // heuristic output. Analysis lags slightly when the project is a
+      // bare placeholder (no scoreboard yet); that's fine, the timeline
+      // just doesn't show until stages have scorecard times.
+      const [proj, ana] = await Promise.all([
+        api.getProject(),
+        api.getMatchAnalysis().catch(() => null),
+      ]);
+      setProject(proj);
+      setAnalysis(ana);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -173,8 +210,62 @@ export function Ingest() {
   const move = async (videoPath: string, toStage: number | null, role: VideoRole) => {
     setBusy(true);
     try {
+      // Promotion to primary uses the audit-safe swap endpoint when a stage
+      // already has a primary. The endpoint returns 409 with {code:
+      // "audit_exists"} when the current primary has shots in audit; we then
+      // ask the user and retry with confirm=true. For the no-existing-audit
+      // case, the swap is silent.
+      if (toStage !== null && role === "primary") {
+        const targetStage = project?.stages.find((s) => s.stage_number === toStage);
+        const existingPrimary = targetStage?.videos.find((v) => v.role === "primary");
+        if (existingPrimary && existingPrimary.path !== videoPath) {
+          try {
+            const updated = await api.swapPrimary(videoPath, toStage, false);
+            setProject(updated);
+            void refreshAnalysis();
+            return;
+          } catch (e) {
+            if (
+              e instanceof ApiError &&
+              e.status === 409 &&
+              e.body &&
+              typeof e.body === "object" &&
+              (e.body as { code?: string }).code === "audit_exists"
+            ) {
+              const ok = window.confirm(
+                `Stage ${toStage} has audited shots on the current primary.\n\n` +
+                  "Confirm the swap to back the audit JSON up to .bak and " +
+                  "re-run detection on the new primary's audio. Existing " +
+                  "shot decisions on the old primary will be preserved in " +
+                  "the .bak file but no longer drive the audit screen.",
+              );
+              if (!ok) return;
+              const updated = await api.swapPrimary(videoPath, toStage, true);
+              setProject(updated);
+              void refreshAnalysis();
+              return;
+            }
+            throw e;
+          }
+        }
+      }
       const updated = await api.moveAssignment(videoPath, toStage, role);
       setProject(updated);
+      void refreshAnalysis();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setStageSkipped = async (stageNumber: number, skipped: boolean) => {
+    setBusy(true);
+    try {
+      const updated = await api.setStageSkipped(stageNumber, skipped);
+      setProject(updated);
+      void refreshAnalysis();
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -248,21 +339,35 @@ export function Ingest() {
 
       {project ? (
         <>
+          <ReadyBanner project={project} analysis={analysis} />
           <UnassignedSection
             project={project}
             busy={busy}
+            dragging={dragging}
+            setDragging={setDragging}
             onAssign={(path, stage, role) => move(path, stage, role)}
             onRemove={(video, stage) => setRemoveTarget({ video, stage })}
           />
           <StagesSection
             project={project}
+            analysis={analysis}
             busy={busy}
+            dragging={dragging}
+            setDragging={setDragging}
             setBusy={setBusy}
             setError={setError}
             onProjectUpdate={setProject}
             onMove={move}
+            onSetSkipped={setStageSkipped}
             onRemove={(video, stage) => setRemoveTarget({ video, stage })}
           />
+          {dragging ? (
+            <RemoveDropZone
+              dragging={dragging}
+              busy={busy}
+              onDrop={() => setRemoveTarget({ video: dragging.video, stage: dragging.stage })}
+            />
+          ) : null}
         </>
       ) : null}
 
@@ -780,63 +885,104 @@ function shortPath(p: string): string {
 function UnassignedSection({
   project,
   busy,
+  dragging,
+  setDragging,
   onAssign,
   onRemove,
 }: {
   project: MatchProject;
   busy: boolean;
+  dragging: { video: StageVideo; stage: StageEntry | null } | null;
+  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   onAssign: (videoPath: string, stage: number | null, role: VideoRole) => void;
   onRemove: (video: StageVideo, stage: StageEntry | null) => void;
 }) {
-  if (project.unassigned_videos.length === 0) return null;
+  const [over, setOver] = useState(false);
+  // The unassigned tray accepts drops only when the dragged video is currently
+  // assigned to a stage; dragging within the tray is a no-op.
+  const canAccept = dragging !== null && dragging.stage !== null;
+
+  if (project.unassigned_videos.length === 0 && !canAccept) return null;
+
   return (
-    <Card>
+    <Card
+      className={cn(
+        canAccept && "border-dashed border-ring/60",
+        canAccept && over && "border-ring bg-accent/30",
+      )}
+      onDragOver={(e) => {
+        if (!canAccept) return;
+        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        if (!canAccept) return;
+        const path = e.dataTransfer.getData(DRAG_MIME);
+        if (!path) return;
+        e.preventDefault();
+        setOver(false);
+        onAssign(path, null, "secondary");
+      }}
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <VideoIcon className="size-5" />
           Unassigned videos · {project.unassigned_videos.length}
         </CardTitle>
         <CardDescription>
-          Drag onto a stage, or use the menu to pick a stage. Trash removes the
-          video from the project (cache is cleared; the original source on USB
-          / external storage is never touched).
+          Drag onto a stage card to assign, or back here to unassign. Trash
+          removes the video from the project (cache is cleared; the original
+          source on USB / external storage is never touched).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
+        {project.unassigned_videos.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Drop here to unassign the video you're dragging.
+          </p>
+        ) : null}
         {project.unassigned_videos.map((v) => (
-          <div
+          <DraggableVideoRow
             key={v.path}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
+            video={v}
+            stage={null}
+            setDragging={setDragging}
+            className="rounded-md border border-border bg-muted/40 px-3 py-2"
           >
-            <div className="flex items-center gap-2 font-mono text-xs">
-              <VideoIcon className="size-3.5 text-muted-foreground" />
-              {v.path}
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {project.stages.map((s) => (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+                <VideoIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate" title={v.path}>{v.path}</span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {project.stages.map((s) => (
+                  <Button
+                    key={s.stage_number}
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => onAssign(v.path, s.stage_number, "secondary")}
+                    title={`Assign to stage ${s.stage_number}: ${s.stage_name}`}
+                  >
+                    → S{s.stage_number}
+                  </Button>
+                ))}
                 <Button
-                  key={s.stage_number}
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   disabled={busy}
-                  onClick={() => onAssign(v.path, s.stage_number, "secondary")}
-                  title={`Assign to stage ${s.stage_number}: ${s.stage_name}`}
+                  onClick={() => onRemove(v, null)}
+                  title="Remove from project"
+                  aria-label={`Remove ${v.path}`}
                 >
-                  → S{s.stage_number}
+                  <Trash2 />
                 </Button>
-              ))}
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => onRemove(v, null)}
-                title="Remove from project"
-                aria-label={`Remove ${v.path}`}
-              >
-                <Trash2 />
-              </Button>
+              </div>
             </div>
-          </div>
+          </DraggableVideoRow>
         ))}
       </CardContent>
     </Card>
@@ -845,19 +991,27 @@ function UnassignedSection({
 
 function StagesSection({
   project,
+  analysis,
   busy,
+  dragging,
+  setDragging,
   setBusy,
   setError,
   onProjectUpdate,
   onMove,
+  onSetSkipped,
   onRemove,
 }: {
   project: MatchProject;
+  analysis: MatchAnalysis | null;
   busy: boolean;
+  dragging: { video: StageVideo; stage: StageEntry | null } | null;
+  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   setBusy: (b: boolean) => void;
   setError: (msg: string | null) => void;
   onProjectUpdate: (next: MatchProject) => void;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
+  onSetSkipped: (stageNumber: number, skipped: boolean) => void;
   onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
   if (project.stages.length === 0) return null;
@@ -888,12 +1042,17 @@ function StagesSection({
             key={s.stage_number}
             stage={s}
             allStages={project.stages}
+            window={analysis?.stages.find((w) => w.stage_number === s.stage_number) ?? null}
+            videoEntries={analysis?.videos ?? []}
             busy={busy}
+            dragging={dragging}
+            setDragging={setDragging}
             primaryCounts={primaryCounts}
             setBusy={setBusy}
             setError={setError}
             onProjectUpdate={onProjectUpdate}
             onMove={onMove}
+            onSetSkipped={onSetSkipped}
             onRemove={onRemove}
           />
         ))}
@@ -905,31 +1064,72 @@ function StagesSection({
 function StageCard({
   stage,
   allStages,
+  window: matchWindow,
+  videoEntries,
   busy,
+  dragging,
+  setDragging,
   primaryCounts,
   setBusy,
   setError,
   onProjectUpdate,
   onMove,
+  onSetSkipped,
   onRemove,
 }: {
   stage: StageEntry;
   allStages: StageEntry[];
+  window: StageMatchWindow | null;
+  videoEntries: VideoMatchAnalysisEntry[];
   busy: boolean;
+  dragging: { video: StageVideo; stage: StageEntry | null } | null;
+  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   primaryCounts: Map<string, number>;
   setBusy: (b: boolean) => void;
   setError: (msg: string | null) => void;
   onProjectUpdate: (next: MatchProject) => void;
   onMove: (path: string, stage: number | null, role: VideoRole) => void;
+  onSetSkipped: (stageNumber: number, skipped: boolean) => void;
   onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
+  const [over, setOver] = useState(false);
   const primary = stage.videos.find((v) => v.role === "primary");
   const secondaries = stage.videos.filter((v) => v.role === "secondary");
   const ignored = stage.videos.filter((v) => v.role === "ignored");
   const hasConflict = primary && (primaryCounts.get(primary.path) ?? 0) > 1;
+  // Accept drops only when the dragged video is from a different stage (or
+  // from the unassigned tray). Dropping onto the source stage is a no-op so
+  // we don't visually invite it.
+  const canAccept =
+    dragging !== null && dragging.stage?.stage_number !== stage.stage_number;
 
   return (
-    <Card className={cn(hasConflict && "border-status-warning")}>
+    <Card
+      className={cn(
+        hasConflict && "border-status-warning",
+        canAccept && "border-dashed border-ring/50",
+        canAccept && over && "border-ring bg-accent/30",
+      )}
+      onDragOver={(e) => {
+        if (!canAccept) return;
+        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        if (!canAccept) return;
+        const path = e.dataTransfer.getData(DRAG_MIME);
+        if (!path) return;
+        e.preventDefault();
+        setOver(false);
+        // First video on a stage becomes primary (per #13 spec); otherwise
+        // it lands as secondary so the user has to opt in to swapping primary.
+        const role: VideoRole = primary ? "secondary" : "primary";
+        onMove(path, stage.stage_number, role);
+      }}
+    >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -937,14 +1137,35 @@ function StageCard({
               Stage {stage.stage_number}: {stage.stage_name}
             </CardTitle>
             <CardDescription className="font-mono tabular-nums">
-              {stage.time_seconds.toFixed(2)}s ·{" "}
+              {stage.time_seconds.toFixed(2)}s &middot;{" "}
               {stage.scorecard_updated_at
                 ? new Date(stage.scorecard_updated_at).toLocaleString()
                 : "no scorecard time"}
             </CardDescription>
           </div>
-          <StatusGlyph stage={stage} />
+          <div className="flex flex-col items-end gap-1">
+            <StatusGlyph stage={stage} />
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              disabled={busy}
+              onClick={() => onSetSkipped(stage.stage_number, !stage.skipped)}
+              title={
+                stage.skipped
+                  ? "Un-skip this stage so it counts toward ingest gating again"
+                  : "Skip this stage; it won't block the next-step gate even without a primary"
+              }
+            >
+              {stage.skipped ? "Un-skip" : "Skip stage"}
+            </Button>
+          </div>
         </div>
+        <MatchWindowTimeline
+          stage={stage}
+          window={matchWindow}
+          videoEntries={videoEntries}
+        />
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
         {stage.videos.length === 0 ? (
@@ -954,6 +1175,8 @@ function StageCard({
           <>
             <VideoRow
               video={primary}
+              stage={stage}
+              setDragging={setDragging}
               badge={
                 <Badge
                   variant={hasConflict ? "statusWarning" : "statusInProgress"}
@@ -988,6 +1211,8 @@ function StageCard({
           <VideoRow
             key={v.path}
             video={v}
+            stage={stage}
+            setDragging={setDragging}
             badge={<Badge variant="secondary">Secondary</Badge>}
             actions={
               <RoleActions
@@ -1006,6 +1231,8 @@ function StageCard({
           <VideoRow
             key={v.path}
             video={v}
+            stage={stage}
+            setDragging={setDragging}
             badge={
               <Badge variant="outline" className="gap-1 opacity-70">
                 <XCircle className="size-3" /> Ignored
@@ -1031,35 +1258,427 @@ function StageCard({
 
 function VideoRow({
   video,
+  stage,
+  setDragging,
   badge,
   actions,
 }: {
   video: StageVideo;
+  stage: StageEntry | null;
+  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   badge: React.ReactNode;
   actions: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
-      <div className="flex min-w-0 items-center gap-2 text-xs">
-        {badge}
-        <span className="truncate font-mono" title={video.path}>
-          {video.path.split("/").pop()}
-        </span>
-        {video.processed.beep ? (
-          <span
-            className="text-muted-foreground"
-            title={`beep at ${video.beep_time?.toFixed(3) ?? "?"}s`}
-          >
-            <CheckCircle2 className="size-3.5" />
+    <DraggableVideoRow
+      video={video}
+      stage={stage}
+      setDragging={setDragging}
+      className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          {badge}
+          <span className="truncate font-mono" title={video.path}>
+            {video.path.split("/").pop()}
           </span>
-        ) : (
-          <Loader2
-            className="size-3.5 text-muted-foreground"
-            aria-label="beep detection pending"
-          />
-        )}
+          {video.processed.beep ? (
+            <span
+              className="text-muted-foreground"
+              title={`beep at ${video.beep_time?.toFixed(3) ?? "?"}s`}
+            >
+              <CheckCircle2 className="size-3.5" />
+            </span>
+          ) : (
+            <Loader2
+              className="size-3.5 text-muted-foreground"
+              aria-label="beep detection pending"
+            />
+          )}
+        </div>
+        <div className="flex gap-1">{actions}</div>
       </div>
-      <div className="flex gap-1">{actions}</div>
+    </DraggableVideoRow>
+  );
+}
+
+/** Draggable wrapper with hover-thumbnail. Used for both stage video rows
+ *  (the badge + filename + actions row inside StageCard) and unassigned-tray
+ *  rows (the path + per-stage assign buttons). The `stage` is `null` when the
+ *  source is the unassigned tray; `setDragging` lets the page surface a
+ *  floating "remove from project" zone while the drag is active. */
+function DraggableVideoRow({
+  video,
+  stage,
+  setDragging,
+  className,
+  children,
+}: {
+  video: StageVideo;
+  stage: StageEntry | null;
+  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [thumb, setThumb] = useState<string | null>(null);
+  const [probing, setProbing] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  // Suppress the hover preview while dragging anything; the floating image
+  // would otherwise track the cursor and obscure the drop target.
+  const [dragInFlight, setDragInFlight] = useState(false);
+
+  const ensureProbe = useCallback(async () => {
+    if (thumb !== null || probing) return;
+    setProbing(true);
+    try {
+      const r = await api.probeFile(video.path);
+      setThumb(r.thumbnail_url);
+    } catch {
+      // Best effort; row still renders without preview.
+    } finally {
+      setProbing(false);
+    }
+  }, [thumb, probing, video.path]);
+
+  return (
+    <div
+      ref={ref}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(DRAG_MIME, video.path);
+        e.dataTransfer.effectAllowed = "move";
+        setDragInFlight(true);
+        setRect(null);
+        setDragging({ video, stage });
+      }}
+      onDragEnd={() => {
+        setDragInFlight(false);
+        setDragging(null);
+      }}
+      onMouseEnter={() => {
+        if (dragInFlight) return;
+        setRect(ref.current?.getBoundingClientRect() ?? null);
+        void ensureProbe();
+      }}
+      onMouseLeave={() => setRect(null)}
+      className={cn("cursor-grab active:cursor-grabbing", className)}
+    >
+      {children}
+      {rect && thumb && !dragInFlight ? (
+        <ThumbnailFloat anchor={rect} src={thumb} alt={video.path} />
+      ) : null}
+    </div>
+  );
+}
+
+/** Fixed-position hover preview, mirrors the FolderPicker pattern: anchor to
+ *  the row's right edge, flip left if it would overflow the viewport, clamp
+ *  the vertical position so it never paints off-screen. */
+function ThumbnailFloat({
+  anchor,
+  src,
+  alt,
+}: {
+  anchor: DOMRect;
+  src: string;
+  alt: string;
+}) {
+  const W = 320;
+  const H = 192;
+  const margin = 8;
+  const flipLeft = anchor.right + W + margin > window.innerWidth;
+  const left = flipLeft
+    ? Math.max(margin, anchor.left - W - margin)
+    : anchor.right + margin;
+  const desiredTop = anchor.top + anchor.height / 2 - H / 2;
+  const top = Math.max(
+    margin,
+    Math.min(window.innerHeight - H - margin, desiredTop),
+  );
+  return (
+    <div
+      role="presentation"
+      style={{ position: "fixed", top, left, width: W, zIndex: 50 }}
+      className="pointer-events-none rounded-md border border-border bg-popover p-1 shadow-xl"
+    >
+      <img src={src} alt={`${alt} thumbnail`} className="w-full rounded" />
+    </div>
+  );
+}
+
+/** Match-window timeline for one stage. Pure renderer: every value comes
+ *  from the backend's :func:`MatchProject.match_analysis` so the SPA never
+ *  duplicates the heuristic.
+ *
+ *  Window is asymmetric -- the band ends at ``scorecard_updated_at`` (the
+ *  upper bound) and extends ``tolerance_minutes`` to the left. Videos
+ *  classified as ``contested`` or ``in_window`` for *this* stage get a tick
+ *  inside the band; videos in another stage's window or orphaned still get
+ *  a faint tick so the user can see neighbours visually. Videos without a
+ *  timestamp are skipped entirely. */
+function MatchWindowTimeline({
+  stage,
+  window: matchWindow,
+  videoEntries,
+}: {
+  stage: StageEntry;
+  window: StageMatchWindow | null;
+  videoEntries: VideoMatchAnalysisEntry[];
+}) {
+  if (!matchWindow || !matchWindow.lower || !matchWindow.upper) return null;
+
+  const lowerSec = new Date(matchWindow.lower).getTime() / 1000;
+  const upperSec = new Date(matchWindow.upper).getTime() / 1000;
+  if (!Number.isFinite(lowerSec) || !Number.isFinite(upperSec)) return null;
+  const tolSec = matchWindow.tolerance_minutes * 60;
+
+  const ticks = videoEntries
+    .filter((e) => e.timestamp !== null)
+    .map((e) => {
+      const ts = new Date(e.timestamp as string).getTime() / 1000;
+      const role = stage.videos.find((x) => x.path === e.path)?.role ?? null;
+      const inThisStage = e.stage_numbers.includes(stage.stage_number);
+      return {
+        path: e.path,
+        ts,
+        role,
+        inThisStage,
+        contested: e.classification === "contested",
+        otherStages: e.stage_numbers.filter((n) => n !== stage.stage_number),
+      };
+    });
+
+  if (ticks.length === 0) return null;
+
+  // Visible range: at least the window plus a half-tolerance on each side,
+  // expanded if any tick falls outside.
+  const tsValues = ticks.map((t) => t.ts);
+  const lo = Math.min(lowerSec - 0.5 * tolSec, ...tsValues);
+  const hi = Math.max(upperSec + 0.5 * tolSec, ...tsValues);
+  const span = Math.max(hi - lo, 1);
+
+  const pct = (t: number) => `${Math.max(0, Math.min(100, ((t - lo) / span) * 100))}%`;
+  const winLowPct = ((lowerSec - lo) / span) * 100;
+  const winHighPct = ((upperSec - lo) / span) * 100;
+  const tickLabel = (t: (typeof ticks)[number]) => {
+    const fname = t.path.split("/").pop();
+    const time = new Date(t.ts * 1000).toLocaleTimeString();
+    if (t.inThisStage) return `${fname} @ ${time} (${t.role ?? "unassigned"})`;
+    if (t.contested) return `${fname} @ ${time} (contested: stages ${t.otherStages.join(", ")})`;
+    if (t.otherStages.length) return `${fname} @ ${time} (in stage ${t.otherStages[0]})`;
+    return `${fname} @ ${time} (orphan)`;
+  };
+
+  return (
+    <div className="mt-2 select-none" aria-hidden>
+      <div className="relative h-3 rounded-full border border-border bg-muted/30">
+        <div
+          className="absolute top-0 h-full bg-status-info/20"
+          style={{
+            left: `${Math.max(0, winLowPct)}%`,
+            width: `${Math.min(100, winHighPct) - Math.max(0, winLowPct)}%`,
+          }}
+          title={`match window: ${matchWindow.tolerance_minutes} min before scorecard`}
+        />
+        <div
+          className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-status-info"
+          style={{ left: pct(upperSec) }}
+          title={`scorecard: ${new Date(upperSec * 1000).toLocaleTimeString()}`}
+        />
+        {ticks.map((t) => (
+          <div
+            key={t.path}
+            className={cn(
+              "absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-sm",
+              t.inThisStage
+                ? t.role === "primary"
+                  ? "h-4 w-1 bg-status-info"
+                  : "bg-foreground"
+                : "bg-muted-foreground/40",
+              t.contested && "outline outline-1 outline-status-warning",
+            )}
+            style={{ left: pct(t.ts) }}
+            title={tickLabel(t)}
+          />
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+        <span>{new Date(lo * 1000).toLocaleTimeString()}</span>
+        <span>scorecard - {matchWindow.tolerance_minutes} min ... scorecard</span>
+        <span>{new Date(hi * 1000).toLocaleTimeString()}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Top-of-page status banner: lists everything that blocks the user from
+ *  advancing to the audit screen. Hard blockers: video claimed as primary
+ *  by two stages; stage with no primary that isn't explicitly skipped.
+ *  Soft warnings (advisory, do not block): contested unassigned videos
+ *  (the heuristic says they fit two stages' windows). Renders nothing
+ *  blocking when ingest is ready. */
+function ReadyBanner({
+  project,
+  analysis,
+}: {
+  project: MatchProject;
+  analysis: MatchAnalysis | null;
+}) {
+  const primaryCounts = new Map<string, number>();
+  for (const s of project.stages) {
+    for (const v of s.videos) {
+      if (v.role === "primary") {
+        primaryCounts.set(v.path, (primaryCounts.get(v.path) ?? 0) + 1);
+      }
+    }
+  }
+  const conflictPaths = Array.from(primaryCounts.entries())
+    .filter(([, n]) => n > 1)
+    .map(([p]) => p);
+  const stagesWithoutPrimary = project.stages.filter(
+    (s) => !s.skipped && s.videos.find((v) => v.role === "primary") === undefined,
+  );
+
+  // Surface heuristic-detected ambiguity for unassigned videos: the
+  // classifier says they fall in 2+ stages' windows, so the auto-assignment
+  // would have to pick one. Advisory only -- the user can resolve by
+  // dragging onto the right stage.
+  const contestedUnassigned = (analysis?.videos ?? []).filter(
+    (v) =>
+      v.classification === "contested" &&
+      project.unassigned_videos.some((u) => u.path === v.path),
+  );
+
+  const blocking = conflictPaths.length > 0 || stagesWithoutPrimary.length > 0;
+  if (!blocking && contestedUnassigned.length === 0) {
+    return (
+      <Card className="border-status-success/40 bg-status-success/5">
+        <CardContent className="flex items-center gap-2 py-3 text-sm">
+          <CheckCircle2 className="size-4 text-status-success" />
+          <span>
+            Ingest looks good. Every stage has a primary (or is skipped); no
+            video is claimed as primary by two stages.
+          </span>
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card
+      className={cn(
+        blocking
+          ? "border-status-warning/50 bg-status-warning/5"
+          : "border-status-info/40 bg-status-info/5",
+      )}
+    >
+      <CardContent className="space-y-2 py-3 text-sm">
+        <div className="flex items-center gap-2 font-medium">
+          <AlertCircle
+            className={cn(
+              "size-4",
+              blocking ? "text-status-warning" : "text-status-info",
+            )}
+          />
+          <span>
+            {blocking
+              ? "Ingest is not ready to advance."
+              : "Ingest is ready, with advisories from the match heuristic."}
+          </span>
+        </div>
+        {conflictPaths.length > 0 ? (
+          <div>
+            <div className="text-xs font-semibold">
+              Video claimed as primary by more than one stage:
+            </div>
+            <ul className="ml-5 list-disc text-xs text-muted-foreground">
+              {conflictPaths.map((p) => (
+                <li key={p} className="font-mono">{p}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {stagesWithoutPrimary.length > 0 ? (
+          <div>
+            <div className="text-xs font-semibold">
+              Stages without a primary (skip or assign one):
+            </div>
+            <ul className="ml-5 list-disc text-xs text-muted-foreground">
+              {stagesWithoutPrimary.map((s) => (
+                <li key={s.stage_number}>
+                  Stage {s.stage_number}: {s.stage_name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {contestedUnassigned.length > 0 ? (
+          <div>
+            <div className="text-xs font-semibold">
+              Unassigned videos that fit multiple stage windows
+              (heuristic, advisory):
+            </div>
+            <ul className="ml-5 list-disc text-xs text-muted-foreground">
+              {contestedUnassigned.map((v) => (
+                <li key={v.path}>
+                  <span className="font-mono">{v.path.split("/").pop()}</span>
+                  {" -- candidates: "}
+                  {v.stage_numbers.map((n) => `S${n}`).join(", ")}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Floating bottom-right drop zone visible only while a drag is in flight.
+ *  Dropping here triggers the same removal dialog the trash button uses, so
+ *  audited primaries still get the keep-audit-or-reset choice. */
+function RemoveDropZone({
+  dragging,
+  busy,
+  onDrop,
+}: {
+  dragging: { video: StageVideo; stage: StageEntry | null };
+  busy: boolean;
+  onDrop: () => void;
+}) {
+  const [over, setOver] = useState(false);
+  const filename = dragging.video.path.split("/").pop() ?? dragging.video.path;
+  return (
+    <div
+      role="region"
+      aria-label="Remove from project"
+      className={cn(
+        "fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-lg border-2 border-dashed border-destructive/60 bg-destructive/10 px-4 py-3 shadow-lg",
+        over && "border-destructive bg-destructive/25",
+        busy && "opacity-50",
+      )}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        const path = e.dataTransfer.getData(DRAG_MIME);
+        if (!path) return;
+        e.preventDefault();
+        setOver(false);
+        onDrop();
+      }}
+    >
+      <Trash2 className="size-5 text-destructive" />
+      <div className="flex flex-col text-xs">
+        <span className="font-medium text-destructive">Drop to remove</span>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {filename}
+        </span>
+      </div>
     </div>
   );
 }
