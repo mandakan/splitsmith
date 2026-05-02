@@ -54,6 +54,10 @@ export interface MarkerLayerProps {
   onClick: (marker: AuditMarker) => void;
   onDelete: (marker: AuditMarker) => void;
   onTimeChange: (id: string, time: number) => void;
+  /** Categories to render. Hiding ``rejected`` while saving keeps the
+   *  rejected markers in the model -- they just don't render. The save
+   *  flow still serializes them via the audit JSON. */
+  visibleKinds?: Set<MarkerKind>;
 }
 
 export function MarkerLayer({
@@ -64,6 +68,7 @@ export function MarkerLayer({
   onClick,
   onDelete,
   onTimeChange,
+  visibleKinds,
 }: MarkerLayerProps) {
   if (duration <= 0) return null;
 
@@ -72,9 +77,12 @@ export function MarkerLayer({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const dragRef = useRef<{ pointerId: number; element: HTMLButtonElement } | null>(null);
 
-  // Markers in time order so Tab moves left-to-right naturally.
+  // Markers in time order so Tab moves left-to-right naturally. Filtered
+  // categories are dropped entirely so they don't intercept pointer events
+  // or appear in keyboard tab order.
   const sorted = markers
     .slice()
+    .filter((m) => (visibleKinds ? visibleKinds.has(m.kind) : true))
     .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
 
   const timeFromClientX = useCallback(

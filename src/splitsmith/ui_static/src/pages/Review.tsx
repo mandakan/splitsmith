@@ -29,6 +29,14 @@ import {
   Undo2,
 } from "lucide-react";
 
+import {
+  DEFAULT_FILTERS,
+  FilterBar,
+  ZoomControls,
+  type MarkerFilters,
+  visibleKindsFromFilters,
+  zoomToPixelsPerSecond,
+} from "@/components/AuditControls";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
@@ -90,7 +98,27 @@ export function Review() {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loopMode, setLoopMode] = useState(false);
+  const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
+  const [zoom, setZoom] = useState<number | null>(null);
+  const waveformWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [waveformViewport, setWaveformViewport] = useState(0);
   const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const el = waveformWrapperRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0) setWaveformViewport(w);
+      }
+    });
+    observer.observe(el);
+    setWaveformViewport(Math.floor(el.getBoundingClientRect().width));
+    return () => observer.disconnect();
+  }, []);
+
+  const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
 
   // Load fixture JSON.
   useEffect(() => {
@@ -398,6 +426,17 @@ export function Review() {
         void performSave();
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3")) {
+        e.preventDefault();
+        if (e.key === "2") setZoom(null);
+        else if (e.key === "1")
+          setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
+        else setZoom((z) => {
+          const next = (z ?? 1) / 1.5;
+          return next <= 0.25 ? null : next;
+        });
+        return;
+      }
       if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (e.key === "m" || e.key === "M") {
           e.preventDefault();
@@ -535,25 +574,45 @@ export function Review() {
             </div>
           ) : peaks ? (
             <>
-              <Waveform
-                peaks={peaks.peaks}
-                duration={peaks.duration}
-                currentTime={currentTime}
-                beepTime={peaks.beep_time}
-                onScrub={handleScrub}
-                onDoubleClick={handleAddManual}
-                height={160}
-              >
-                <MarkerLayer
-                  markers={markers}
-                  duration={peaks.duration}
-                  focusedId={focusedMarkerId}
-                  onFocusChange={setFocusedMarkerId}
-                  onClick={handleMarkerClick}
-                  onDelete={handleMarkerDelete}
-                  onTimeChange={handleMarkerTimeChange}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <FilterBar
+                  filters={filters}
+                  counts={{
+                    detected: detectedCount,
+                    rejected: rejectedCount,
+                    manual: manualCount,
+                  }}
+                  onChange={setFilters}
                 />
-              </Waveform>
+                <ZoomControls zoom={zoom} onZoomChange={setZoom} />
+              </div>
+              <div ref={waveformWrapperRef}>
+                <Waveform
+                  peaks={peaks.peaks}
+                  duration={peaks.duration}
+                  currentTime={currentTime}
+                  beepTime={filters.beep ? peaks.beep_time : null}
+                  pixelsPerSecond={zoomToPixelsPerSecond(
+                    zoom,
+                    waveformViewport,
+                    peaks.duration,
+                  )}
+                  onScrub={handleScrub}
+                  onDoubleClick={handleAddManual}
+                  height={160}
+                >
+                  <MarkerLayer
+                    markers={markers}
+                    duration={peaks.duration}
+                    focusedId={focusedMarkerId}
+                    onFocusChange={setFocusedMarkerId}
+                    onClick={handleMarkerClick}
+                    onDelete={handleMarkerDelete}
+                    onTimeChange={handleMarkerTimeChange}
+                    visibleKinds={visibleKinds}
+                  />
+                </Waveform>
+              </div>
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <Button
                   variant="outline"

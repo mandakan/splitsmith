@@ -1,24 +1,25 @@
 /**
- * Static-peaks waveform with pointer-driven scrubbing.
+ * Static-peaks waveform with pointer-driven scrubbing + horizontal zoom.
  *
- * Issue #15: the audit screen renders the primary's audio as a static canvas
- * and overlays the active video's playhead. Scrubbing the waveform updates
- * the playback time directly -- no two-element sync drift.
+ * Issue #15: the audit screen renders the primary's audio as a static
+ * canvas and overlays the active video's playhead. Scrubbing the
+ * waveform updates playback time directly -- no two-element sync drift.
  *
- * This component is the substrate. It is intentionally markerless; the marker
- * layer composes on top in a sibling overlay (added in Step 3).
+ * Two layout modes:
+ *   - **fit**: ``pixelsPerSecond`` is null/undefined; content width tracks
+ *     the container, no horizontal scroll. The default.
+ *   - **zoom**: ``pixelsPerSecond`` set; content width = duration * pps,
+ *     wrapped in an overflow-x-auto outer; auto-scrolls the playhead
+ *     into view during playback.
+ *
+ * Marker children compose into the inner (content) div so their
+ * absolute / percent positions stay correct under both modes.
  *
  * Contract:
- *   - `peaks` is an array of normalized magnitudes (0..1) computed server-side
- *     by `splitsmith.waveform.compute_peaks`. The component does not decode
- *     audio.
- *   - `currentTime` drives the playhead position. The component does not own
- *     playback state; the parent feeds it from the active video element via
- *     `requestAnimationFrame` (see Step 2's VideoPanel).
- *   - `onScrub(t)` fires while the user drags or clicks. The parent is
- *     responsible for setting `video.currentTime` (with beep-offset math when
- *     the active video is a secondary). Throttling to rAF cadence happens
- *     here so the parent doesn't have to.
+ *   - `peaks` is server-computed (splitsmith.waveform.compute_peaks).
+ *   - `currentTime` drives the playhead; the parent feeds it from the
+ *     active <video> via rAF.
+ *   - `onScrub(t)` fires while the user drags; rAF-throttled internally.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -31,10 +32,13 @@ interface WaveformProps {
   currentTime: number;
   onScrub: (timeSeconds: number) => void;
   onScrubEnd?: () => void;
-  /** Fires on a double-click on the waveform background. The parent can use
-   *  this to add a manual marker at the clicked time (issue #15). */
+  /** Fires on a double-click on the waveform background. The parent can
+   *  use this to add a manual marker at the clicked time (issue #15). */
   onDoubleClick?: (timeSeconds: number) => void;
   beepTime?: number | null;
+  /** Pixels-per-second of the rendered content. Null/undefined => fit
+   *  the visible container width (no horizontal scroll). */
+  pixelsPerSecond?: number | null;
   height?: number;
   className?: string;
   ariaLabel?: string;
@@ -49,33 +53,44 @@ export function Waveform({
   onScrubEnd,
   onDoubleClick,
   beepTime,
+  pixelsPerSecond,
   height = 128,
   className,
   ariaLabel = "Audio waveform -- drag to scrub",
   children,
 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const outerRef = useRef<HTMLDivElement | null>(null);
+  // Tracks the visible viewport's width so fit-mode can size the canvas
+  // and zoom-mode can know when the playhead leaves the visible area.
+  const [viewportWidth, setViewportWidth] = useState(0);
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const draggingRef = useRef(false);
   const pendingTimeRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
-  // Track container width so the canvas re-renders crisply on resize.
   useLayoutEffect(() => {
-    const el = containerRef.current;
+    const el = outerRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const w = Math.floor(entry.contentRect.width);
-        if (w > 0) setWidth(w);
+        if (w > 0) setViewportWidth(w);
       }
     });
     observer.observe(el);
-    setWidth(Math.floor(el.getBoundingClientRect().width));
+    setViewportWidth(Math.floor(el.getBoundingClientRect().width));
     return () => observer.disconnect();
   }, []);
+
+  // Effective content width in CSS pixels.
+  const contentWidth = useMemo(() => {
+    if (pixelsPerSecond != null && duration > 0) {
+      return Math.max(1, Math.floor(pixelsPerSecond * duration));
+    }
+    return viewportWidth;
+  }, [pixelsPerSecond, duration, viewportWidth]);
 
   const cssVar = useCallback((name: string, fallback: string) => {
     if (typeof window === "undefined") return fallback;
@@ -87,9 +102,9 @@ export function Waveform({
   // Draw bars + playhead + optional beep marker.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || width === 0) return;
+    if (!canvas || contentWidth === 0) return;
 
-    const cssWidth = width;
+    const cssWidth = contentWidth;
     const cssHeight = height;
     canvas.width = Math.floor(cssWidth * dpr);
     canvas.height = Math.floor(cssHeight * dpr);
@@ -105,7 +120,7 @@ export function Waveform({
     const playheadColor = cssVar("--waveform-playhead", "#d55e00");
     const beepColor = cssVar("--waveform-beep", "#0072b2");
 
-    // Bars: one per peak, scaled to canvas width so the strip fills the box.
+    // Bars: one per peak, scaled to content width.
     const n = peaks.length;
     if (n > 0) {
       const barStride = cssWidth / n;
@@ -141,7 +156,23 @@ export function Waveform({
       ctx.lineTo(x, cssHeight);
       ctx.stroke();
     }
-  }, [peaks, duration, currentTime, beepTime, width, height, dpr, cssVar]);
+  }, [peaks, duration, currentTime, beepTime, contentWidth, height, dpr, cssVar]);
+
+  // Auto-scroll the playhead into view during playback. Edge-trigger:
+  // only adjust scroll when the playhead leaves a center band, otherwise
+  // small playback jitter would yank the user's manual scrolling.
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer || contentWidth <= viewportWidth || duration <= 0) return;
+    if (draggingRef.current) return; // user is scrubbing; don't fight them
+    const playheadX = (Math.min(Math.max(currentTime, 0), duration) / duration) * contentWidth;
+    const visibleLeft = outer.scrollLeft;
+    const visibleRight = visibleLeft + viewportWidth;
+    const margin = viewportWidth * 0.1;
+    if (playheadX < visibleLeft + margin || playheadX > visibleRight - margin) {
+      outer.scrollLeft = Math.max(0, playheadX - viewportWidth / 2);
+    }
+  }, [currentTime, contentWidth, viewportWidth, duration]);
 
   const flushScrub = useCallback(() => {
     rafRef.current = null;
@@ -162,11 +193,15 @@ export function Waveform({
     [flushScrub],
   );
 
+  // Pointer math: clientX -> time. Uses the inner content div's bounding
+  // rect (which reflects scroll position automatically), so zoom + scroll
+  // don't break scrub accuracy.
   const timeFromEvent = useCallback(
     (clientX: number): number => {
-      const el = containerRef.current;
+      const el = innerRef.current;
       if (!el || duration <= 0) return 0;
       const rect = el.getBoundingClientRect();
+      if (rect.width <= 0) return 0;
       const ratio = (clientX - rect.left) / rect.width;
       return Math.min(Math.max(ratio, 0), 1) * duration;
     },
@@ -177,7 +212,7 @@ export function Waveform({
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      const el = containerRef.current;
+      const el = innerRef.current;
       if (!el) return;
       el.setPointerCapture(e.pointerId);
       draggingRef.current = true;
@@ -198,11 +233,10 @@ export function Waveform({
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
-      const el = containerRef.current;
+      const el = innerRef.current;
       if (el && el.hasPointerCapture(e.pointerId)) {
         el.releasePointerCapture(e.pointerId);
       }
-      // Flush any pending rAF immediately so the final frame lands.
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -213,7 +247,6 @@ export function Waveform({
     [flushScrub, onScrubEnd],
   );
 
-  // Cancel any in-flight rAF on unmount.
   useEffect(() => {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
@@ -227,34 +260,41 @@ export function Waveform({
 
   return (
     <div
-      ref={containerRef}
-      role="slider"
-      aria-label={ariaLabel}
-      aria-valuemin={0}
-      aria-valuemax={Math.max(duration, 0)}
-      aria-valuenow={Math.min(Math.max(currentTime, 0), Math.max(duration, 0))}
-      aria-valuetext={ariaValueText}
-      tabIndex={0}
+      ref={outerRef}
       className={cn(
         "relative w-full select-none rounded-md bg-muted/40 ring-1 ring-border",
-        "cursor-ew-resize touch-none",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "overflow-x-auto overflow-y-hidden",
         className,
       )}
       style={{ height }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onDoubleClick={(e) => {
-        if (!onDoubleClick) return;
-        // Ignore double-clicks that originated on a marker (overlay child).
-        if ((e.target as HTMLElement).closest("[data-audit-marker]")) return;
-        onDoubleClick(timeFromEvent(e.clientX));
-      }}
     >
-      <canvas ref={canvasRef} className="block" />
-      {children}
+      <div
+        ref={innerRef}
+        role="slider"
+        aria-label={ariaLabel}
+        aria-valuemin={0}
+        aria-valuemax={Math.max(duration, 0)}
+        aria-valuenow={Math.min(Math.max(currentTime, 0), Math.max(duration, 0))}
+        aria-valuetext={ariaValueText}
+        tabIndex={0}
+        className={cn(
+          "relative cursor-ew-resize touch-none",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+        style={{ width: contentWidth, height }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onDoubleClick={(e) => {
+          if (!onDoubleClick) return;
+          if ((e.target as HTMLElement).closest("[data-audit-marker]")) return;
+          onDoubleClick(timeFromEvent(e.clientX));
+        }}
+      >
+        <canvas ref={canvasRef} className="block" />
+        {children}
+      </div>
     </div>
   );
 }

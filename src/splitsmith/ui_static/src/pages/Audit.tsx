@@ -41,6 +41,14 @@ import {
   Undo2,
 } from "lucide-react";
 
+import {
+  DEFAULT_FILTERS,
+  FilterBar,
+  ZoomControls,
+  type MarkerFilters,
+  visibleKindsFromFilters,
+  zoomToPixelsPerSecond,
+} from "@/components/AuditControls";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
@@ -106,6 +114,12 @@ export function Audit() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
+  const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
+  // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
+  // relative to fit. Reset on stage change.
+  const [zoom, setZoom] = useState<number | null>(null);
+  const waveformWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [waveformViewport, setWaveformViewport] = useState(0);
   const rafRef = useRef<number | null>(null);
 
   const stageNumber = useMemo(() => {
@@ -187,6 +201,8 @@ export function Audit() {
     setFocusedMarkerId(null);
     setCurrentShotIndex(0);
     setShowDrawer(false);
+    setZoom(null);
+    setFilters(DEFAULT_FILTERS);
     undoStackRef.current = [];
     sessionEventsRef.current = [];
     isDirtyRef.current = false;
@@ -496,6 +512,30 @@ export function Audit() {
     [handleScrub, keptShots],
   );
 
+  // Track the waveform wrapper's viewport width so zoom multipliers can
+  // be converted to absolute pixels-per-second. Bound to the wrapping
+  // div around <Waveform> below; ResizeObserver keeps it accurate during
+  // window resize / drawer toggle.
+  useEffect(() => {
+    const el = waveformWrapperRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0) setWaveformViewport(w);
+      }
+    });
+    observer.observe(el);
+    setWaveformViewport(Math.floor(el.getBoundingClientRect().width));
+    return () => observer.disconnect();
+  }, []);
+
+  const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
+  const pixelsPerSecond = useMemo(
+    () => zoomToPixelsPerSecond(zoom, waveformViewport, peaks?.duration ?? 0),
+    [zoom, waveformViewport, peaks],
+  );
+
   // ---- Save flow (Step 5) ------------------------------------------------
 
   const performSave = useCallback(
@@ -586,6 +626,19 @@ export function Audit() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void performSave();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3")) {
+        // Cmd+1 zoom in / Cmd+2 fit / Cmd+3 zoom out -- matches the old
+        // review SPA's bindings so muscle memory carries over.
+        e.preventDefault();
+        if (e.key === "2") setZoom(null);
+        else if (e.key === "1")
+          setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
+        else setZoom((z) => {
+          const next = (z ?? 1) / 1.5;
+          return next <= 0.25 ? null : next;
+        });
         return;
       }
       if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -768,25 +821,41 @@ export function Audit() {
               </div>
             ) : peaks ? (
               <>
-                <Waveform
-                  peaks={peaks.peaks}
-                  duration={peaks.duration}
-                  currentTime={currentTime}
-                  beepTime={auditBeep}
-                  onScrub={handleScrub}
-                  onDoubleClick={handleAddManual}
-                  height={160}
-                >
-                  <MarkerLayer
-                    markers={markers}
-                    duration={peaks.duration}
-                    focusedId={focusedMarkerId}
-                    onFocusChange={setFocusedMarkerId}
-                    onClick={handleMarkerClick}
-                    onDelete={handleMarkerDelete}
-                    onTimeChange={handleMarkerTimeChange}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <FilterBar
+                    filters={filters}
+                    counts={{
+                      detected: detectedCount,
+                      rejected: rejectedCount,
+                      manual: manualCount,
+                    }}
+                    onChange={setFilters}
                   />
-                </Waveform>
+                  <ZoomControls zoom={zoom} onZoomChange={setZoom} />
+                </div>
+                <div ref={waveformWrapperRef}>
+                  <Waveform
+                    peaks={peaks.peaks}
+                    duration={peaks.duration}
+                    currentTime={currentTime}
+                    beepTime={filters.beep ? auditBeep : null}
+                    pixelsPerSecond={pixelsPerSecond}
+                    onScrub={handleScrub}
+                    onDoubleClick={handleAddManual}
+                    height={160}
+                  >
+                    <MarkerLayer
+                      markers={markers}
+                      duration={peaks.duration}
+                      focusedId={focusedMarkerId}
+                      onFocusChange={setFocusedMarkerId}
+                      onClick={handleMarkerClick}
+                      onDelete={handleMarkerDelete}
+                      onTimeChange={handleMarkerTimeChange}
+                      visibleKinds={visibleKinds}
+                    />
+                  </Waveform>
+                </div>
                 <div className="flex flex-wrap items-center gap-3 text-sm">
                   <Button
                     variant="outline"
