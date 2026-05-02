@@ -14,7 +14,7 @@
  *   - Keyboard navigable: Tab through, Enter on a row to drill in
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Clock,
@@ -295,8 +295,9 @@ function VideoRowMulti({
   onToggle: () => void;
   onProbed: (duration: number | null, thumbnail_url: string | null) => void;
 }) {
-  const [hover, setHover] = useState(false);
+  const [rect, setRect] = useState<DOMRect | null>(null);
   const [probing, setProbing] = useState(false);
+  const liRef = useRef<HTMLLIElement | null>(null);
 
   const ensureProbe = useCallback(async () => {
     if (entry.duration != null && entry.thumbnail_url != null) return;
@@ -314,12 +315,12 @@ function VideoRowMulti({
 
   return (
     <li
+      ref={liRef}
       onMouseEnter={() => {
-        setHover(true);
+        setRect(liRef.current?.getBoundingClientRect() ?? null);
         void ensureProbe();
       }}
-      onMouseLeave={() => setHover(false)}
-      className="relative"
+      onMouseLeave={() => setRect(null)}
     >
       <label
         className={cn(
@@ -340,21 +341,54 @@ function VideoRowMulti({
           <span className="truncate font-mono text-xs">{entry.name}</span>
         </span>
         <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground tabular-nums">
+          {entry.mtime != null ? <span>{formatMtime(entry.mtime)}</span> : null}
           {entry.duration != null ? <span>{formatDuration(entry.duration)}</span> : null}
           {entry.size_bytes != null ? <span>{formatBytes(entry.size_bytes)}</span> : null}
         </span>
       </label>
-      {hover && entry.thumbnail_url ? (
-        <div className="pointer-events-none absolute right-2 top-full z-10 mt-1 rounded-md border border-border bg-popover p-1 shadow-lg">
-          <img
-            src={entry.thumbnail_url}
-            alt={`${entry.name} thumbnail`}
-            className="h-32 rounded"
-          />
-        </div>
+      {rect && entry.thumbnail_url ? (
+        <ThumbnailFloat anchor={rect} src={entry.thumbnail_url} alt={entry.name} />
       ) : null}
     </li>
   );
+}
+
+function ThumbnailFloat({ anchor, src, alt }: { anchor: DOMRect; src: string; alt: string }) {
+  // Fixed positioning escapes the picker's overflow:auto clip so rows near
+  // the bottom of the list still render their preview. We anchor the
+  // thumbnail to the right edge of the row, flip it to the left if the
+  // viewport's right side wouldn't fit, and clamp the vertical position so
+  // it never paints off-screen.
+  const W = 320; // matches max-w used below
+  const H = 192; // h-48 -> 12rem -> 192px; rough cap to keep clamping math simple
+  const margin = 8;
+  const flipLeft = anchor.right + W + margin > window.innerWidth;
+  const left = flipLeft ? Math.max(margin, anchor.left - W - margin) : anchor.right + margin;
+  const desiredTop = anchor.top + anchor.height / 2 - H / 2;
+  const top = Math.max(margin, Math.min(window.innerHeight - H - margin, desiredTop));
+  return (
+    <div
+      role="presentation"
+      style={{ position: "fixed", top, left, width: W, zIndex: 50 }}
+      className="pointer-events-none rounded-md border border-border bg-popover p-1 shadow-xl"
+    >
+      <img src={src} alt={`${alt} thumbnail`} className="w-full rounded" />
+    </div>
+  );
+}
+
+function formatMtime(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
+  const date = d.toLocaleDateString(undefined, {
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${date} ${time}`;
 }
 
 function formatDuration(seconds: number): string {
