@@ -926,10 +926,52 @@ def test_trim_partial_filename_keeps_mp4_extension(tmp_path: Path, monkeypatch) 
     assert final["status"] == "succeeded", final
     assert captured, "trim_video should have been invoked"
     assert captured[0].suffix == ".mp4", (
-        f"partial path must keep .mp4 so ffmpeg infers the muxer; "
-        f"got {captured[0].name}"
+        f"partial path must keep .mp4 so ffmpeg infers the muxer; " f"got {captured[0].name}"
     )
     assert ".partial" in captured[0].stem
+
+
+def test_trim_endpoint_returns_existing_job_when_one_is_running(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A second submit while the first is still running adopts the existing
+    job instead of spawning a parallel ffmpeg that races on the partial
+    file. Symptom we're guarding against: clicking "Trim now" twice (or
+    after a reload) shouldn't double-submit."""
+    import threading
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import trim
+
+    proceed = threading.Event()
+    invocations = []
+
+    def slow_trim(**kwargs):  # type: ignore[no-untyped-def]
+        invocations.append(kwargs)
+        proceed.wait(timeout=2.0)
+        out = Path(kwargs["output_path"])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"T")
+        return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
+
+    monkeypatch.setattr(trim, "trim_video", slow_trim)
+
+    first = client.post("/api/stages/1/trim").json()
+    second = client.post("/api/stages/1/trim").json()
+    assert first["id"] == second["id"], "second submit should return the same job"
+    proceed.set()
+    final = _wait_for_job(client, first["id"])
+    assert final["status"] == "succeeded"
+    assert len(invocations) == 1, "ffmpeg must run only once"
 
 
 def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:

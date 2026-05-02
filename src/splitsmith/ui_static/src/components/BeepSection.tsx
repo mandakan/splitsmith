@@ -39,6 +39,45 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
     setDraft(primary.beep_time?.toFixed(3) ?? "");
   }, [primary.beep_time]);
 
+  // After a page reload, an in-flight detect-beep job is still running on
+  // the server. Surface it instead of letting the user click "Detect beep"
+  // again -- the server now dedupes anyway, but the SPA showing the
+  // progress is the difference between confidence and confusion.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listJobs()
+      .then(async (jobs) => {
+        if (cancelled) return;
+        const active = jobs.find(
+          (j) =>
+            j.kind === "detect_beep" &&
+            j.stage_number === stageNumber &&
+            (j.status === "pending" || j.status === "running"),
+        );
+        if (!active) return;
+        setJobStatus(active);
+        setBusy(true);
+        try {
+          const final = await api.pollJob(active.id, setJobStatus);
+          if (cancelled) return;
+          if (final.status === "succeeded") onProjectUpdate(await api.getProject());
+          else if (final.status === "failed") setError(final.error ?? "Beep detection failed");
+        } finally {
+          if (!cancelled) {
+            setJobStatus(null);
+            setBusy(false);
+          }
+        }
+      })
+      .catch(() => {
+        /* the action buttons still work; nothing to surface */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stageNumber, onProjectUpdate, setBusy, setError]);
+
   const detect = async (force: boolean) => {
     setBusy(true);
     setError(null);

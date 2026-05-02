@@ -497,6 +497,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             proj.save(state.project_root)
             handle.update(progress=1.0, message="Done")
 
+        existing = state.jobs.find_active(kind="detect_beep", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(kind="detect_beep", stage_number=stage_number, fn=run)
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -555,6 +558,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             proj.save(state.project_root)
             handle.update(progress=1.0, message="Done")
 
+        existing = state.jobs.find_active(kind="trim", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(kind="trim", stage_number=stage_number, fn=run)
         return JSONResponse(job.model_dump(mode="json"))
 

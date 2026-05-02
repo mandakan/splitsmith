@@ -617,9 +617,45 @@ function TrimNowBadge({
       : null;
   const running = job != null && (job.status === "pending" || job.status === "running");
 
+  // Auto-adopt an in-flight trim on mount / stage change. After a page
+  // reload the server still has the running job; we reattach to it
+  // instead of leaving the user a "Trim now" button that double-submits.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listJobs()
+      .then(async (jobs) => {
+        if (cancelled) return;
+        const active = jobs.find(
+          (j) =>
+            j.kind === "trim" &&
+            j.stage_number === stageNumber &&
+            (j.status === "pending" || j.status === "running"),
+        );
+        if (!active) return;
+        setJob(active);
+        try {
+          const final = await api.pollJob(active.id, setJob);
+          if (cancelled) return;
+          if (final.status === "succeeded") onProjectUpdate(await api.getProject());
+          else if (final.status === "failed") setError(final.error ?? "Trim failed");
+        } finally {
+          if (!cancelled) setJob(null);
+        }
+      })
+      .catch(() => {
+        /* swallow -- the user can still click Trim now to retry */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stageNumber, onProjectUpdate]);
+
   const onClick = useCallback(async () => {
     setError(null);
     try {
+      // The server returns the existing active job if one is in flight,
+      // so two clicks (or a click after reload) don't spawn parallels.
       const initial = await api.trimStage(stageNumber);
       setJob(initial);
       const final = await api.pollJob(initial.id, setJob);

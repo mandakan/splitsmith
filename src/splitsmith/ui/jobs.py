@@ -174,6 +174,25 @@ class JobRegistry:
                 self._jobs[jid].model_copy(deep=True) for jid in self._order if jid in self._jobs
             ]
 
+    def find_active(self, *, kind: str, stage_number: int | None = None) -> Job | None:
+        """Return the first PENDING/RUNNING job matching ``(kind, stage_number)``.
+
+        Used to dedupe submissions: a second click of "Trim now" while the
+        first job is still running should adopt the existing job instead
+        of spawning a parallel ffmpeg that races on the same output file.
+        """
+        with self._lock:
+            for jid in self._order:
+                j = self._jobs.get(jid)
+                if j is None:
+                    continue
+                if j.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+                    continue
+                if j.kind != kind or j.stage_number != stage_number:
+                    continue
+                return j.model_copy(deep=True)
+            return None
+
     # ------------------------------------------------------------------
     # Internal -- worker glue. These run on the executor thread.
     # ------------------------------------------------------------------
