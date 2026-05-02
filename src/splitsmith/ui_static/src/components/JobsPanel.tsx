@@ -45,8 +45,14 @@ function isActive(job: Job): boolean {
 }
 
 function jobLabel(job: Job): string {
-  const stage = job.stage_number != null ? ` (Stage ${job.stage_number})` : "";
-  return `${formatKind(job.kind)}${stage}`;
+  const stage = job.stage_number != null ? ` (Stage ${job.stage_number}` : "";
+  // Per-camera jobs (multi-cam beep / trim) tag the row with the first
+  // 6 chars of the video_id so the user can tell parallel jobs apart.
+  // Stage-level jobs (shot_detect, export) don't carry a video_id, so
+  // the row falls back to "(Stage N)" alone.
+  const cam = job.video_id ? ` -- cam ${job.video_id.slice(0, 6)}` : "";
+  const close = job.stage_number != null ? ")" : "";
+  return `${formatKind(job.kind)}${stage}${cam}${close}`;
 }
 
 interface StatusIconProps {

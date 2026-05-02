@@ -4,12 +4,15 @@ The CLI does this inline in ``cli.py:_extract_or_load_audio`` (caching the WAV
 next to the source video). The production UI prefers project-local caching so
 the project directory stays self-contained:
 
-  <project>/audio/stage<N>_primary.wav   -- extracted from the full source
-  <project>/audio/stage<N>_audit.wav     -- extracted from the trimmed MP4
+  <project>/audio/stage<N>_primary.wav            -- primary WAV (legacy name)
+  <project>/audio/stage<N>_cam_<video_id>.wav     -- non-primary WAV (per video)
+  <project>/audio/stage<N>_audit.wav              -- primary's audit WAV
+  <project>/audio/stage<N>_cam_<video_id>_audit.wav -- secondary's audit WAV
 
 The audit screen (#15) prefers the audit WAV when a trimmed clip exists,
-falling back to the full primary WAV. The cache is invalidated when its
-source's mtime changes.
+falling back to the full WAV. Caches are invalidated when their source's
+mtime changes. Per-video keys live alongside the legacy primary names so
+existing primary caches survive the rollout to multi-camera ingest.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from pathlib import Path
 
 from .. import beep_detect
 from ..config import BeepDetectConfig, BeepDetection
-from .project import MatchProject
+from .project import MatchProject, StageVideo
 
 # Standard trim buffer (config.OutputConfig.trim_buffer_seconds default).
 # Used to derive the beep's position inside a trimmed clip when no trim
@@ -49,6 +52,26 @@ class AuditAudioResult:
 
 class AudioExtractionError(RuntimeError):
     """ffmpeg or ffprobe failed during audio extraction."""
+
+
+def video_audio_path(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject | None = None,
+) -> Path:
+    """Resolve the cached audio-WAV path for ``video`` on ``stage_number``.
+
+    Filename rules:
+      - primary -> ``stage<N>_primary.wav`` (legacy; preserved so existing
+        caches survive the introduction of multi-cam beep workflows)
+      - non-primary -> ``stage<N>_cam_<video_id>.wav`` (per-video)
+    """
+    audio_dir = project.audio_path(project_root) if project else project_root / "audio"
+    if video.role == "primary":
+        return audio_dir / f"stage{stage_number}_primary.wav"
+    return audio_dir / f"stage{stage_number}_cam_{video.video_id}.wav"
 
 
 def primary_audio_path(
@@ -120,6 +143,91 @@ def ensure_primary_audio(
     return audio_path
 
 
+def ensure_video_audio(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    source_video: Path,
+    *,
+    sample_rate: int = 48000,
+    ffmpeg_binary: str = "ffmpeg",
+    project: MatchProject | None = None,
+) -> Path:
+    """Extract a mono WAV for ``video`` if not already cached.
+
+    For the primary, delegates to :func:`ensure_primary_audio` so the
+    legacy ``stage<N>_primary.wav`` cache + monkeypatch points keep
+    working. Non-primary cameras land at
+    ``<audio_dir>/stage<N>_cam_<video_id>.wav`` and run their own
+    extraction. Re-extracts when the source mtime is newer than cache.
+    """
+    if video.role == "primary":
+        return ensure_primary_audio(
+            project_root,
+            stage_number,
+            source_video,
+            sample_rate=sample_rate,
+            ffmpeg_binary=ffmpeg_binary,
+            project=project,
+        )
+    audio_path = video_audio_path(project_root, stage_number, video, project=project)
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+
+    src_resolved = source_video.resolve()
+    if not src_resolved.exists():
+        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+
+    if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
+        return audio_path
+
+    if not shutil.which(ffmpeg_binary):
+        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
+
+    cmd = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(src_resolved),
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-vn",
+        str(audio_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise AudioExtractionError(
+            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc
+    return audio_path
+
+
+def trimmed_video_path(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+) -> Path:
+    """Resolve the cached audit-mode short-GOP MP4 for ``video`` on a stage.
+
+    Primary keeps the legacy ``stage<N>_trimmed.mp4`` filename; non-primary
+    cameras get ``stage<N>_cam_<video_id>_trimmed.mp4`` so each angle has its
+    own scrub clip cut around its own beep.
+    """
+    if video.role == "primary":
+        return project.trimmed_path(project_root) / f"stage{stage_number}_trimmed.mp4"
+    return (
+        project.trimmed_path(project_root)
+        / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
+    )
+
+
 def trimmed_primary_path(project_root: Path, stage_number: int, *, project: MatchProject) -> Path:
     """Resolve the cached short-GOP trimmed MP4 path for a stage's primary."""
     return project.trimmed_path(project_root) / f"stage{stage_number}_trimmed.mp4"
@@ -131,9 +239,23 @@ def audit_audio_path(
     *,
     project: MatchProject,
 ) -> Path:
-    """Cache path for the audit WAV (extracted from the trimmed MP4)."""
+    """Cache path for the primary's audit WAV (extracted from the trimmed MP4)."""
     audio_dir = project.audio_path(project_root)
     return audio_dir / f"stage{stage_number}_audit.wav"
+
+
+def video_audit_audio_path(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+) -> Path:
+    """Cache path for ``video``'s audit WAV (extracted from its trimmed MP4)."""
+    if video.role == "primary":
+        return audit_audio_path(project_root, stage_number, project=project)
+    audio_dir = project.audio_path(project_root)
+    return audio_dir / f"stage{stage_number}_cam_{video.video_id}_audit.wav"
 
 
 def ensure_audit_audio(
@@ -242,15 +364,21 @@ def _current_trim_params(
     }
 
 
-def invalidate_audit_trim(project_root: Path, stage_number: int, *, project: MatchProject) -> None:
-    """Delete the cached trim, audit WAV, and params sidecar.
+def invalidate_video_audit_trim(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+) -> None:
+    """Delete the cached trim, audit WAV, and params sidecar for ``video``.
 
     Called after beep_time changes (manual override) or stage_time changes
     (scoreboard re-import) so the next trim job runs from scratch instead
     of trusting a now-stale cache. Idempotent if any file is missing.
     """
-    output = trimmed_primary_path(project_root, stage_number, project=project)
-    wav = audit_audio_path(project_root, stage_number, project=project)
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    wav = video_audit_audio_path(project_root, stage_number, video, project=project)
     params = trim_params_path(output)
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     for p in (output, wav, params, partial):
@@ -261,48 +389,71 @@ def invalidate_audit_trim(project_root: Path, stage_number: int, *, project: Mat
             pass
 
 
-def ensure_audit_trim(
+def invalidate_audit_trim(project_root: Path, stage_number: int, *, project: MatchProject) -> None:
+    """Backward-compat shim: invalidate the primary's audit trim.
+
+    Equivalent to :func:`invalidate_video_audit_trim` with the stage's
+    primary. Synthesizes a primary-role ``StageVideo`` so the legacy code
+    path in callers that don't have the live model handy still works.
+    """
+    invalidate_video_audit_trim(
+        project_root,
+        stage_number,
+        StageVideo(path=Path("primary"), role="primary"),
+        project=project,
+    )
+
+
+def ensure_video_audit_trim(
     project_root: Path,
     stage_number: int,
-    primary_source: Path,
-    primary_beep_time: float,
+    video: StageVideo,
+    source: Path,
+    beep_time: float,
     stage_time_seconds: float,
     *,
     project: MatchProject,
     ffmpeg_binary: str = "ffmpeg",
     runner: object | None = None,
 ) -> Path:
-    """Produce ``stage<N>_trimmed.mp4`` for the audit screen if not cached.
+    """Produce the audit-mode short-GOP trim for ``video`` if not cached.
 
-    Re-encodes the primary's source with a short GOP (Sub 5 / #16 audit
-    mode) so the audit screen scrubs frame-accurately. The trim window is
-    ``[max(0, beep - pre_buffer), beep + stage_time + post_buffer]``.
+    Generic over role: primary delegates to :func:`ensure_audit_trim` so
+    legacy filename caching + monkeypatch surfaces keep working;
+    secondaries run the same trim pipeline against their per-video output
+    path. The trim window is ``[max(0, beep - pre_buffer), beep +
+    stage_time + post_buffer]`` -- same shape for both roles.
 
-    Cache key is the source mtime *and* a sidecar params JSON: when the
+    Cache key is the source mtime *and* a sidecar params JSON; when the
     beep, stage time, or buffer settings change, the next call sees a
-    params mismatch and re-trims even though the source file is
-    untouched. Without that the user could fix a wrong beep, click "Trim
-    now", and still get the old trim served back.
-
-    Returns the path to the trimmed MP4. Raises ``AudioExtractionError`` on
-    ffmpeg failure (kept under the same error type the audio helpers
-    already raise so the endpoint can map them with one ``except``).
+    params mismatch and re-trims even though the source file is untouched.
     """
+    if video.role == "primary":
+        return ensure_audit_trim(
+            project_root,
+            stage_number,
+            source,
+            beep_time,
+            stage_time_seconds,
+            project=project,
+            ffmpeg_binary=ffmpeg_binary,
+            runner=runner,
+        )
     from .. import trim as trim_module
 
-    output = trimmed_primary_path(project_root, stage_number, project=project)
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     params_file = trim_params_path(output)
     current_params = _current_trim_params(
-        primary_beep_time=primary_beep_time,
+        primary_beep_time=beep_time,
         stage_time_seconds=stage_time_seconds,
         project=project,
     )
 
-    src_resolved = primary_source.resolve()
+    src_resolved = source.resolve()
     if not src_resolved.exists():
-        raise FileNotFoundError(f"primary video missing on disk: {src_resolved}")
+        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
 
     cache_hit = (
         output.exists()
@@ -332,7 +483,7 @@ def ensure_audit_trim(
     trim_kwargs: dict[str, object] = {
         "input_path": src_resolved,
         "output_path": partial,
-        "beep_time": primary_beep_time,
+        "beep_time": beep_time,
         "stage_time": stage_time_seconds,
         "pre_buffer_seconds": project.trim_pre_buffer_seconds,
         "post_buffer_seconds": project.trim_post_buffer_seconds,
@@ -347,6 +498,97 @@ def ensure_audit_trim(
         trim_module.trim_video(**trim_kwargs)
     except trim_module.FFmpegError as exc:
         # ffmpeg may have written some bytes before bailing; delete them.
+        if partial.exists():
+            partial.unlink()
+        raise AudioExtractionError(str(exc)) from exc
+
+    partial.replace(output)
+    params_file.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8")
+    return output
+
+
+def ensure_audit_trim(
+    project_root: Path,
+    stage_number: int,
+    primary_source: Path,
+    primary_beep_time: float,
+    stage_time_seconds: float,
+    *,
+    project: MatchProject,
+    ffmpeg_binary: str = "ffmpeg",
+    runner: object | None = None,
+) -> Path:
+    """Produce ``stage<N>_trimmed.mp4`` for the audit screen if not cached.
+
+    Re-encodes the primary's source with a short GOP (Sub 5 / #16 audit
+    mode) so the audit screen scrubs frame-accurately. The trim window is
+    ``[max(0, beep - pre_buffer), beep + stage_time + post_buffer]``.
+
+    Cache key is the source mtime *and* a sidecar params JSON: when the
+    beep, stage time, or buffer settings change, the next call sees a
+    params mismatch and re-trims even though the source file is
+    untouched. Without that the user could fix a wrong beep, click "Trim
+    now", and still get the old trim served back.
+
+    Returns the path to the trimmed MP4. Raises ``AudioExtractionError``
+    on ffmpeg failure (kept under the same error type the audio helpers
+    already raise so the endpoint can map them with one ``except``).
+    """
+    from .. import trim as trim_module
+
+    output = trimmed_primary_path(project_root, stage_number, project=project)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_name(f"{output.stem}.partial{output.suffix}")
+    params_file = trim_params_path(output)
+    current_params = _current_trim_params(
+        primary_beep_time=primary_beep_time,
+        stage_time_seconds=stage_time_seconds,
+        project=project,
+    )
+
+    src_resolved = primary_source.resolve()
+    if not src_resolved.exists():
+        raise FileNotFoundError(f"primary video missing on disk: {src_resolved}")
+
+    cache_hit = (
+        output.exists()
+        and output.stat().st_mtime >= src_resolved.stat().st_mtime
+        and params_file.exists()
+    )
+    if cache_hit:
+        try:
+            existing_params = json.loads(params_file.read_text(encoding="utf-8"))
+            if existing_params == current_params:
+                if partial.exists():
+                    partial.unlink()
+                return output
+        except (OSError, ValueError):
+            pass
+
+    for p in (output, partial, params_file):
+        if p.exists():
+            p.unlink()
+
+    encoder = trim_module.select_audit_encoder(
+        project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary
+    )
+    trim_kwargs: dict[str, object] = {
+        "input_path": src_resolved,
+        "output_path": partial,
+        "beep_time": primary_beep_time,
+        "stage_time": stage_time_seconds,
+        "pre_buffer_seconds": project.trim_pre_buffer_seconds,
+        "post_buffer_seconds": project.trim_post_buffer_seconds,
+        "mode": "audit",
+        "video_encoder": encoder,
+        "ffmpeg_binary": ffmpeg_binary,
+        "overwrite": True,
+    }
+    if runner is not None:
+        trim_kwargs["runner"] = runner
+    try:
+        trim_module.trim_video(**trim_kwargs)
+    except trim_module.FFmpegError as exc:
         if partial.exists():
             partial.unlink()
         raise AudioExtractionError(str(exc)) from exc
@@ -375,6 +617,46 @@ def detect_primary_beep(
         project_root,
         stage_number,
         source_video,
+        ffmpeg_binary=ffmpeg_binary,
+        project=project,
+    )
+    audio, sr = beep_detect.load_audio(audio_path)
+    cfg = config or BeepDetectConfig()
+    return beep_detect.detect_beep(audio, sr, cfg)
+
+
+def detect_video_beep(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    source: Path,
+    *,
+    config: BeepDetectConfig | None = None,
+    ffmpeg_binary: str = "ffmpeg",
+    project: MatchProject | None = None,
+) -> BeepDetection:
+    """Run ``beep_detect.detect_beep`` against ``video``'s cached audio.
+
+    Generic over role: primary delegates to :func:`detect_primary_beep`
+    so existing monkeypatches + cache filenames keep working;
+    non-primary cameras run the same detector against the per-video
+    audio cache (``stage<N>_cam_<video_id>.wav``). Caller persists the
+    fields onto ``video``.
+    """
+    if video.role == "primary":
+        return detect_primary_beep(
+            project_root,
+            stage_number,
+            source,
+            config=config,
+            ffmpeg_binary=ffmpeg_binary,
+            project=project,
+        )
+    audio_path = ensure_video_audio(
+        project_root,
+        stage_number,
+        video,
+        source,
         ffmpeg_binary=ffmpeg_binary,
         project=project,
     )

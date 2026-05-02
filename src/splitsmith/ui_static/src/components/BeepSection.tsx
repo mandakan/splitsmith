@@ -1,17 +1,24 @@
 /**
- * Per-stage beep detection + correction (issue #22).
+ * Per-video beep detection + correction (issue #22, multi-cam ingest).
  *
- * The beep timestamp anchors the trim window, secondary-video alignment, and
- * shot-detection input window for the audit screen (#15). If detection is
- * wrong, every downstream artefact is wrong. This component exposes:
+ * The beep timestamp anchors the trim window for *every* angle and -- for
+ * the primary -- the shot-detection input window for the audit screen.
+ * Without per-video beep alignment, secondaries can't be slipped into the
+ * audit timeline (a phone shooting at 30 fps and a head-cam at 60 fps need
+ * to land on the same physical instant). This component is rendered once
+ * per video on the stage card so each angle gets the same controls:
  *
  *   - Status: none / auto / manual
  *   - Detect-beep action (or re-detect, with confirmation when overriding manual)
- *   - Manual override: numeric input (seconds, ms precision) + verify-by-ear audio playback
- *   - Clear action: drops the override back to "no beep yet"
+ *   - Manual override: numeric input (seconds, ms precision)
+ *   - Per-video 1 s preview clip around the chosen beep
+ *   - Ranked candidate list (when the detector returned alternatives)
  *
- * Used inside the Ingest screen's <StageCard>; #15 will surface a richer
- * waveform-based correction inline with the audit waveform.
+ * Waveform picker + audio verifier are primary-only because the project
+ * caches a stage-level audit WAV / peaks bundle from the primary's audio.
+ * Secondaries fall back to the numeric input + preview clip; that's
+ * enough for the multi-cam alignment use case (the beep is loud and
+ * visible in the preview).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -45,26 +52,40 @@ import {
 
 interface Props {
   stageNumber: number;
-  primary: StageVideo;
+  /** The video this section operates on. Beep fields, candidate lists and
+   *  the preview clip are all read from / written to this video; the
+   *  per-video API endpoints carry ``video.video_id`` so jobs and caches
+   *  stay scoped to one camera at a time. */
+  video: StageVideo;
   busy: boolean;
   onProjectUpdate: (next: MatchProject) => void;
   setBusy: (b: boolean) => void;
   setError: (msg: string | null) => void;
 }
 
-export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBusy, setError }: Props) {
+export function BeepSection({
+  stageNumber,
+  video,
+  busy,
+  onProjectUpdate,
+  setBusy,
+  setError,
+}: Props) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(primary.beep_time?.toFixed(3) ?? "");
+  const [draft, setDraft] = useState(video.beep_time?.toFixed(3) ?? "");
   const [jobStatus, setJobStatus] = useState<Job | null>(null);
+  const isPrimary = video.role === "primary";
+  const videoId = video.video_id;
 
   useEffect(() => {
-    setDraft(primary.beep_time?.toFixed(3) ?? "");
-  }, [primary.beep_time]);
+    setDraft(video.beep_time?.toFixed(3) ?? "");
+  }, [video.beep_time]);
 
   // After a page reload, an in-flight detect-beep job is still running on
   // the server. Surface it instead of letting the user click "Detect beep"
   // again -- the server now dedupes anyway, but the SPA showing the
-  // progress is the difference between confidence and confusion.
+  // progress is the difference between confidence and confusion. We match
+  // on video_id too so each camera's section picks up its own job.
   useEffect(() => {
     let cancelled = false;
     api
@@ -75,6 +96,7 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
           (j) =>
             j.kind === "detect_beep" &&
             j.stage_number === stageNumber &&
+            j.video_id === videoId &&
             (j.status === "pending" || j.status === "running"),
         );
         if (!active) return;
@@ -98,31 +120,27 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
     return () => {
       cancelled = true;
     };
-  }, [stageNumber, onProjectUpdate, setBusy, setError]);
+  }, [stageNumber, videoId, onProjectUpdate, setBusy, setError]);
 
   const detect = async (force: boolean) => {
     setBusy(true);
     setError(null);
     try {
-      const job = await api.detectBeep(stageNumber, force);
+      const job = await api.detectBeepForVideo(stageNumber, videoId, force);
       setJobStatus(job);
       const final = await api.pollJob(job.id, setJobStatus);
       if (final.status === "failed") {
         setError(final.error ?? "Beep detection failed");
       } else {
-        // Re-fetch the project to pick up beep_time + processed.trim.
         onProjectUpdate(await api.getProject());
       }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         const ok = window.confirm(
-          "This stage has a manual beep override. Replace it with the auto-detected value?",
+          "This video has a manual beep override. Replace it with the auto-detected value?",
         );
         if (ok) await detect(true);
       } else {
-        // Source-unreachable (424) gets the same friendly wording the
-        // Export page shows, so the user sees one consistent
-        // "reconnect external storage" message everywhere.
         const unreachable = asSourceUnreachable(e);
         if (unreachable) {
           setError(unreachable.message);
@@ -149,7 +167,7 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
     }
     setBusy(true);
     try {
-      const updated = await api.overrideBeep(stageNumber, value);
+      const updated = await api.overrideBeepForVideo(stageNumber, videoId, value);
       onProjectUpdate(updated);
       setError(null);
       setEditing(false);
@@ -163,7 +181,7 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
   const clear = async () => {
     setBusy(true);
     try {
-      const updated = await api.overrideBeep(stageNumber, null);
+      const updated = await api.overrideBeepForVideo(stageNumber, videoId, null);
       onProjectUpdate(updated);
       setError(null);
       setEditing(false);
@@ -177,7 +195,7 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
   const selectCandidate = async (time: number) => {
     setBusy(true);
     try {
-      const updated = await api.selectBeepCandidate(stageNumber, time);
+      const updated = await api.selectBeepCandidateForVideo(stageNumber, videoId, time);
       onProjectUpdate(updated);
       setError(null);
     } catch (e) {
@@ -215,21 +233,31 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
             Cancel
           </Button>
         </div>
-        <BeepWaveformPicker
-          stageNumber={stageNumber}
-          primaryBeepTime={primary.beep_time}
-          draftSourceTime={draftValid ? draftSourceTime : null}
-          onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
-        />
-        <AudioVerifier
-          stageNumber={stageNumber}
-          suspectedTime={draftValid ? draftSourceTime : primary.beep_time}
-        />
+        {isPrimary ? (
+          <BeepWaveformPicker
+            stageNumber={stageNumber}
+            primaryBeepTime={video.beep_time}
+            draftSourceTime={draftValid ? draftSourceTime : null}
+            onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
+          />
+        ) : null}
+        {isPrimary ? (
+          <AudioVerifier
+            stageNumber={stageNumber}
+            suspectedTime={draftValid ? draftSourceTime : video.beep_time}
+          />
+        ) : (
+          <div className="text-xs text-muted-foreground">
+            Tip: scrub the preview clip below the section header after Apply --
+            secondaries don't have a project-level waveform yet (the audit
+            timeline is anchored to the primary's audio).
+          </div>
+        )}
       </div>
     );
   }
 
-  if (!primary.beep_time) {
+  if (!video.beep_time) {
     return (
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
         <Badge variant="statusNotStarted" className="gap-1">
@@ -239,7 +267,9 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
           <JobProgress job={jobStatus} />
         ) : (
           <span className="text-muted-foreground">
-            Audit screen needs this. Run detection or set manually.
+            {isPrimary
+              ? "Audit screen needs this. Run detection or set manually."
+              : "Needed to sync this camera to the primary timeline."}
           </span>
         )}
         <div className="ml-auto flex gap-1">
@@ -256,7 +286,7 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
     );
   }
 
-  const isManual = primary.beep_source === "manual";
+  const isManual = video.beep_source === "manual";
   return (
     <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
       <div className="flex flex-wrap items-center gap-2">
@@ -264,10 +294,10 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
           <Check className="size-3" />
           beep · {isManual ? "user" : "auto"}
         </Badge>
-        <span className="font-mono tabular-nums">{primary.beep_time.toFixed(3)}s</span>
-        {primary.beep_peak_amplitude != null ? (
+        <span className="font-mono tabular-nums">{video.beep_time.toFixed(3)}s</span>
+        {video.beep_peak_amplitude != null ? (
           <span className="text-muted-foreground" title="Peak amplitude on the bandpassed envelope">
-            peak {primary.beep_peak_amplitude.toFixed(2)}
+            peak {video.beep_peak_amplitude.toFixed(2)}
           </span>
         ) : null}
         {jobStatus ? <JobProgress job={jobStatus} /> : null}
@@ -293,20 +323,29 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
       </div>
       <BeepCandidates
         stageNumber={stageNumber}
-        candidates={primary.beep_candidates}
-        currentTime={primary.beep_time}
+        videoId={videoId}
+        candidates={video.beep_candidates}
+        currentTime={video.beep_time}
         busy={busy}
         onSelect={selectCandidate}
       />
       <BeepPreview
         stageNumber={stageNumber}
-        beepTime={primary.beep_time}
+        videoId={videoId}
+        beepTime={video.beep_time}
+        isPrimary={isPrimary}
       />
     </div>
   );
 }
 
 /** Click-to-set waveform inside the manual-edit panel.
+ *
+ *  Primary-only: the waveform shows the project's audit clip (or full
+ *  primary WAV when no trim is cached yet). Secondaries don't have a
+ *  project-level waveform endpoint and they don't need one for beep
+ *  alignment -- the beep is a loud sharp pulse the preview clip makes
+ *  obvious.
  *
  *  The /audio + /peaks endpoints serve the **trimmed** audit clip when one
  *  exists (cut around the previously-detected beep) and the **full**
@@ -329,9 +368,6 @@ function BeepWaveformPicker({
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
-  // Local clip time in seconds; drives the waveform's playhead while the
-  // user drags. Initialised to the existing primary beep position so the
-  // playhead doesn't snap to 0 on open.
   const [localTime, setLocalTime] = useState<number>(0);
 
   useEffect(() => {
@@ -343,8 +379,6 @@ function BeepWaveformPicker({
       .then((p) => {
         if (cancelled) return;
         setPeaks(p);
-        // Seed the playhead at the served clip's beep marker if we have
-        // one, otherwise at zero.
         setLocalTime(p.beep_time ?? 0);
       })
       .catch(() => {
@@ -359,16 +393,10 @@ function BeepWaveformPicker({
   }, [stageNumber]);
 
   const offset = useMemo(() => {
-    // primary.beep_time and peaks.beep_time are both expressed as the same
-    // physical instant (the beep). Their difference is the trim window's
-    // start time in source coordinates; zero when the audio is the full
-    // source. Falls back to 0 when either side is unset.
     if (primaryBeepTime == null || !peaks || peaks.beep_time == null) return 0;
     return primaryBeepTime - peaks.beep_time;
   }, [primaryBeepTime, peaks]);
 
-  // Keep the visual playhead in sync with the numeric draft when the user
-  // types in the input directly.
   useEffect(() => {
     if (!peaks || draftSourceTime == null) return;
     const local = draftSourceTime - offset;
@@ -386,8 +414,6 @@ function BeepWaveformPicker({
     );
   }
   if (unavailable || !peaks) {
-    // No audio cached yet (the user has never run detect-beep on this
-    // stage). The numeric input + AudioVerifier hint below cover this case.
     return null;
   }
 
@@ -419,27 +445,23 @@ function BeepWaveformPicker({
 
 function BeepCandidates({
   stageNumber,
+  videoId,
   candidates,
   currentTime,
   busy,
   onSelect,
 }: {
   stageNumber: number;
+  videoId: string;
   candidates: BeepCandidate[];
   currentTime: number | null;
   busy: boolean;
   onSelect: (time: number) => void | Promise<void>;
 }) {
-  // Never bother showing a picker when the detector only returned the winner
-  // (no real choice for the user to make). For projects that predate #22 the
-  // list is just empty -- next detect-beep run repopulates it.
   const hasAlternatives = candidates.length > 1;
   const [open, setOpen] = useState(false);
   if (!hasAlternatives) return null;
 
-  // The "currently promoted" candidate is the one whose time matches
-  // primary.beep_time. We compare with a small epsilon because the value
-  // round-trips through JSON. Falls back to index 0 (the auto-winner).
   const activeIndex = (() => {
     if (currentTime == null) return -1;
     let best = -1;
@@ -454,17 +476,11 @@ function BeepCandidates({
     return bestDelta <= 1e-3 ? best : -1;
   })();
 
-  // Single shared preview slot under the candidate list. Holding one
-  // <video> for the whole list keeps the layout predictable and avoids
-  // the SPA stacking 5 different aspect-ratio thumbnails when the user
-  // explores alternatives.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [previewError, setPreviewError] = useState(false);
   useEffect(() => {
     setPreviewError(false);
-  }, [previewIndex, stageNumber]);
-  // If candidates change underneath us (re-detect, override) drop a stale
-  // preview index.
+  }, [previewIndex, stageNumber, videoId]);
   useEffect(() => {
     if (previewIndex != null && previewIndex >= candidates.length) {
       setPreviewIndex(null);
@@ -478,7 +494,7 @@ function BeepCandidates({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
         aria-expanded={open}
-        aria-controls={`beep-candidates-${stageNumber}`}
+        aria-controls={`beep-candidates-${stageNumber}-${videoId}`}
         title="Silence-preference ranked; pick a different one if the auto-winner is wrong"
       >
         {open ? (
@@ -494,7 +510,7 @@ function BeepCandidates({
       {open ? (
         <>
           <ul
-            id={`beep-candidates-${stageNumber}`}
+            id={`beep-candidates-${stageNumber}-${videoId}`}
             className="divide-y divide-border/40 border-t border-border/40"
           >
             {candidates.map((c, i) => (
@@ -524,9 +540,10 @@ function BeepCandidates({
                 </div>
               ) : (
                 <video
-                  key={`${stageNumber}:${candidates[previewIndex].time.toFixed(3)}`}
-                  src={api.stageBeepPreviewUrl(
+                  key={`${stageNumber}:${videoId}:${candidates[previewIndex].time.toFixed(3)}`}
+                  src={api.videoBeepPreviewUrl(
                     stageNumber,
+                    videoId,
                     candidates[previewIndex].time,
                   )}
                   className="aspect-video w-full max-w-sm rounded-md border border-border/60 bg-black object-contain"
@@ -563,10 +580,6 @@ function CandidateRow({
   onTogglePreview: () => void;
   onSelect: () => void | Promise<void>;
 }) {
-  // Two-line layout to fit narrow stage cards: top line is the headline
-  // (rank + time + actions); bottom line is muted diagnostics. Buttons
-  // are icon-only with title tooltips so the row never grows wider than
-  // the card.
   return (
     <li
       className={`px-2 py-1.5 text-xs ${isActive ? "bg-muted/40" : ""}`}
@@ -619,18 +632,19 @@ function CandidateRow({
 
 function BeepPreview({
   stageNumber,
+  videoId,
   beepTime,
+  isPrimary,
 }: {
   stageNumber: number;
+  videoId: string;
   beepTime: number;
+  isPrimary: boolean;
 }) {
-  // The clip caches on the source's mtime+size and beep_time, so re-mounting
-  // with a new beepTime forces a fresh fetch. <video> errors when no clip
-  // exists yet (rare race after detect-beep finishes); fall back to a hint.
   const [errored, setErrored] = useState(false);
   useEffect(() => {
     setErrored(false);
-  }, [stageNumber, beepTime]);
+  }, [stageNumber, videoId, beepTime]);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -641,8 +655,8 @@ function BeepPreview({
         </div>
       ) : (
         <video
-          key={`${stageNumber}:${beepTime.toFixed(3)}`}
-          src={api.stageBeepPreviewUrl(stageNumber, beepTime)}
+          key={`${stageNumber}:${videoId}:${beepTime.toFixed(3)}`}
+          src={api.videoBeepPreviewUrl(stageNumber, videoId, beepTime)}
           className="h-40 w-64 rounded-md border border-border/60 bg-black object-cover"
           playsInline
           controls
@@ -652,14 +666,16 @@ function BeepPreview({
           onError={() => setErrored(true)}
         />
       )}
-      <Link
-        to={`/audit/${stageNumber}`}
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-        title="Open the audit screen to verify or correct this beep on the waveform"
-      >
-        <Sparkles className="size-3" />
-        Looks wrong? Refine in audit
-      </Link>
+      {isPrimary ? (
+        <Link
+          to={`/audit/${stageNumber}`}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          title="Open the audit screen to verify or correct this beep on the waveform"
+        >
+          <Sparkles className="size-3" />
+          Looks wrong? Refine in audit
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -713,8 +729,6 @@ function AudioVerifier({
   }, [stageNumber]);
 
   useEffect(() => {
-    // Auto-seek the audio element near the suspected beep so the user can
-    // hit play and immediately hear the relevant slice.
     const el = audioRef.current;
     if (el && suspectedTime != null && Number.isFinite(suspectedTime)) {
       const start = Math.max(0, suspectedTime - 0.5);
@@ -730,7 +744,7 @@ function AudioVerifier({
     return (
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <Volume2 className="size-3" />
-        Loading audio…
+        Loading audio...
       </div>
     );
   }

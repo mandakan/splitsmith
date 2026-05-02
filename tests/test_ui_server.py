@@ -496,9 +496,12 @@ def _stub_detect(
     *,
     candidates: list | None = None,
 ) -> None:
-    """Replace audio_helpers.detect_primary_beep with a fast stub returning a
+    """Replace the per-video beep detector with a fast stub returning a
     deterministic BeepDetection. The endpoint is otherwise wrapped around
-    ffmpeg + librosa, which we don't want to invoke from a unit test."""
+    ffmpeg + librosa, which we don't want to invoke from a unit test.
+    Both the legacy ``detect_primary_beep`` shim and the new
+    ``detect_video_beep`` are patched so callers on either path get the
+    stubbed result."""
     from splitsmith.config import BeepCandidate, BeepDetection
     from splitsmith.ui import audio as audio_helpers
 
@@ -512,6 +515,7 @@ def _stub_detect(
         )
 
     monkeypatch.setattr(audio_helpers, "detect_primary_beep", fake)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", fake)
 
 
 def test_detect_beep_persists_auto_result(tmp_path: Path, monkeypatch) -> None:
@@ -1574,6 +1578,7 @@ def test_detect_beep_job_records_failure_when_ffmpeg_blows_up(tmp_path: Path, mo
         raise audio_helpers.AudioExtractionError("ffmpeg fell over")
 
     monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
 
     resp = client.post("/api/stages/1/detect-beep")
     assert resp.status_code == 200
@@ -2297,3 +2302,131 @@ def test_external_edit_visible_without_restart(tmp_path: Path) -> None:
     project.save(root)
 
     assert client.get("/api/project").json()["competitor_name"] == "Edited Externally"
+
+
+# Per-video beep endpoints (multi-cam ingest) -------------------------------
+
+
+def _seed_project_with_secondary(tmp_path: Path) -> tuple[TestClient, Path]:
+    """Boot a server with one stage, a primary, and a secondary assigned.
+
+    Returns ``(client, secondary_source_path)`` so the caller can mutate
+    the secondary source if needed.
+    """
+    client, _ = _seed_project_with_primary(tmp_path)
+    src_dir = tmp_path / "videos"
+    cam2 = src_dir / "CAM2.mp4"
+    cam2.write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/CAM2.mp4", "to_stage_number": 1, "role": "secondary"},
+    )
+    return client, cam2
+
+
+def _video_id_for(client: TestClient, stage_number: int, role: str) -> str:
+    """Pull the ``video_id`` for the first video matching ``role`` on a stage."""
+    proj = client.get("/api/project").json()
+    stage = next(s for s in proj["stages"] if s["stage_number"] == stage_number)
+    video = next(v for v in stage["videos"] if v["role"] == role)
+    return video["video_id"]
+
+
+def test_video_id_is_stable_and_exposed(tmp_path: Path) -> None:
+    """The computed ``video_id`` is on the wire and identical across reloads."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    proj1 = client.get("/api/project").json()
+    proj2 = client.get("/api/project").json()
+    vid1 = proj1["stages"][0]["videos"][0]["video_id"]
+    vid2 = proj2["stages"][0]["videos"][0]["video_id"]
+    assert vid1 == vid2
+    assert len(vid1) == 12  # 6-byte blake2s -> 12 hex chars
+
+
+def test_per_video_detect_beep_runs_on_secondary(tmp_path: Path, monkeypatch) -> None:
+    """The /api/stages/{n}/videos/{video_id}/detect-beep endpoint runs the
+    beep pipeline on a secondary and persists the result onto that
+    secondary -- not the primary."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=7.250)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    resp = client.post(f"/api/stages/1/videos/{sec_id}/detect-beep")
+    assert resp.status_code == 200
+    job = resp.json()
+    assert job["video_id"] == sec_id
+    final = _wait_for_job(client, job["id"])
+    assert final["status"] == "succeeded", final
+
+    proj = client.get("/api/project").json()
+    primary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "primary")
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert primary["beep_time"] is None  # primary untouched
+    assert secondary["beep_time"] == pytest.approx(7.250)
+    assert secondary["beep_source"] == "auto"
+    assert secondary["processed"]["beep"] is True
+
+
+def test_per_video_detect_beep_dedupes_per_video(tmp_path: Path, monkeypatch) -> None:
+    """Two simultaneous detect-beep posts for the same video adopt one job;
+    a post for a different video on the same stage runs in parallel."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=3.0)
+
+    primary_id = _video_id_for(client, 1, "primary")
+    sec_id = _video_id_for(client, 1, "secondary")
+    j1 = client.post(f"/api/stages/1/videos/{primary_id}/detect-beep").json()
+    j2 = client.post(f"/api/stages/1/videos/{primary_id}/detect-beep").json()
+    j3 = client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()
+    assert j1["id"] == j2["id"]  # same video -> same job
+    assert j1["id"] != j3["id"]  # different video -> different job
+    _wait_for_job(client, j1["id"])
+    _wait_for_job(client, j3["id"])
+
+
+def test_per_video_manual_override(tmp_path: Path) -> None:
+    """The /beep override endpoint sets ``beep_source="manual"`` on the
+    targeted video and clears its diagnostic fields."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    sec_id = _video_id_for(client, 1, "secondary")
+
+    resp = client.post(f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 4.5})
+    assert resp.status_code == 200
+    proj = resp.json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] == pytest.approx(4.5)
+    assert secondary["beep_source"] == "manual"
+
+    # Clear flips back to "no beep yet" and resets processed.beep
+    resp = client.post(f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": None})
+    assert resp.status_code == 200
+    proj = resp.json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] is None
+    assert secondary["beep_source"] is None
+    assert secondary["processed"]["beep"] is False
+
+
+def test_legacy_primary_endpoints_still_work(tmp_path: Path, monkeypatch) -> None:
+    """The pre-existing /api/stages/{n}/detect-beep endpoint forwards to
+    the per-video pipeline and operates on the stage's primary."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    job = resp.json()
+    primary_id = _video_id_for(client, 1, "primary")
+    assert job["video_id"] == primary_id  # forwarded to per-video pipeline
+    final = _wait_for_job(client, job["id"])
+    assert final["status"] == "succeeded", final
+
+
+def test_per_video_endpoint_404_for_unknown_video_id(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/stages/1/videos/deadbeef0000/detect-beep")
+    assert resp.status_code == 404
