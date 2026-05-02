@@ -46,7 +46,7 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["Shift", "M"], desc: "Previous kept shot" },
     { keys: ["N"], desc: "Next marker (any kind)" },
     { keys: ["Shift", "N"], desc: "Previous marker (any kind)" },
-    { keys: ["K"], desc: "Toggle current shot keep / reject (manual: delete)" },
+    { keys: ["K"], desc: "Toggle keep / reject (manual: delete); auto-advances if enabled" },
     { keys: ["Delete"], desc: "Delete focused manual marker" },
     { keys: ["Alt", "←", "→"], desc: "Nudge selected marker (10.7 ms)" },
     { keys: ["Alt", "Shift", "←", "→"], desc: "Nudge selected marker (1 ms)" },
