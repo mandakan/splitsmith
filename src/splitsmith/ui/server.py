@@ -47,6 +47,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -64,7 +65,9 @@ from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
+from ..config import Config
 from . import audio as audio_helpers
+from . import exports as export_helpers
 from .jobs import Job, JobCancelled, JobHandle, JobRegistry
 from .project import (
     VIDEO_EXTENSIONS,
@@ -326,6 +329,32 @@ class BeepSelectRequest(BaseModel):
     """
 
     time: float
+
+
+class ExportStageRequest(BaseModel):
+    """Body for POST /api/stages/{n}/export.
+
+    Each toggle defaults True; turning one off skips that artefact while
+    leaving the others on. The trimmed video itself is never regenerated
+    here -- it lives at ``<project>/trimmed/stage<N>_trimmed.mp4`` from the
+    audit-mode trim and is referenced as-is.
+    """
+
+    write_csv: bool = True
+    write_fcpxml: bool = True
+    write_report: bool = True
+
+
+class RevealRequest(BaseModel):
+    """Body for POST /api/files/reveal.
+
+    Opens the OS file manager at ``path``'s parent, selecting the file when
+    the platform supports it (``open -R`` on macOS). The path must resolve
+    inside the project root for safety -- we don't expose a generic shell
+    out.
+    """
+
+    path: str
 
 
 class SwapPrimaryRequest(BaseModel):
@@ -1776,6 +1805,136 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
+
+    @app.get("/api/exports/overview")
+    def export_overview() -> JSONResponse:
+        """Match-overview payload for the Analysis & Export screen.
+
+        Returns one row per stage with audit + export status (shot count,
+        pending candidates, file paths, last export time, ready-to-export
+        flag). Pure stat: no detection, no rewriting of audit JSON.
+        """
+        project = state.load()
+        rows = project.export_overview(state.project_root)
+        return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
+
+    @app.post("/api/stages/{stage_number}/export")
+    def export_stage(stage_number: int, req: ExportStageRequest) -> JSONResponse:
+        """Run the per-stage export: CSV / FCPXML / report. Idempotent --
+        re-running overwrites prior artefacts in place.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None or primary.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has no primary or no beep yet; "
+                    "finish ingest + audit before exporting"
+                ),
+            )
+
+        audit_dir = project.audit_path(state.project_root)
+        audit_file = audit_dir / f"stage{stage_number}.json"
+        exports_dir = project.exports_path(state.project_root)
+        trimmed_dir = project.trimmed_path(state.project_root)
+        trimmed_video = trimmed_dir / f"stage{stage_number}_trimmed.mp4"
+
+        # Build the engine StageData from the stored stage. ``time_seconds``
+        # must be > 0 for the report's anomaly checks to make sense; reject
+        # placeholder stages that never got real scoreboard data.
+        if stage.time_seconds <= 0 or stage.scorecard_updated_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} is a placeholder; import a real "
+                    "scoreboard before exporting"
+                ),
+            )
+        from ..config import StageData as EngineStageData
+
+        engine_stage = EngineStageData(
+            stage_number=stage.stage_number,
+            stage_name=stage.stage_name,
+            time_seconds=stage.time_seconds,
+            scorecard_updated_at=stage.scorecard_updated_at,
+        )
+
+        try:
+            result = export_helpers.export_stage(
+                request=export_helpers.StageExportRequest(
+                    stage_number=stage_number,
+                    write_csv=req.write_csv,
+                    write_fcpxml=req.write_fcpxml,
+                    write_report=req.write_report,
+                ),
+                audit_path=audit_file,
+                exports_dir=exports_dir,
+                trimmed_video_path=trimmed_video if trimmed_video.exists() else None,
+                stage_data=engine_stage,
+                beep_time_in_source=primary.beep_time,
+                config=Config(),
+            )
+        except export_helpers.StageExportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # Touch updated_at so the overview's last_export_at reflects this run.
+        project.updated_at = datetime.now(UTC)
+        project.save(state.project_root)
+        return JSONResponse(
+            {
+                "stage_number": result.stage_number,
+                "csv_path": str(result.csv_path) if result.csv_path else None,
+                "fcpxml_path": str(result.fcpxml_path) if result.fcpxml_path else None,
+                "report_path": str(result.report_path) if result.report_path else None,
+                "trimmed_video_path": (
+                    str(result.trimmed_video_path) if result.trimmed_video_path else None
+                ),
+                "shots_written": result.shots_written,
+                "anomalies": result.anomalies,
+            }
+        )
+
+    @app.post("/api/files/reveal")
+    def reveal_file(req: RevealRequest) -> JSONResponse:
+        """Reveal a file in the OS file manager.
+
+        Restricted to paths inside the current project root so the endpoint
+        can never be coerced into opening arbitrary locations. macOS uses
+        ``open -R`` (selects the file in Finder); Linux uses ``xdg-open``
+        on the parent dir; Windows uses ``explorer /select``.
+        """
+        target = Path(req.path).expanduser()
+        try:
+            resolved = target.resolve(strict=True)
+        except (OSError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=f"not found: {target}") from exc
+        try:
+            resolved.relative_to(state.project_root.resolve())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="reveal path must be inside the project root",
+            ) from exc
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", "-R", str(resolved)], check=False)
+            elif sys.platform.startswith("win"):
+                subprocess.run(["explorer", f"/select,{resolved}"], check=False)
+            else:
+                # xdg-open doesn't support file selection; opening the parent
+                # is the closest cross-distro behaviour.
+                parent = resolved.parent if resolved.is_file() else resolved
+                subprocess.run(["xdg-open", str(parent)], check=False)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"failed to launch file manager: {exc}"
+            ) from exc
+        return JSONResponse({"revealed": str(resolved)})
 
     @app.post("/api/stages/{stage_number}/skip")
     def set_stage_skipped(stage_number: int, req: SkipStageRequest) -> JSONResponse:

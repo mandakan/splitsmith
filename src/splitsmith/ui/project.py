@@ -139,6 +139,33 @@ class RemovalPlan(BaseModel):
     audit_reset: bool = False  # caller-facing flag: did we wipe stage audit?
 
 
+class StageExportStatus(BaseModel):
+    """Per-stage audit + export status for the Analysis & Export overview.
+
+    Inferred (no explicit "Done" button per the v1 contract): a stage is
+    ``ready_to_export`` when its primary has run beep + trim + shot detect
+    and the audit JSON has at least one shot. ``has_exports`` flips when
+    the user has clicked Generate at least once for this stage; the SPA
+    uses it to badge stages with stale exports vs. fresh ones.
+    """
+
+    stage_number: int
+    stage_name: str
+    skipped: bool
+    has_primary: bool
+    primary_processed: dict[str, bool]
+    audit_shot_count: int
+    pending_candidate_count: int
+    audit_path: Path | None
+    trimmed_video_path: Path | None
+    csv_path: Path | None
+    fcpxml_path: Path | None
+    report_path: Path | None
+    has_exports: bool
+    last_export_at: datetime | None
+    ready_to_export: bool
+
+
 class StageMatchWindow(BaseModel):
     """One stage's match window for the SPA timeline (issue #13).
 
@@ -321,6 +348,95 @@ class MatchProject(BaseModel):
         out: list[StageVideo] = list(self.unassigned_videos)
         for s in self.stages:
             out.extend(s.videos)
+        return out
+
+    def export_overview(self, root: Path) -> list[StageExportStatus]:
+        """Per-stage audit + export status for the Analysis & Export screen.
+
+        Pure: stat-only inspection of the audit/exports directories; never
+        re-runs detection. The returned list mirrors :attr:`stages` order so
+        the SPA can iterate cards directly.
+        """
+        from . import exports as exports_mod  # local: avoid import cycle
+
+        audit_dir = self.audit_path(root)
+        exports_dir = self.exports_path(root)
+        trimmed_dir = self.trimmed_path(root)
+
+        out: list[StageExportStatus] = []
+        for stage in self.stages:
+            primary = stage.primary()
+            audit_file = audit_dir / f"stage{stage.stage_number}.json"
+            shot_count = 0
+            pending_count = 0
+            if audit_file.exists():
+                try:
+                    raw = json.loads(audit_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    raw = {}
+                shots = raw.get("shots") if isinstance(raw, dict) else None
+                if isinstance(shots, list):
+                    shot_count = len(shots)
+                cand_block = (
+                    raw.get("_candidates_pending_audit") if isinstance(raw, dict) else None
+                )
+                if isinstance(cand_block, dict):
+                    cands = cand_block.get("candidates")
+                    if isinstance(cands, list):
+                        pending_count = len(cands)
+
+            base = f"stage{stage.stage_number}_{exports_mod._slugify(stage.stage_name)}"
+            csv_p = exports_dir / f"{base}_splits.csv"
+            fcpxml_p = exports_dir / f"{base}.fcpxml"
+            report_p = exports_dir / f"{base}_report.txt"
+            trimmed_p = trimmed_dir / f"stage{stage.stage_number}_trimmed.mp4"
+
+            csv_exists = csv_p.exists()
+            fcpxml_exists = fcpxml_p.exists()
+            report_exists = report_p.exists()
+            has_exports = csv_exists or fcpxml_exists or report_exists
+            last_export_at: datetime | None = None
+            if has_exports:
+                mtimes = [
+                    p.stat().st_mtime
+                    for p in (csv_p, fcpxml_p, report_p)
+                    if p.exists()
+                ]
+                if mtimes:
+                    last_export_at = datetime.fromtimestamp(max(mtimes), tz=UTC)
+
+            processed = (
+                dict(primary.processed)
+                if primary is not None
+                else {"beep": False, "shot_detect": False, "trim": False}
+            )
+            ready_to_export = (
+                primary is not None
+                and processed.get("beep", False)
+                and processed.get("trim", False)
+                and processed.get("shot_detect", False)
+                and shot_count > 0
+            )
+
+            out.append(
+                StageExportStatus(
+                    stage_number=stage.stage_number,
+                    stage_name=stage.stage_name,
+                    skipped=stage.skipped,
+                    has_primary=primary is not None,
+                    primary_processed=processed,
+                    audit_shot_count=shot_count,
+                    pending_candidate_count=pending_count,
+                    audit_path=audit_file if audit_file.exists() else None,
+                    trimmed_video_path=trimmed_p if trimmed_p.exists() else None,
+                    csv_path=csv_p if csv_exists else None,
+                    fcpxml_path=fcpxml_p if fcpxml_exists else None,
+                    report_path=report_p if report_exists else None,
+                    has_exports=has_exports,
+                    last_export_at=last_export_at,
+                    ready_to_export=ready_to_export,
+                )
+            )
         return out
 
     def match_analysis(

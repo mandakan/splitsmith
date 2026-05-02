@@ -162,6 +162,47 @@ export interface MatchAnalysis {
   videos: VideoMatchAnalysisEntry[];
 }
 
+/** Per-stage status row for the Analysis & Export overview (#17).
+ *  Mirrors splitsmith.ui.project.StageExportStatus. The SPA renders one
+ *  card per row; ``ready_to_export`` decides whether Generate is enabled. */
+export interface StageExportStatus {
+  stage_number: number;
+  stage_name: string;
+  skipped: boolean;
+  has_primary: boolean;
+  primary_processed: { beep: boolean; shot_detect: boolean; trim: boolean };
+  audit_shot_count: number;
+  pending_candidate_count: number;
+  audit_path: string | null;
+  trimmed_video_path: string | null;
+  csv_path: string | null;
+  fcpxml_path: string | null;
+  report_path: string | null;
+  has_exports: boolean;
+  last_export_at: string | null;
+  ready_to_export: boolean;
+}
+
+export interface ExportOverview {
+  stages: StageExportStatus[];
+}
+
+export interface ExportStageRequestPayload {
+  write_csv?: boolean;
+  write_fcpxml?: boolean;
+  write_report?: boolean;
+}
+
+export interface ExportStageResult {
+  stage_number: number;
+  csv_path: string | null;
+  fcpxml_path: string | null;
+  report_path: string | null;
+  trimmed_video_path: string | null;
+  shots_written: number;
+  anomalies: string[];
+}
+
 export interface RemovalPlan {
   video_path: string;
   raw_link_path: string;
@@ -218,6 +259,10 @@ export interface AuditShot {
   time: number;
   ms_after_beep: number;
   source?: "detected" | "manual";
+  /** Free-text user note ("draw", "reload", "transition", ...). Persisted
+   *  in the per-stage audit JSON and rendered in the splits CSV. Optional
+   *  for backwards compatibility with audit JSONs written before #17. */
+  notes?: string;
 }
 
 export interface AuditEvent {
@@ -510,6 +555,29 @@ export const api = {
     request<StageAudit>(`/api/stages/${stageNumber}/audit`, {
       method: "PUT",
       json: payload,
+    }),
+
+  /** Match-overview payload for the Analysis & Export screen. */
+  getExportOverview: () => request<ExportOverview>("/api/exports/overview"),
+
+  /** Run a stage export. Idempotent; re-running overwrites in place. */
+  exportStage: (stageNumber: number, opts: ExportStageRequestPayload = {}) =>
+    request<ExportStageResult>(`/api/stages/${stageNumber}/export`, {
+      method: "POST",
+      json: {
+        write_csv: opts.write_csv ?? true,
+        write_fcpxml: opts.write_fcpxml ?? true,
+        write_report: opts.write_report ?? true,
+      },
+    }),
+
+  /** Open the OS file manager at ``path`` (selecting the file on macOS /
+   *  Windows; opening the parent dir on Linux). The backend rejects paths
+   *  outside the project root. */
+  revealFile: (path: string) =>
+    request<{ revealed: string }>("/api/files/reveal", {
+      method: "POST",
+      json: { path },
     }),
 
   // -----------------------------------------------------------------------
