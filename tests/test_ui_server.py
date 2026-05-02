@@ -974,6 +974,135 @@ def test_trim_endpoint_returns_existing_job_when_one_is_running(
     assert len(invocations) == 1, "ffmpeg must run only once"
 
 
+def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> None:
+    """The shot-detect job runs detect_shots on the audit clip and merges
+    the results into <project>/audit/stage<N>.json's candidates block."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    # Pretend the trim already produced an audit WAV.
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import shot_detect
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    # Stub the audit-audio resolver so the test doesn't depend on ffmpeg.
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+
+    class FakeShot:
+        def __init__(self, t: float, conf: float) -> None:
+            self.time_absolute = t
+            self.time_from_beep = t - 5.0
+            self.peak_amplitude = 0.5
+            self.confidence = conf
+
+    monkeypatch.setattr(
+        shot_detect,
+        "detect_shots",
+        lambda *a, **kw: [FakeShot(5.5, 0.8), FakeShot(6.1, 0.6), FakeShot(6.9, 0.9)],
+    )
+
+    resp = client.post("/api/stages/1/shot-detect")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    audit_file = project_root / "audit" / "stage1.json"
+    assert audit_file.exists()
+    saved = _json.loads(audit_file.read_text(encoding="utf-8"))
+    cands = saved["_candidates_pending_audit"]["candidates"]
+    assert len(cands) == 3
+    assert cands[0]["candidate_number"] == 1
+    assert cands[0]["time"] == pytest.approx(5.5)
+    assert cands[0]["ms_after_beep"] == 500
+    # processed.shot_detect flips on the primary so the SPA can show status.
+    proj_after = client.get("/api/project").json()
+    assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
+
+
+def test_shot_detect_endpoint_400_when_no_beep(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    resp = client.post("/api/stages/1/shot-detect")
+    assert resp.status_code == 400
+    assert "beep_time" in resp.json()["detail"]
+
+
+def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -> None:
+    """Second submit while first is running returns the same job."""
+    import threading
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+
+    from splitsmith import shot_detect
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+
+    proceed = threading.Event()
+    invocations = []
+
+    def slow_detect(*a, **kw):
+        invocations.append(1)
+        proceed.wait(timeout=2.0)
+        return []
+
+    monkeypatch.setattr(shot_detect, "detect_shots", slow_detect)
+
+    first = client.post("/api/stages/1/shot-detect").json()
+    second = client.post("/api/stages/1/shot-detect").json()
+    assert first["id"] == second["id"]
+    proceed.set()
+    final = _wait_for_job(client, first["id"])
+    assert final["status"] == "succeeded"
+    assert len(invocations) == 1
+
+
 def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
     """/api/jobs lists active + recent; /api/jobs/{id} polls one. detect-beep
     and trim both surface here so the SPA has a single status surface."""

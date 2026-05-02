@@ -691,6 +691,21 @@ export function Audit() {
                   }}
                 />
               ) : null}
+              {peaks && peaks.trimmed && markers.length === 0 ? (
+                <DetectShotsBadge
+                  stageNumber={stage.stage_number}
+                  hasBeep={primary.beep_time != null}
+                  hasStageTime={stage.time_seconds > 0}
+                  onComplete={async () => {
+                    // Re-fetch the audit JSON; the SPA derives markers from
+                    // _candidates_pending_audit, which the job just wrote.
+                    if (stageNumber == null) return;
+                    const a = await api.getStageAudit(stageNumber);
+                    setAudit(a);
+                    setMarkers(deriveMarkers(a));
+                  }}
+                />
+              ) : null}
             </CardTitle>
             <CardDescription>
               Primary: <code className="text-xs">{primary.path}</code>
@@ -930,6 +945,103 @@ function StageSelector({ stages, selected, onSelect }: StageSelectorProps) {
         ))}
       </select>
     </label>
+  );
+}
+
+interface DetectShotsBadgeProps {
+  stageNumber: number;
+  hasBeep: boolean;
+  hasStageTime: boolean;
+  onComplete: () => Promise<void> | void;
+}
+
+function DetectShotsBadge({
+  stageNumber,
+  hasBeep,
+  hasStageTime,
+  onComplete,
+}: DetectShotsBadgeProps) {
+  const [job, setJob] = useState<Job | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const blocked = !hasBeep || !hasStageTime;
+  const running = job != null && (job.status === "pending" || job.status === "running");
+  const reason = !hasBeep
+    ? "Detect or set the beep first."
+    : !hasStageTime
+      ? "Import a scoreboard so the stage time is known."
+      : null;
+
+  // Auto-adopt an in-flight shot-detect job after reload. Auto-trim
+  // chains shot detection; the user often lands on Audit while it's
+  // still mid-flight.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listJobs()
+      .then(async (jobs) => {
+        if (cancelled) return;
+        const active = jobs.find(
+          (j) =>
+            j.kind === "shot_detect" &&
+            j.stage_number === stageNumber &&
+            (j.status === "pending" || j.status === "running"),
+        );
+        if (!active) return;
+        setJob(active);
+        try {
+          const final = await api.pollJob(active.id, setJob);
+          if (cancelled) return;
+          if (final.status === "succeeded") await onComplete();
+          else if (final.status === "failed")
+            setError(final.error ?? "Shot detection failed");
+        } finally {
+          if (!cancelled) setJob(null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [stageNumber, onComplete]);
+
+  const onClick = useCallback(async () => {
+    setError(null);
+    try {
+      const initial = await api.detectShots(stageNumber);
+      setJob(initial);
+      const final = await api.pollJob(initial.id, setJob);
+      if (final.status === "failed") {
+        setError(final.error ?? "Shot detection failed");
+        return;
+      }
+      await onComplete();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : String(err));
+    } finally {
+      setJob(null);
+    }
+  }, [stageNumber, onComplete]);
+
+  const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
+
+  return (
+    <span className="flex items-center gap-2">
+      <Badge variant="secondary" title="No candidates yet -- run shot detection">
+        no candidates
+      </Badge>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onClick}
+        disabled={running || blocked}
+        title={reason ?? "Run splitsmith.shot_detect on the audit clip"}
+      >
+        {running ? <Loader2 className="size-3 animate-spin" /> : null}
+        {running ? job?.message ?? "Detecting..." : "Detect shots"}
+        {running && pct != null ? ` (${pct}%)` : null}
+      </Button>
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
+    </span>
   );
 }
 

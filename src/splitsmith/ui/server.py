@@ -17,6 +17,7 @@ Endpoints (locked v1 surface):
   POST /api/stages/{n}/detect-beep  -- submit a beep-detection job (runs in pool)
   POST /api/stages/{n}/beep         -- manual beep_time override (synchronous)
   POST /api/stages/{n}/trim         -- submit an audit-mode trim job
+  POST /api/stages/{n}/shot-detect  -- submit shot detection on the audit clip
   GET  /api/jobs                    -- list all retained jobs
   GET  /api/jobs/{job_id}           -- poll a single job for progress / status
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
@@ -40,7 +41,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -49,9 +50,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import beep_detect, video_probe
+from .. import shot_detect as shot_detect_module
 from .. import thumbnail as thumbnail_helpers
-from .. import video_probe
 from .. import waveform as waveform_helpers
+from ..config import ShotDetectConfig
 from . import audio as audio_helpers
 from .jobs import Job, JobHandle, JobRegistry
 from .project import (
@@ -64,6 +67,11 @@ from .project import (
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
+
+
+def _now_iso() -> str:
+    """ISO-8601 UTC timestamp for audit_events entries."""
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -478,8 +486,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             prim.beep_duration_ms = beep.duration_ms
             prim.processed["beep"] = True
 
+            trimmed_ok = False
             if stg.time_seconds > 0:
-                handle.update(progress=0.65, message="Trimming audit clip (short GOP)...")
+                handle.update(progress=0.55, message="Trimming audit clip (short GOP)...")
                 try:
                     audio_helpers.ensure_audit_trim(
                         state.project_root,
@@ -490,12 +499,22 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                         project=proj,
                     )
                     prim.processed["trim"] = True
+                    trimmed_ok = True
                 except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
                     # Soft failure: the beep is valuable on its own.
                     logger.warning("auto-trim failed for stage %d: %s", stage_number, exc)
                     handle.update(message=f"beep saved; trim failed: {exc}")
-            handle.update(progress=0.95, message="Saving project...")
+            handle.update(progress=0.85, message="Saving project...")
             proj.save(state.project_root)
+            # Auto-chain shot detection so the audit screen lands populated.
+            # Dedupe handles the case where the user already kicked one off.
+            if trimmed_ok:
+                if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+                    state.jobs.submit(
+                        kind="shot_detect",
+                        stage_number=stage_number,
+                        fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                    )
             handle.update(progress=1.0, message="Done")
 
         existing = state.jobs.find_active(kind="detect_beep", stage_number=stage_number)
@@ -554,15 +573,167 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 stg.time_seconds,
                 project=proj,
             )
-            handle.update(progress=0.9, message="Saving project...")
+            handle.update(progress=0.85, message="Saving project...")
             prim.processed["trim"] = True
             proj.save(state.project_root)
+            # Auto-chain: a fresh trim invalidates whatever shot-detection
+            # candidates were derived from the old trim, so re-run.
+            if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+                state.jobs.submit(
+                    kind="shot_detect",
+                    stage_number=stage_number,
+                    fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                )
             handle.update(progress=1.0, message="Done")
 
         existing = state.jobs.find_active(kind="trim", stage_number=stage_number)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(kind="trim", stage_number=stage_number, fn=run)
+        return JSONResponse(job.model_dump(mode="json"))
+
+    def _run_shot_detect(handle: JobHandle, stage_number: int) -> None:
+        """Worker that runs shot detection on the stage's audit clip.
+
+        Reads the trimmed clip's WAV (extracting it on demand if needed),
+        runs ``splitsmith.shot_detect`` over the [beep .. beep+stage] window,
+        and merges the resulting candidates into the audit JSON's
+        ``_candidates_pending_audit`` block. Existing ``shots[]`` are not
+        touched -- the user has authority over what's kept; this just
+        refreshes the candidate pool the audit screen draws markers from.
+        """
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError(f"stage {stage_number} has no primary or no beep yet")
+        if stg.time_seconds <= 0:
+            raise RuntimeError(
+                f"stage {stage_number} has time_seconds=0; import a "
+                "scoreboard before running shot detection"
+            )
+        source = proj.resolve_video_path(state.project_root, prim.path)
+
+        handle.update(progress=0.1, message="Preparing audio...")
+        audit = audio_helpers.ensure_audit_audio(
+            state.project_root,
+            stage_number,
+            source,
+            prim.beep_time,
+            project=proj,
+        )
+        beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
+
+        handle.update(progress=0.4, message="Detecting shots...")
+        audio_array, sr = beep_detect.load_audio(audit.audio_path)
+        detected = shot_detect_module.detect_shots(
+            audio_array,
+            sr,
+            beep_in_clip,
+            stg.time_seconds,
+            ShotDetectConfig(),
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for i, s in enumerate(detected, start=1):
+            candidates.append(
+                {
+                    "candidate_number": i,
+                    "time": round(s.time_absolute, 4),
+                    "ms_after_beep": round(s.time_from_beep * 1000),
+                    "peak_amplitude": round(float(s.peak_amplitude), 4),
+                    "confidence": round(float(s.confidence), 3),
+                }
+            )
+
+        handle.update(progress=0.85, message="Saving audit JSON...")
+        audit_dir = proj.audit_path(state.project_root)
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_file = audit_dir / f"stage{stage_number}.json"
+
+        if audit_file.exists():
+            try:
+                existing_json = json.loads(audit_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing_json = {}
+        else:
+            existing_json = {
+                "stage_number": stg.stage_number,
+                "stage_name": stg.stage_name,
+                "stage_time_seconds": stg.time_seconds,
+                "beep_time": round(beep_in_clip, 4),
+                "shots": [],
+            }
+        existing_json["_candidates_pending_audit"] = {
+            "_note": "Auto-detected by shot_detect via the production UI.",
+            "candidates": candidates,
+        }
+        events = list(existing_json.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "shot_detect_run",
+                "payload": {"candidate_count": len(candidates)},
+            }
+        )
+        existing_json["audit_events"] = events
+
+        # Atomic write + .bak (mirrors put_stage_audit).
+        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        tmp.write_text(json.dumps(existing_json, indent=2) + "\n", encoding="utf-8")
+        if audit_file.exists():
+            if backup.exists():
+                backup.unlink()
+            audit_file.replace(backup)
+        tmp.replace(audit_file)
+
+        prim.processed["shot_detect"] = True
+        proj.save(state.project_root)
+        handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
+
+    @app.post("/api/stages/{stage_number}/shot-detect")
+    def shot_detect_endpoint(stage_number: int) -> JSONResponse:
+        """Submit a shot-detection job for the stage's audit clip.
+
+        Returns a Job snapshot. Idempotent dedupe via the registry: a second
+        click while one is running adopts the existing job. The candidate
+        list lands in the audit JSON's ``_candidates_pending_audit`` block,
+        which is what the audit screen reads to render markers.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if primary.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} primary has no beep_time yet",
+            )
+        if stage.time_seconds <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has time_seconds=0; import a "
+                    "scoreboard before running shot detection"
+                ),
+            )
+
+        existing = state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="shot_detect",
+            stage_number=stage_number,
+            fn=lambda h: _run_shot_detect(h, stage_number),
+        )
         return JSONResponse(job.model_dump(mode="json"))
 
     @app.get("/api/jobs", response_model=list[Job])
