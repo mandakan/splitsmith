@@ -62,8 +62,11 @@ export function Waveform({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
   const outerRef = useRef<HTMLDivElement | null>(null);
-  // Tracks the visible viewport's width so fit-mode can size the canvas
-  // and zoom-mode can know when the playhead leaves the visible area.
+  // Wrapper exists purely to measure the available viewport. Without it,
+  // the scroll-host's w-full would grow to fit its inner content (block
+  // layout doesn't auto-clip), so overflow-x-auto would never trigger
+  // and zoom would have no visible effect.
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const draggingRef = useRef(false);
@@ -71,7 +74,10 @@ export function Waveform({
   const rafRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
-    const el = outerRef.current;
+    // Measure the wrapper, NOT the scroll-host: the scroll-host's width
+    // is pinned to whatever we set, so observing it would create a
+    // feedback loop where viewportWidth tracks contentWidth.
+    const el = wrapperRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -259,41 +265,46 @@ export function Waveform({
   }, [currentTime, duration]);
 
   return (
-    <div
-      ref={outerRef}
-      className={cn(
-        "relative w-full select-none rounded-md bg-muted/40 ring-1 ring-border",
-        "overflow-x-auto overflow-y-hidden",
-        className,
-      )}
-      style={{ height }}
-    >
+    <div ref={wrapperRef} className={cn("w-full", className)}>
       <div
-        ref={innerRef}
-        role="slider"
-        aria-label={ariaLabel}
-        aria-valuemin={0}
-        aria-valuemax={Math.max(duration, 0)}
-        aria-valuenow={Math.min(Math.max(currentTime, 0), Math.max(duration, 0))}
-        aria-valuetext={ariaValueText}
-        tabIndex={0}
+        ref={outerRef}
         className={cn(
-          "relative cursor-ew-resize touch-none",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "relative select-none rounded-md bg-muted/40 ring-1 ring-border",
+          "overflow-x-auto overflow-y-hidden",
         )}
-        style={{ width: contentWidth, height }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onDoubleClick={(e) => {
-          if (!onDoubleClick) return;
-          if ((e.target as HTMLElement).closest("[data-audit-marker]")) return;
-          onDoubleClick(timeFromEvent(e.clientX));
-        }}
+        // Pinning the scroll-host's width to the measured viewport (not
+        // w-full) ensures overflow-x-auto actually clips when the inner
+        // content is wider; otherwise block layout would let the
+        // scroll-host expand to fit and the scrollbar would never appear.
+        style={{ width: viewportWidth || "100%", height }}
       >
-        <canvas ref={canvasRef} className="block" />
-        {children}
+        <div
+          ref={innerRef}
+          role="slider"
+          aria-label={ariaLabel}
+          aria-valuemin={0}
+          aria-valuemax={Math.max(duration, 0)}
+          aria-valuenow={Math.min(Math.max(currentTime, 0), Math.max(duration, 0))}
+          aria-valuetext={ariaValueText}
+          tabIndex={0}
+          className={cn(
+            "relative cursor-ew-resize touch-none",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+          style={{ width: contentWidth, height }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onDoubleClick={(e) => {
+            if (!onDoubleClick) return;
+            if ((e.target as HTMLElement).closest("[data-audit-marker]")) return;
+            onDoubleClick(timeFromEvent(e.clientX));
+          }}
+        >
+          <canvas ref={canvasRef} className="block" />
+          {children}
+        </div>
       </div>
     </div>
   );
