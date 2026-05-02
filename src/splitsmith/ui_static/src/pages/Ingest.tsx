@@ -877,7 +877,12 @@ function StagesSection({
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {/* Cards carry a beep section + stage-move dropdown + multiple
+          video previews; squeezing them into 3 columns at the xl
+          breakpoint (1280px viewport, ~992px content width after the
+          240px sidebar) clipped controls. Push 2-col to lg and 3-col
+          to 2xl so each card has room to breathe. */}
+      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {project.stages.map((s) => (
           <StageCard
             key={s.stage_number}

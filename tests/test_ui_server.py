@@ -490,15 +490,26 @@ def _seed_project_with_primary(tmp_path: Path) -> tuple[TestClient, Path]:
     return client, src
 
 
-def _stub_detect(monkeypatch, beep_time: float = 12.453) -> None:
+def _stub_detect(
+    monkeypatch,
+    beep_time: float = 12.453,
+    *,
+    candidates: list | None = None,
+) -> None:
     """Replace audio_helpers.detect_primary_beep with a fast stub returning a
     deterministic BeepDetection. The endpoint is otherwise wrapped around
     ffmpeg + librosa, which we don't want to invoke from a unit test."""
-    from splitsmith.config import BeepDetection
+    from splitsmith.config import BeepCandidate, BeepDetection
     from splitsmith.ui import audio as audio_helpers
 
     def fake(*args, **kwargs):  # type: ignore[no-untyped-def]
-        return BeepDetection(time=beep_time, peak_amplitude=0.42, duration_ms=320.0)
+        cands: list[BeepCandidate] = candidates or []
+        return BeepDetection(
+            time=beep_time,
+            peak_amplitude=0.42,
+            duration_ms=320.0,
+            candidates=cands,
+        )
 
     monkeypatch.setattr(audio_helpers, "detect_primary_beep", fake)
 
@@ -598,6 +609,101 @@ def test_override_beep_400_on_negative(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
+def _three_candidates() -> list:
+    from splitsmith.config import BeepCandidate
+
+    return [
+        BeepCandidate(time=12.453, score=18.0, peak_amplitude=0.42, duration_ms=320.0),
+        BeepCandidate(time=8.100, score=9.0, peak_amplitude=0.30, duration_ms=180.0),
+        BeepCandidate(time=27.500, score=4.5, peak_amplitude=0.55, duration_ms=210.0),
+    ]
+
+
+def test_detect_beep_persists_candidate_list(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert len(primary["beep_candidates"]) == 3
+    assert primary["beep_candidates"][0]["time"] == 12.453
+    assert primary["beep_candidates"][1]["time"] == 8.100
+
+
+def test_select_beep_candidate_promotes_alternate(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
+    final = _wait_for_job(
+        client, client.post("/api/stages/1/detect-beep").json()["id"]
+    )
+    assert final["status"] == "succeeded"
+
+    resp = client.post("/api/stages/1/beep/select", json={"time": 8.100})
+    assert resp.status_code == 200
+    primary = resp.json()["stages"][0]["videos"][0]
+    assert primary["beep_time"] == 8.100
+    assert primary["beep_source"] == "auto"
+    assert primary["beep_peak_amplitude"] == 0.30
+    assert primary["beep_duration_ms"] == 180.0
+    # Selecting an alternate keeps the candidate list intact so the user
+    # can switch again without re-running detection.
+    assert len(primary["beep_candidates"]) == 3
+    # New beep -> previous trim is stale.
+    assert primary["processed"]["trim"] is False
+
+
+def test_select_beep_candidate_tolerates_sub_ms_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The SPA may send a slightly-rounded time (3 decimals) while the
+    server still has the full-precision candidate. The 1 ms tolerance
+    keeps the click working."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
+    _wait_for_job(client, client.post("/api/stages/1/detect-beep").json()["id"])
+
+    resp = client.post("/api/stages/1/beep/select", json={"time": 8.1004})
+    assert resp.status_code == 200
+    primary = resp.json()["stages"][0]["videos"][0]
+    assert primary["beep_time"] == 8.100
+
+
+def test_select_beep_candidate_400_when_no_candidates(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/stages/1/beep/select", json={"time": 0.0})
+    assert resp.status_code == 400
+
+
+def test_select_beep_candidate_400_when_time_no_match(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
+    _wait_for_job(client, client.post("/api/stages/1/detect-beep").json()["id"])
+
+    resp = client.post("/api/stages/1/beep/select", json={"time": 99.999})
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    # The server lists what's available so the user can copy a real time.
+    assert "12.453" in detail
+    assert "8.100" in detail
+
+
+def test_manual_override_clears_candidate_list(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
+    _wait_for_job(client, client.post("/api/stages/1/detect-beep").json()["id"])
+
+    resp = client.post("/api/stages/1/beep", json={"beep_time": 12.5})
+    assert resp.status_code == 200
+    primary = resp.json()["stages"][0]["videos"][0]
+    assert primary["beep_source"] == "manual"
+    assert primary["beep_candidates"] == []
+
+
 def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
     """The /audio endpoint asks the helper for the cached WAV; we stub the
     helper to drop a small WAV file in place rather than running ffmpeg."""
@@ -663,6 +769,58 @@ def test_beep_preview_serves_cached_clip(tmp_path: Path, monkeypatch) -> None:
     assert captured["center_time"] == pytest.approx(12.5)
     assert captured["duration_s"] == pytest.approx(1.0)
     assert Path(captured["source"]).name == src.name
+
+
+def test_beep_preview_t_query_overrides_center(tmp_path: Path, monkeypatch) -> None:
+    """``?t=<seconds>`` re-centres the preview clip on an arbitrary time
+    (used by the candidate picker before the user has committed a choice).
+    """
+    client, src = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 12.5
+    project.save(project_root)
+
+    thumbs_dir = project_root / "thumbs"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    fake_clip = thumbs_dir / "fake_t27500_d1000.mp4"
+    fake_clip.write_bytes(b"\x00\x00\x00\x18ftypmp42fake-mp4")
+
+    captured: dict = {}
+
+    def fake_ensure_clip(source, *, cache_dir, center_time, duration_s=1.0, **kwargs):  # type: ignore[no-untyped-def]
+        captured["center_time"] = center_time
+        return fake_clip
+
+    from splitsmith.ui import server as server_module
+
+    monkeypatch.setattr(
+        server_module.thumbnail_helpers, "ensure_clip", fake_ensure_clip
+    )
+
+    resp = client.get("/api/stages/1/beep-preview?t=27.5")
+    assert resp.status_code == 200
+    assert captured["center_time"] == pytest.approx(27.5)
+    # primary.beep_time is unchanged.
+    after = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert after["beep_time"] == 12.5
+    # ``src`` is the seeded source video; sanity-check it exists.
+    assert src.exists()
+
+
+def test_beep_preview_400_on_negative_t(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.save(project_root)
+
+    resp = client.get("/api/stages/1/beep-preview?t=-1")
+    assert resp.status_code == 400
 
 
 def test_beep_preview_404_when_no_beep(tmp_path: Path) -> None:
@@ -894,6 +1052,7 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
         time = 6.5
         peak_amplitude = 0.42
         duration_ms = 110.0
+        candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "x.wav")
     (tmp_path / "x.wav").write_bytes(b"\x00")
@@ -945,6 +1104,7 @@ def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch
         time = 4.0
         peak_amplitude = 0.5
         duration_ms = 100.0
+        candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "y.wav")
     (tmp_path / "y.wav").write_bytes(b"\x00")
@@ -1277,6 +1437,7 @@ def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
         time = 1.0
         peak_amplitude = 0.5
         duration_ms = 80.0
+        candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
     (tmp_path / "z.wav").write_bytes(b"\x00")

@@ -33,7 +33,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ..config import StageData, VideoMatchConfig
+from ..config import BeepCandidate, StageData, VideoMatchConfig
 from ..video_match import match_videos_to_stages
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
@@ -75,6 +75,11 @@ class StageVideo(BaseModel):
     # surfaced in the UI to help the user judge auto-detection confidence.
     beep_peak_amplitude: float | None = None
     beep_duration_ms: float | None = None
+    # Ranked alternative candidates from the most recent auto-detection run
+    # (silence-preference score, descending). The production UI offers these
+    # as one-click alternatives to the auto-winner so the user rarely has to
+    # type a timestamp by hand. Cleared on manual override / clear (issue #22).
+    beep_candidates: list[BeepCandidate] = Field(default_factory=list)
     notes: str = ""
 
 
@@ -579,6 +584,7 @@ class MatchProject(BaseModel):
                     v.beep_source = None
                     v.beep_peak_amplitude = None
                     v.beep_duration_ms = None
+                    v.beep_candidates = []
 
         return RemovalPlan(
             video_path=video.path,

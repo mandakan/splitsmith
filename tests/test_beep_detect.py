@@ -64,6 +64,52 @@ def test_detect_beep_synthetic_clean_tone() -> None:
     assert 250.0 <= result.duration_ms <= 350.0
 
 
+def test_detect_beep_returns_ranked_candidates() -> None:
+    """Two synthetic beeps in one buffer; candidates should be sorted by
+    silence-preference score (descending) and the winner should match
+    candidates[0]."""
+    sr = 48000
+    rng = np.random.default_rng(7)
+    audio = (rng.standard_normal(sr * 6) * 0.001).astype(np.float32)
+
+    def _stamp(at_s: float, amp: float, dur_s: float = 0.300) -> None:
+        n = int(sr * dur_s)
+        t = np.arange(n) / sr
+        audio[int(sr * at_s) : int(sr * at_s) + n] += (
+            amp * np.sin(2 * np.pi * 3000 * t).astype(np.float32)
+        )
+
+    _stamp(1.0, 0.6)  # the "real" beep -- preceded by ~1 s of silence
+    _stamp(3.0, 0.4)  # competing transient further into the clip
+
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    assert len(result.candidates) >= 2
+    # Sorted by score, descending.
+    scores = [c.score for c in result.candidates]
+    assert scores == sorted(scores, reverse=True)
+    # Winner == candidates[0].
+    assert result.time == pytest.approx(result.candidates[0].time, abs=1e-9)
+    assert result.peak_amplitude == pytest.approx(
+        result.candidates[0].peak_amplitude, abs=1e-9
+    )
+    assert result.duration_ms == pytest.approx(
+        result.candidates[0].duration_ms, abs=1e-9
+    )
+
+
+def test_detect_beep_top_n_zero_returns_only_winner() -> None:
+    sr = 48000
+    rng = np.random.default_rng(11)
+    audio = (rng.standard_normal(sr * 3) * 0.001).astype(np.float32)
+    n = int(sr * 0.300)
+    t = np.arange(n) / sr
+    audio[sr : sr + n] += 0.6 * np.sin(2 * np.pi * 3000 * t).astype(np.float32)
+
+    cfg = BeepDetectConfig(top_n_candidates=0)
+    result = detect_beep(audio, sr, cfg)
+    assert len(result.candidates) == 1
+
+
 def test_detect_beep_rejects_2d_input() -> None:
     sr = 48000
     audio = np.zeros((sr, 2), dtype=np.float32)

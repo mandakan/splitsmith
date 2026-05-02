@@ -236,6 +236,20 @@ class BeepOverrideRequest(BaseModel):
     beep_time: float | None  # None clears the override
 
 
+class BeepSelectRequest(BaseModel):
+    """Body for POST /api/stages/{n}/beep/select.
+
+    ``time`` is matched against ``primary.beep_candidates`` within 1 ms.
+    Time-based addressing (rather than an index into the list) is robust
+    against the SPA holding a stale candidate snapshot when a concurrent
+    trim job re-persists the project: the user picked a *time*, so the
+    server should honour that exact pick regardless of where it lands in
+    the current list.
+    """
+
+    time: float
+
+
 class RemoveVideoRequest(BaseModel):
     """Body for POST /api/videos/remove (#24).
 
@@ -566,6 +580,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             prim.beep_source = "auto"
             prim.beep_peak_amplitude = beep.peak_amplitude
             prim.beep_duration_ms = beep.duration_ms
+            prim.beep_candidates = list(beep.candidates)
             prim.processed["beep"] = True
 
             trimmed_ok = False
@@ -768,12 +783,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         # cutoff is conservative -- noise events fall well below, real
         # shots typically land >= 0.4. The user can flip individuals
         # afterward; ``reset=true`` re-runs this seeding from scratch.
-        SEED_KEEP_CONFIDENCE = 0.3
+        seed_keep_confidence = 0.3
         if reset:
             existing_json["shots"] = []
         seeded_shots = False
         if not existing_json.get("shots"):
-            kept = [c for c in candidates if (c.get("confidence") or 0.0) >= SEED_KEEP_CONFIDENCE]
+            kept = [c for c in candidates if (c.get("confidence") or 0.0) >= seed_keep_confidence]
             existing_json["shots"] = [
                 {
                     "shot_number": i,
@@ -890,6 +905,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             primary.beep_source = None
             primary.beep_peak_amplitude = None
             primary.beep_duration_ms = None
+            primary.beep_candidates = []
             primary.processed["beep"] = False
             primary.processed["trim"] = False
             primary.processed["shot_detect"] = False
@@ -902,6 +918,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             # Diagnostics from a previous auto-detect are no longer authoritative.
             primary.beep_peak_amplitude = None
             primary.beep_duration_ms = None
+            # Manual time wins over the ranked-candidate list -- drop it so
+            # the UI doesn't keep offering a different "auto" pick that
+            # contradicts what the user just typed.
+            primary.beep_candidates = []
             # New beep -> previous trim was cut around the wrong window.
             # processed.trim flips back so the SPA prompts re-trim.
             primary.processed["trim"] = False
@@ -917,6 +937,77 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         if (
             req.beep_time is not None
             and stage.time_seconds > 0
+            and state.jobs.find_active(kind="trim", stage_number=stage_number) is None
+        ):
+            state.jobs.submit(
+                kind="trim",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
+            )
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/beep/select")
+    def select_beep_candidate(
+        stage_number: int, req: BeepSelectRequest
+    ) -> JSONResponse:
+        """Promote one of the ranked auto-detected candidates as authoritative.
+
+        Lets the user fix a wrong auto-pick without typing a timestamp.
+        Re-uses the auto-detect provenance because the time still came from
+        the detector -- we only changed which candidate the project trusts.
+        Triggers a re-trim like the manual override path so the cached
+        audit clip lines up with the new beep.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if not primary.beep_candidates:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has no candidate list yet; run "
+                    "detect-beep first"
+                ),
+            )
+        # Match by time within 1 ms. Round-tripping floats through JSON +
+        # pydantic preserves the value but a strict equality check is
+        # fragile, so we use the same epsilon the SPA uses to pick the
+        # active row.
+        match_eps = 1e-3
+        chosen = None
+        for c in primary.beep_candidates:
+            if abs(c.time - req.time) <= match_eps:
+                chosen = c
+                break
+        if chosen is None:
+            available = ", ".join(f"{c.time:.3f}" for c in primary.beep_candidates)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"no candidate within {match_eps * 1000:.0f} ms of "
+                    f"{req.time:.3f}s; available: [{available}]"
+                ),
+            )
+        primary.beep_time = chosen.time
+        primary.beep_source = "auto"
+        primary.beep_peak_amplitude = chosen.peak_amplitude
+        primary.beep_duration_ms = chosen.duration_ms
+        primary.processed["beep"] = True
+        primary.processed["trim"] = False
+        primary.processed["shot_detect"] = False
+
+        audio_helpers.invalidate_audit_trim(state.project_root, stage_number, project=project)
+        project.save(state.project_root)
+        if (
+            stage.time_seconds > 0
             and state.jobs.find_active(kind="trim", stage_number=stage_number) is None
         ):
             state.jobs.submit(
@@ -955,14 +1046,16 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/api/stages/{stage_number}/beep-preview")
-    def stage_beep_preview(stage_number: int) -> FileResponse:
-        """Serve a tiny MP4 around the primary's detected beep (#27).
+    def stage_beep_preview(
+        stage_number: int, t: float | None = None
+    ) -> FileResponse:
+        """Serve a tiny MP4 around a beep timestamp (#27, #22).
 
-        Lets the Ingest screen render an inline preview right after
-        detection runs so the user can eyeball "did the detector land on
-        the right beep?" without jumping into the audit screen. Cache
-        keys on (source mtime/size, beep_time, duration), so a re-detect
-        or manual override naturally regenerates the clip.
+        Default center is the primary's persisted ``beep_time``. The
+        optional ``t`` query param overrides it so the BeepCandidates
+        picker (#22) can preview alternative ranked candidates without
+        promoting them first. Cache keys on (source mtime/size, center
+        time, duration), so each distinct ``t`` gets its own cached clip.
         """
         project = state.load()
         try:
@@ -975,11 +1068,14 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
-        if primary.beep_time is None:
+        center = t if t is not None else primary.beep_time
+        if center is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"stage {stage_number} has no beep_time yet",
             )
+        if center < 0:
+            raise HTTPException(status_code=400, detail="t must be >= 0")
         source = project.resolve_video_path(state.project_root, primary.path)
         if not source.is_file():
             raise HTTPException(
@@ -991,7 +1087,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             clip = thumbnail_helpers.ensure_clip(
                 source,
                 cache_dir=thumbs_dir,
-                center_time=float(primary.beep_time),
+                center_time=float(center),
                 duration_s=1.0,
                 width=480,
             )

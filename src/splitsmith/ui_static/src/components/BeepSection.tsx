@@ -14,13 +14,33 @@
  * waveform-based correction inline with the audit waveform.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Loader2, Pencil, Play, RefreshCw, Sparkles, Trash2, Volume2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  Play,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Volume2,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type Job, type MatchProject, type StageVideo } from "@/lib/api";
+import { Waveform } from "@/components/Waveform";
+import {
+  ApiError,
+  api,
+  type BeepCandidate,
+  type Job,
+  type MatchProject,
+  type PeaksResult,
+  type StageVideo,
+} from "@/lib/api";
 
 interface Props {
   stageNumber: number;
@@ -145,7 +165,22 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
     }
   };
 
+  const selectCandidate = async (time: number) => {
+    setBusy(true);
+    try {
+      const updated = await api.selectBeepCandidate(stageNumber, time);
+      onProjectUpdate(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (editing) {
+    const draftSourceTime = Number(draft);
+    const draftValid = Number.isFinite(draftSourceTime) && draftSourceTime >= 0;
     return (
       <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
         <div className="flex flex-wrap items-end gap-2">
@@ -171,7 +206,16 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
             Cancel
           </Button>
         </div>
-        <AudioVerifier stageNumber={stageNumber} suspectedTime={Number(draft) || primary.beep_time} />
+        <BeepWaveformPicker
+          stageNumber={stageNumber}
+          primaryBeepTime={primary.beep_time}
+          draftSourceTime={draftValid ? draftSourceTime : null}
+          onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
+        />
+        <AudioVerifier
+          stageNumber={stageNumber}
+          suspectedTime={draftValid ? draftSourceTime : primary.beep_time}
+        />
       </div>
     );
   }
@@ -238,11 +282,329 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
           </Button>
         </div>
       </div>
+      <BeepCandidates
+        stageNumber={stageNumber}
+        candidates={primary.beep_candidates}
+        currentTime={primary.beep_time}
+        busy={busy}
+        onSelect={selectCandidate}
+      />
       <BeepPreview
         stageNumber={stageNumber}
         beepTime={primary.beep_time}
       />
     </div>
+  );
+}
+
+/** Click-to-set waveform inside the manual-edit panel.
+ *
+ *  The /audio + /peaks endpoints serve the **trimmed** audit clip when one
+ *  exists (cut around the previously-detected beep) and the **full**
+ *  primary WAV otherwise. Time on the waveform is therefore "local clip
+ *  time", not source time. We translate using the offset
+ *  ``primary.beep_time - peaks.beep_time``: in the trimmed case this is
+ *  exactly the trim window's start; in the untrimmed case both sides are
+ *  the same number so the offset is zero. */
+function BeepWaveformPicker({
+  stageNumber,
+  primaryBeepTime,
+  draftSourceTime,
+  onPick,
+}: {
+  stageNumber: number;
+  primaryBeepTime: number | null;
+  draftSourceTime: number | null;
+  onPick: (sourceTime: number) => void;
+}) {
+  const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
+  // Local clip time in seconds; drives the waveform's playhead while the
+  // user drags. Initialised to the existing primary beep position so the
+  // playhead doesn't snap to 0 on open.
+  const [localTime, setLocalTime] = useState<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setUnavailable(false);
+    api
+      .getStagePeaks(stageNumber)
+      .then((p) => {
+        if (cancelled) return;
+        setPeaks(p);
+        // Seed the playhead at the served clip's beep marker if we have
+        // one, otherwise at zero.
+        setLocalTime(p.beep_time ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setUnavailable(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stageNumber]);
+
+  const offset = useMemo(() => {
+    // primary.beep_time and peaks.beep_time are both expressed as the same
+    // physical instant (the beep). Their difference is the trim window's
+    // start time in source coordinates; zero when the audio is the full
+    // source. Falls back to 0 when either side is unset.
+    if (primaryBeepTime == null || !peaks || peaks.beep_time == null) return 0;
+    return primaryBeepTime - peaks.beep_time;
+  }, [primaryBeepTime, peaks]);
+
+  // Keep the visual playhead in sync with the numeric draft when the user
+  // types in the input directly.
+  useEffect(() => {
+    if (!peaks || draftSourceTime == null) return;
+    const local = draftSourceTime - offset;
+    if (local >= 0 && local <= peaks.duration) {
+      setLocalTime(local);
+    }
+  }, [draftSourceTime, peaks, offset]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" aria-hidden />
+        Loading waveform...
+      </div>
+    );
+  }
+  if (unavailable || !peaks) {
+    // No audio cached yet (the user has never run detect-beep on this
+    // stage). The numeric input + AudioVerifier hint below cover this case.
+    return null;
+  }
+
+  const handleScrub = (t: number) => {
+    setLocalTime(t);
+  };
+  const handleScrubEnd = () => {
+    onPick(localTime + offset);
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">
+        Drag the waveform to set the beep time (releases snap to source seconds)
+      </div>
+      <Waveform
+        peaks={peaks.peaks}
+        duration={peaks.duration}
+        currentTime={localTime}
+        onScrub={handleScrub}
+        onScrubEnd={handleScrubEnd}
+        beepTime={peaks.beep_time}
+        height={80}
+        ariaLabel={`Beep editor waveform for stage ${stageNumber}`}
+      />
+    </div>
+  );
+}
+
+function BeepCandidates({
+  stageNumber,
+  candidates,
+  currentTime,
+  busy,
+  onSelect,
+}: {
+  stageNumber: number;
+  candidates: BeepCandidate[];
+  currentTime: number | null;
+  busy: boolean;
+  onSelect: (time: number) => void | Promise<void>;
+}) {
+  // Never bother showing a picker when the detector only returned the winner
+  // (no real choice for the user to make). For projects that predate #22 the
+  // list is just empty -- next detect-beep run repopulates it.
+  const hasAlternatives = candidates.length > 1;
+  const [open, setOpen] = useState(false);
+  if (!hasAlternatives) return null;
+
+  // The "currently promoted" candidate is the one whose time matches
+  // primary.beep_time. We compare with a small epsilon because the value
+  // round-trips through JSON. Falls back to index 0 (the auto-winner).
+  const activeIndex = (() => {
+    if (currentTime == null) return -1;
+    let best = -1;
+    let bestDelta = Infinity;
+    candidates.forEach((c, i) => {
+      const d = Math.abs(c.time - currentTime);
+      if (d < bestDelta) {
+        bestDelta = d;
+        best = i;
+      }
+    });
+    return bestDelta <= 1e-3 ? best : -1;
+  })();
+
+  // Single shared preview slot under the candidate list. Holding one
+  // <video> for the whole list keeps the layout predictable and avoids
+  // the SPA stacking 5 different aspect-ratio thumbnails when the user
+  // explores alternatives.
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [previewError, setPreviewError] = useState(false);
+  useEffect(() => {
+    setPreviewError(false);
+  }, [previewIndex, stageNumber]);
+  // If candidates change underneath us (re-detect, override) drop a stale
+  // preview index.
+  useEffect(() => {
+    if (previewIndex != null && previewIndex >= candidates.length) {
+      setPreviewIndex(null);
+    }
+  }, [candidates.length, previewIndex]);
+
+  return (
+    <div className="rounded-md border border-border/40 bg-background/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        aria-expanded={open}
+        aria-controls={`beep-candidates-${stageNumber}`}
+        title="Silence-preference ranked; pick a different one if the auto-winner is wrong"
+      >
+        {open ? (
+          <ChevronDown className="size-3" aria-hidden />
+        ) : (
+          <ChevronRight className="size-3" aria-hidden />
+        )}
+        <span>
+          {candidates.length - 1} alternate
+          {candidates.length - 1 === 1 ? "" : "s"}
+        </span>
+      </button>
+      {open ? (
+        <>
+          <ul
+            id={`beep-candidates-${stageNumber}`}
+            className="divide-y divide-border/40 border-t border-border/40"
+          >
+            {candidates.map((c, i) => (
+              <CandidateRow
+                key={`${c.time.toFixed(6)}-${i}`}
+                candidate={c}
+                index={i}
+                isActive={i === activeIndex}
+                isPreviewing={i === previewIndex}
+                busy={busy}
+                onTogglePreview={() =>
+                  setPreviewIndex((cur) => (cur === i ? null : i))
+                }
+                onSelect={() => onSelect(c.time)}
+              />
+            ))}
+          </ul>
+          {previewIndex != null && candidates[previewIndex] ? (
+            <div className="border-t border-border/40 p-2">
+              <div className="mb-1 text-xs text-muted-foreground">
+                Preview #{previewIndex + 1} -- {candidates[previewIndex].time.toFixed(3)}s
+              </div>
+              {previewError ? (
+                <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-xs text-muted-foreground">
+                  <Sparkles className="size-3" />
+                  Preview unavailable (no cached clip yet)
+                </div>
+              ) : (
+                <video
+                  key={`${stageNumber}:${candidates[previewIndex].time.toFixed(3)}`}
+                  src={api.stageBeepPreviewUrl(
+                    stageNumber,
+                    candidates[previewIndex].time,
+                  )}
+                  className="aspect-video w-full max-w-sm rounded-md border border-border/60 bg-black object-contain"
+                  playsInline
+                  controls
+                  autoPlay
+                  preload="metadata"
+                  aria-label={`Preview for candidate ${previewIndex + 1}`}
+                  onError={() => setPreviewError(true)}
+                />
+              )}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function CandidateRow({
+  candidate,
+  index,
+  isActive,
+  isPreviewing,
+  busy,
+  onTogglePreview,
+  onSelect,
+}: {
+  candidate: BeepCandidate;
+  index: number;
+  isActive: boolean;
+  isPreviewing: boolean;
+  busy: boolean;
+  onTogglePreview: () => void;
+  onSelect: () => void | Promise<void>;
+}) {
+  // Two-line layout to fit narrow stage cards: top line is the headline
+  // (rank + time + actions); bottom line is muted diagnostics. Buttons
+  // are icon-only with title tooltips so the row never grows wider than
+  // the card.
+  return (
+    <li
+      className={`px-2 py-1.5 text-xs ${isActive ? "bg-muted/40" : ""}`}
+    >
+      <div className="flex items-center gap-2">
+        <span className="w-5 shrink-0 text-muted-foreground tabular-nums">
+          #{index + 1}
+        </span>
+        <span className="font-mono tabular-nums">{candidate.time.toFixed(3)}s</span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onTogglePreview}
+            aria-pressed={isPreviewing}
+            aria-label={isPreviewing ? "Hide preview" : "Preview"}
+            title={isPreviewing ? "Hide preview" : "Preview a 1 s clip"}
+            className="size-7"
+          >
+            <Play className="size-3.5" />
+          </Button>
+          {isActive ? (
+            <Badge variant="statusComplete" className="gap-1" title="Currently promoted">
+              <Check className="size-3" />
+              Selected
+            </Badge>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onSelect}
+              disabled={busy}
+              title={`Promote ${candidate.time.toFixed(3)}s as the beep`}
+            >
+              Use this
+            </Button>
+          )}
+        </div>
+      </div>
+      <div
+        className="mt-0.5 pl-7 text-[11px] text-muted-foreground"
+        title={`Silence-preference score: ${candidate.score.toFixed(2)} (run peak / pre-window mean). Peak amplitude on the bandpassed envelope: ${candidate.peak_amplitude.toFixed(3)}. Duration: ${candidate.duration_ms.toFixed(0)} ms.`}
+      >
+        score {candidate.score.toFixed(1)} &middot; peak {candidate.peak_amplitude.toFixed(2)}{" "}
+        &middot; {Math.round(candidate.duration_ms)} ms
+      </div>
+    </li>
   );
 }
 
