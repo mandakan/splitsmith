@@ -60,6 +60,10 @@ function FilterChip({ label, glyph, active, count, onToggle }: FilterChipProps) 
     <label
       className={cn(
         "inline-flex cursor-pointer select-none items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
+        // The checkbox is sr-only so the label needs to surface its focus
+        // ring for keyboard nav. ``has-[:focus-visible]`` keeps mouse
+        // clicks (no :focus-visible) from showing a stray ring.
+        "has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
         active
           ? "border-input bg-accent text-foreground"
           : "border-border/40 bg-background text-muted-foreground line-through",
@@ -70,7 +74,7 @@ function FilterChip({ label, glyph, active, count, onToggle }: FilterChipProps) 
         className="sr-only"
         checked={active}
         onChange={onToggle}
-        aria-label={`Show ${label}`}
+        aria-label={`Show ${label} markers`}
       />
       {visual}
       <span>{label}</span>

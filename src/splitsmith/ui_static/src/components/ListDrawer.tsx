@@ -152,11 +152,21 @@ export function ListDrawer({
                 return (
                   <tr
                     key={m.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Jump to ${m.kind} marker at ${m.time.toFixed(3)}s`}
                     className={cn(
                       "cursor-pointer border-b border-border/50 hover:bg-accent",
+                      "focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       selected && "bg-accent",
                     )}
                     onClick={() => onJumpTo(m)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onJumpTo(m);
+                      }
+                    }}
                   >
                     <td className="px-2 py-1 font-mono tabular-nums">
                       {m.time.toFixed(3)}s
@@ -203,13 +213,18 @@ function SortHeader({
   className?: string;
   children: React.ReactNode;
 }) {
+  // Wrap the column label in a real <button> so screen readers announce
+  // the sort affordance and keyboard nav can hit Enter to toggle order.
   return (
-    <th
-      scope="col"
-      className={cn("cursor-pointer px-2 py-2 font-medium", className)}
-      onClick={onClick}
-    >
-      <span className="inline-flex items-center gap-0.5">
+    <th scope="col" className={cn("px-2 py-2 font-medium", className)} aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "inline-flex cursor-pointer items-center gap-0.5",
+          "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+      >
         {children}
         {active ? (
           dir === "asc" ? (
@@ -218,7 +233,7 @@ function SortHeader({
             <ArrowDown className="size-3" aria-hidden />
           )
         ) : null}
-      </span>
+      </button>
     </th>
   );
 }
