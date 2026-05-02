@@ -74,6 +74,7 @@ import {
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
+import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
@@ -81,6 +82,10 @@ const MAX_UNDO = 50;
 export function Audit() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
+
+  // Drop button / chip focus after a mouse click so the next Space press
+  // toggles playback instead of re-clicking the last-touched control.
+  useBlurOnPointerClick();
 
   const [project, setProject] = useState<MatchProject | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
@@ -613,8 +618,11 @@ export function Audit() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const inField =
-        target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      // ``inField`` distinguishes typing text from anything else focusable.
+      // Hidden checkboxes (filter chips), buttons, etc. are NOT "in a field"
+      // -- the audit screen reserves Space / arrow keys / etc. for playback
+      // control regardless of which control was last clicked.
+      const inField = isTypingTextTarget(target);
 
       if (e.code === "Space" && !inField) {
         e.preventDefault();

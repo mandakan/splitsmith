@@ -58,6 +58,7 @@ import {
   type PeaksResult,
   type StageAudit,
 } from "@/lib/api";
+import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
@@ -72,6 +73,10 @@ export function Review() {
   const [params] = useSearchParams();
   const fixturePath = params.get("fixture");
   const videoPath = params.get("video");
+
+  // Drop button / chip focus after a mouse click so the next Space press
+  // toggles playback instead of re-clicking the last-touched control.
+  useBlurOnPointerClick();
 
   const [audit, setAudit] = useState<StageAudit | null>(null);
   const [auditLoaded, setAuditLoaded] = useState(false);
@@ -417,7 +422,7 @@ export function Review() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const inField = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      const inField = isTypingTextTarget(target);
       if (e.code === "Space" && !inField) {
         e.preventDefault();
         togglePlay();
