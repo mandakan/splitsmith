@@ -23,6 +23,7 @@ Endpoints (locked v1 surface):
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
   GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
   GET  /api/stages/{n}/audit        -- read the stage's audit JSON (404 if none)
+  PUT  /api/stages/{n}/audit        -- atomically write the stage's audit JSON
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -700,6 +701,45 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             payload = json.loads(audit_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    @app.put("/api/stages/{stage_number}/audit")
+    def put_stage_audit(stage_number: int, payload: dict[str, Any]) -> JSONResponse:
+        """Atomically write the audit JSON for a stage.
+
+        Layout follows the existing audit-prep / audit-apply convention plus
+        an ``audit_events`` append-only log (issue #15). The SPA owns the
+        document shape -- this endpoint just verifies it's a JSON object,
+        writes it under ``<project>/audit/stage<N>.json``, and keeps the
+        previous version as ``stage<N>.json.bak`` so a bad save can be
+        recovered.
+
+        The atomic-write pattern is: serialize -> ``stage<N>.json.tmp`` ->
+        rename existing final to ``.bak`` (replacing any prior backup) ->
+        rename ``.tmp`` to final. A crashed process never leaves the SPA
+        without a readable JSON.
+        """
+        project = state.load()
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_dir = project.audit_path(state.project_root)
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        target = audit_dir / f"stage{stage_number}.json"
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        backup = target.with_suffix(target.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if target.exists():
+                if backup.exists():
+                    backup.unlink()
+                target.replace(backup)
+            tmp.replace(target)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return JSONResponse(payload)
 
     @app.get("/api/videos/stream")

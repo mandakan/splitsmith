@@ -1089,6 +1089,61 @@ def test_get_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_put_stage_audit_writes_payload_and_returns_it(tmp_path: Path) -> None:
+    """PUT writes the JSON under <project>/audit/stage<N>.json. The body
+    round-trips so the SPA can keep a single source of truth."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    payload = {
+        "stage_number": 1,
+        "stage_name": "Stage 1",
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": 4,
+                "time": 1.5,
+                "ms_after_beep": 1500,
+                "source": "detected",
+            }
+        ],
+        "audit_events": [
+            {"ts": "2026-05-02T12:00:00Z", "kind": "marker_kept", "payload": {"id": "cand-4"}}
+        ],
+    }
+    resp = client.put("/api/stages/1/audit", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["shots"][0]["candidate_number"] == 4
+    on_disk = (tmp_path / "match" / "audit" / "stage1.json").read_text(encoding="utf-8")
+    import json as _json
+
+    assert _json.loads(on_disk)["shots"][0]["candidate_number"] == 4
+
+
+def test_put_stage_audit_keeps_previous_version_as_bak(tmp_path: Path) -> None:
+    """A second PUT preserves the prior contents at stage<N>.json.bak so a
+    bad save can be recovered manually."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    first = {"stage_number": 1, "shots": [{"shot_number": 1, "time": 0.5}]}
+    second = {"stage_number": 1, "shots": [{"shot_number": 1, "time": 1.5}]}
+    audit_path = tmp_path / "match" / "audit"
+
+    assert client.put("/api/stages/1/audit", json=first).status_code == 200
+    assert client.put("/api/stages/1/audit", json=second).status_code == 200
+
+    import json as _json
+
+    final = _json.loads((audit_path / "stage1.json").read_text(encoding="utf-8"))
+    backup = _json.loads((audit_path / "stage1.json.bak").read_text(encoding="utf-8"))
+    assert final["shots"][0]["time"] == 1.5
+    assert backup["shots"][0]["time"] == 0.5
+
+
+def test_put_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.put("/api/stages/99/audit", json={"stage_number": 99, "shots": []})
+    assert resp.status_code == 404
+
+
 def test_stream_video_serves_registered_file(tmp_path: Path) -> None:
     """Stream endpoint serves bytes for a path that's registered with the project."""
     client, _ = _seed_project_with_primary(tmp_path)

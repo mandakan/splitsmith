@@ -1,7 +1,7 @@
 /**
  * Audit screen v2 (#15).
  *
- * Through Step 4 -- markers + stepper + list drawer (in-memory).
+ * Through Step 5 -- save flow + audit_events log persisted.
  *
  * Contract:
  *   - Audit truth = primary's audio. The waveform is always the primary's.
@@ -18,17 +18,18 @@
  *     standalone manual marker.
  *
  * Step 4 adds the bottom stepper (◀ shot N/M ▶) and the right-side list
- * drawer (toggled with `L`). The stepper walks kept-only shots in time
- * order; jumping to a shot scrubs the playhead. The drawer shows every
- * marker including rejected so the user can revisit filtered candidates.
+ * drawer (toggled with `L`). Step 5 wires save: Cmd+S writes the audit
+ * JSON to ``<project>/audit/stage<N>.json`` (atomic, with a .bak), and a
+ * silent auto-save fires on stage switch so the user never loses work.
+ * Edits accrete into ``audit_events[]`` -- an append-only history that
+ * makes the saved JSON self-explaining months later.
  *
- * Interactions remain in-memory. Save flow + audit_events log arrive in
- * Step 5; right-click context menu is deferred to Step 7 polish.
+ * Right-click context menu is still deferred to Step 7 polish.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Crosshair, ListChecks, Loader2, Pause, Play, Undo2 } from "lucide-react";
+import { CheckCircle2, Crosshair, ListChecks, Loader2, Pause, Play, Save, Undo2 } from "lucide-react";
 
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
@@ -47,6 +48,8 @@ import {
 import {
   ApiError,
   api,
+  type AuditEvent,
+  type AuditShot,
   type Job,
   type MatchProject,
   type PeaksResult,
@@ -79,6 +82,14 @@ export function Audit() {
   // index is decoupled from the playhead -- scrubbing doesn't reset it.
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
   const [showDrawer, setShowDrawer] = useState(false);
+
+  // Save flow (Step 5).
+  // sessionEventsRef accumulates audit_events for this session; appended
+  // to the saved JSON's audit_events[] on save and cleared. isDirtyRef
+  // controls whether stage-switch / Cmd+S actually fires a write.
+  const sessionEventsRef = useRef<AuditEvent[]>([]);
+  const isDirtyRef = useRef(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -156,7 +167,8 @@ export function Audit() {
     return activeBeep - auditBeep;
   }, [activeBeep, auditBeep, activeVideoIndex]);
 
-  // Reset state on stage change.
+  // Reset state on stage change. Anything dirty has already been
+  // auto-saved in the StageSelector handler before navigating.
   useEffect(() => {
     setCurrentTime(0);
     setIsPlaying(false);
@@ -165,6 +177,9 @@ export function Audit() {
     setCurrentShotIndex(0);
     setShowDrawer(false);
     undoStackRef.current = [];
+    sessionEventsRef.current = [];
+    isDirtyRef.current = false;
+    setSaveStatus({ kind: "idle" });
     const v = videoRef.current;
     if (v) {
       v.pause();
@@ -284,12 +299,22 @@ export function Audit() {
 
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
+  const recordEvent = useCallback((kind: string, payload: Record<string, unknown>) => {
+    sessionEventsRef.current.push({
+      ts: new Date().toISOString(),
+      kind,
+      payload,
+    });
+    isDirtyRef.current = true;
+  }, []);
+
   const mutate = useCallback((next: AuditMarker[]) => {
     setMarkers((prev) => {
       undoStackRef.current.push(prev);
       if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
       return next;
     });
+    isDirtyRef.current = true;
   }, []);
 
   const undo = useCallback(() => {
@@ -302,24 +327,32 @@ export function Audit() {
   const handleMarkerClick = useCallback(
     (m: AuditMarker) => {
       if (m.kind === "manual") return; // toggle is meaningless for manual markers
-      mutate(
-        markers.map((x) =>
-          x.id === m.id ? { ...x, kind: x.kind === "detected" ? "rejected" : "detected" } : x,
-        ),
-      );
+      const next = m.kind === "detected" ? "rejected" : "detected";
+      recordEvent(next === "detected" ? "marker_kept" : "marker_rejected", {
+        id: m.id,
+        time: m.time,
+        candidate_number: m.candidateNumber,
+      });
+      mutate(markers.map((x) => (x.id === m.id ? { ...x, kind: next } : x)));
     },
-    [markers, mutate],
+    [markers, mutate, recordEvent],
   );
 
   const handleMarkerDelete = useCallback(
     (m: AuditMarker) => {
       if (m.kind === "manual") {
+        recordEvent("marker_deleted", { id: m.id, time: m.time, kind: m.kind });
         mutate(markers.filter((x) => x.id !== m.id));
       } else if (m.kind === "detected") {
+        recordEvent("marker_rejected", {
+          id: m.id,
+          time: m.time,
+          candidate_number: m.candidateNumber,
+        });
         mutate(markers.map((x) => (x.id === m.id ? { ...x, kind: "rejected" } : x)));
       }
     },
-    [markers, mutate],
+    [markers, mutate, recordEvent],
   );
 
   const handleMarkerTimeChange = useCallback(
@@ -329,6 +362,18 @@ export function Audit() {
       // simplest: only push to undo when the time actually differs from the
       // current snapshot. Here we use an inline check.
       setMarkers((prev) => {
+        const target = prev.find((x) => x.id === id);
+        if (target && target.time !== time) {
+          // One event per drag commit (rAF-coalesced). Aggregating
+          // pointer-move ticks into a single event would need extra
+          // glue; the log stays useful even with a few entries per drag.
+          sessionEventsRef.current.push({
+            ts: new Date().toISOString(),
+            kind: "marker_time_changed",
+            payload: { id, from_time: target.time, to_time: time },
+          });
+          isDirtyRef.current = true;
+        }
         const nextList = prev.map((x) => (x.id === id ? { ...x, time } : x));
         if (
           undoStackRef.current.length === 0 ||
@@ -346,6 +391,7 @@ export function Audit() {
   const handleAddManual = useCallback(
     (time: number) => {
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      recordEvent("marker_added_manual", { id, time });
       mutate([
         ...markers,
         {
@@ -360,14 +406,21 @@ export function Audit() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate],
+    [markers, mutate, recordEvent],
   );
 
   const handleNoteChange = useCallback(
     (id: string, note: string) => {
       // Notes don't go on the undo stack -- a stray keystroke shouldn't
-      // bury the last marker drag. Step 5 will batch these into the
-      // audit_events log on save.
+      // bury the last marker drag. We do log the change to audit_events
+      // (debounce-on-save would be nicer; one event per keystroke is
+      // fine for v1 since notes are short).
+      sessionEventsRef.current.push({
+        ts: new Date().toISOString(),
+        kind: "note_changed",
+        payload: { id, note },
+      });
+      isDirtyRef.current = true;
       setMarkers((prev) => prev.map((m) => (m.id === id ? { ...m, note } : m)));
     },
     [],
@@ -419,6 +472,75 @@ export function Audit() {
     [handleScrub, keptShots],
   );
 
+  // ---- Save flow (Step 5) ------------------------------------------------
+
+  const performSave = useCallback(
+    async (opts: { silent?: boolean } = {}): Promise<boolean> => {
+      if (stageNumber == null || !stage) return false;
+      if (!isDirtyRef.current && opts.silent) return true; // nothing to save
+      const beepInClip = peaks?.beep_time ?? primary?.beep_time ?? null;
+      const appendEvents = sessionEventsRef.current;
+      const payload = buildAuditJson({
+        base: audit,
+        stage: {
+          stage_number: stage.stage_number,
+          stage_name: stage.stage_name,
+          time_seconds: stage.time_seconds,
+        },
+        primaryBeepInClip: beepInClip,
+        markers,
+        appendEvents: [
+          ...appendEvents,
+          {
+            ts: new Date().toISOString(),
+            kind: "save",
+            payload: { shots_count: 0 /* filled after build */ },
+          },
+        ],
+      });
+      // Attach the actual shots count to the synthetic save event.
+      const lastEv = payload.audit_events?.[payload.audit_events.length - 1];
+      if (lastEv && lastEv.kind === "save") {
+        lastEv.payload = { shots_count: payload.shots.length };
+      }
+      setSaveStatus({ kind: "saving" });
+      try {
+        const saved = await api.saveStageAudit(stageNumber, payload);
+        setAudit(saved);
+        sessionEventsRef.current = [];
+        isDirtyRef.current = false;
+        setSaveStatus({ kind: "saved", at: Date.now() });
+        return true;
+      } catch (err) {
+        const message = err instanceof ApiError ? err.detail : String(err);
+        setSaveStatus({ kind: "error", message });
+        return false;
+      }
+    },
+    [stageNumber, stage, peaks, primary, audit, markers],
+  );
+
+  // Auto-clear "saved" toast after a short hold so it stops nagging.
+  useEffect(() => {
+    if (saveStatus.kind !== "saved") return;
+    const timer = window.setTimeout(() => setSaveStatus({ kind: "idle" }), 2500);
+    return () => window.clearTimeout(timer);
+  }, [saveStatus]);
+
+  // Auto-save on stage switch: if the user picks a different stage in
+  // the selector, wait for the save to complete before navigating so a
+  // crash mid-flight doesn't lose the last stage's edits.
+  const navigateToStage = useCallback(
+    async (n: number) => {
+      if (stageNumber === n) return;
+      if (isDirtyRef.current) {
+        await performSave({ silent: true });
+      }
+      navigate(`/audit/${n}`);
+    },
+    [navigate, performSave, stageNumber],
+  );
+
   // ---- Global keyboard shortcuts -----------------------------------------
 
   useEffect(() => {
@@ -437,6 +559,11 @@ export function Audit() {
         undo();
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void performSave();
+        return;
+      }
       if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (e.key === "m" || e.key === "M") {
           e.preventDefault();
@@ -452,7 +579,7 @@ export function Audit() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, undo, stepShot]);
+  }, [togglePlay, undo, stepShot, performSave]);
 
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
@@ -525,7 +652,7 @@ export function Audit() {
             stageName: s.stage_name,
           }))}
           selected={stageNumber ?? null}
-          onSelect={(n) => navigate(`/audit/${n}`)}
+          onSelect={(n) => void navigateToStage(n)}
         />
       </div>
 
@@ -638,6 +765,22 @@ export function Audit() {
                   >
                     <Undo2 className="size-4" />
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void performSave()}
+                    disabled={saveStatus.kind === "saving"}
+                    aria-label="Save (Cmd+S)"
+                    title="Save (Cmd+S)"
+                  >
+                    {saveStatus.kind === "saving" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : saveStatus.kind === "saved" ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : (
+                      <Save className="size-4" />
+                    )}
+                  </Button>
                   <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{detectedCount} detected</span>
                     <span>{rejectedCount} rejected</span>
@@ -672,8 +815,97 @@ export function Audit() {
         currentMarkerId={focusedMarkerId}
         onJumpTo={jumpToMarker}
       />
+      <SaveToast status={saveStatus} />
     </div>
   );
+}
+
+function SaveToast({ status }: { status: SaveStatus }) {
+  // Single aria-live region for save status. We render the container
+  // unconditionally so screen readers can pick up status changes; only
+  // the inner pill is conditional.
+  let label = "";
+  let tone = "";
+  if (status.kind === "saving") {
+    label = "Saving audit...";
+    tone = "bg-card text-foreground";
+  } else if (status.kind === "saved") {
+    label = "Audit saved";
+    tone = "bg-status-complete/10 text-foreground border-status-complete/40";
+  } else if (status.kind === "error") {
+    label = `Save failed: ${status.message}`;
+    tone = "bg-destructive/10 text-destructive border-destructive/40";
+  }
+  return (
+    <div
+      role="status"
+      aria-live={status.kind === "error" ? "assertive" : "polite"}
+      className="pointer-events-none fixed bottom-4 right-4 z-50"
+    >
+      {label ? (
+        <div
+          className={`pointer-events-auto rounded-md border px-3 py-2 text-sm shadow-md ${tone}`}
+        >
+          {label}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type SaveStatus =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved"; at: number }
+  | { kind: "error"; message: string };
+
+function buildAuditJson(opts: {
+  base: StageAudit | null;
+  stage: { stage_number: number; stage_name: string; time_seconds: number };
+  primaryBeepInClip: number | null;
+  markers: AuditMarker[];
+  appendEvents: AuditEvent[];
+}): StageAudit {
+  const { base, stage, primaryBeepInClip, markers, appendEvents } = opts;
+
+  // Kept = detected + manual, sorted by time. Each gets a sequential
+  // shot_number; we preserve the candidate_number when the marker came
+  // from a detected candidate so the SSI cross-reference stays intact.
+  const kept = markers
+    .filter((m) => m.kind === "detected" || m.kind === "manual")
+    .slice()
+    .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+
+  const shots: AuditShot[] = kept.map((m, i) => {
+    const ms_after_beep =
+      primaryBeepInClip != null ? Math.round((m.time - primaryBeepInClip) * 1000) : 0;
+    return {
+      shot_number: i + 1,
+      candidate_number: m.candidateNumber,
+      time: round3(m.time),
+      ms_after_beep,
+      source: m.kind === "manual" ? "manual" : "detected",
+      ...(m.note ? { note: m.note } : {}),
+    } as AuditShot & { note?: string };
+  });
+
+  const previousEvents = base?.audit_events ?? [];
+  const audit_events = [...previousEvents, ...appendEvents];
+
+  return {
+    ...(base ?? {}),
+    stage_number: stage.stage_number,
+    stage_name: stage.stage_name,
+    stage_time_seconds: stage.time_seconds,
+    beep_time: primaryBeepInClip ?? base?.beep_time,
+    shots,
+    _candidates_pending_audit: base?._candidates_pending_audit,
+    audit_events,
+  };
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
 }
 
 interface StageSelectorProps {

@@ -373,6 +373,14 @@ export const api = {
       throw err;
     }
   },
+
+  /** Atomically write the stage's audit JSON. The server keeps the prior
+   *  version as ``stage<N>.json.bak`` so a bad save can be recovered. */
+  saveStageAudit: (stageNumber: number, payload: StageAudit) =>
+    request<StageAudit>(`/api/stages/${stageNumber}/audit`, {
+      method: "PUT",
+      json: payload,
+    }),
 };
 
 export { ApiError };
