@@ -597,6 +597,106 @@ def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
     assert resp.content.startswith(b"RIFF")
 
 
+def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypatch) -> None:
+    """When stage<N>_trimmed.mp4 exists the peaks come from its WAV; the
+    response carries the clip-local beep_time and trimmed=true so the SPA
+    can render the beep marker correctly."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+
+    # Stage primary already has beep_time set by the seeder. Force-set to a
+    # known value so we can assert the clip-local beep math.
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 30.0  # source-time beep; trim default buffer is 5s
+    project.save(project_root)
+
+    # Create a fake "trimmed" mp4 placeholder so the existence check passes.
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00fake_mp4")
+
+    # Stub _extract_audio so we don't actually shell out; drop a known WAV
+    # at the audit-cache path.
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audit_wav = audio_dir / "stage1_audit.wav"
+    audio = np.zeros(48_000, dtype="float32")
+    audio[20_000:21_000] = 0.7
+    sf.write(audit_wav, audio, 48_000)
+
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_extract(source, dest, sample_rate, ffmpeg_binary):  # type: ignore[no-untyped-def]
+        # Already wrote audit_wav above; pretend ffmpeg ran.
+        return None
+
+    monkeypatch.setattr(audio_helpers, "_extract_audio", fake_extract)
+
+    resp = client.get("/api/stages/1/peaks?bins=64")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trimmed"] is True
+    # beep_time at 30s in source -> clamped to buffer (5.0s) inside clip.
+    assert body["beep_time"] == pytest.approx(5.0)
+    assert len(body["peaks"]) == 64
+    assert body["duration"] == pytest.approx(1.0)
+
+
+def test_peaks_endpoint_falls_back_to_full_when_no_trim(tmp_path: Path, monkeypatch) -> None:
+    """No trimmed file -> /peaks serves the full primary WAV. Response says
+    trimmed=false so the SPA can hint that the user is on an untrimmed clip."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_primary.wav"
+    audio = np.zeros(24_000, dtype="float32")
+    audio[5_000:6_000] = 0.3
+    sf.write(wav, audio, 48_000)
+
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_ensure(root, n, source, **kwargs):  # type: ignore[no-untyped-def]
+        return wav
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", fake_ensure)
+
+    resp = client.get("/api/stages/1/peaks?bins=64")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trimmed"] is False
+
+
+def test_stream_video_serves_trimmed_for_primary(tmp_path: Path) -> None:
+    """When the trimmed MP4 exists for a stage, /stream returns its bytes
+    rather than the source. This is what gives the audit screen its
+    short-GOP scrub-friendly playback."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_bytes(b"SOURCE_MP4")
+
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"TRIMMED_MP4")
+
+    resp = client.get(f"/api/videos/stream?path={primary.path}")
+    assert resp.status_code == 200
+    assert resp.content == b"TRIMMED_MP4"
+
+
 def test_peaks_endpoint_returns_normalized_bins(tmp_path: Path, monkeypatch) -> None:
     """/peaks asks the audio helper for the cached WAV, then computes peaks.
 

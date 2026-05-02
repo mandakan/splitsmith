@@ -129,6 +129,12 @@ export interface PeaksResult {
   sample_rate: number;
   bins: number;
   peaks: number[];
+  /** Where the beep falls in the served clip's local timeline (seconds).
+   *  Null when no beep is detected for the primary yet. */
+  beep_time: number | null;
+  /** True when the audio came from the short-GOP trimmed MP4; false when
+   *  the audit screen is operating on the full source for lack of a trim. */
+  trimmed: boolean;
 }
 
 /**

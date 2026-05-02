@@ -125,11 +125,23 @@ export function Audit() {
   const activeVideo = videos[activeVideoIndex] ?? primary;
   const primaryBeep = primary?.beep_time ?? null;
   const activeBeep = activeVideo?.beep_time ?? null;
+  // Beep position **on the audit timeline** -- this is the X where the
+  // waveform draws the dashed beep line and where audit-time = beep-time.
+  // When the server is serving trimmed audio, peaks.beep_time is the
+  // clip-local beep (typically near the trim buffer of 5 s). When the
+  // server falls back to full-source audio, peaks.beep_time mirrors
+  // primary.beep_time. Either way, this value is the correct anchor.
+  const auditBeep = peaks?.beep_time ?? primaryBeep;
   const beepOffset = useMemo(() => {
+    // Primary tab: served clip *is* the audit timeline (trimmed primary
+    // serves trimmed; untrimmed primary serves source). Offset is zero.
     if (activeVideoIndex === 0) return 0;
-    if (activeBeep == null || primaryBeep == null) return 0;
-    return activeBeep - primaryBeep;
-  }, [activeBeep, primaryBeep, activeVideoIndex]);
+    // Secondary tab: served clip is always the source for now (per-video
+    // trimming isn't wired through the production UI yet). Map audit time
+    // T to secondary source time via beep alignment.
+    if (activeBeep == null || auditBeep == null) return 0;
+    return activeBeep - auditBeep;
+  }, [activeBeep, auditBeep, activeVideoIndex]);
 
   // Reset state on stage change.
   useEffect(() => {
@@ -450,6 +462,11 @@ export function Audit() {
               ) : auditLoaded ? (
                 <Badge variant="outline">no audit yet</Badge>
               ) : null}
+              {peaks && !peaks.trimmed ? (
+                <Badge variant="destructive" title="Run `splitsmith trim --mode audit` for fast, frame-accurate scrubbing.">
+                  untrimmed -- scrubbing will be slow
+                </Badge>
+              ) : null}
             </CardTitle>
             <CardDescription>
               Primary: <code className="text-xs">{primary.path}</code>
@@ -478,7 +495,7 @@ export function Audit() {
                   peaks={peaks.peaks}
                   duration={peaks.duration}
                   currentTime={currentTime}
-                  beepTime={primary.beep_time}
+                  beepTime={auditBeep}
                   onScrub={handleScrub}
                   onDoubleClick={handleAddManual}
                   height={160}

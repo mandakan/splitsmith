@@ -477,9 +477,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.get("/api/stages/{stage_number}/audio")
-    def stage_audio(stage_number: int) -> FileResponse:
-        project = state.load()
+    def _resolve_audit_audio(
+        project: MatchProject, stage_number: int
+    ) -> audio_helpers.AuditAudioResult:
+        """Shared resolver for /audio + /peaks: prefers the trimmed clip's
+        WAV, falls back to full primary on cache miss / no trim."""
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -491,21 +493,34 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 detail=f"stage {stage_number} has no primary video",
             )
         try:
-            audio_path = audio_helpers.ensure_primary_audio(
+            return audio_helpers.ensure_audit_audio(
                 state.project_root,
                 stage_number,
                 project.resolve_video_path(state.project_root, primary.path),
+                primary.beep_time,
                 project=project,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except audio_helpers.AudioExtractionError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        # FileResponse handles HTTP Range automatically.
+
+    @app.get("/api/stages/{stage_number}/audio")
+    def stage_audio(stage_number: int) -> FileResponse:
+        """Serve the audit-clip WAV for ``stage_number``.
+
+        Prefers ``stage<N>_audit.wav`` (extracted from the short-GOP trimmed
+        MP4 produced by Sub 5 / #16) so the waveform timeline matches what
+        the user is auditing. Falls back to the full ``stage<N>_primary.wav``
+        when no trimmed clip exists yet -- the SPA surfaces this with a
+        "trim required" hint.
+        """
+        project = state.load()
+        result = _resolve_audit_audio(project, stage_number)
         return FileResponse(
-            audio_path,
+            result.audio_path,
             media_type="audio/wav",
-            filename=audio_path.name,
+            filename=result.audio_path.name,
         )
 
     @app.get("/api/stages/{stage_number}/peaks")
@@ -513,35 +528,21 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         stage_number: int,
         bins: int = Query(default=1200, ge=16, le=8192),
     ) -> JSONResponse:
-        """Return ``bins`` peak magnitudes (0..1) for the stage's primary audio.
+        """Return ``bins`` peak magnitudes (0..1) for the stage's audit clip.
 
-        Audio extraction happens on demand via ``ensure_primary_audio``; peaks
-        cache as JSON next to the WAV (see :mod:`splitsmith.waveform`).
+        The peaks come from whichever WAV ``_resolve_audit_audio`` picked
+        (trimmed clip if available, full source otherwise). The response
+        carries ``beep_time`` translated into the served clip's local
+        timeline + ``trimmed`` so the SPA can render the beep marker
+        correctly and warn when the user is auditing an untrimmed source.
         """
         project = state.load()
-        try:
-            stage = project.stage(stage_number)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        primary = stage.primary()
-        if primary is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"stage {stage_number} has no primary video",
-            )
-        try:
-            audio_path = audio_helpers.ensure_primary_audio(
-                state.project_root,
-                stage_number,
-                project.resolve_video_path(state.project_root, primary.path),
-                project=project,
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except audio_helpers.AudioExtractionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        result = waveform_helpers.ensure_peaks(audio_path, bins)
-        return JSONResponse(result.model_dump(mode="json"))
+        audit = _resolve_audit_audio(project, stage_number)
+        peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
+        payload = peaks.model_dump(mode="json")
+        payload["beep_time"] = audit.beep_in_clip
+        payload["trimmed"] = audit.trimmed
+        return JSONResponse(payload)
 
     @app.get("/api/stages/{stage_number}/audit")
     def get_stage_audit(stage_number: int) -> JSONResponse:
@@ -573,11 +574,16 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def stream_video(path: str = Query(...)) -> FileResponse:
         """Serve a registered video file with HTTP Range support.
 
+        For the primary of a stage, prefers the short-GOP trimmed MP4
+        produced by Sub 5 / #16 (``<trimmed>/stage<N>_trimmed.mp4``). The
+        re-encoded clip seeks frame-accurately, which is what makes the
+        audit screen's drag-scrubbing feel responsive. Secondaries fall
+        through to their source file -- per-video trim runs aren't wired
+        through the production UI yet.
+
         Validates that ``path`` matches a video registered to the project
         (any stage, any role, or unassigned) so the endpoint cannot be
-        used as a generic file-read primitive. The path is resolved
-        through :meth:`MatchProject.resolve_video_path`, which honours
-        the project-relative storage convention.
+        used as a generic file-read primitive.
         """
         project = state.load()
         located = project.find_video(Path(path))
@@ -586,17 +592,27 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 status_code=404,
                 detail=f"video not registered with project: {path}",
             )
-        _stage, video = located
-        resolved = project.resolve_video_path(state.project_root, video.path).resolve()
-        if not resolved.is_file():
-            raise HTTPException(
-                status_code=404,
-                detail=f"video missing on disk: {resolved}",
+        stage, video = located
+
+        served_path: Path | None = None
+        if stage is not None and video.role == "primary":
+            trimmed = audio_helpers.trimmed_primary_path(
+                state.project_root, stage.stage_number, project=project
             )
+            if trimmed.exists():
+                served_path = trimmed.resolve()
+        if served_path is None:
+            served_path = project.resolve_video_path(state.project_root, video.path).resolve()
+            if not served_path.is_file():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"video missing on disk: {served_path}",
+                )
+
         media_type = (
-            "video/mp4" if resolved.suffix.lower() == ".mp4" else "application/octet-stream"
+            "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
         )
-        return FileResponse(resolved, media_type=media_type, filename=resolved.name)
+        return FileResponse(served_path, media_type=media_type, filename=served_path.name)
 
     @app.get("/api/fs/list", response_model=FsListing)
     def fs_list(
