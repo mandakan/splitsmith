@@ -1,25 +1,31 @@
 /**
  * Audit screen v2 (#15).
  *
- * Through Step 2 -- single playback source + multi-video viewing tabs.
+ * Through Step 3 -- markers + interactions (in-memory).
  *
  * Contract:
  *   - Audit truth = primary's audio. The waveform is always the primary's.
- *   - The active <video> element drives playback time. There is no separate
- *     <audio> element; audio you hear comes from the active video.
- *   - The Audit page exposes "primary timeline" times to children. When the
- *     active video is a secondary, we offset its `currentTime` by
- *     (secondary.beep_time - primary.beep_time) so the audit timeline lines up.
- *   - Switching active tab preserves play state and the primary-timeline
- *     position; the new video.currentTime is set on `loadedmetadata`.
+ *   - The active <video> drives playback time.
+ *   - The Audit page exposes "primary timeline" times to children.
+ *   - Markers live on the primary's timeline. Switching tabs offsets only
+ *     the video element; markers don't move.
  *
- * Markers, the stepper, save flow, and standalone /review come in later steps.
+ * Marker model:
+ *   - Each candidate from `_candidates_pending_audit.candidates` becomes a
+ *     marker. If the same candidate_number is in `shots[]`, kind="detected"
+ *     (kept); otherwise kind="rejected".
+ *   - Each shot with no candidate_number (or source="manual") becomes a
+ *     standalone manual marker.
+ *
+ * Interactions in this step are in-memory only. Save flow + audit_events log
+ * arrive in Step 5; right-click context menu is deferred to Step 7 polish.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Crosshair, Loader2, Pause, Play } from "lucide-react";
+import { Crosshair, Loader2, Pause, Play, Undo2 } from "lucide-react";
 
+import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
@@ -36,10 +42,12 @@ import {
   api,
   type MatchProject,
   type PeaksResult,
+  type StageAudit,
   type StageVideo,
 } from "@/lib/api";
 
 const PEAK_BINS = 1500;
+const MAX_UNDO = 50;
 
 export function Audit() {
   const { stage: stageParam } = useParams();
@@ -52,9 +60,14 @@ export function Audit() {
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
 
+  const [audit, setAudit] = useState<StageAudit | null>(null);
+  const [auditLoaded, setAuditLoaded] = useState(false);
+
+  const [markers, setMarkers] = useState<AuditMarker[]>([]);
+  const undoStackRef = useRef<AuditMarker[][]>([]);
+  const [focusedMarkerId, setFocusedMarkerId] = useState<string | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  // currentTime is in the **primary's** timeline. Secondary tabs map this
-  // to their own video.currentTime via beep-offset math.
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
@@ -87,7 +100,6 @@ export function Audit() {
     return project.stages.filter((s) => s.videos.some((v) => v.role === "primary"));
   }, [project]);
 
-  // Default to the first stage with a primary if no stage in URL.
   useEffect(() => {
     if (stageNumber != null) return;
     if (stagesWithPrimary.length === 0) return;
@@ -99,7 +111,6 @@ export function Audit() {
     return project.stages.find((s) => s.stage_number === stageNumber) ?? null;
   }, [project, stageNumber]);
 
-  // Order videos: primary first, secondaries by added_at.
   const videos = useMemo<StageVideo[]>(() => {
     if (!stage) return [];
     const primary = stage.videos.find((v) => v.role === "primary");
@@ -125,6 +136,8 @@ export function Audit() {
     setCurrentTime(0);
     setIsPlaying(false);
     setActiveVideoIndex(0);
+    setFocusedMarkerId(null);
+    undoStackRef.current = [];
     const v = videoRef.current;
     if (v) {
       v.pause();
@@ -132,7 +145,7 @@ export function Audit() {
     }
   }, [stageNumber]);
 
-  // Load peaks whenever the stage changes.
+  // Load peaks.
   useEffect(() => {
     if (stageNumber == null || !primary) {
       setPeaks(null);
@@ -160,9 +173,35 @@ export function Audit() {
     };
   }, [stageNumber, primary]);
 
-  // Tab change: when the <video> src swaps, browsers reset currentTime to 0.
-  // Restore the primary-timeline position (mapped to the new video's clock)
-  // once metadata is loaded so visuals stay in sync with the audit.
+  // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
+  useEffect(() => {
+    if (stageNumber == null) {
+      setAudit(null);
+      setAuditLoaded(false);
+      return;
+    }
+    let alive = true;
+    setAuditLoaded(false);
+    api
+      .getStageAudit(stageNumber)
+      .then((a) => {
+        if (!alive) return;
+        setAudit(a);
+        setMarkers(deriveMarkers(a));
+        setAuditLoaded(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setAudit(null);
+        setMarkers([]);
+        setAuditLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [stageNumber]);
+
+  // Tab change: re-seek the new <video> to the audit-timeline position.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -179,13 +218,9 @@ export function Audit() {
       v.addEventListener("loadedmetadata", seekWhenReady, { once: true });
       return () => v.removeEventListener("loadedmetadata", seekWhenReady);
     }
-    // Intentionally only react to active video changes; currentTime updates
-    // come from the rAF loop below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeVideoIndex]);
 
-  // rAF loop: pull video.currentTime into state while playing, mapped back
-  // to the primary timeline.
   useEffect(() => {
     if (!isPlaying) return;
     const tick = () => {
@@ -220,20 +255,112 @@ export function Audit() {
     }
   }, []);
 
-  // Spacebar play/pause when not editing a form field.
+  // ---- Marker mutators (push prev state to undo stack) -------------------
+
+  const mutate = useCallback((next: AuditMarker[]) => {
+    setMarkers((prev) => {
+      undoStackRef.current.push(prev);
+      if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+      return next;
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    setMarkers((curr) => {
+      const prev = undoStackRef.current.pop();
+      return prev ?? curr;
+    });
+  }, []);
+
+  const handleMarkerClick = useCallback(
+    (m: AuditMarker) => {
+      if (m.kind === "manual") return; // toggle is meaningless for manual markers
+      mutate(
+        markers.map((x) =>
+          x.id === m.id ? { ...x, kind: x.kind === "detected" ? "rejected" : "detected" } : x,
+        ),
+      );
+    },
+    [markers, mutate],
+  );
+
+  const handleMarkerDelete = useCallback(
+    (m: AuditMarker) => {
+      if (m.kind === "manual") {
+        mutate(markers.filter((x) => x.id !== m.id));
+      } else if (m.kind === "detected") {
+        mutate(markers.map((x) => (x.id === m.id ? { ...x, kind: "rejected" } : x)));
+      }
+    },
+    [markers, mutate],
+  );
+
+  const handleMarkerTimeChange = useCallback(
+    (id: string, time: number) => {
+      // Drag-during-pointer-move calls this many times. Coalesce by replacing
+      // the head of the undo stack on the same id while a drag is active --
+      // simplest: only push to undo when the time actually differs from the
+      // current snapshot. Here we use an inline check.
+      setMarkers((prev) => {
+        const nextList = prev.map((x) => (x.id === id ? { ...x, time } : x));
+        if (
+          undoStackRef.current.length === 0 ||
+          undoStackRef.current[undoStackRef.current.length - 1] !== prev
+        ) {
+          undoStackRef.current.push(prev);
+          if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
+        }
+        return nextList;
+      });
+    },
+    [],
+  );
+
+  const handleAddManual = useCallback(
+    (time: number) => {
+      const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      mutate([
+        ...markers,
+        {
+          id,
+          kind: "manual",
+          time,
+          candidateNumber: null,
+          confidence: null,
+          peakAmplitude: null,
+        },
+      ]);
+      setFocusedMarkerId(id);
+    },
+    [markers, mutate],
+  );
+
+  // ---- Global keyboard shortcuts -----------------------------------------
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "Space") return;
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      e.preventDefault();
-      togglePlay();
+      const inField =
+        target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+
+      if (e.code === "Space" && !inField) {
+        e.preventDefault();
+        togglePlay();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+        return;
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay]);
+  }, [togglePlay, undo]);
 
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
+
+  // ---- Render ------------------------------------------------------------
 
   if (projectError) {
     return (
@@ -281,14 +408,18 @@ export function Audit() {
     );
   }
 
+  const detectedCount = markers.filter((m) => m.kind === "detected").length;
+  const rejectedCount = markers.filter((m) => m.kind === "rejected").length;
+  const manualCount = markers.filter((m) => m.kind === "manual").length;
+
   return (
     <div className="space-y-6">
       <div className="flex items-baseline justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
           <p className="text-sm text-muted-foreground">
-            Drag the waveform to scrub. Spacebar plays / pauses. Tabs switch
-            the viewing angle without changing the audit timeline.
+            Drag the waveform to scrub. Double-click to add a manual marker.
+            Click a marker to toggle keep/reject. Cmd+Z undoes.
           </p>
         </div>
         <StageSelector
@@ -313,6 +444,11 @@ export function Audit() {
               )}
               {videos.length > 1 ? (
                 <Badge variant="secondary">{videos.length} videos</Badge>
+              ) : null}
+              {auditLoaded && audit ? (
+                <Badge variant="outline">audit loaded</Badge>
+              ) : auditLoaded ? (
+                <Badge variant="outline">no audit yet</Badge>
               ) : null}
             </CardTitle>
             <CardDescription>
@@ -344,9 +480,20 @@ export function Audit() {
                   currentTime={currentTime}
                   beepTime={primary.beep_time}
                   onScrub={handleScrub}
-                  height={140}
-                />
-                <div className="flex items-center gap-3 text-sm">
+                  onDoubleClick={handleAddManual}
+                  height={160}
+                >
+                  <MarkerLayer
+                    markers={markers}
+                    duration={peaks.duration}
+                    focusedId={focusedMarkerId}
+                    onFocusChange={setFocusedMarkerId}
+                    onClick={handleMarkerClick}
+                    onDelete={handleMarkerDelete}
+                    onTimeChange={handleMarkerTimeChange}
+                  />
+                </Waveform>
+                <div className="flex flex-wrap items-center gap-3 text-sm">
                   <Button
                     variant="outline"
                     size="sm"
@@ -368,6 +515,20 @@ export function Audit() {
                       {beepOffset.toFixed(3)}s)
                     </span>
                   ) : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={undo}
+                    disabled={undoStackRef.current.length === 0}
+                    aria-label="Undo (Cmd+Z)"
+                  >
+                    <Undo2 className="size-4" />
+                  </Button>
+                  <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{detectedCount} detected</span>
+                    <span>{rejectedCount} rejected</span>
+                    <span>{manualCount} manual</span>
+                  </span>
                 </div>
               </>
             ) : null}
@@ -401,6 +562,37 @@ function StageSelector({ stages, selected, onSelect }: StageSelectorProps) {
       </select>
     </label>
   );
+}
+
+function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
+  if (!audit) return [];
+  const candidates = audit._candidates_pending_audit?.candidates ?? [];
+  const shotsByCandidateNumber = new Map<number, true>();
+  for (const s of audit.shots ?? []) {
+    if (s.candidate_number != null) shotsByCandidateNumber.set(s.candidate_number, true);
+  }
+  const markers: AuditMarker[] = candidates.map((c) => ({
+    id: `cand-${c.candidate_number}`,
+    kind: shotsByCandidateNumber.has(c.candidate_number) ? "detected" : "rejected",
+    time: c.time,
+    candidateNumber: c.candidate_number,
+    confidence: c.confidence ?? null,
+    peakAmplitude: c.peak_amplitude ?? null,
+  }));
+  // Manual shots: those without a matching candidate_number.
+  for (const s of audit.shots ?? []) {
+    if (s.candidate_number == null || s.source === "manual") {
+      markers.push({
+        id: `manual-shot-${s.shot_number}`,
+        kind: "manual",
+        time: s.time,
+        candidateNumber: s.candidate_number ?? null,
+        confidence: null,
+        peakAmplitude: null,
+      });
+    }
+  }
+  return markers;
 }
 
 function formatTime(seconds: number): string {

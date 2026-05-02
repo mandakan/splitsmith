@@ -131,6 +131,47 @@ export interface PeaksResult {
   peaks: number[];
 }
 
+/**
+ * Audit JSON shape (issue #15). Mirrors the on-disk file at
+ * `<project>/audit/stage<N>.json`. Same schema the existing audit-prep /
+ * audit-apply CLI flow uses; the audit screen v2 reads and writes this
+ * format so external tooling stays compatible.
+ */
+export interface AuditCandidate {
+  candidate_number: number;
+  time: number;
+  ms_after_beep: number;
+  peak_amplitude?: number | null;
+  confidence?: number | null;
+}
+
+export interface AuditShot {
+  shot_number: number;
+  candidate_number: number | null;
+  time: number;
+  ms_after_beep: number;
+  source?: "detected" | "manual";
+}
+
+export interface AuditEvent {
+  ts: string;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+export interface StageAudit {
+  stage_number: number;
+  stage_name: string;
+  beep_time?: number;
+  tolerance_ms?: number;
+  stage_time_seconds?: number;
+  fixture_window_in_source?: [number, number];
+  shots: AuditShot[];
+  _candidates_pending_audit?: { candidates: AuditCandidate[] };
+  audit_events?: AuditEvent[];
+  source?: string;
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -260,6 +301,16 @@ export const api = {
 
   getStagePeaks: (stageNumber: number, bins = 1200) =>
     request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),
+
+  /** Returns the saved audit JSON for a stage, or null when none exists yet. */
+  getStageAudit: async (stageNumber: number): Promise<StageAudit | null> => {
+    try {
+      return await request<StageAudit>(`/api/stages/${stageNumber}/audit`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
 };
 
 export { ApiError };

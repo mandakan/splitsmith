@@ -31,10 +31,14 @@ interface WaveformProps {
   currentTime: number;
   onScrub: (timeSeconds: number) => void;
   onScrubEnd?: () => void;
+  /** Fires on a double-click on the waveform background. The parent can use
+   *  this to add a manual marker at the clicked time (issue #15). */
+  onDoubleClick?: (timeSeconds: number) => void;
   beepTime?: number | null;
   height?: number;
   className?: string;
   ariaLabel?: string;
+  children?: React.ReactNode;
 }
 
 export function Waveform({
@@ -43,10 +47,12 @@ export function Waveform({
   currentTime,
   onScrub,
   onScrubEnd,
+  onDoubleClick,
   beepTime,
   height = 128,
   className,
   ariaLabel = "Audio waveform -- drag to scrub",
+  children,
 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -240,8 +246,15 @@ export function Waveform({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      onDoubleClick={(e) => {
+        if (!onDoubleClick) return;
+        // Ignore double-clicks that originated on a marker (overlay child).
+        if ((e.target as HTMLElement).closest("[data-audit-marker]")) return;
+        onDoubleClick(timeFromEvent(e.clientX));
+      }}
     >
       <canvas ref={canvasRef} className="block" />
+      {children}
     </div>
   );
 }

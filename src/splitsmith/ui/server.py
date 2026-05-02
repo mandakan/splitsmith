@@ -19,6 +19,7 @@ Endpoints (locked v1 surface):
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
   GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
+  GET  /api/stages/{n}/audit        -- read the stage's audit JSON (404 if none)
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -31,6 +32,7 @@ Design notes:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -540,6 +542,32 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         result = waveform_helpers.ensure_peaks(audio_path, bins)
         return JSONResponse(result.model_dump(mode="json"))
+
+    @app.get("/api/stages/{stage_number}/audit")
+    def get_stage_audit(stage_number: int) -> JSONResponse:
+        """Return the stage's audit JSON (issue #15) if one has been written.
+
+        Lives at ``<project>/audit/stage<N>.json`` -- the same path the
+        existing audit-prep / audit-apply flow uses. 404 when no audit file
+        exists yet (the audit screen treats this as "fresh -- start from
+        candidates if any, otherwise empty markers").
+        """
+        project = state.load()
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"no audit JSON yet for stage {stage_number}",
+            )
+        try:
+            payload = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+        return JSONResponse(payload)
 
     @app.get("/api/videos/stream")
     def stream_video(path: str = Query(...)) -> FileResponse:

@@ -645,6 +645,41 @@ def test_peaks_endpoint_404_when_no_primary(tmp_path: Path) -> None:
     assert "no primary" in resp.json()["detail"]
 
 
+def test_get_stage_audit_returns_payload_when_file_exists(tmp_path: Path) -> None:
+    """Audit endpoint reads <project>/audit/stage<N>.json verbatim."""
+    import json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    audit_dir = project_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "stage_number": 1,
+        "stage_name": "Stage 1",
+        "shots": [{"shot_number": 1, "candidate_number": 4, "time": 1.5, "ms_after_beep": 1500}],
+        "_candidates_pending_audit": {"candidates": []},
+    }
+    (audit_dir / "stage1.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    resp = client.get("/api/stages/1/audit")
+    assert resp.status_code == 200
+    assert resp.json()["shots"][0]["candidate_number"] == 4
+
+
+def test_get_stage_audit_404_when_missing(tmp_path: Path) -> None:
+    """No audit JSON yet -> 404. The SPA treats this as 'start fresh'."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/stages/1/audit")
+    assert resp.status_code == 404
+    assert "no audit" in resp.json()["detail"]
+
+
+def test_get_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/stages/99/audit")
+    assert resp.status_code == 404
+
+
 def test_stream_video_serves_registered_file(tmp_path: Path) -> None:
     """Stream endpoint serves bytes for a path that's registered with the project."""
     client, _ = _seed_project_with_primary(tmp_path)
