@@ -1,0 +1,44 @@
+{
+  "voter_a_floor": 0.01847127532497797,
+  "voter_b_threshold": 0.11580950021743774,
+  "voter_c_threshold": 0.09775335426402208,
+  "voter_d_threshold": 0.0012177228927612305,
+  "voter_c_target_recall": 0.95,
+  "tolerance_ms": 75.0,
+  "clap_prompts_shot": [
+    "a single gunshot at close range",
+    "a loud handgun shot recorded with a body-worn microphone",
+    "a sharp pistol shot in an outdoor competition",
+    "a rapid sequence of pistol shots"
+  ],
+  "clap_prompts": [
+    "a single gunshot at close range",
+    "a loud handgun shot recorded with a body-worn microphone",
+    "a sharp pistol shot in an outdoor competition",
+    "a rapid sequence of pistol shots",
+    "a distant gunshot echo from another shooting bay",
+    "ambient outdoor environment noise",
+    "wind blowing into a microphone",
+    "footsteps on gravel",
+    "a person speaking",
+    "a metallic clang from a steel target falling"
+  ],
+  "calibration_fixtures": [
+    "stage-shots",
+    "stage-shots-blacksmith-h5",
+    "stage-shots-blacksmith-2026-stage1",
+    "stage-shots-blacksmith-2026-stage2",
+    "stage-shots-blacksmith-2026-stage3",
+    "stage-shots-blacksmith-2026-stage5",
+    "stage-shots-blacksmith-2026-stage6",
+    "stage-shots-blacksmith-2026-stage8",
+    "stage-shots-tallmilan-stage2",
+    "stage-shots-tallmilan-stage7",
+    "stage-shots-tallmilan-2026-stage5",
+    "stage-shots-tallmilan-2026-stage6"
+  ],
+  "n_calibration_candidates": 949,
+  "n_calibration_positives": 227,
+  "voter_c_feature_dim": 22,
+  "built_at": "2026-05-02T12:11:59.331971+00:00"
+}

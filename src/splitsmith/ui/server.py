@@ -47,6 +47,7 @@ import json
 import logging
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -59,10 +60,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import beep_detect, video_probe
-from .. import shot_detect as shot_detect_module
+from .. import ensemble as ensemble_module
+from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
-from ..config import ShotDetectConfig
 from . import audio as audio_helpers
 from .jobs import Job, JobHandle, JobRegistry
 from .project import (
@@ -164,6 +165,30 @@ class AppState:
 
     def load(self) -> MatchProject:
         return MatchProject.load(self.project_root)
+
+
+# Module-level cache for the 4-voter ensemble runtime (issue #31). Heavy
+# (CLAP ~600 MB, PANN ~80 MB), so it is loaded on the first shot-detect
+# call and reused for subsequent calls. The threading lock guards against
+# two shot-detect jobs colliding on first init when the model weights
+# haven't downloaded yet.
+_ENSEMBLE_RUNTIME: ensemble_module.EnsembleRuntime | None = None
+_ENSEMBLE_RUNTIME_LOCK = threading.Lock()
+
+
+def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
+    """Lazy-load + cache the ensemble runtime; thread-safe.
+
+    Test code monkeypatches this function (and
+    ``ensemble_module.detect_shots_ensemble``) to avoid pulling the heavy
+    model weights into the test process.
+    """
+    global _ENSEMBLE_RUNTIME
+    if _ENSEMBLE_RUNTIME is None:
+        with _ENSEMBLE_RUNTIME_LOCK:
+            if _ENSEMBLE_RUNTIME is None:
+                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime()
+    return _ENSEMBLE_RUNTIME
 
 
 class HealthResponse(BaseModel):
@@ -694,17 +719,25 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         handle.update(progress=1.0, message="Done")
 
     def _run_shot_detect(handle: JobHandle, stage_number: int, reset: bool = False) -> None:
-        """Worker that runs shot detection on the stage's audit clip.
+        """Worker that runs the 4-voter ensemble on the stage's audit clip.
 
         Reads the trimmed clip's WAV (extracting it on demand if needed),
-        runs ``splitsmith.shot_detect`` over the [beep .. beep+stage] window,
-        and merges the resulting candidates into the audit JSON's
-        ``_candidates_pending_audit`` block. Existing ``shots[]`` are not
-        touched -- the user has authority over what's kept; this just
-        refreshes the candidate pool the audit screen draws markers from.
+        runs ``splitsmith.ensemble.detect_shots_ensemble`` over the
+        ``[beep .. beep+stage]`` window, and writes both the consensus
+        ``shots[]`` and the full voter-A universe into the audit JSON.
 
-        If ``reset`` is True, ``shots[]`` is wiped before re-seeding so the
-        user can start over after a bad beep / detector pass.
+        ``_candidates_pending_audit.candidates`` carries every candidate
+        annotated with per-voter signals (vote_a/b/c/d, ensemble_score,
+        score_c, clap_diff, gunshot_prob) so the audit UI can render the
+        decision trail. ``shots[]`` is seeded from the consensus subset
+        unless it is already populated -- the user retains authority. If
+        ``reset`` is True, ``shots[]`` is wiped first so the user can
+        start over after a bad beep / detector pass.
+
+        Adaptive prior: if the audit JSON already carries
+        ``stage_rounds.expected``, voter C switches to its adaptive
+        top-(K+slack) mode and the apriori boost lifts the top-K
+        confidence-ranked candidates over the consensus line.
         """
         proj = state.load()
         stg = proj.stage(stage_number)
@@ -728,33 +761,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         )
         beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
 
-        handle.update(progress=0.4, message="Detecting shots...")
-        audio_array, sr = beep_detect.load_audio(audit.audio_path)
-        detected = shot_detect_module.detect_shots(
-            audio_array,
-            sr,
-            beep_in_clip,
-            stg.time_seconds,
-            ShotDetectConfig(),
-        )
-
-        candidates: list[dict[str, Any]] = []
-        for i, s in enumerate(detected, start=1):
-            candidates.append(
-                {
-                    "candidate_number": i,
-                    "time": round(s.time_absolute, 4),
-                    "ms_after_beep": round(s.time_from_beep * 1000),
-                    "peak_amplitude": round(float(s.peak_amplitude), 4),
-                    "confidence": round(float(s.confidence), 3),
-                }
-            )
-
-        handle.update(progress=0.85, message="Saving audit JSON...")
+        # Read existing audit JSON up-front: we need ``stage_rounds.expected``
+        # before running detection (it changes voter C's mode and the
+        # apriori boost) and we'll merge results back into the same dict.
         audit_dir = proj.audit_path(state.project_root)
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"stage{stage_number}.json"
-
         if audit_file.exists():
             try:
                 existing_json = json.loads(audit_file.read_text(encoding="utf-8"))
@@ -768,31 +780,76 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 "beep_time": round(beep_in_clip, 4),
                 "shots": [],
             }
+        expected_rounds: int | None = None
+        sr_block = existing_json.get("stage_rounds")
+        if isinstance(sr_block, dict):
+            raw = sr_block.get("expected")
+            if isinstance(raw, int) and raw > 0:
+                expected_rounds = raw
+
+        handle.update(progress=0.2, message="Loading ensemble models...")
+        runtime = _get_ensemble_runtime()
+
+        handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
+        audio_array, sr = beep_detect.load_audio(audit.audio_path)
+        result = ensemble_module.detect_shots_ensemble(
+            audio_array,
+            sr,
+            beep_in_clip,
+            stg.time_seconds,
+            runtime,
+            expected_rounds=expected_rounds,
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for cand in result.candidates:
+            candidates.append(
+                {
+                    "candidate_number": cand.candidate_number,
+                    "time": cand.time,
+                    "ms_after_beep": cand.ms_after_beep,
+                    "peak_amplitude": cand.peak_amplitude,
+                    "confidence": cand.confidence,
+                    "vote_a": cand.vote_a,
+                    "vote_b": cand.vote_b,
+                    "vote_c": cand.vote_c,
+                    "vote_d": cand.vote_d,
+                    "vote_total": cand.vote_total,
+                    "apriori_boost": cand.apriori_boost,
+                    "ensemble_score": cand.ensemble_score,
+                    "score_c": cand.score_c,
+                    "clap_diff": cand.clap_diff,
+                    "gunshot_prob": cand.gunshot_prob,
+                }
+            )
+
+        handle.update(progress=0.85, message="Saving audit JSON...")
         existing_json["_candidates_pending_audit"] = {
-            "_note": "Auto-detected by shot_detect via the production UI.",
+            "_note": (
+                "4-voter ensemble (issue #31). vote_a/b/c/d=1 means the "
+                "voter kept the candidate; ensemble_score = vote_total + "
+                "apriori_boost. shots[] is seeded from candidates with "
+                "ensemble_score >= consensus."
+            ),
+            "consensus": result.consensus,
+            "expected_rounds": result.expected_rounds,
             "candidates": candidates,
         }
-        # Seed shots[] only with high-confidence candidates so the audit
-        # screen lands with a sane keep/reject split instead of either
-        # extreme. The detector emits many low-confidence echoes and AGC
-        # ducks alongside real shots; auto-keeping every candidate produces
-        # 50+ spurious "kept" markers on a typical short course. The 0.3
-        # cutoff is conservative -- noise events fall well below, real
-        # shots typically land >= 0.4. The user can flip individuals
-        # afterward; ``reset=true`` re-runs this seeding from scratch.
-        seed_keep_confidence = 0.3
         if reset:
             existing_json["shots"] = []
         seeded_shots = False
         if not existing_json.get("shots"):
-            kept = [c for c in candidates if (c.get("confidence") or 0.0) >= seed_keep_confidence]
+            kept = [c for c in result.candidates if c.kept]
             existing_json["shots"] = [
                 {
                     "shot_number": i,
-                    "candidate_number": c["candidate_number"],
-                    "time": c["time"],
-                    "ms_after_beep": c["ms_after_beep"],
+                    "candidate_number": c.candidate_number,
+                    "time": c.time,
+                    "ms_after_beep": c.ms_after_beep,
                     "source": "detected",
+                    "ensemble_votes": c.vote_total,
+                    "apriori_boost": c.apriori_boost,
+                    "ensemble_score": c.ensemble_score,
                 }
                 for i, c in enumerate(kept, start=1)
             ]
@@ -804,6 +861,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 "kind": "shot_detect_run",
                 "payload": {
                     "candidate_count": len(candidates),
+                    "kept_count": sum(1 for c in result.candidates if c.kept),
+                    "consensus": result.consensus,
+                    "expected_rounds": result.expected_rounds,
                     "seeded_shots": seeded_shots,
                 },
             }

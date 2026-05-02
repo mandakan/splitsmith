@@ -1279,9 +1279,39 @@ def test_trim_endpoint_returns_existing_job_when_one_is_running(
     assert len(invocations) == 1, "ffmpeg must run only once"
 
 
+def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
+    """Build an ``EnsembleResult`` from terse candidate dicts for tests."""
+    from splitsmith.ensemble import EnsembleCandidate, EnsembleResult
+
+    cands = [
+        EnsembleCandidate(
+            candidate_number=i + 1,
+            time=c["time"],
+            ms_after_beep=c.get("ms_after_beep", round((c["time"] - 5.0) * 1000)),
+            peak_amplitude=c.get("peak_amplitude", 0.5),
+            confidence=c.get("confidence", 0.8),
+            vote_a=c.get("vote_a", 1),
+            vote_b=c.get("vote_b", 1),
+            vote_c=c.get("vote_c", 1),
+            vote_d=c.get("vote_d", 1),
+            vote_total=c.get("vote_total", 4),
+            apriori_boost=c.get("apriori_boost", 0.0),
+            ensemble_score=c.get("ensemble_score", 4.0),
+            score_c=c.get("score_c", 0.9),
+            clap_diff=c.get("clap_diff", 0.5),
+            gunshot_prob=c.get("gunshot_prob", 0.7),
+            kept=c.get("kept", True),
+        )
+        for i, c in enumerate(candidates)
+    ]
+    return EnsembleResult(candidates=cands, consensus=consensus, expected_rounds=None)
+
+
 def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> None:
-    """The shot-detect job runs detect_shots on the audit clip and merges
-    the results into <project>/audit/stage<N>.json's candidates block."""
+    """The shot-detect job runs the 4-voter ensemble on the audit clip and
+    merges per-voter signals into <project>/audit/stage<N>.json. Heavy
+    models (CLAP, PANN, GBDT) are stubbed via the ensemble module entry
+    points so the test runs offline."""
     import json as _json
 
     import numpy as np
@@ -1306,8 +1336,9 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
 
-    from splitsmith import shot_detect
+    from splitsmith import ensemble as ensemble_module
     from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
 
     class FakeAudit:
         audio_path = wav
@@ -1316,19 +1347,16 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
 
     # Stub the audit-audio resolver so the test doesn't depend on ffmpeg.
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-
-    class FakeShot:
-        def __init__(self, t: float, conf: float) -> None:
-            self.time_absolute = t
-            self.time_from_beep = t - 5.0
-            self.peak_amplitude = 0.5
-            self.confidence = conf
-
-    monkeypatch.setattr(
-        shot_detect,
-        "detect_shots",
-        lambda *a, **kw: [FakeShot(5.5, 0.8), FakeShot(6.1, 0.6), FakeShot(6.9, 0.9)],
+    # Skip CLAP/PANN/GBDT loading; the stub below ignores the runtime arg.
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [
+            {"time": 5.5, "confidence": 0.8, "ensemble_score": 4.0, "kept": True},
+            {"time": 6.1, "confidence": 0.6, "ensemble_score": 3.0, "kept": True},
+            {"time": 6.9, "confidence": 0.9, "ensemble_score": 4.0, "kept": True},
+        ]
     )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
 
     resp = client.post("/api/stages/1/shot-detect")
     assert resp.status_code == 200
@@ -1337,11 +1365,22 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     audit_file = project_root / "audit" / "stage1.json"
     assert audit_file.exists()
     saved = _json.loads(audit_file.read_text(encoding="utf-8"))
-    cands = saved["_candidates_pending_audit"]["candidates"]
+    block = saved["_candidates_pending_audit"]
+    assert block["consensus"] == 3
+    cands = block["candidates"]
     assert len(cands) == 3
     assert cands[0]["candidate_number"] == 1
     assert cands[0]["time"] == pytest.approx(5.5)
     assert cands[0]["ms_after_beep"] == 500
+    # Per-voter signals should reach the audit JSON.
+    assert cands[0]["vote_a"] == 1
+    assert cands[0]["vote_total"] == 4
+    assert "score_c" in cands[0]
+    # shots[] is seeded from the consensus subset.
+    shots = saved["shots"]
+    assert len(shots) == 3
+    assert shots[0]["source"] == "detected"
+    assert shots[0]["ensemble_votes"] == 4
     # processed.shot_detect flips on the primary so the SPA can show status.
     proj_after = client.get("/api/project").json()
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
@@ -1379,8 +1418,9 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
 
-    from splitsmith import shot_detect
+    from splitsmith import ensemble as ensemble_module
     from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
 
     class FakeAudit:
         audio_path = wav
@@ -1388,6 +1428,7 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
 
     proceed = threading.Event()
     invocations = []
@@ -1395,9 +1436,9 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
     def slow_detect(*a, **kw):
         invocations.append(1)
         proceed.wait(timeout=2.0)
-        return []
+        return _fake_ensemble_result([])
 
-    monkeypatch.setattr(shot_detect, "detect_shots", slow_detect)
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", slow_detect)
 
     first = client.post("/api/stages/1/shot-detect").json()
     second = client.post("/api/stages/1/shot-detect").json()

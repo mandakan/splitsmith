@@ -48,7 +48,7 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - A real-time tool. All processing is offline batch.
 - A library. Single-purpose application.
 
-## Detection pipeline (current, post-ensemble work)
+## Detection pipeline
 
 The shot-detection pipeline is a 4-voter ensemble, not raw signal processing:
 
@@ -56,22 +56,27 @@ The shot-detection pipeline is a 4-voter ensemble, not raw signal processing:
   auto-calibrated ``min_confidence`` floor (the lowest positive-shot
   confidence across the calibration set). This is the candidate generator;
   every other voter sees only candidates A emits.
-- **Voter B** -- threshold on a hand-crafted feature vector
-  (see ``scripts/build_ensemble_fixture.py``); calibrated against labeled
-  fixtures.
-- **Voter C** -- trained ``sklearn`` ``GradientBoostingClassifier`` over the
-  same hand features; calibrated to a target recall on the same set.
-- **Voter D** -- PANN audio-tagging features thresholded against the
-  calibration distribution.
+- **Voter B** -- threshold on the CLAP shot-vs-not-shot prompt similarity
+  differential; calibrated against labeled fixtures.
+- **Voter C** -- trained ``sklearn`` ``GradientBoostingClassifier`` over
+  hand-crafted features + CLAP per-prompt similarities; calibrated to a
+  target recall on the same set. Switches to a per-stage adaptive
+  top-(K+slack) mode when the audit JSON has ``stage_rounds.expected``.
+- **Voter D** -- PANN audio-tagging gunshot-class probability thresholded
+  against the calibration distribution.
 - **Consensus** -- a candidate is kept when ``vote_total + apriori_boost
   >= consensus`` (default 3-of-4). The apriori boost biases toward
   expected-shot-count regions when prior info is known.
 
-This pipeline lives in ``scripts/build_ensemble_fixture.py`` and produces
-fixtures under ``build/ensemble-review/``. It is **not yet wired into the
-production UI's shot-detect endpoint** -- doing so is open work; until
-then the UI seeds shots[] from raw voter-A candidates with a static
-confidence cutoff, which under- or over-keeps depending on the clip.
+The pipeline lives in ``src/splitsmith/ensemble/`` and is wired into the
+production UI's ``/api/stages/{n}/shot-detect`` endpoint. Calibration
+artifacts ship under ``src/splitsmith/data/`` (built once by
+``scripts/build_ensemble_artifacts.py``); the FastAPI server lazy-loads
+the CLAP / PANN / GBDT models on the first detection. Re-run the build
+script after adding new audited fixtures.
+
+The review-time variant generator ``scripts/build_ensemble_fixture.py``
+still exists for offline comparison under ``build/ensemble-review/``.
 
 ## Things Claude Code should not do
 
