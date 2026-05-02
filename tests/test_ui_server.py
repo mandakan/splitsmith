@@ -892,6 +892,46 @@ def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
     assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
 
 
+def test_trim_partial_filename_keeps_mp4_extension(tmp_path: Path, monkeypatch) -> None:
+    """ffmpeg infers the muxer from the output extension. The atomic-write
+    partial must stay an .mp4 (e.g. stage1_trimmed.partial.mp4) -- if it
+    becomes stage1_trimmed.mp4.partial ffmpeg fails with "Unable to choose
+    an output format". Regression test for that bug."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import trim
+
+    captured: list[Path] = []
+
+    def fake_trim_video(**kwargs):  # type: ignore[no-untyped-def]
+        out = Path(kwargs["output_path"])
+        captured.append(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"T")
+        return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+
+    resp = client.post("/api/stages/1/trim")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    assert captured, "trim_video should have been invoked"
+    assert captured[0].suffix == ".mp4", (
+        f"partial path must keep .mp4 so ffmpeg infers the muxer; "
+        f"got {captured[0].name}"
+    )
+    assert ".partial" in captured[0].stem
+
+
 def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
     """/api/jobs lists active + recent; /api/jobs/{id} polls one. detect-beep
     and trim both surface here so the SPA has a single status surface."""

@@ -246,11 +246,14 @@ def ensure_audit_trim(
 
     output = trimmed_primary_path(project_root, stage_number, project=project)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: ffmpeg encodes into .partial, then we rename on success.
-    # Without this, a page reload mid-trim sees a half-written .mp4 with no
-    # moov atom; the audit endpoints then fail to extract audio because the
-    # cache check (output.exists + fresh mtime) trusts the broken file.
-    partial = output.with_suffix(output.suffix + ".partial")
+    # Atomic write: ffmpeg encodes into .partial.mp4, then we rename on success.
+    # The extra ".partial" sits before the real suffix so ffmpeg can still
+    # infer the MP4 muxer from the extension. (An earlier version put
+    # ".partial" *after* the suffix and ffmpeg failed with "Unable to choose
+    # an output format".) Without this, a page reload mid-trim leaves a
+    # half-written .mp4 with no moov atom; the audit endpoints then fail
+    # to extract audio because the cache check trusts the broken file.
+    partial = output.with_name(f"{output.stem}.partial{output.suffix}")
 
     src_resolved = primary_source.resolve()
     if not src_resolved.exists():
