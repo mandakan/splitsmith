@@ -40,6 +40,7 @@ import {
 import {
   ApiError,
   api,
+  type Job,
   type MatchProject,
   type PeaksResult,
   type StageAudit,
@@ -606,7 +607,7 @@ function TrimNowBadge({
   hasStageTime,
   onProjectUpdate,
 }: TrimNowBadgeProps) {
-  const [running, setRunning] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const blocked = !hasBeep || !hasStageTime;
   const reason = !hasBeep
@@ -614,16 +615,28 @@ function TrimNowBadge({
     : !hasStageTime
       ? "Import a scoreboard so the stage time is known."
       : null;
+  const running = job != null && (job.status === "pending" || job.status === "running");
 
-  const onClick = useCallback(() => {
-    setRunning(true);
+  const onClick = useCallback(async () => {
     setError(null);
-    api
-      .trimStage(stageNumber)
-      .then(onProjectUpdate)
-      .catch((err) => setError(err instanceof ApiError ? err.detail : String(err)))
-      .finally(() => setRunning(false));
+    try {
+      const initial = await api.trimStage(stageNumber);
+      setJob(initial);
+      const final = await api.pollJob(initial.id, setJob);
+      if (final.status === "failed") {
+        setError(final.error ?? "Trim failed");
+        return;
+      }
+      const fresh = await api.getProject();
+      onProjectUpdate(fresh);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : String(err));
+    } finally {
+      setJob(null);
+    }
   }, [stageNumber, onProjectUpdate]);
+
+  const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
   return (
     <span className="flex items-center gap-2">
@@ -641,7 +654,8 @@ function TrimNowBadge({
         title={reason ?? "Re-encode with short GOP for scrub-friendly playback"}
       >
         {running ? <Loader2 className="size-3 animate-spin" /> : null}
-        {running ? "Trimming..." : "Trim now"}
+        {running ? job?.message ?? "Trimming..." : "Trim now"}
+        {running && pct != null ? ` (${pct}%)` : null}
       </Button>
       {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </span>

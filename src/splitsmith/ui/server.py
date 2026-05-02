@@ -14,9 +14,11 @@ Endpoints (locked v1 surface):
   POST /api/project/settings        -- update raw/audio/trimmed/exports dir overrides
   GET  /api/fs/probe?path=...       -- probe + thumbnail one source file on demand
   GET  /api/thumbnails/{key}.jpg    -- serve cached thumbnail
-  POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
-  POST /api/stages/{n}/beep         -- manual beep_time override
-  POST /api/stages/{n}/trim         -- (re-)produce stage<N>_trimmed.mp4 (audit mode)
+  POST /api/stages/{n}/detect-beep  -- submit a beep-detection job (runs in pool)
+  POST /api/stages/{n}/beep         -- manual beep_time override (synchronous)
+  POST /api/stages/{n}/trim         -- submit an audit-mode trim job
+  GET  /api/jobs                    -- list all retained jobs
+  GET  /api/jobs/{job_id}           -- poll a single job for progress / status
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
   GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
@@ -36,7 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -50,6 +52,7 @@ from .. import thumbnail as thumbnail_helpers
 from .. import video_probe
 from .. import waveform as waveform_helpers
 from . import audio as audio_helpers
+from .jobs import Job, JobHandle, JobRegistry
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -67,6 +70,7 @@ class AppState:
     """Per-process state. One project root per server instance."""
 
     project_root: Path
+    jobs: JobRegistry = field(default_factory=JobRegistry)
 
     def load(self) -> MatchProject:
         return MatchProject.load(self.project_root)
@@ -324,7 +328,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         """
         project = state.load()
         update: dict[str, str | None] = {}
-        for field in (
+        for fname in (
             "raw_dir",
             "audio_dir",
             "trimmed_dir",
@@ -332,11 +336,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             "probes_dir",
             "thumbs_dir",
         ):
-            value = getattr(req, field)
+            value = getattr(req, fname)
             if value is None:
                 continue
             normalized = value.strip() or None
-            update[field] = normalized
+            update[fname] = normalized
 
         # Detect non-empty old dirs for fields that are actually changing.
         resolver_for = {
@@ -348,10 +352,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             "thumbs_dir": project.thumbs_path,
         }
         non_empty: list[dict[str, object]] = []
-        for field, new_value in update.items():
-            if new_value == getattr(project, field):
+        for fname, new_value in update.items():
+            if new_value == getattr(project, fname):
                 continue  # no change
-            old_path = resolver_for[field](state.project_root)
+            old_path = resolver_for[fname](state.project_root)
             if not old_path.exists() or not old_path.is_dir():
                 continue
             try:
@@ -362,7 +366,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 continue
             non_empty.append(
                 {
-                    "field": field,
+                    "field": fname,
                     "path": str(old_path),
                     "file_count": file_count,
                 }
@@ -382,8 +386,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 },
             )
 
-        for field, value in update.items():
-            setattr(project, field, value)
+        for fname, value in update.items():
+            setattr(project, fname, value)
 
         for buf_field in ("trim_pre_buffer_seconds", "trim_post_buffer_seconds"):
             value = getattr(req, buf_field)
@@ -420,6 +424,17 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.post("/api/stages/{stage_number}/detect-beep")
     def detect_beep(stage_number: int, force: bool = False) -> JSONResponse:
+        """Submit a beep-detection job for the stage's primary.
+
+        Returns a Job snapshot (status=PENDING) immediately; the SPA polls
+        ``/api/jobs/{id}`` for progress and refetches ``/api/project`` on
+        completion. The job pipeline is detect-beep -> auto-trim (when
+        the stage time is known); both happen atomically inside one job.
+
+        Validations are still performed up front and surface as HTTP
+        errors before any job is queued, so the SPA can show e.g. a 409
+        for "manual override exists" without spinning a useless job.
+        """
         project = state.load()
         try:
             stage = project.stage(stage_number)
@@ -440,58 +455,58 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 ),
             )
 
-        source_video = project.resolve_video_path(state.project_root, primary.path)
-        try:
-            result = audio_helpers.detect_primary_beep(
+        def run(handle: JobHandle) -> None:
+            handle.update(progress=0.05, message="Loading project...")
+            proj = state.load()
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None:  # pragma: no cover -- defensive; pre-checked above
+                raise RuntimeError("primary video disappeared mid-flight")
+            source = proj.resolve_video_path(state.project_root, prim.path)
+            handle.update(progress=0.15, message="Extracting audio + detecting beep...")
+            beep = audio_helpers.detect_primary_beep(
                 state.project_root,
                 stage_number,
-                source_video,
-                project=project,
+                source,
+                project=proj,
             )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except audio_helpers.AudioExtractionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            handle.update(progress=0.55, message="Saving beep...")
+            prim.beep_time = beep.time
+            prim.beep_source = "auto"
+            prim.beep_peak_amplitude = beep.peak_amplitude
+            prim.beep_duration_ms = beep.duration_ms
+            prim.processed["beep"] = True
 
-        primary.beep_time = result.time
-        primary.beep_source = "auto"
-        primary.beep_peak_amplitude = result.peak_amplitude
-        primary.beep_duration_ms = result.duration_ms
-        primary.processed["beep"] = True
+            if stg.time_seconds > 0:
+                handle.update(progress=0.65, message="Trimming audit clip (short GOP)...")
+                try:
+                    audio_helpers.ensure_audit_trim(
+                        state.project_root,
+                        stage_number,
+                        source,
+                        prim.beep_time,
+                        stg.time_seconds,
+                        project=proj,
+                    )
+                    prim.processed["trim"] = True
+                except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                    # Soft failure: the beep is valuable on its own.
+                    logger.warning("auto-trim failed for stage %d: %s", stage_number, exc)
+                    handle.update(message=f"beep saved; trim failed: {exc}")
+            handle.update(progress=0.95, message="Saving project...")
+            proj.save(state.project_root)
+            handle.update(progress=1.0, message="Done")
 
-        # Auto-trim: with a known beep + stage time, the audit screen needs a
-        # short-GOP MP4 to feel scrub-friendly (Sub 5 / #16). Run it inline so
-        # the user lands on Audit with everything ready. ffmpeg failures here
-        # don't block the beep result -- we surface a warning header.
-        warning: str | None = None
-        if stage.time_seconds > 0:
-            try:
-                audio_helpers.ensure_audit_trim(
-                    state.project_root,
-                    stage_number,
-                    source_video,
-                    primary.beep_time,
-                    stage.time_seconds,
-                    project=project,
-                )
-                primary.processed["trim"] = True
-            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
-                warning = f"beep saved but auto-trim failed: {exc}"
-                logger.warning("auto-trim failed for stage %d: %s", stage_number, exc)
-
-        project.save(state.project_root)
-        resp = JSONResponse(project.model_dump(mode="json"))
-        if warning:
-            resp.headers["X-Splitsmith-Warning"] = warning
-        return resp
+        job = state.jobs.submit(kind="detect_beep", stage_number=stage_number, fn=run)
+        return JSONResponse(job.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/trim")
     def trim_stage(stage_number: int) -> JSONResponse:
-        """Run the audit-mode short-GOP trim for a stage's primary.
+        """Submit an audit-mode short-GOP trim job for the stage's primary.
 
-        Idempotent: re-uses the cached MP4 when its mtime is at least as
-        new as the source's. Sets ``processed.trim`` on the primary and
-        returns the updated project.
+        Returns a Job snapshot. Idempotent on the worker side: when the
+        cached MP4 is newer than the source, the job completes near-
+        instantly without re-encoding.
         """
         project = state.load()
         try:
@@ -517,23 +532,44 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                     "scoreboard or set the stage time before trimming"
                 ),
             )
-        source_video = project.resolve_video_path(state.project_root, primary.path)
-        try:
+
+        def run(handle: JobHandle) -> None:
+            handle.update(progress=0.1, message="Preparing trim...")
+            proj = state.load()
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None or prim.beep_time is None:
+                raise RuntimeError("primary or beep disappeared mid-flight")
+            source = proj.resolve_video_path(state.project_root, prim.path)
+            handle.update(progress=0.3, message="Encoding short-GOP MP4...")
             audio_helpers.ensure_audit_trim(
                 state.project_root,
                 stage_number,
-                source_video,
-                primary.beep_time,
-                stage.time_seconds,
-                project=project,
+                source,
+                prim.beep_time,
+                stg.time_seconds,
+                project=proj,
             )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except audio_helpers.AudioExtractionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        primary.processed["trim"] = True
-        project.save(state.project_root)
-        return JSONResponse(project.model_dump(mode="json"))
+            handle.update(progress=0.9, message="Saving project...")
+            prim.processed["trim"] = True
+            proj.save(state.project_root)
+            handle.update(progress=1.0, message="Done")
+
+        job = state.jobs.submit(kind="trim", stage_number=stage_number, fn=run)
+        return JSONResponse(job.model_dump(mode="json"))
+
+    @app.get("/api/jobs", response_model=list[Job])
+    def list_jobs() -> list[Job]:
+        """Snapshot of all retained jobs (active + recently finished)."""
+        return state.jobs.list()
+
+    @app.get("/api/jobs/{job_id}", response_model=Job)
+    def get_job(job_id: str) -> Job:
+        """Poll a single job. SPA polls ~1 Hz while a job is active."""
+        job = state.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+        return job
 
     @app.post("/api/stages/{stage_number}/beep")
     def override_beep(stage_number: int, req: BeepOverrideRequest) -> JSONResponse:

@@ -182,6 +182,25 @@ export interface StageAudit {
   source?: string;
 }
 
+export type JobStatus = "pending" | "running" | "succeeded" | "failed";
+
+/** Mirror of splitsmith.ui.jobs.Job. Long-running endpoints (detect-beep,
+ *  trim, future shot-detect/export) submit a job and return a snapshot;
+ *  the SPA polls /api/jobs/{id} until status leaves "pending" / "running". */
+export interface Job {
+  id: string;
+  kind: string;
+  stage_number: number | null;
+  status: JobStatus;
+  progress: number | null;
+  message: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -292,8 +311,12 @@ export const api = {
       },
     }),
 
+  /** Submit a beep-detection job. Returns a Job snapshot; poll the SPA
+   *  via {@link api.pollJob} (or read /api/jobs/{id} directly) until the
+   *  status flips out of "pending"/"running". On success, the SPA should
+   *  re-fetch /api/project to pick up the new beep_time + processed.trim. */
   detectBeep: (stageNumber: number, force = false) =>
-    request<MatchProject>(
+    request<Job>(
       `/api/stages/${stageNumber}/detect-beep${force ? "?force=true" : ""}`,
       { method: "POST" },
     ),
@@ -304,11 +327,34 @@ export const api = {
       json: { beep_time: beepTime },
     }),
 
-  /** Run audit-mode trim for a stage's primary. Idempotent: re-uses the
-   *  cached MP4 unless the source has changed. Triggered automatically
-   *  after detect-beep; this endpoint exists for retry / manual override. */
+  /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
+   *  idempotent on the worker side -- when the cached MP4 is fresh the
+   *  job completes near-instantly without re-encoding. */
   trimStage: (stageNumber: number) =>
-    request<MatchProject>(`/api/stages/${stageNumber}/trim`, { method: "POST" }),
+    request<Job>(`/api/stages/${stageNumber}/trim`, { method: "POST" }),
+
+  listJobs: () => request<Job[]>("/api/jobs"),
+  getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),
+
+  /** Poll a job until it leaves the running state. ``onUpdate`` fires on
+   *  every snapshot (including the final one). Returns the terminal Job. */
+  pollJob: async (
+    jobId: string,
+    onUpdate: (job: Job) => void,
+    opts: { intervalMs?: number; timeoutMs?: number } = {},
+  ): Promise<Job> => {
+    const interval = opts.intervalMs ?? 750;
+    const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60 * 1000);
+    while (true) {
+      const job = await request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`);
+      onUpdate(job);
+      if (job.status === "succeeded" || job.status === "failed") return job;
+      if (Date.now() > deadline) {
+        throw new Error(`Timed out waiting for job ${jobId}`);
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+  },
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 

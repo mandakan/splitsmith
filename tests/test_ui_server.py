@@ -14,6 +14,26 @@ from splitsmith.ui.server import create_app
 from splitsmith.video_probe import ProbeError, ProbeResult
 
 
+def _wait_for_job(client: TestClient, job_id: str, *, timeout: float = 5.0) -> dict:
+    """Poll /api/jobs/{id} until the job is no longer running.
+
+    Returns the final job snapshot. Raises ``AssertionError`` if the job
+    doesn't finish in time -- ample margin since unit tests stub ffmpeg
+    and beep_detect.
+    """
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = client.get(f"/api/jobs/{job_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        if body["status"] in ("succeeded", "failed"):
+            return body
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} did not finish within {timeout}s")
+
+
 def test_health_returns_project_info(tmp_path: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="Test Match")
     client = TestClient(app)
@@ -489,8 +509,11 @@ def test_detect_beep_persists_auto_result(tmp_path: Path, monkeypatch) -> None:
 
     resp = client.post("/api/stages/1/detect-beep")
     assert resp.status_code == 200
-    body = resp.json()
-    primary = body["stages"][0]["videos"][0]
+    job = resp.json()
+    assert job["kind"] == "detect_beep"
+    final = _wait_for_job(client, job["id"])
+    assert final["status"] == "succeeded", final
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
     assert primary["beep_time"] == 12.453
     assert primary["beep_source"] == "auto"
     assert primary["beep_peak_amplitude"] == 0.42
@@ -513,7 +536,9 @@ def test_detect_beep_409_over_manual_unless_forced(tmp_path: Path, monkeypatch) 
     # ?force=true replaces it.
     resp = client.post("/api/stages/1/detect-beep?force=true")
     assert resp.status_code == 200
-    primary = resp.json()["stages"][0]["videos"][0]
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
     assert primary["beep_time"] == 99.0
     assert primary["beep_source"] == "auto"
 
@@ -785,9 +810,11 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
 
     resp = client.post("/api/stages/1/detect-beep")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["stages"][0]["videos"][0]["beep_time"] == pytest.approx(6.5)
-    assert body["stages"][0]["videos"][0]["processed"]["trim"] is True
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    project_after = client.get("/api/project").json()
+    assert project_after["stages"][0]["videos"][0]["beep_time"] == pytest.approx(6.5)
+    assert project_after["stages"][0]["videos"][0]["processed"]["trim"] is True
     assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
     assert len(trim_calls) == 1
     assert trim_calls[0]["mode"] == "audit"
@@ -827,9 +854,11 @@ def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch
 
     resp = client.post("/api/stages/1/detect-beep")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["stages"][0]["videos"][0]["beep_time"] == pytest.approx(4.0)
-    assert body["stages"][0]["videos"][0]["processed"]["trim"] is False
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    project_after = client.get("/api/project").json()
+    assert project_after["stages"][0]["videos"][0]["beep_time"] == pytest.approx(4.0)
+    assert project_after["stages"][0]["videos"][0]["processed"]["trim"] is False
     assert called == []
 
 
@@ -856,9 +885,80 @@ def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
 
     resp = client.post("/api/stages/1/trim")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["stages"][0]["videos"][0]["processed"]["trim"] is True
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    project_after = client.get("/api/project").json()
+    assert project_after["stages"][0]["videos"][0]["processed"]["trim"] is True
     assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
+
+
+def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
+    """/api/jobs lists active + recent; /api/jobs/{id} polls one. detect-beep
+    and trim both surface here so the SPA has a single status surface."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 5.0
+    project.save(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import beep_detect, trim
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeBeep:
+        time = 1.0
+        peak_amplitude = 0.5
+        duration_ms = 80.0
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
+    (tmp_path / "z.wav").write_bytes(b"\x00")
+    monkeypatch.setattr(beep_detect, "load_audio", lambda p: ([0.0] * 100, 48_000))
+    monkeypatch.setattr(beep_detect, "detect_beep", lambda *a, **kw: FakeBeep())
+
+    def fake_trim(**kwargs):  # type: ignore[no-untyped-def]
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_bytes(b"T")
+        return trim.TrimResult(output_path=kwargs["output_path"], start_time=0.0, end_time=10.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    job_id = resp.json()["id"]
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "succeeded"
+    assert final["progress"] == pytest.approx(1.0)
+    assert final["kind"] == "detect_beep"
+    assert final["stage_number"] == 1
+
+    listing = client.get("/api/jobs").json()
+    assert any(j["id"] == job_id for j in listing)
+
+
+def test_get_job_404_when_unknown(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/jobs/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_detect_beep_job_records_failure_when_ffmpeg_blows_up(tmp_path: Path, monkeypatch) -> None:
+    """ffmpeg failures inside a job populate Job.error rather than 500-ing
+    the submit request. The SPA learns about the failure via polling."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise audio_helpers.AudioExtractionError("ffmpeg fell over")
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "failed"
+    assert "ffmpeg fell over" in final["error"]
 
 
 def test_post_trim_400_when_no_beep(tmp_path: Path) -> None:

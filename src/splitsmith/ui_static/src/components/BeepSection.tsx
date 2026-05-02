@@ -15,11 +15,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Pencil, Play, RefreshCw, Trash2, Volume2 } from "lucide-react";
+import { Check, Loader2, Pencil, Play, RefreshCw, Trash2, Volume2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type MatchProject, type StageVideo } from "@/lib/api";
+import { ApiError, api, type Job, type MatchProject, type StageVideo } from "@/lib/api";
 
 interface Props {
   stageNumber: number;
@@ -33,6 +33,7 @@ interface Props {
 export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBusy, setError }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(primary.beep_time?.toFixed(3) ?? "");
+  const [jobStatus, setJobStatus] = useState<Job | null>(null);
 
   useEffect(() => {
     setDraft(primary.beep_time?.toFixed(3) ?? "");
@@ -40,21 +41,28 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
 
   const detect = async (force: boolean) => {
     setBusy(true);
+    setError(null);
     try {
-      const updated = await api.detectBeep(stageNumber, force);
-      onProjectUpdate(updated);
-      setError(null);
+      const job = await api.detectBeep(stageNumber, force);
+      setJobStatus(job);
+      const final = await api.pollJob(job.id, setJobStatus);
+      if (final.status === "failed") {
+        setError(final.error ?? "Beep detection failed");
+      } else {
+        // Re-fetch the project to pick up beep_time + processed.trim.
+        onProjectUpdate(await api.getProject());
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         const ok = window.confirm(
           "This stage has a manual beep override. Replace it with the auto-detected value?",
         );
         if (ok) await detect(true);
-        else setError(null);
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
     } finally {
+      setJobStatus(null);
       setBusy(false);
     }
   };
@@ -134,9 +142,13 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
         <Badge variant="statusNotStarted" className="gap-1">
           ○ No beep yet
         </Badge>
-        <span className="text-muted-foreground">
-          Audit screen needs this. Run detection or set manually.
-        </span>
+        {jobStatus ? (
+          <JobProgress job={jobStatus} />
+        ) : (
+          <span className="text-muted-foreground">
+            Audit screen needs this. Run detection or set manually.
+          </span>
+        )}
         <div className="ml-auto flex gap-1">
           <Button size="sm" variant="default" onClick={() => detect(false)} disabled={busy}>
             <RefreshCw />
@@ -164,6 +176,7 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
           peak {primary.beep_peak_amplitude.toFixed(2)}
         </span>
       ) : null}
+      {jobStatus ? <JobProgress job={jobStatus} /> : null}
       <div className="ml-auto flex gap-1">
         <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
           <Pencil />
@@ -184,6 +197,30 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
         </Button>
       </div>
     </div>
+  );
+}
+
+function JobProgress({ job }: { job: Job }) {
+  const pct = job.progress != null ? Math.round(job.progress * 100) : null;
+  const tone =
+    job.status === "failed"
+      ? "text-destructive"
+      : job.status === "succeeded"
+        ? "text-muted-foreground"
+        : "text-foreground";
+  const active = job.status === "pending" || job.status === "running";
+  return (
+    <span
+      className={`flex items-center gap-1 ${tone}`}
+      role="status"
+      aria-live="polite"
+    >
+      {active ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
+      <span className="text-xs">
+        {job.message ?? job.status}
+        {pct != null && active ? ` (${pct}%)` : null}
+      </span>
+    </span>
   );
 }
 
