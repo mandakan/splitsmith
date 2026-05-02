@@ -622,6 +622,108 @@ def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
     assert resp.content.startswith(b"RIFF")
 
 
+def test_beep_preview_serves_cached_clip(tmp_path: Path, monkeypatch) -> None:
+    """When a primary has beep_time set, the endpoint asks ensure_clip for a
+    short MP4 around the beep and serves it as video/mp4. We stub the helper
+    so the test doesn't need real ffmpeg."""
+    client, src = _seed_project_with_primary(tmp_path)
+
+    # Set beep_time on the primary so the endpoint has something to anchor on.
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 12.5
+    project.save(project_root)
+
+    # Drop a fake clip in the thumbs cache and stub ensure_clip to return it.
+    thumbs_dir = project_root / "thumbs"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    fake_clip = thumbs_dir / "fake_t12500_d1000.mp4"
+    fake_clip.write_bytes(b"\x00\x00\x00\x18ftypmp42fake-mp4")
+
+    captured: dict = {}
+
+    def fake_ensure_clip(source, *, cache_dir, center_time, duration_s=1.0, **kwargs):  # type: ignore[no-untyped-def]
+        captured["source"] = source
+        captured["center_time"] = center_time
+        captured["duration_s"] = duration_s
+        return fake_clip
+
+    from splitsmith.ui import server as server_module
+
+    monkeypatch.setattr(
+        server_module.thumbnail_helpers, "ensure_clip", fake_ensure_clip
+    )
+
+    resp = client.get("/api/stages/1/beep-preview")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "video/mp4"
+    assert resp.content.startswith(b"\x00\x00\x00\x18ftyp")
+    assert captured["center_time"] == pytest.approx(12.5)
+    assert captured["duration_s"] == pytest.approx(1.0)
+    assert Path(captured["source"]).name == src.name
+
+
+def test_beep_preview_404_when_no_beep(tmp_path: Path) -> None:
+    """No beep_time yet -> 404 with a clear detail. The SPA hides the preview
+    until detection has run."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/stages/1/beep-preview")
+    assert resp.status_code == 404
+    assert "beep_time" in resp.json()["detail"]
+
+
+def test_beep_preview_404_when_no_primary(tmp_path: Path) -> None:
+    """A stage without a primary has no source video to clip from."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "Empty",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    resp = client.get("/api/stages/1/beep-preview")
+    assert resp.status_code == 404
+
+
+def test_beep_preview_500_on_ffmpeg_failure(tmp_path: Path, monkeypatch) -> None:
+    """ensure_clip raises on missing ffmpeg / encode failure -- surface as
+    500 so the SPA can fall back to the 'preview unavailable' hint."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.save(project_root)
+
+    from splitsmith import thumbnail
+    from splitsmith.ui import server as server_module
+
+    def boom(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise thumbnail.ThumbnailError("ffmpeg exploded")
+
+    monkeypatch.setattr(server_module.thumbnail_helpers, "ensure_clip", boom)
+    resp = client.get("/api/stages/1/beep-preview")
+    assert resp.status_code == 500
+    assert "ffmpeg exploded" in resp.json()["detail"]
+
+
 def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypatch) -> None:
     """When stage<N>_trimmed.mp4 exists the peaks come from its WAV; the
     response carries the clip-local beep_time and trimmed=true so the SPA

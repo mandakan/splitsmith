@@ -15,7 +15,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, Pencil, Play, RefreshCw, Trash2, Volume2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Check, Loader2, Pencil, Play, RefreshCw, Sparkles, Trash2, Volume2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -204,37 +205,90 @@ export function BeepSection({ stageNumber, primary, busy, onProjectUpdate, setBu
 
   const isManual = primary.beep_source === "manual";
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
-      <Badge variant={isManual ? "statusComplete" : "statusInProgress"} className="gap-1">
-        <Check className="size-3" />
-        beep · {isManual ? "user" : "auto"}
-      </Badge>
-      <span className="font-mono tabular-nums">{primary.beep_time.toFixed(3)}s</span>
-      {primary.beep_peak_amplitude != null ? (
-        <span className="text-muted-foreground" title="Peak amplitude on the bandpassed envelope">
-          peak {primary.beep_peak_amplitude.toFixed(2)}
-        </span>
-      ) : null}
-      {jobStatus ? <JobProgress job={jobStatus} /> : null}
-      <div className="ml-auto flex gap-1">
-        <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
-          <Pencil />
-          Edit
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => detect(false)} disabled={busy}>
-          <RefreshCw />
-          Re-detect
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={clear}
-          disabled={busy}
-          title="Clear the beep timestamp (back to no-beep state)"
-        >
-          <Trash2 />
-        </Button>
+    <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={isManual ? "statusComplete" : "statusInProgress"} className="gap-1">
+          <Check className="size-3" />
+          beep · {isManual ? "user" : "auto"}
+        </Badge>
+        <span className="font-mono tabular-nums">{primary.beep_time.toFixed(3)}s</span>
+        {primary.beep_peak_amplitude != null ? (
+          <span className="text-muted-foreground" title="Peak amplitude on the bandpassed envelope">
+            peak {primary.beep_peak_amplitude.toFixed(2)}
+          </span>
+        ) : null}
+        {jobStatus ? <JobProgress job={jobStatus} /> : null}
+        <div className="ml-auto flex gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
+            <Pencil />
+            Edit
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => detect(false)} disabled={busy}>
+            <RefreshCw />
+            Re-detect
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={clear}
+            disabled={busy}
+            title="Clear the beep timestamp (back to no-beep state)"
+          >
+            <Trash2 />
+          </Button>
+        </div>
       </div>
+      <BeepPreview
+        stageNumber={stageNumber}
+        beepTime={primary.beep_time}
+      />
+    </div>
+  );
+}
+
+function BeepPreview({
+  stageNumber,
+  beepTime,
+}: {
+  stageNumber: number;
+  beepTime: number;
+}) {
+  // The clip caches on the source's mtime+size and beep_time, so re-mounting
+  // with a new beepTime forces a fresh fetch. <video> errors when no clip
+  // exists yet (rare race after detect-beep finishes); fall back to a hint.
+  const [errored, setErrored] = useState(false);
+  useEffect(() => {
+    setErrored(false);
+  }, [stageNumber, beepTime]);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {errored ? (
+        <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-muted-foreground">
+          <Sparkles className="size-3" />
+          Preview unavailable
+        </div>
+      ) : (
+        <video
+          key={`${stageNumber}:${beepTime.toFixed(3)}`}
+          src={api.stageBeepPreviewUrl(stageNumber, beepTime)}
+          className="h-40 w-64 rounded-md border border-border/60 bg-black object-cover"
+          playsInline
+          controls
+          preload="metadata"
+          aria-label={`Beep preview for stage ${stageNumber}`}
+          title="1s preview around the detected beep -- press play to verify"
+          onError={() => setErrored(true)}
+        />
+      )}
+      <Link
+        to={`/audit/${stageNumber}`}
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        title="Open the audit screen to verify or correct this beep on the waveform"
+      >
+        <Sparkles className="size-3" />
+        Looks wrong? Refine in audit
+      </Link>
     </div>
   );
 }

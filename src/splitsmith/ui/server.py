@@ -22,6 +22,7 @@ Endpoints (locked v1 surface):
   GET  /api/jobs/{job_id}           -- poll a single job for progress / status
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
+  GET  /api/stages/{n}/beep-preview -- ~1s MP4 around the detected beep (#27)
   GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
   GET  /api/stages/{n}/audit        -- read the stage's audit JSON (404 if none)
   PUT  /api/stages/{n}/audit        -- atomically write the stage's audit JSON
@@ -952,6 +953,51 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except audio_helpers.AudioExtractionError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/api/stages/{stage_number}/beep-preview")
+    def stage_beep_preview(stage_number: int) -> FileResponse:
+        """Serve a tiny MP4 around the primary's detected beep (#27).
+
+        Lets the Ingest screen render an inline preview right after
+        detection runs so the user can eyeball "did the detector land on
+        the right beep?" without jumping into the audit screen. Cache
+        keys on (source mtime/size, beep_time, duration), so a re-detect
+        or manual override naturally regenerates the clip.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if primary.beep_time is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"stage {stage_number} has no beep_time yet",
+            )
+        source = project.resolve_video_path(state.project_root, primary.path)
+        if not source.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"primary video missing on disk: {source}",
+            )
+        thumbs_dir = project.thumbs_path(state.project_root)
+        try:
+            clip = thumbnail_helpers.ensure_clip(
+                source,
+                cache_dir=thumbs_dir,
+                center_time=float(primary.beep_time),
+                duration_s=1.0,
+                width=480,
+            )
+        except thumbnail_helpers.ThumbnailError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return FileResponse(clip, media_type="video/mp4", filename=clip.name)
 
     @app.get("/api/stages/{stage_number}/audio")
     def stage_audio(stage_number: int) -> FileResponse:
