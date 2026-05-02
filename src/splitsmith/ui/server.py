@@ -14,9 +14,22 @@ Endpoints (locked v1 surface):
   POST /api/project/settings        -- update raw/audio/trimmed/exports dir overrides
   GET  /api/fs/probe?path=...       -- probe + thumbnail one source file on demand
   GET  /api/thumbnails/{key}.jpg    -- serve cached thumbnail
-  POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
-  POST /api/stages/{n}/beep         -- manual beep_time override
+  POST /api/stages/{n}/detect-beep  -- submit a beep-detection job (runs in pool)
+  POST /api/stages/{n}/beep         -- manual beep_time override (synchronous)
+  POST /api/stages/{n}/trim         -- submit an audit-mode trim job
+  POST /api/stages/{n}/shot-detect  -- submit shot detection on the audit clip
+  GET  /api/jobs                    -- list all retained jobs
+  GET  /api/jobs/{job_id}           -- poll a single job for progress / status
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
+  GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
+  GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
+  GET  /api/stages/{n}/audit        -- read the stage's audit JSON (404 if none)
+  PUT  /api/stages/{n}/audit        -- atomically write the stage's audit JSON
+  GET  /api/fixture/audit?path=...  -- standalone fixture review (read JSON)
+  PUT  /api/fixture/audit?path=...  -- standalone fixture review (write JSON)
+  GET  /api/fixture/peaks?path=...  -- waveform peaks for a fixture's sibling WAV
+  GET  /api/fixture/audio?path=...  -- serve the fixture's sibling WAV (Range)
+  GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -29,21 +42,26 @@ Design notes:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import beep_detect, video_probe
+from .. import shot_detect as shot_detect_module
 from .. import thumbnail as thumbnail_helpers
-from .. import video_probe
+from .. import waveform as waveform_helpers
+from ..config import ShotDetectConfig
 from . import audio as audio_helpers
+from .jobs import Job, JobHandle, JobRegistry
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -56,11 +74,17 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
 
 
+def _now_iso() -> str:
+    """ISO-8601 UTC timestamp for audit_events entries."""
+    return datetime.now(UTC).isoformat()
+
+
 @dataclass
 class AppState:
     """Per-process state. One project root per server instance."""
 
     project_root: Path
+    jobs: JobRegistry = field(default_factory=JobRegistry)
 
     def load(self) -> MatchProject:
         return MatchProject.load(self.project_root)
@@ -118,6 +142,10 @@ class SettingsRequest(BaseModel):
     exports_dir: str | None = None
     probes_dir: str | None = None
     thumbs_dir: str | None = None
+    # Audit-mode trim buffers (#15 / #16). Pre = pad before beep,
+    # post = pad after stage end. Both must be non-negative.
+    trim_pre_buffer_seconds: float | None = None
+    trim_post_buffer_seconds: float | None = None
     confirm: bool = False
 
 
@@ -314,7 +342,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         """
         project = state.load()
         update: dict[str, str | None] = {}
-        for field in (
+        for fname in (
             "raw_dir",
             "audio_dir",
             "trimmed_dir",
@@ -322,11 +350,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             "probes_dir",
             "thumbs_dir",
         ):
-            value = getattr(req, field)
+            value = getattr(req, fname)
             if value is None:
                 continue
             normalized = value.strip() or None
-            update[field] = normalized
+            update[fname] = normalized
 
         # Detect non-empty old dirs for fields that are actually changing.
         resolver_for = {
@@ -338,10 +366,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             "thumbs_dir": project.thumbs_path,
         }
         non_empty: list[dict[str, object]] = []
-        for field, new_value in update.items():
-            if new_value == getattr(project, field):
+        for fname, new_value in update.items():
+            if new_value == getattr(project, fname):
                 continue  # no change
-            old_path = resolver_for[field](state.project_root)
+            old_path = resolver_for[fname](state.project_root)
             if not old_path.exists() or not old_path.is_dir():
                 continue
             try:
@@ -352,7 +380,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 continue
             non_empty.append(
                 {
-                    "field": field,
+                    "field": fname,
                     "path": str(old_path),
                     "file_count": file_count,
                 }
@@ -372,8 +400,19 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 },
             )
 
-        for field, value in update.items():
-            setattr(project, field, value)
+        for fname, value in update.items():
+            setattr(project, fname, value)
+
+        for buf_field in ("trim_pre_buffer_seconds", "trim_post_buffer_seconds"):
+            value = getattr(req, buf_field)
+            if value is None:
+                continue
+            if value < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{buf_field} must be non-negative, got {value}",
+                )
+            setattr(project, buf_field, value)
 
         # Make sure each configured directory is creatable; surface a 400
         # rather than failing later in detect-beep / trim / export.
@@ -399,6 +438,17 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.post("/api/stages/{stage_number}/detect-beep")
     def detect_beep(stage_number: int, force: bool = False) -> JSONResponse:
+        """Submit a beep-detection job for the stage's primary.
+
+        Returns a Job snapshot (status=PENDING) immediately; the SPA polls
+        ``/api/jobs/{id}`` for progress and refetches ``/api/project`` on
+        completion. The job pipeline is detect-beep -> auto-trim (when
+        the stage time is known); both happen atomically inside one job.
+
+        Validations are still performed up front and surface as HTTP
+        errors before any job is queued, so the SPA can show e.g. a 409
+        for "manual override exists" without spinning a useless job.
+        """
         project = state.load()
         try:
             stage = project.stage(stage_number)
@@ -419,26 +469,295 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 ),
             )
 
-        source_video = project.resolve_video_path(state.project_root, primary.path)
-        try:
-            result = audio_helpers.detect_primary_beep(
+        def run(handle: JobHandle) -> None:
+            handle.update(progress=0.05, message="Loading project...")
+            proj = state.load()
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None:  # pragma: no cover -- defensive; pre-checked above
+                raise RuntimeError("primary video disappeared mid-flight")
+            source = proj.resolve_video_path(state.project_root, prim.path)
+            handle.update(progress=0.15, message="Extracting audio + detecting beep...")
+            beep = audio_helpers.detect_primary_beep(
                 state.project_root,
                 stage_number,
-                source_video,
-                project=project,
+                source,
+                project=proj,
             )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except audio_helpers.AudioExtractionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            handle.update(progress=0.55, message="Saving beep...")
+            prim.beep_time = beep.time
+            prim.beep_source = "auto"
+            prim.beep_peak_amplitude = beep.peak_amplitude
+            prim.beep_duration_ms = beep.duration_ms
+            prim.processed["beep"] = True
 
-        primary.beep_time = result.time
-        primary.beep_source = "auto"
-        primary.beep_peak_amplitude = result.peak_amplitude
-        primary.beep_duration_ms = result.duration_ms
-        primary.processed["beep"] = True
-        project.save(state.project_root)
-        return JSONResponse(project.model_dump(mode="json"))
+            trimmed_ok = False
+            if stg.time_seconds > 0:
+                handle.update(progress=0.55, message="Trimming audit clip (short GOP)...")
+                try:
+                    audio_helpers.ensure_audit_trim(
+                        state.project_root,
+                        stage_number,
+                        source,
+                        prim.beep_time,
+                        stg.time_seconds,
+                        project=proj,
+                    )
+                    prim.processed["trim"] = True
+                    trimmed_ok = True
+                except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                    # Soft failure: the beep is valuable on its own.
+                    logger.warning("auto-trim failed for stage %d: %s", stage_number, exc)
+                    handle.update(message=f"beep saved; trim failed: {exc}")
+            handle.update(progress=0.85, message="Saving project...")
+            proj.save(state.project_root)
+            # Auto-chain shot detection so the audit screen lands populated.
+            # Dedupe handles the case where the user already kicked one off.
+            if trimmed_ok:
+                if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+                    state.jobs.submit(
+                        kind="shot_detect",
+                        stage_number=stage_number,
+                        fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                    )
+            handle.update(progress=1.0, message="Done")
+
+        existing = state.jobs.find_active(kind="detect_beep", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(kind="detect_beep", stage_number=stage_number, fn=run)
+        return JSONResponse(job.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/trim")
+    def trim_stage(stage_number: int) -> JSONResponse:
+        """Submit an audit-mode short-GOP trim job for the stage's primary.
+
+        Returns a Job snapshot. Idempotent on the worker side: when the
+        cached MP4 is newer than the source, the job completes near-
+        instantly without re-encoding.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if primary.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} primary has no beep_time yet",
+            )
+        if stage.time_seconds <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has time_seconds=0; import a "
+                    "scoreboard or set the stage time before trimming"
+                ),
+            )
+
+        existing = state.jobs.find_active(kind="trim", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="trim",
+            stage_number=stage_number,
+            fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
+        )
+        return JSONResponse(job.model_dump(mode="json"))
+
+    def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:
+        """Worker for the audit-mode trim. Auto-chains shot detection on
+        success so a re-trim (e.g. after manual beep override) refreshes
+        the candidate pool the audit screen reads from."""
+        handle.update(progress=0.1, message="Preparing trim...")
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError("primary or beep disappeared mid-flight")
+        source = proj.resolve_video_path(state.project_root, prim.path)
+        handle.update(progress=0.3, message="Encoding short-GOP MP4...")
+        audio_helpers.ensure_audit_trim(
+            state.project_root,
+            stage_number,
+            source,
+            prim.beep_time,
+            stg.time_seconds,
+            project=proj,
+        )
+        handle.update(progress=0.85, message="Saving project...")
+        prim.processed["trim"] = True
+        proj.save(state.project_root)
+        if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+            state.jobs.submit(
+                kind="shot_detect",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+            )
+        handle.update(progress=1.0, message="Done")
+
+    def _run_shot_detect(handle: JobHandle, stage_number: int) -> None:
+        """Worker that runs shot detection on the stage's audit clip.
+
+        Reads the trimmed clip's WAV (extracting it on demand if needed),
+        runs ``splitsmith.shot_detect`` over the [beep .. beep+stage] window,
+        and merges the resulting candidates into the audit JSON's
+        ``_candidates_pending_audit`` block. Existing ``shots[]`` are not
+        touched -- the user has authority over what's kept; this just
+        refreshes the candidate pool the audit screen draws markers from.
+        """
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError(f"stage {stage_number} has no primary or no beep yet")
+        if stg.time_seconds <= 0:
+            raise RuntimeError(
+                f"stage {stage_number} has time_seconds=0; import a "
+                "scoreboard before running shot detection"
+            )
+        source = proj.resolve_video_path(state.project_root, prim.path)
+
+        handle.update(progress=0.1, message="Preparing audio...")
+        audit = audio_helpers.ensure_audit_audio(
+            state.project_root,
+            stage_number,
+            source,
+            prim.beep_time,
+            project=proj,
+        )
+        beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
+
+        handle.update(progress=0.4, message="Detecting shots...")
+        audio_array, sr = beep_detect.load_audio(audit.audio_path)
+        detected = shot_detect_module.detect_shots(
+            audio_array,
+            sr,
+            beep_in_clip,
+            stg.time_seconds,
+            ShotDetectConfig(),
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for i, s in enumerate(detected, start=1):
+            candidates.append(
+                {
+                    "candidate_number": i,
+                    "time": round(s.time_absolute, 4),
+                    "ms_after_beep": round(s.time_from_beep * 1000),
+                    "peak_amplitude": round(float(s.peak_amplitude), 4),
+                    "confidence": round(float(s.confidence), 3),
+                }
+            )
+
+        handle.update(progress=0.85, message="Saving audit JSON...")
+        audit_dir = proj.audit_path(state.project_root)
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_file = audit_dir / f"stage{stage_number}.json"
+
+        if audit_file.exists():
+            try:
+                existing_json = json.loads(audit_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing_json = {}
+        else:
+            existing_json = {
+                "stage_number": stg.stage_number,
+                "stage_name": stg.stage_name,
+                "stage_time_seconds": stg.time_seconds,
+                "beep_time": round(beep_in_clip, 4),
+                "shots": [],
+            }
+        existing_json["_candidates_pending_audit"] = {
+            "_note": "Auto-detected by shot_detect via the production UI.",
+            "candidates": candidates,
+        }
+        events = list(existing_json.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "shot_detect_run",
+                "payload": {"candidate_count": len(candidates)},
+            }
+        )
+        existing_json["audit_events"] = events
+
+        # Atomic write + .bak (mirrors put_stage_audit).
+        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        tmp.write_text(json.dumps(existing_json, indent=2) + "\n", encoding="utf-8")
+        if audit_file.exists():
+            if backup.exists():
+                backup.unlink()
+            audit_file.replace(backup)
+        tmp.replace(audit_file)
+
+        prim.processed["shot_detect"] = True
+        proj.save(state.project_root)
+        handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
+
+    @app.post("/api/stages/{stage_number}/shot-detect")
+    def shot_detect_endpoint(stage_number: int) -> JSONResponse:
+        """Submit a shot-detection job for the stage's audit clip.
+
+        Returns a Job snapshot. Idempotent dedupe via the registry: a second
+        click while one is running adopts the existing job. The candidate
+        list lands in the audit JSON's ``_candidates_pending_audit`` block,
+        which is what the audit screen reads to render markers.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if primary.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} primary has no beep_time yet",
+            )
+        if stage.time_seconds <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has time_seconds=0; import a "
+                    "scoreboard before running shot detection"
+                ),
+            )
+
+        existing = state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="shot_detect",
+            stage_number=stage_number,
+            fn=lambda h: _run_shot_detect(h, stage_number),
+        )
+        return JSONResponse(job.model_dump(mode="json"))
+
+    @app.get("/api/jobs", response_model=list[Job])
+    def list_jobs() -> list[Job]:
+        """Snapshot of all retained jobs (active + recently finished)."""
+        return state.jobs.list()
+
+    @app.get("/api/jobs/{job_id}", response_model=Job)
+    def get_job(job_id: str) -> Job:
+        """Poll a single job. SPA polls ~1 Hz while a job is active."""
+        job = state.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+        return job
 
     @app.post("/api/stages/{stage_number}/beep")
     def override_beep(stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
@@ -460,6 +779,8 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             primary.beep_peak_amplitude = None
             primary.beep_duration_ms = None
             primary.processed["beep"] = False
+            primary.processed["trim"] = False
+            primary.processed["shot_detect"] = False
         else:
             if req.beep_time < 0.0:
                 raise HTTPException(status_code=400, detail="beep_time must be >= 0")
@@ -469,12 +790,35 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             # Diagnostics from a previous auto-detect are no longer authoritative.
             primary.beep_peak_amplitude = None
             primary.beep_duration_ms = None
+            # New beep -> previous trim was cut around the wrong window.
+            # processed.trim flips back so the SPA prompts re-trim.
+            primary.processed["trim"] = False
+            primary.processed["shot_detect"] = False
+
+        # Either branch invalidates the cached trim + audit WAV so the
+        # next audit-screen visit can't serve a stale clip cut around an
+        # outdated beep. Auto-fires a trim job (which auto-chains shot
+        # detection) when we still have enough info to run; otherwise
+        # the user gets the badge on the audit screen.
+        audio_helpers.invalidate_audit_trim(state.project_root, stage_number, project=project)
         project.save(state.project_root)
+        if (
+            req.beep_time is not None
+            and stage.time_seconds > 0
+            and state.jobs.find_active(kind="trim", stage_number=stage_number) is None
+        ):
+            state.jobs.submit(
+                kind="trim",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number: _run_trim_for_stage(h, n),
+            )
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.get("/api/stages/{stage_number}/audio")
-    def stage_audio(stage_number: int) -> FileResponse:
-        project = state.load()
+    def _resolve_audit_audio(
+        project: MatchProject, stage_number: int
+    ) -> audio_helpers.AuditAudioResult:
+        """Shared resolver for /audio + /peaks: prefers the trimmed clip's
+        WAV, falls back to full primary on cache miss / no trim."""
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -486,22 +830,276 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 detail=f"stage {stage_number} has no primary video",
             )
         try:
-            audio_path = audio_helpers.ensure_primary_audio(
+            return audio_helpers.ensure_audit_audio(
                 state.project_root,
                 stage_number,
                 project.resolve_video_path(state.project_root, primary.path),
+                primary.beep_time,
                 project=project,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except audio_helpers.AudioExtractionError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        # FileResponse handles HTTP Range automatically.
+
+    @app.get("/api/stages/{stage_number}/audio")
+    def stage_audio(stage_number: int) -> FileResponse:
+        """Serve the audit-clip WAV for ``stage_number``.
+
+        Prefers ``stage<N>_audit.wav`` (extracted from the short-GOP trimmed
+        MP4 produced by Sub 5 / #16) so the waveform timeline matches what
+        the user is auditing. Falls back to the full ``stage<N>_primary.wav``
+        when no trimmed clip exists yet -- the SPA surfaces this with a
+        "trim required" hint.
+        """
+        project = state.load()
+        result = _resolve_audit_audio(project, stage_number)
         return FileResponse(
-            audio_path,
+            result.audio_path,
             media_type="audio/wav",
-            filename=audio_path.name,
+            filename=result.audio_path.name,
         )
+
+    @app.get("/api/stages/{stage_number}/peaks")
+    def stage_peaks(
+        stage_number: int,
+        bins: int = Query(default=1200, ge=16, le=8192),
+    ) -> JSONResponse:
+        """Return ``bins`` peak magnitudes (0..1) for the stage's audit clip.
+
+        The peaks come from whichever WAV ``_resolve_audit_audio`` picked
+        (trimmed clip if available, full source otherwise). The response
+        carries ``beep_time`` translated into the served clip's local
+        timeline + ``trimmed`` so the SPA can render the beep marker
+        correctly and warn when the user is auditing an untrimmed source.
+        """
+        project = state.load()
+        audit = _resolve_audit_audio(project, stage_number)
+        peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
+        payload = peaks.model_dump(mode="json")
+        payload["beep_time"] = audit.beep_in_clip
+        payload["trimmed"] = audit.trimmed
+        return JSONResponse(payload)
+
+    @app.get("/api/stages/{stage_number}/audit")
+    def get_stage_audit(stage_number: int) -> JSONResponse:
+        """Return the stage's audit JSON (issue #15) if one has been written.
+
+        Lives at ``<project>/audit/stage<N>.json`` -- the same path the
+        existing audit-prep / audit-apply flow uses. 404 when no audit file
+        exists yet (the audit screen treats this as "fresh -- start from
+        candidates if any, otherwise empty markers").
+        """
+        project = state.load()
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"no audit JSON yet for stage {stage_number}",
+            )
+        try:
+            payload = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    @app.put("/api/stages/{stage_number}/audit")
+    def put_stage_audit(stage_number: int, payload: dict[str, Any]) -> JSONResponse:
+        """Atomically write the audit JSON for a stage.
+
+        Layout follows the existing audit-prep / audit-apply convention plus
+        an ``audit_events`` append-only log (issue #15). The SPA owns the
+        document shape -- this endpoint just verifies it's a JSON object,
+        writes it under ``<project>/audit/stage<N>.json``, and keeps the
+        previous version as ``stage<N>.json.bak`` so a bad save can be
+        recovered.
+
+        The atomic-write pattern is: serialize -> ``stage<N>.json.tmp`` ->
+        rename existing final to ``.bak`` (replacing any prior backup) ->
+        rename ``.tmp`` to final. A crashed process never leaves the SPA
+        without a readable JSON.
+        """
+        project = state.load()
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_dir = project.audit_path(state.project_root)
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        target = audit_dir / f"stage{stage_number}.json"
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        backup = target.with_suffix(target.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if target.exists():
+                if backup.exists():
+                    backup.unlink()
+                target.replace(backup)
+            tmp.replace(target)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    # ----------------------------------------------------------------------
+    # Fixture-review endpoints (closes #19 -- the old splitsmith.review_server
+    # standalone). The /review SPA route reads a single audit fixture (JSON
+    # + sibling WAV + optional video) and edits it in place. No project
+    # context, no stages, no jobs. Localhost-only convention applies; paths
+    # are passed by the user via CLI / query string.
+    # ----------------------------------------------------------------------
+
+    def _resolve_fixture_path(path: str) -> Path:
+        """Validate + resolve a fixture path the SPA passed in. Localhost
+        only -- we trust the user's machine but still refuse non-existent
+        files cleanly so the SPA can show a 404 message."""
+        target = Path(path).expanduser()
+        try:
+            resolved = target.resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"fixture not found: {target}") from exc
+        if not resolved.is_file():
+            raise HTTPException(status_code=400, detail=f"fixture is not a file: {resolved}")
+        return resolved
+
+    @app.get("/api/fixture/audit")
+    def get_fixture_audit(path: str = Query(...)) -> JSONResponse:
+        """Read the fixture JSON at ``path``."""
+        target = _resolve_fixture_path(path)
+        try:
+            payload = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"fixture read failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    @app.put("/api/fixture/audit")
+    def put_fixture_audit(
+        path: str = Query(...),
+        payload: dict[str, Any] = Body(...),  # noqa: B008  FastAPI default-arg DI
+    ) -> JSONResponse:
+        """Atomically rewrite a fixture JSON. Same .bak backup pattern as
+        ``/api/stages/{n}/audit``: serialize -> .tmp -> rename existing
+        target to .bak (replacing any prior backup) -> rename .tmp to
+        target. A crashed write never leaves the SPA without a JSON."""
+        target = _resolve_fixture_path(path)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        backup = target.with_suffix(target.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if backup.exists():
+                backup.unlink()
+            target.replace(backup)
+            tmp.replace(target)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"fixture write failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    @app.get("/api/fixture/peaks")
+    def get_fixture_peaks(
+        path: str = Query(...),
+        bins: int = Query(default=1200, ge=16, le=8192),
+    ) -> JSONResponse:
+        """Compute peaks for the fixture's sibling WAV (``<path>.with_suffix('.wav')``).
+
+        Returns the same payload as the project peaks endpoint so the
+        Review page can reuse the same client-side rendering, including
+        the ``beep_time`` and ``trimmed`` fields. The fixture is treated
+        as already-trimmed (clip-local timeline) by convention.
+        """
+        target = _resolve_fixture_path(path)
+        wav = target.with_suffix(".wav")
+        if not wav.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"fixture audio not found: {wav}",
+            )
+        result = waveform_helpers.ensure_peaks(wav, bins)
+        # The fixture JSON owns the canonical beep_time; we expose it via
+        # the audit endpoint instead of re-deriving here. peaks payload
+        # gets ``trimmed=true`` since fixtures are clip-local.
+        payload = result.model_dump(mode="json")
+        try:
+            fixture_json = json.loads(target.read_text(encoding="utf-8"))
+            payload["beep_time"] = fixture_json.get("beep_time")
+        except (OSError, json.JSONDecodeError):
+            payload["beep_time"] = None
+        payload["trimmed"] = True
+        return JSONResponse(payload)
+
+    @app.get("/api/fixture/audio")
+    def get_fixture_audio(path: str = Query(...)) -> FileResponse:
+        """Serve the WAV alongside ``path`` (same stem, .wav extension)."""
+        target = _resolve_fixture_path(path)
+        wav = target.with_suffix(".wav")
+        if not wav.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"fixture audio not found: {wav}",
+            )
+        return FileResponse(wav, media_type="audio/wav", filename=wav.name)
+
+    @app.get("/api/fixture/video")
+    def get_fixture_video(path: str = Query(...)) -> FileResponse:
+        """Serve an arbitrary video file the user binds to a fixture.
+
+        The CLI's ``splitsmith review --video <path>`` passes this through
+        to the SPA via a query param. Localhost-only; we don't restrict
+        the path beyond "must exist + must be a file".
+        """
+        target = _resolve_fixture_path(path)
+        media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
+        return FileResponse(target, media_type=media_type, filename=target.name)
+
+    @app.get("/api/videos/stream")
+    def stream_video(path: str = Query(...)) -> FileResponse:
+        """Serve a registered video file with HTTP Range support.
+
+        For the primary of a stage, prefers the short-GOP trimmed MP4
+        produced by Sub 5 / #16 (``<trimmed>/stage<N>_trimmed.mp4``). The
+        re-encoded clip seeks frame-accurately, which is what makes the
+        audit screen's drag-scrubbing feel responsive. Secondaries fall
+        through to their source file -- per-video trim runs aren't wired
+        through the production UI yet.
+
+        Validates that ``path`` matches a video registered to the project
+        (any stage, any role, or unassigned) so the endpoint cannot be
+        used as a generic file-read primitive.
+        """
+        project = state.load()
+        located = project.find_video(Path(path))
+        if located is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"video not registered with project: {path}",
+            )
+        stage, video = located
+
+        served_path: Path | None = None
+        if stage is not None and video.role == "primary":
+            trimmed = audio_helpers.trimmed_primary_path(
+                state.project_root, stage.stage_number, project=project
+            )
+            if trimmed.exists():
+                served_path = trimmed.resolve()
+        if served_path is None:
+            served_path = project.resolve_video_path(state.project_root, video.path).resolve()
+            if not served_path.is_file():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"video missing on disk: {served_path}",
+                )
+
+        media_type = (
+            "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
+        )
+        return FileResponse(served_path, media_type=media_type, filename=served_path.name)
 
     @app.get("/api/fs/list", response_model=FsListing)
     def fs_list(

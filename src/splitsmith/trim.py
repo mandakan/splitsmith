@@ -43,6 +43,8 @@ def trim_video(
     stage_time: float,
     *,
     buffer_seconds: float = 5.0,
+    pre_buffer_seconds: float | None = None,
+    post_buffer_seconds: float | None = None,
     mode: TrimMode = "lossless",
     gop_frames: int = 15,
     crf: int = 20,
@@ -53,6 +55,14 @@ def trim_video(
 ) -> TrimResult:
     """Cut ``input_path`` to ``output_path`` around ``beep_time``.
 
+    Buffer can be set asymmetrically: ``pre_buffer_seconds`` controls the
+    pad before ``beep_time`` (anything from the source before that is cut),
+    ``post_buffer_seconds`` controls the pad after ``beep_time + stage_time``.
+    Both default to ``buffer_seconds`` when omitted -- so callers that want
+    a symmetric buffer keep the old single-knob shape. Asymmetric buffers
+    are useful for FCP exports where post-stage padding wants to be longer
+    than the pre-roll (room for fades and transitions).
+
     ``mode`` selects the encoding strategy:
 
     - ``"lossless"``: stream copy (instant, archival).
@@ -62,12 +72,16 @@ def trim_video(
     Returns the absolute-source-time window of the cut. Raises ``FFmpegError``
     if ffmpeg fails or is not installed.
     """
+    pre = pre_buffer_seconds if pre_buffer_seconds is not None else buffer_seconds
+    post = post_buffer_seconds if post_buffer_seconds is not None else buffer_seconds
     if beep_time < 0.0:
         raise ValueError(f"beep_time must be non-negative, got {beep_time}")
     if stage_time < 0.0:
         raise ValueError(f"stage_time must be non-negative, got {stage_time}")
-    if buffer_seconds < 0.0:
-        raise ValueError(f"buffer_seconds must be non-negative, got {buffer_seconds}")
+    if pre < 0.0:
+        raise ValueError(f"pre_buffer_seconds must be non-negative, got {pre}")
+    if post < 0.0:
+        raise ValueError(f"post_buffer_seconds must be non-negative, got {post}")
     if mode not in ("lossless", "audit"):
         raise ValueError(f"mode must be 'lossless' or 'audit', got {mode!r}")
     if gop_frames < 1:
@@ -77,8 +91,8 @@ def trim_video(
     if not input_path.exists():
         raise FileNotFoundError(f"input video not found: {input_path}")
 
-    start = max(0.0, beep_time - buffer_seconds)
-    end = beep_time + stage_time + buffer_seconds
+    start = max(0.0, beep_time - pre)
+    end = beep_time + stage_time + post
     duration = end - start
 
     cmd = [

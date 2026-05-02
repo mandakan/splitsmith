@@ -48,6 +48,8 @@ export interface MatchProject {
   exports_dir: string | null;
   probes_dir: string | null;
   thumbs_dir: string | null;
+  trim_pre_buffer_seconds: number;
+  trim_post_buffer_seconds: number;
 }
 
 export interface PlaceholderStagesRequest {
@@ -63,6 +65,8 @@ export interface ProjectSettingsPatch {
   exports_dir?: string | null;
   probes_dir?: string | null;
   thumbs_dir?: string | null;
+  trim_pre_buffer_seconds?: number | null;
+  trim_post_buffer_seconds?: number | null;
   confirm?: boolean;
 }
 
@@ -122,6 +126,79 @@ export interface FsListing {
   parent: string | null;
   entries: FsEntry[];
   suggested_starts: string[];
+}
+
+export interface PeaksResult {
+  duration: number;
+  sample_rate: number;
+  bins: number;
+  peaks: number[];
+  /** Where the beep falls in the served clip's local timeline (seconds).
+   *  Null when no beep is detected for the primary yet. */
+  beep_time: number | null;
+  /** True when the audio came from the short-GOP trimmed MP4; false when
+   *  the audit screen is operating on the full source for lack of a trim. */
+  trimmed: boolean;
+}
+
+/**
+ * Audit JSON shape (issue #15). Mirrors the on-disk file at
+ * `<project>/audit/stage<N>.json`. Same schema the existing audit-prep /
+ * audit-apply CLI flow uses; the audit screen v2 reads and writes this
+ * format so external tooling stays compatible.
+ */
+export interface AuditCandidate {
+  candidate_number: number;
+  time: number;
+  ms_after_beep: number;
+  peak_amplitude?: number | null;
+  confidence?: number | null;
+}
+
+export interface AuditShot {
+  shot_number: number;
+  candidate_number: number | null;
+  time: number;
+  ms_after_beep: number;
+  source?: "detected" | "manual";
+}
+
+export interface AuditEvent {
+  ts: string;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+export interface StageAudit {
+  stage_number: number;
+  stage_name: string;
+  beep_time?: number;
+  tolerance_ms?: number;
+  stage_time_seconds?: number;
+  fixture_window_in_source?: [number, number];
+  shots: AuditShot[];
+  _candidates_pending_audit?: { candidates: AuditCandidate[] };
+  audit_events?: AuditEvent[];
+  source?: string;
+}
+
+export type JobStatus = "pending" | "running" | "succeeded" | "failed";
+
+/** Mirror of splitsmith.ui.jobs.Job. Long-running endpoints (detect-beep,
+ *  trim, future shot-detect/export) submit a job and return a snapshot;
+ *  the SPA polls /api/jobs/{id} until status leaves "pending" / "running". */
+export interface Job {
+  id: string;
+  kind: string;
+  stage_number: number | null;
+  status: JobStatus;
+  progress: number | null;
+  message: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 class ApiError extends Error {
@@ -234,8 +311,12 @@ export const api = {
       },
     }),
 
+  /** Submit a beep-detection job. Returns a Job snapshot; poll the SPA
+   *  via {@link api.pollJob} (or read /api/jobs/{id} directly) until the
+   *  status flips out of "pending"/"running". On success, the SPA should
+   *  re-fetch /api/project to pick up the new beep_time + processed.trim. */
   detectBeep: (stageNumber: number, force = false) =>
-    request<MatchProject>(
+    request<Job>(
       `/api/stages/${stageNumber}/detect-beep${force ? "?force=true" : ""}`,
       { method: "POST" },
     ),
@@ -246,7 +327,94 @@ export const api = {
       json: { beep_time: beepTime },
     }),
 
+  /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
+   *  idempotent on the worker side -- when the cached MP4 is fresh the
+   *  job completes near-instantly without re-encoding. */
+  trimStage: (stageNumber: number) =>
+    request<Job>(`/api/stages/${stageNumber}/trim`, { method: "POST" }),
+
+  /** Submit a shot-detection job for the stage's audit clip. The job
+   *  populates _candidates_pending_audit in the audit JSON; the audit
+   *  screen renders markers from there. Auto-triggered after trim;
+   *  this endpoint is for manual retrigger. */
+  detectShots: (stageNumber: number) =>
+    request<Job>(`/api/stages/${stageNumber}/shot-detect`, { method: "POST" }),
+
+  listJobs: () => request<Job[]>("/api/jobs"),
+  getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),
+
+  /** Poll a job until it leaves the running state. ``onUpdate`` fires on
+   *  every snapshot (including the final one). Returns the terminal Job. */
+  pollJob: async (
+    jobId: string,
+    onUpdate: (job: Job) => void,
+    opts: { intervalMs?: number; timeoutMs?: number } = {},
+  ): Promise<Job> => {
+    const interval = opts.intervalMs ?? 750;
+    const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60 * 1000);
+    while (true) {
+      const job = await request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`);
+      onUpdate(job);
+      if (job.status === "succeeded" || job.status === "failed") return job;
+      if (Date.now() > deadline) {
+        throw new Error(`Timed out waiting for job ${jobId}`);
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+  },
+
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
+
+  videoStreamUrl: (videoPath: string) =>
+    `/api/videos/stream?path=${encodeURIComponent(videoPath)}`,
+
+  getStagePeaks: (stageNumber: number, bins = 1200) =>
+    request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),
+
+  /** Returns the saved audit JSON for a stage, or null when none exists yet. */
+  getStageAudit: async (stageNumber: number): Promise<StageAudit | null> => {
+    try {
+      return await request<StageAudit>(`/api/stages/${stageNumber}/audit`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
+
+  /** Atomically write the stage's audit JSON. The server keeps the prior
+   *  version as ``stage<N>.json.bak`` so a bad save can be recovered. */
+  saveStageAudit: (stageNumber: number, payload: StageAudit) =>
+    request<StageAudit>(`/api/stages/${stageNumber}/audit`, {
+      method: "PUT",
+      json: payload,
+    }),
+
+  // -----------------------------------------------------------------------
+  // Fixture mode (closes #19): the /review SPA route reads + writes a single
+  // audit fixture (JSON + sibling WAV + optional video) without project
+  // context. Folds the old splitsmith.review_server standalone into this
+  // build so the audit primitives are shared.
+  // -----------------------------------------------------------------------
+
+  getFixtureAudit: (fixturePath: string) =>
+    request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`),
+
+  saveFixtureAudit: (fixturePath: string, payload: StageAudit) =>
+    request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`, {
+      method: "PUT",
+      json: payload,
+    }),
+
+  getFixturePeaks: (fixturePath: string, bins = 1200) =>
+    request<PeaksResult>(
+      `/api/fixture/peaks?path=${encodeURIComponent(fixturePath)}&bins=${bins}`,
+    ),
+
+  fixtureAudioUrl: (fixturePath: string) =>
+    `/api/fixture/audio?path=${encodeURIComponent(fixturePath)}`,
+
+  fixtureVideoUrl: (videoPath: string) =>
+    `/api/fixture/video?path=${encodeURIComponent(videoPath)}`,
 };
 
 export { ApiError };

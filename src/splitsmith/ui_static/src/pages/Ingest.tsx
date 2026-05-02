@@ -711,9 +711,63 @@ function SettingsSection({
               onCancel={() => setPickerFor(null)}
             />
           ) : null}
+          <TrimBufferRow
+            label="Pre-beep buffer (seconds)"
+            help="Pad before the beep in the trimmed clip. Longer = more pre-roll for FCP fades."
+            value={project.trim_pre_buffer_seconds}
+            disabled={busy}
+            onCommit={(seconds) => void update({ trim_pre_buffer_seconds: seconds } as never)}
+          />
+          <TrimBufferRow
+            label="Post-stage buffer (seconds)"
+            help="Pad after the stage end. Longer = more tail for FCP fades and transitions."
+            value={project.trim_post_buffer_seconds}
+            disabled={busy}
+            onCommit={(seconds) => void update({ trim_post_buffer_seconds: seconds } as never)}
+          />
         </CardContent>
       ) : null}
     </Card>
+  );
+}
+
+function TrimBufferRow({
+  label,
+  help,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  help: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (seconds: number) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">{help}</span>
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          defaultValue={value}
+          disabled={disabled}
+          className="flex h-8 w-32 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onBlur={(e) => {
+            const next = Number.parseFloat(e.target.value);
+            if (!Number.isFinite(next) || next < 0) return;
+            if (Math.abs(next - value) < 1e-6) return;
+            onCommit(next);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </label>
+    </div>
   );
 }
 
