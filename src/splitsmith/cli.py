@@ -26,7 +26,6 @@ from . import (
     csv_gen,
     fcpxml_gen,
     report,
-    review_server,
     shot_detect,
     shot_refine,
     trim,
@@ -184,19 +183,23 @@ def review(
     video: Path | None = typer.Option(
         None, "--video", help="Optional source video to align alongside the waveform."
     ),
-    video_offset_seconds: float | None = typer.Option(
-        None,
-        "--video-offset-seconds",
-        help=(
-            "Seconds added to the waveform time to seek the video. "
-            "Defaults to fixture_window_in_source[0] from the fixture JSON."
-        ),
-    ),
-    port: int = typer.Option(5173, "--port"),
+    port: int = typer.Option(5174, "--port"),
     host: str = typer.Option("127.0.0.1", "--host"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Skip auto-opening browser."),
 ) -> None:
-    """Open the audit-only SPA in a browser to review/correct shot detections."""
+    """Open the production UI's standalone fixture-review page.
+
+    Boots the same server ``splitsmith ui`` uses, with a throwaway project
+    root, then opens ``/review?fixture=...&video=...``. The route reads
+    the fixture JSON via the API, edits markers in-memory, saves back to
+    the same path with a ``.bak`` for the previous version. The
+    standalone splitsmith.review_server has been retired (#19).
+    """
+    import tempfile
+    from urllib.parse import urlencode
+
+    from .ui.server import serve
+
     if not fixture.exists():
         raise typer.BadParameter(f"fixture not found: {fixture}")
     audio_path = fixture.with_suffix(".wav")
@@ -205,37 +208,35 @@ def review(
     if video is not None and not video.exists():
         raise typer.BadParameter(f"video not found: {video}")
 
-    if video_offset_seconds is None:
-        try:
-            data = json.loads(fixture.read_text())
-            video_offset_seconds = float(data.get("fixture_window_in_source", [0.0])[0])
-        except (json.JSONDecodeError, KeyError, ValueError):
-            video_offset_seconds = 0.0
+    fixture_resolved = fixture.resolve()
+    video_resolved = video.resolve() if video is not None else None
 
-    config = review_server.ReviewConfig(
-        fixture_path=fixture.resolve(),
-        audio_path=audio_path.resolve(),
-        video_path=video.resolve() if video is not None else None,
-        video_offset_seconds=video_offset_seconds,
-    )
-    server = review_server.make_server(host, port, config)
-    url = f"http://{host}:{port}/"
-    console.print(f"[green]Audit UI[/]: [bold]{url}[/]   (Ctrl+C to stop)")
-    console.print(f"  fixture: {fixture}")
-    console.print(f"  audio:   {audio_path}")
-    if video is not None:
-        console.print(f"  video:   {video}  (offset {video_offset_seconds:+.3f}s)")
+    # The production UI server requires a project root, but the fixture
+    # endpoints don't touch project state. Use a throwaway tmpdir so the
+    # server boots cleanly and nothing from this run pollutes a real
+    # match folder. Cleanup is left to the OS.
+    tmp_root = Path(tempfile.mkdtemp(prefix="splitsmith-review-"))
+
+    qs = {"fixture": str(fixture_resolved)}
+    if video_resolved is not None:
+        qs["video"] = str(video_resolved)
+    url = f"http://{host}:{port}/review?{urlencode(qs)}"
+
+    console.print(f"[green]splitsmith review[/]: [bold]{url}[/]   (Ctrl+C to stop)")
+    console.print(f"  fixture: {fixture_resolved}")
+    console.print(f"  audio:   {audio_path.resolve()}")
+    if video_resolved is not None:
+        console.print(f"  video:   {video_resolved}")
 
     if not no_browser:
         import webbrowser
 
         webbrowser.open(url)
+
     try:
-        server.serve_forever()
+        serve(project_root=tmp_root, project_name="review", host=host, port=port)
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
-    finally:
-        server.server_close()
 
 
 @app.command()
