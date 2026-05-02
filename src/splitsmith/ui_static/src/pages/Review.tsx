@@ -379,6 +379,38 @@ export function Review() {
     [keptShots, currentShotIndex, handleScrub],
   );
 
+  const allMarkersSorted = useMemo(
+    () => markers.slice().sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
+    [markers],
+  );
+
+  const stepAnyMarker = useCallback(
+    (delta: number) => {
+      if (allMarkersSorted.length === 0) return;
+      let curIdx = -1;
+      if (focusedMarkerId) {
+        curIdx = allMarkersSorted.findIndex((m) => m.id === focusedMarkerId);
+      }
+      if (curIdx < 0) {
+        for (let i = 0; i < allMarkersSorted.length; i++) {
+          if (allMarkersSorted[i].time <= currentTime) curIdx = i;
+          else break;
+        }
+        if (curIdx < 0) curIdx = delta > 0 ? -1 : 0;
+      }
+      const nextIdx = Math.min(
+        Math.max(curIdx + delta, 0),
+        allMarkersSorted.length - 1,
+      );
+      const target = allMarkersSorted[nextIdx];
+      setFocusedMarkerId(target.id);
+      handleScrub(target.time);
+      const keptIdx = keptShots.findIndex((k) => k.id === target.id);
+      if (keptIdx >= 0) setCurrentShotIndex(keptIdx);
+    },
+    [allMarkersSorted, focusedMarkerId, currentTime, handleScrub, keptShots],
+  );
+
   const jumpToMarker = useCallback(
     (m: AuditMarker) => {
       setFocusedMarkerId(m.id);
@@ -492,6 +524,11 @@ export function Review() {
           stepShot(e.shiftKey ? -1 : 1);
           return;
         }
+        if (e.key === "n" || e.key === "N") {
+          e.preventDefault();
+          stepAnyMarker(e.shiftKey ? -1 : 1);
+          return;
+        }
         if (e.key === "l" || e.key === "L") {
           e.preventDefault();
           setShowDrawer((v) => !v);
@@ -533,6 +570,7 @@ export function Review() {
     undo,
     performSave,
     stepShot,
+    stepAnyMarker,
     peaks,
     handleScrub,
     handleMarkerClick,
@@ -601,9 +639,10 @@ export function Review() {
           <p className="text-sm text-muted-foreground">
             Standalone fixture review. Drag the waveform to scrub. Arrow keys
             nudge 250 ms (Shift = 25 ms). Double-click adds a manual marker.
-            M / Shift+M step shots, K toggles the current shot, Alt+Arrow
-            nudges the selected marker (Shift = 1 ms), L toggles the marker
-            list, R toggles loop, Cmd+Z undoes,
+            M / Shift+M step kept shots, N / Shift+N step every marker,
+            K toggles the current shot, Alt+Arrow nudges the selected marker
+            (Shift = 1 ms), L toggles the marker list, R toggles loop,
+            Cmd+Z undoes,
             Cmd+S saves.
           </p>
         </div>

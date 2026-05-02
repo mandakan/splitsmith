@@ -546,6 +546,45 @@ export function Audit() {
     [keptShots, currentShotIndex, handleScrub],
   );
 
+  // All markers in time order (detected + rejected + manual). The N
+  // shortcut walks this list so the user can revisit a rejected marker
+  // and toggle it back to kept without touching the mouse. M only
+  // visits kept shots (the "real" sequence the export will use).
+  const allMarkersSorted = useMemo(
+    () => markers.slice().sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
+    [markers],
+  );
+
+  const stepAnyMarker = useCallback(
+    (delta: number) => {
+      if (allMarkersSorted.length === 0) return;
+      // Anchor: focused marker -> use its index; otherwise pick the
+      // marker at-or-just-before the playhead so forward stepping lands
+      // on the next one and back-stepping lands on the previous.
+      let curIdx = -1;
+      if (focusedMarkerId) {
+        curIdx = allMarkersSorted.findIndex((m) => m.id === focusedMarkerId);
+      }
+      if (curIdx < 0) {
+        for (let i = 0; i < allMarkersSorted.length; i++) {
+          if (allMarkersSorted[i].time <= currentTime) curIdx = i;
+          else break;
+        }
+        if (curIdx < 0) curIdx = delta > 0 ? -1 : 0;
+      }
+      const nextIdx = Math.min(
+        Math.max(curIdx + delta, 0),
+        allMarkersSorted.length - 1,
+      );
+      const target = allMarkersSorted[nextIdx];
+      setFocusedMarkerId(target.id);
+      handleScrub(target.time);
+      const keptIdx = keptShots.findIndex((k) => k.id === target.id);
+      if (keptIdx >= 0) setCurrentShotIndex(keptIdx);
+    },
+    [allMarkersSorted, focusedMarkerId, currentTime, handleScrub, keptShots],
+  );
+
   const jumpToMarker = useCallback(
     (m: AuditMarker) => {
       setFocusedMarkerId(m.id);
@@ -706,6 +745,14 @@ export function Audit() {
           stepShot(e.shiftKey ? -1 : 1);
           return;
         }
+        if (e.key === "n" || e.key === "N") {
+          // N steps through *every* marker (detected / rejected / manual)
+          // so the user can find a rejected one and K-toggle it back to
+          // kept without leaving the keyboard.
+          e.preventDefault();
+          stepAnyMarker(e.shiftKey ? -1 : 1);
+          return;
+        }
         if (e.key === "l" || e.key === "L") {
           e.preventDefault();
           setShowDrawer((v) => !v);
@@ -758,6 +805,7 @@ export function Audit() {
     togglePlay,
     undo,
     stepShot,
+    stepAnyMarker,
     performSave,
     beepOffset,
     peaks,
@@ -832,9 +880,10 @@ export function Audit() {
           <p className="text-sm text-muted-foreground">
             Drag the waveform to scrub. Arrow keys nudge 250 ms (Shift = 25 ms).
             Double-click to add a manual marker. Click a marker to toggle
-            keep/reject. M / Shift+M step shots, K toggles the current shot,
-            Alt+Arrow nudges the selected marker (Shift = 1 ms), L toggles the
-            marker list, R toggles loop, Cmd+Z undoes, Cmd+S saves.
+            keep/reject. M / Shift+M step kept shots, N / Shift+N step every
+            marker, K toggles the current shot, Alt+Arrow nudges the selected
+            marker (Shift = 1 ms), L toggles the marker list, R toggles loop,
+            Cmd+Z undoes, Cmd+S saves.
           </p>
         </div>
         <StageSelector
