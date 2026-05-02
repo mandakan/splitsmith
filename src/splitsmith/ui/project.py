@@ -172,6 +172,12 @@ class MatchProject(BaseModel):
     # to 5.0 s -- the historical single-knob value.
     trim_pre_buffer_seconds: float = 5.0
     trim_post_buffer_seconds: float = 5.0
+    # Audit-mode encoder selection (issue #26). ``"auto"`` probes ffmpeg
+    # for ``h264_videotoolbox`` on macOS (~10x faster on 4K Insta360
+    # footage) and falls back to ``libx264`` everywhere else. Override to
+    # a specific encoder name (e.g. ``"libx264"``) to pin the choice; the
+    # next trim job uses the new value.
+    trim_audit_encoder: str = "auto"
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from splitsmith.trim import FFmpegError, trim_video
+from splitsmith.trim import FFmpegError, select_audit_encoder, trim_video
 
 
 class _RecordingRunner:
@@ -205,6 +205,95 @@ def test_trim_wraps_missing_binary(tmp_path: Path) -> None:
 
     with pytest.raises(FFmpegError, match="ffmpeg binary not found"):
         trim_video(src, dst, 1.0, 1.0, ffmpeg_binary="ffmpeg-nope", runner=missing_runner)
+
+
+def test_trim_audit_default_preset_is_ultrafast(tmp_path: Path) -> None:
+    """Issue #26: drop libx264 preset to ``ultrafast`` for the audit cache.
+
+    Audit clips are throw-away cache files: encode speed matters, file size
+    doesn't. ``ultrafast`` is ~3-5x faster than ``fast`` on 2K/4K Insta360
+    footage, which is the bottleneck the audit screen feels."""
+    src = _touch(tmp_path / "in.mp4")
+    dst = tmp_path / "out.mp4"
+    runner = _RecordingRunner()
+
+    trim_video(src, dst, beep_time=1.0, stage_time=1.0, mode="audit", runner=runner)
+
+    cmd = runner.calls[0]
+    assert cmd[cmd.index("-preset") + 1] == "ultrafast"
+
+
+def test_trim_audit_videotoolbox_skips_libx264_knobs(tmp_path: Path) -> None:
+    """Hardware encoders ignore (or reject) ``-preset`` / ``-crf``: their
+    speed/quality tradeoff is built in. We must drop those flags so ffmpeg
+    doesn't fail or warn while still emitting the codec-level knobs that
+    make scrubbing snappy (-g, -keyint_min, -pix_fmt)."""
+    src = _touch(tmp_path / "in.mp4")
+    dst = tmp_path / "out.mp4"
+    runner = _RecordingRunner()
+
+    trim_video(
+        src,
+        dst,
+        beep_time=1.0,
+        stage_time=1.0,
+        mode="audit",
+        video_encoder="h264_videotoolbox",
+        runner=runner,
+    )
+
+    cmd = runner.calls[0]
+    assert cmd[cmd.index("-c:v") + 1] == "h264_videotoolbox"
+    assert "-preset" not in cmd
+    assert "-crf" not in cmd
+    # GOP + pixfmt knobs survive -- they're codec-level, not encoder-level.
+    assert cmd[cmd.index("-g") + 1] == "15"
+    assert cmd[cmd.index("-keyint_min") + 1] == "15"
+    assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p"
+    assert cmd[cmd.index("-c:a") + 1] == "copy"
+
+
+def test_select_audit_encoder_falls_back_to_libx264(monkeypatch) -> None:
+    """When ffmpeg isn't on PATH (or is too old to advertise an encoder),
+    ``select_audit_encoder`` returns the universal ``libx264`` so the trim
+    pipeline still works without manual config."""
+    import splitsmith.trim as trim_module
+
+    # Bust the lru_cache so this test sees our patched probe.
+    trim_module._probe_available_encoders.cache_clear()
+    monkeypatch.setattr(trim_module, "_probe_available_encoders", lambda *a, **kw: frozenset())
+
+    assert select_audit_encoder("auto") == "libx264"
+
+
+def test_select_audit_encoder_picks_videotoolbox_on_macos(monkeypatch) -> None:
+    """On macOS with ffmpeg advertising h264_videotoolbox, "auto" picks it
+    -- ~10x faster than libx264 on 4K Insta360 footage, which is the whole
+    point of the optimisation."""
+    import splitsmith.trim as trim_module
+
+    trim_module._probe_available_encoders.cache_clear()
+    monkeypatch.setattr(
+        trim_module,
+        "_probe_available_encoders",
+        lambda *a, **kw: frozenset({"libx264", "h264_videotoolbox"}),
+    )
+    monkeypatch.setattr(trim_module.platform, "system", lambda: "Darwin")
+
+    assert select_audit_encoder("auto") == "h264_videotoolbox"
+
+
+def test_select_audit_encoder_explicit_override_when_unsupported(monkeypatch) -> None:
+    """An explicit encoder name that isn't advertised falls back to
+    libx264 instead of letting ffmpeg surface a cryptic error mid-encode."""
+    import splitsmith.trim as trim_module
+
+    trim_module._probe_available_encoders.cache_clear()
+    monkeypatch.setattr(
+        trim_module, "_probe_available_encoders", lambda *a, **kw: frozenset({"libx264"})
+    )
+
+    assert select_audit_encoder("h264_nvenc") == "libx264"
 
 
 @pytest.mark.integration

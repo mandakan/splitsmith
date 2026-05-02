@@ -196,7 +196,7 @@ export interface StageAudit {
   source?: string;
 }
 
-export type JobStatus = "pending" | "running" | "succeeded" | "failed";
+export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
 /** Mirror of splitsmith.ui.jobs.Job. Long-running endpoints (detect-beep,
  *  trim, future shot-detect/export) submit a job and return a snapshot;
@@ -209,6 +209,10 @@ export interface Job {
   progress: number | null;
   message: string | null;
   error: string | null;
+  /** True after the SPA POSTed /api/jobs/{id}/cancel for this job. The flag
+   *  stays True on the terminal snapshot so the row can be labelled
+   *  "Cancelled by user" instead of "Aborted". */
+  cancel_requested: boolean;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -372,6 +376,12 @@ export const api = {
   listJobs: () => request<Job[]>("/api/jobs"),
   getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),
 
+  /** Request cooperative cancellation. Idempotent: a finished job is returned
+   *  as-is. For a running trim job the server terminates the underlying
+   *  ffmpeg subprocess so the cancel takes effect immediately. */
+  cancelJob: (jobId: string) =>
+    request<Job>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+
   /** Poll a job until it leaves the running state. ``onUpdate`` fires on
    *  every snapshot (including the final one). Returns the terminal Job. */
   pollJob: async (
@@ -384,7 +394,11 @@ export const api = {
     while (true) {
       const job = await request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`);
       onUpdate(job);
-      if (job.status === "succeeded" || job.status === "failed") return job;
+      if (
+        job.status === "succeeded" ||
+        job.status === "failed" ||
+        job.status === "cancelled"
+      ) return job;
       if (Date.now() > deadline) {
         throw new Error(`Timed out waiting for job ${jobId}`);
       }

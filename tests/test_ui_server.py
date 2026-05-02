@@ -28,7 +28,7 @@ def _wait_for_job(client: TestClient, job_id: str, *, timeout: float = 5.0) -> d
         resp = client.get(f"/api/jobs/{job_id}")
         assert resp.status_code == 200
         body = resp.json()
-        if body["status"] in ("succeeded", "failed"):
+        if body["status"] in ("succeeded", "failed", "cancelled"):
             return body
         time.sleep(0.02)
     raise AssertionError(f"job {job_id} did not finish within {timeout}s")
@@ -1277,6 +1277,69 @@ def test_trim_endpoint_returns_existing_job_when_one_is_running(
     final = _wait_for_job(client, first["id"])
     assert final["status"] == "succeeded"
     assert len(invocations) == 1, "ffmpeg must run only once"
+
+
+def test_cancel_endpoint_aborts_running_trim(tmp_path: Path, monkeypatch) -> None:
+    """POST /api/jobs/{id}/cancel cooperatively cancels a running trim
+    so the user can bail out of a slow encode without waiting for it to
+    finish (issue #26)."""
+    import threading
+
+    from splitsmith.ui.jobs import JobCancelled
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import trim
+
+    started = threading.Event()
+    cancel_observed = threading.Event()
+
+    def slow_trim(**kwargs):  # type: ignore[no-untyped-def]
+        # The server passes a runner that bridges to the JobHandle. We
+        # call it with a short fake command to register the "subprocess",
+        # then wait for the registry to terminate it.
+        runner = kwargs["runner"]
+        # ``true`` exits 0; we want a process that blocks until cancelled.
+        # ``sleep 30`` is portable and gets killed by the registry's
+        # terminate() when /cancel arrives.
+        started.set()
+        try:
+            runner(["sleep", "30"], check=True, capture_output=True, text=True)
+        except JobCancelled:
+            cancel_observed.set()
+            raise
+        out = Path(kwargs["output_path"])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"T")
+        return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
+
+    monkeypatch.setattr(trim, "trim_video", slow_trim)
+
+    job = client.post("/api/stages/1/trim").json()
+    assert started.wait(timeout=3.0), "worker should have started by now"
+
+    cancel_resp = client.post(f"/api/jobs/{job['id']}/cancel")
+    assert cancel_resp.status_code == 200
+    snapshot = cancel_resp.json()
+    assert snapshot["cancel_requested"] is True
+
+    final = _wait_for_job(client, job["id"])
+    assert final["status"] == "cancelled", final
+    assert cancel_observed.is_set(), "worker must observe the cancel via JobCancelled"
+
+
+def test_cancel_endpoint_returns_404_for_unknown_job(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/jobs/does-not-exist/cancel")
+    assert resp.status_code == 404
 
 
 def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):

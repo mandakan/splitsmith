@@ -65,13 +65,67 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from . import audio as audio_helpers
-from .jobs import Job, JobHandle, JobRegistry
+from .jobs import Job, JobCancelled, JobHandle, JobRegistry
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
     ScoreboardImportConflictError,
     VideoRole,
 )
+
+
+def _cancellable_runner(handle: JobHandle):
+    """Build a ``trim.Runner`` that registers ffmpeg with the job for cancel.
+
+    Mirrors the ``subprocess.run(check=True, capture_output=True)`` shape
+    that :func:`splitsmith.trim.trim_video` expects, but uses ``Popen`` so
+    the registry can ``terminate()`` ffmpeg the moment a cancel arrives.
+    Without this the worker thread sits inside ``proc.wait()`` until the
+    whole encode finishes -- a couple of minutes on a 4K Insta360 stage.
+    """
+
+    def runner(cmd, *, check=True, capture_output=True, text=True, **kwargs):
+        stdout_arg = subprocess.PIPE if capture_output else None
+        stderr_arg = subprocess.PIPE if capture_output else None
+        proc = subprocess.Popen(  # noqa: S603 -- argv is constructed by us
+            cmd,
+            stdout=stdout_arg,
+            stderr=stderr_arg,
+            text=text,
+            **kwargs,
+        )
+        try:
+            handle.attach_subprocess(proc)
+            try:
+                stdout, stderr = proc.communicate()
+            finally:
+                handle.detach_subprocess()
+        except JobCancelled:
+            # attach_subprocess terminated the proc when the cancel
+            # arrived before we could attach -- reap it so we don't leak
+            # a zombie, then propagate. Use a short wait to bound the
+            # impact if the child is wedged in uninterruptible I/O.
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise
+        if check and proc.returncode != 0:
+            # When the registry terminated ffmpeg as part of a cancel,
+            # surface the cancel rather than the noisy non-zero exit.
+            if handle.is_cancel_requested():
+                raise JobCancelled()
+            raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=proc.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    return runner
+
 
 logger = logging.getLogger(__name__)
 
@@ -609,6 +663,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
             trimmed_ok = False
             if stg.time_seconds > 0:
+                handle.check_cancel()
                 handle.update(progress=0.55, message="Trimming audit clip (short GOP)...")
                 try:
                     audio_helpers.ensure_audit_trim(
@@ -618,6 +673,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                         prim.beep_time,
                         stg.time_seconds,
                         project=proj,
+                        runner=_cancellable_runner(handle),
                     )
                     prim.processed["trim"] = True
                     trimmed_ok = True
@@ -698,6 +754,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         if prim is None or prim.beep_time is None:
             raise RuntimeError("primary or beep disappeared mid-flight")
         source = proj.resolve_video_path(state.project_root, prim.path)
+        handle.check_cancel()
         handle.update(progress=0.3, message="Encoding short-GOP MP4...")
         audio_helpers.ensure_audit_trim(
             state.project_root,
@@ -706,6 +763,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             prim.beep_time,
             stg.time_seconds,
             project=proj,
+            runner=_cancellable_runner(handle),
         )
         handle.update(progress=0.85, message="Saving project...")
         prim.processed["trim"] = True
@@ -939,6 +997,21 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def get_job(job_id: str) -> Job:
         """Poll a single job. SPA polls ~1 Hz while a job is active."""
         job = state.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+        return job
+
+    @app.post("/api/jobs/{job_id}/cancel", response_model=Job)
+    def cancel_job(job_id: str) -> Job:
+        """Request cooperative cancellation of a running or pending job.
+
+        The registry sets ``cancel_requested=True`` and (for trim jobs)
+        terminates the running ffmpeg subprocess. The worker then bails
+        out at its next phase boundary, ending the job in
+        ``status=cancelled``. Idempotent: cancelling a finished job
+        returns the existing snapshot unchanged.
+        """
+        job = state.jobs.cancel(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
