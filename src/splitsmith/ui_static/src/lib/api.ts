@@ -48,6 +48,8 @@ export interface MatchProject {
   exports_dir: string | null;
   probes_dir: string | null;
   thumbs_dir: string | null;
+  trim_pre_buffer_seconds: number;
+  trim_post_buffer_seconds: number;
 }
 
 export interface PlaceholderStagesRequest {
@@ -63,6 +65,8 @@ export interface ProjectSettingsPatch {
   exports_dir?: string | null;
   probes_dir?: string | null;
   thumbs_dir?: string | null;
+  trim_pre_buffer_seconds?: number | null;
+  trim_post_buffer_seconds?: number | null;
   confirm?: boolean;
 }
 
@@ -299,6 +303,12 @@ export const api = {
       method: "POST",
       json: { beep_time: beepTime },
     }),
+
+  /** Run audit-mode trim for a stage's primary. Idempotent: re-uses the
+   *  cached MP4 unless the source has changed. Triggered automatically
+   *  after detect-beep; this endpoint exists for retry / manual override. */
+  trimStage: (stageNumber: number) =>
+    request<MatchProject>(`/api/stages/${stageNumber}/trim`, { method: "POST" }),
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 

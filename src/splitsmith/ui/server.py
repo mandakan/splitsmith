@@ -16,6 +16,7 @@ Endpoints (locked v1 surface):
   GET  /api/thumbnails/{key}.jpg    -- serve cached thumbnail
   POST /api/stages/{n}/detect-beep  -- run beep_detect on the primary, save result
   POST /api/stages/{n}/beep         -- manual beep_time override
+  POST /api/stages/{n}/trim         -- (re-)produce stage<N>_trimmed.mp4 (audit mode)
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
   GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
@@ -123,6 +124,10 @@ class SettingsRequest(BaseModel):
     exports_dir: str | None = None
     probes_dir: str | None = None
     thumbs_dir: str | None = None
+    # Audit-mode trim buffers (#15 / #16). Pre = pad before beep,
+    # post = pad after stage end. Both must be non-negative.
+    trim_pre_buffer_seconds: float | None = None
+    trim_post_buffer_seconds: float | None = None
     confirm: bool = False
 
 
@@ -380,6 +385,17 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         for field, value in update.items():
             setattr(project, field, value)
 
+        for buf_field in ("trim_pre_buffer_seconds", "trim_post_buffer_seconds"):
+            value = getattr(req, buf_field)
+            if value is None:
+                continue
+            if value < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{buf_field} must be non-negative, got {value}",
+                )
+            setattr(project, buf_field, value)
+
         # Make sure each configured directory is creatable; surface a 400
         # rather than failing later in detect-beep / trim / export.
         for resolver in (
@@ -442,6 +458,80 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         primary.beep_peak_amplitude = result.peak_amplitude
         primary.beep_duration_ms = result.duration_ms
         primary.processed["beep"] = True
+
+        # Auto-trim: with a known beep + stage time, the audit screen needs a
+        # short-GOP MP4 to feel scrub-friendly (Sub 5 / #16). Run it inline so
+        # the user lands on Audit with everything ready. ffmpeg failures here
+        # don't block the beep result -- we surface a warning header.
+        warning: str | None = None
+        if stage.time_seconds > 0:
+            try:
+                audio_helpers.ensure_audit_trim(
+                    state.project_root,
+                    stage_number,
+                    source_video,
+                    primary.beep_time,
+                    stage.time_seconds,
+                    project=project,
+                )
+                primary.processed["trim"] = True
+            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                warning = f"beep saved but auto-trim failed: {exc}"
+                logger.warning("auto-trim failed for stage %d: %s", stage_number, exc)
+
+        project.save(state.project_root)
+        resp = JSONResponse(project.model_dump(mode="json"))
+        if warning:
+            resp.headers["X-Splitsmith-Warning"] = warning
+        return resp
+
+    @app.post("/api/stages/{stage_number}/trim")
+    def trim_stage(stage_number: int) -> JSONResponse:
+        """Run the audit-mode short-GOP trim for a stage's primary.
+
+        Idempotent: re-uses the cached MP4 when its mtime is at least as
+        new as the source's. Sets ``processed.trim`` on the primary and
+        returns the updated project.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        primary = stage.primary()
+        if primary is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} has no primary video",
+            )
+        if primary.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"stage {stage_number} primary has no beep_time yet",
+            )
+        if stage.time_seconds <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stage {stage_number} has time_seconds=0; import a "
+                    "scoreboard or set the stage time before trimming"
+                ),
+            )
+        source_video = project.resolve_video_path(state.project_root, primary.path)
+        try:
+            audio_helpers.ensure_audit_trim(
+                state.project_root,
+                stage_number,
+                source_video,
+                primary.beep_time,
+                stage.time_seconds,
+                project=project,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except audio_helpers.AudioExtractionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        primary.processed["trim"] = True
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 

@@ -463,9 +463,21 @@ export function Audit() {
                 <Badge variant="outline">no audit yet</Badge>
               ) : null}
               {peaks && !peaks.trimmed ? (
-                <Badge variant="destructive" title="Run `splitsmith trim --mode audit` for fast, frame-accurate scrubbing.">
-                  untrimmed -- scrubbing will be slow
-                </Badge>
+                <TrimNowBadge
+                  stageNumber={stage.stage_number}
+                  hasBeep={primary.beep_time != null}
+                  hasStageTime={stage.time_seconds > 0}
+                  onProjectUpdate={(p) => {
+                    setProject(p);
+                    // Re-fetch peaks now that the trimmed clip exists.
+                    if (stageNumber != null) {
+                      api
+                        .getStagePeaks(stageNumber, PEAK_BINS)
+                        .then((np) => setPeaks(np))
+                        .catch(() => {});
+                    }
+                  }}
+                />
               ) : null}
             </CardTitle>
             <CardDescription>
@@ -578,6 +590,61 @@ function StageSelector({ stages, selected, onSelect }: StageSelectorProps) {
         ))}
       </select>
     </label>
+  );
+}
+
+interface TrimNowBadgeProps {
+  stageNumber: number;
+  hasBeep: boolean;
+  hasStageTime: boolean;
+  onProjectUpdate: (p: MatchProject) => void;
+}
+
+function TrimNowBadge({
+  stageNumber,
+  hasBeep,
+  hasStageTime,
+  onProjectUpdate,
+}: TrimNowBadgeProps) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const blocked = !hasBeep || !hasStageTime;
+  const reason = !hasBeep
+    ? "Detect or set the beep first."
+    : !hasStageTime
+      ? "Import a scoreboard so the stage time is known."
+      : null;
+
+  const onClick = useCallback(() => {
+    setRunning(true);
+    setError(null);
+    api
+      .trimStage(stageNumber)
+      .then(onProjectUpdate)
+      .catch((err) => setError(err instanceof ApiError ? err.detail : String(err)))
+      .finally(() => setRunning(false));
+  }, [stageNumber, onProjectUpdate]);
+
+  return (
+    <span className="flex items-center gap-2">
+      <Badge
+        variant="destructive"
+        title="The audit screen is reading the full source clip. Trim makes scrubbing frame-accurate."
+      >
+        untrimmed -- scrubbing will be slow
+      </Badge>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onClick}
+        disabled={running || blocked}
+        title={reason ?? "Re-encode with short GOP for scrub-friendly playback"}
+      >
+        {running ? <Loader2 className="size-3 animate-spin" /> : null}
+        {running ? "Trimming..." : "Trim now"}
+      </Button>
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
+    </span>
   );
 }
 

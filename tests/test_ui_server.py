@@ -745,6 +745,133 @@ def test_peaks_endpoint_404_when_no_primary(tmp_path: Path) -> None:
     assert "no primary" in resp.json()["detail"]
 
 
+def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
+    """After a successful beep detect, the production UI runs the audit-mode
+    trim inline so the audit screen lands with frame-accurate scrubbing."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    project.stages[0].time_seconds = 12.0
+    project.save(project_root)
+
+    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_bytes(b"FAKE_SOURCE_MP4")
+
+    from splitsmith import beep_detect, trim
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeBeep:
+        time = 6.5
+        peak_amplitude = 0.42
+        duration_ms = 110.0
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "x.wav")
+    (tmp_path / "x.wav").write_bytes(b"\x00")
+    monkeypatch.setattr(beep_detect, "load_audio", lambda p: ([0.0] * 100, 48_000))
+    monkeypatch.setattr(beep_detect, "detect_beep", lambda *a, **kw: FakeBeep())
+
+    trim_calls: list[dict] = []
+
+    def fake_trim_video(**kwargs):  # type: ignore[no-untyped-def]
+        trim_calls.append(kwargs)
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_bytes(b"TRIMMED_MP4")
+        return trim.TrimResult(output_path=kwargs["output_path"], start_time=1.5, end_time=23.5)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stages"][0]["videos"][0]["beep_time"] == pytest.approx(6.5)
+    assert body["stages"][0]["videos"][0]["processed"]["trim"] is True
+    assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
+    assert len(trim_calls) == 1
+    assert trim_calls[0]["mode"] == "audit"
+    assert trim_calls[0]["beep_time"] == pytest.approx(6.5)
+    assert trim_calls[0]["stage_time"] == pytest.approx(12.0)
+
+
+def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch) -> None:
+    """Source-first / placeholder stages with time_seconds=0 (no scoreboard
+    yet) should still let the user detect a beep -- trim just gets deferred
+    until a stage time is known."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 0.0
+    project.save(project_root)
+
+    primary = project.stages[0].primary()
+    assert primary is not None
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"X")
+
+    from splitsmith import beep_detect, trim
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeBeep:
+        time = 4.0
+        peak_amplitude = 0.5
+        duration_ms = 100.0
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "y.wav")
+    (tmp_path / "y.wav").write_bytes(b"\x00")
+    monkeypatch.setattr(beep_detect, "load_audio", lambda p: ([0.0] * 100, 48_000))
+    monkeypatch.setattr(beep_detect, "detect_beep", lambda *a, **kw: FakeBeep())
+
+    called = []
+    monkeypatch.setattr(trim, "trim_video", lambda **kw: called.append(kw))
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stages"][0]["videos"][0]["beep_time"] == pytest.approx(4.0)
+    assert body["stages"][0]["videos"][0]["processed"]["trim"] is False
+    assert called == []
+
+
+def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
+    """Manual /trim endpoint runs audit-mode trim and flips processed.trim."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import trim
+
+    def fake_trim_video(**kwargs):  # type: ignore[no-untyped-def]
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_bytes(b"TRIMMED")
+        return trim.TrimResult(output_path=kwargs["output_path"], start_time=0.0, end_time=20.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+
+    resp = client.post("/api/stages/1/trim")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stages"][0]["videos"][0]["processed"]["trim"] is True
+    assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
+
+
+def test_post_trim_400_when_no_beep(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    resp = client.post("/api/stages/1/trim")
+    assert resp.status_code == 400
+    assert "beep_time" in resp.json()["detail"]
+
+
 def test_get_stage_audit_returns_payload_when_file_exists(tmp_path: Path) -> None:
     """Audit endpoint reads <project>/audit/stage<N>.json verbatim."""
     import json

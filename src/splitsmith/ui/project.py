@@ -161,6 +161,12 @@ class MatchProject(BaseModel):
     # relative -> resolved against project root, absolute -> as-is.
     probes_dir: str | None = None
     thumbs_dir: str | None = None
+    # Audit-mode trim buffers (#15 / #16). Pre is the pad before the beep;
+    # post is the pad after the stage end. Asymmetric defaults are allowed;
+    # users typically want longer post-buffers for FCP fades. Both default
+    # to 5.0 s -- the historical single-knob value.
+    trim_pre_buffer_seconds: float = 5.0
+    trim_post_buffer_seconds: float = 5.0
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
