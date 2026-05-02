@@ -252,6 +252,9 @@ function StageActions({
   const [csv, setCsv] = useState(true);
   const [fcpxml, setFcpxml] = useState(true);
   const [reportFlag, setReportFlag] = useState(true);
+  // Overlay (issue #45) defaults off: render is slower than the other
+  // writers and most users only want it once per stage.
+  const [overlay, setOverlay] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
 
   const sourceUnreachable = row.has_primary && row.source_reachable === false;
@@ -299,6 +302,7 @@ function StageActions({
         write_csv: csv,
         write_fcpxml: fcpxml,
         write_report: reportFlag,
+        write_overlay: overlay,
       });
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
@@ -398,13 +402,31 @@ function StageActions({
           />
           Report
         </label>
+        <label
+          className="flex items-center gap-1.5"
+          title={
+            row.audit_shot_count > 0
+              ? "Pre-render an alpha overlay MOV (N/M, last split, " +
+                "running total) and reference it from the FCPXML on V2"
+              : "Finish the audit first -- overlay needs at least one shot"
+          }
+        >
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={overlay}
+            disabled={busy || row.audit_shot_count === 0}
+            onChange={(e) => setOverlay(e.target.checked)}
+          />
+          Overlay (alpha MOV)
+        </label>
         <Button
           size="sm"
           onClick={generate}
           disabled={
             busy ||
             !row.ready_to_export ||
-            (!trim && !csv && !fcpxml && !reportFlag)
+            (!trim && !csv && !fcpxml && !reportFlag && !overlay)
           }
           title={
             row.ready_to_export
@@ -464,6 +486,7 @@ function FileLinks({
     { label: "Splits CSV", path: row.csv_path },
     { label: "FCPXML", path: row.fcpxml_path },
     { label: "Report", path: row.report_path },
+    { label: "Overlay (alpha MOV)", path: row.overlay_path },
   ];
   return (
     <div className="space-y-1 text-xs">

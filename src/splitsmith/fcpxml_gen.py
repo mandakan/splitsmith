@@ -110,6 +110,8 @@ def generate_fcpxml(
     output_path: Path,
     project_name: str,
     config: OutputConfig,
+    overlay_path: Path | None = None,
+    overlay_video: VideoMetadata | None = None,
 ) -> None:
     """Write a minimal FCPXML 1.10 timeline for the trimmed video.
 
@@ -120,6 +122,13 @@ def generate_fcpxml(
     Each entry in ``shots`` must have ``time_from_beep`` set; shot times are
     converted to clip-local time via ``beep_offset + time_from_beep`` and
     rationalized against the source frame duration.
+
+    ``overlay_path``: optional pre-rendered alpha MOV (issue #45) to place
+    on V2 as a connected clip. When the file exists the timeline gets a
+    second asset + a lane=1 asset-clip nested in the V1 clip; when it's
+    None the FCPXML is unchanged. ``overlay_video`` is the probed metadata
+    for the overlay -- when omitted, the trimmed video's metadata is used
+    (the renderer mirrors the source frame-for-frame so this is correct).
     """
     if not video_path.exists():
         raise FileNotFoundError(f"video not found: {video_path}")
@@ -133,6 +142,8 @@ def generate_fcpxml(
 
     asset_id = "r2"
     format_id = "r1"
+    overlay_asset_id = "r3"
+    use_overlay = overlay_path is not None and overlay_path.exists()
 
     fcpxml = ET.Element("fcpxml", {"version": config.fcpxml_version})
 
@@ -179,6 +190,32 @@ def generate_fcpxml(
         {"kind": "original-media", "src": video_path.resolve().as_uri()},
     )
 
+    overlay_meta = overlay_video if overlay_video is not None else video
+    overlay_duration_str: str | None = None
+    if use_overlay:
+        assert overlay_path is not None  # narrowed by use_overlay
+        overlay_duration_frames = int(round(overlay_meta.duration_seconds / float(frame_duration)))
+        overlay_duration_str = _frame_aligned_str(overlay_duration_frames, fd_num, fd_den)
+        overlay_asset = ET.SubElement(
+            resources,
+            "asset",
+            {
+                "id": overlay_asset_id,
+                "name": overlay_path.stem,
+                "start": "0s",
+                "duration": overlay_duration_str,
+                "hasVideo": "1",
+                "hasAudio": "0",
+                "format": format_id,
+                "videoSources": "1",
+            },
+        )
+        ET.SubElement(
+            overlay_asset,
+            "media-rep",
+            {"kind": "original-media", "src": overlay_path.resolve().as_uri()},
+        )
+
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
@@ -211,6 +248,26 @@ def generate_fcpxml(
             "format": format_id,
         },
     )
+
+    if use_overlay and overlay_duration_str is not None:
+        # Connected clip on V2 (lane=1). FCPXML stacks lanes above 0 over
+        # the primary, so this puts the overlay on top of the trim with
+        # its own alpha. ``offset="0s"`` aligns its head to the primary's
+        # head; the renderer matches the trim duration so we don't need a
+        # nested clip for trims.
+        ET.SubElement(
+            asset_clip,
+            "asset-clip",
+            {
+                "ref": overlay_asset_id,
+                "lane": "1",
+                "offset": "0s",
+                "name": "Splitsmith overlay",
+                "start": "0s",
+                "duration": overlay_duration_str,
+                "format": format_id,
+            },
+        )
 
     fd_seconds = float(frame_duration)
     for shot in shots:

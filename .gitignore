@@ -54,3 +54,4 @@ tests/fixtures/.cache/
 *.peaks-*.json
 # And audit-mode trim params sidecars from splitsmith.ui.audio.
 *_trimmed.params.json
+.claude/
