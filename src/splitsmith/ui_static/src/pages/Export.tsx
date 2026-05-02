@@ -322,7 +322,7 @@ function StageActions({
           {row.has_exports ? "Re-generate" : "Generate"}
         </Button>
         <Button asChild size="sm" variant="outline" title="Open audit screen for this stage">
-          <Link to={`/audit?stage=${row.stage_number}`}>
+          <Link to={`/audit/${row.stage_number}`}>
             <PlayCircle className="size-4" />
             Audit
           </Link>
@@ -474,7 +474,7 @@ function StageShotTable({
         Audit JSON exists but no shots yet.{" "}
         <Link
           className="text-foreground underline"
-          to={`/audit?stage=${row.stage_number}`}
+          to={`/audit/${row.stage_number}`}
         >
           Open audit screen
         </Link>
