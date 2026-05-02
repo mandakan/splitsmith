@@ -369,6 +369,13 @@ export const api = {
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 
+  /** URL for a tiny MP4 around the detected beep (#27). The server keys
+   *  the cache on the source's mtime+size and the beep_time, so the URL
+   *  needs ``beepTime`` as a cache-busting query param: a re-detect
+   *  flips beep_time and the SPA must re-fetch a freshly-encoded clip. */
+  stageBeepPreviewUrl: (stageNumber: number, beepTime: number) =>
+    `/api/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
+
   videoStreamUrl: (videoPath: string) =>
     `/api/videos/stream?path=${encodeURIComponent(videoPath)}`,
 
