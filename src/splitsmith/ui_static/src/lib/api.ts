@@ -592,9 +592,14 @@ export const api = {
   /** Match-overview payload for the Analysis & Export screen. */
   getExportOverview: () => request<ExportOverview>("/api/exports/overview"),
 
-  /** Run a stage export. Idempotent; re-running overwrites in place. */
+  /** Submit a stage export job. Returns a Job snapshot; poll
+   *  ``/api/jobs/{id}`` (or {@link api.pollJob}) until it leaves the
+   *  running state, then re-fetch the export overview to see updated
+   *  paths + ``last_export_at``. Idempotent on the worker side: the
+   *  registry dedupes by (kind, stage_number) so double-clicking
+   *  Generate returns the in-flight job instead of stacking. */
   exportStage: (stageNumber: number, opts: ExportStageRequestPayload = {}) =>
-    request<ExportStageResult>(`/api/stages/${stageNumber}/export`, {
+    request<Job>(`/api/stages/${stageNumber}/export`, {
       method: "POST",
       json: {
         write_trim: opts.write_trim ?? true,

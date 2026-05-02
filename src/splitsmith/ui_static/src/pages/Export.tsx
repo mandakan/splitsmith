@@ -43,7 +43,7 @@ import {
   api,
   asSourceUnreachable,
   type ExportOverview,
-  type ExportStageResult,
+  type Job,
   type MatchProject,
   type StageAudit,
   type StageExportStatus,
@@ -252,23 +252,61 @@ function StageActions({
   const [csv, setCsv] = useState(true);
   const [fcpxml, setFcpxml] = useState(true);
   const [reportFlag, setReportFlag] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [lastResult, setLastResult] = useState<ExportStageResult | null>(null);
+  const [job, setJob] = useState<Job | null>(null);
 
   const sourceUnreachable = row.has_primary && row.source_reachable === false;
   const willDegrade = sourceUnreachable && (trim || fcpxml);
+  const busy = job?.status === "pending" || job?.status === "running";
+
+  // Resume an in-flight export job after a page reload, so the JobsPanel
+  // (sidebar) and this row stay consistent.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listJobs()
+      .then(async (jobs) => {
+        if (cancelled) return;
+        const active = jobs.find(
+          (j) =>
+            j.kind === "export" &&
+            j.stage_number === row.stage_number &&
+            (j.status === "pending" || j.status === "running"),
+        );
+        if (!active) return;
+        setJob(active);
+        const final = await api.pollJob(active.id, (j) => {
+          if (!cancelled) setJob(j);
+        });
+        if (cancelled) return;
+        if (final.status === "failed") {
+          onError(final.error ?? "Export failed");
+        }
+        await onChanged();
+      })
+      .catch(() => {
+        // Best effort; jobs endpoint occasionally hiccups during reload.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [row.stage_number, onChanged, onError]);
 
   const generate = async () => {
-    setBusy(true);
+    onError(null);
     try {
-      const r = await api.exportStage(row.stage_number, {
+      const submitted = await api.exportStage(row.stage_number, {
         write_trim: trim,
         write_csv: csv,
         write_fcpxml: fcpxml,
         write_report: reportFlag,
       });
-      setLastResult(r);
-      onError(null);
+      setJob(submitted);
+      const final = await api.pollJob(submitted.id, setJob);
+      if (final.status === "failed") {
+        onError(final.error ?? "Export failed");
+      } else if (final.status === "cancelled") {
+        onError("Export cancelled");
+      }
       await onChanged();
     } catch (e) {
       // Source-unreachable: surface the structured message so the user
@@ -287,7 +325,10 @@ function StageActions({
         );
       }
     } finally {
-      setBusy(false);
+      // Clear the local job snapshot a moment after completion so the
+      // row's UI returns to its idle state. The JobsPanel still keeps
+      // the terminal entry in its history.
+      setTimeout(() => setJob(null), 1500);
     }
   };
 
@@ -387,17 +428,16 @@ function StageActions({
 
       <FileLinks row={row} onReveal={reveal} />
 
-      {lastResult && lastResult.anomalies.length > 0 ? (
-        <div className="rounded-md border border-status-warning/40 bg-status-warning/5 p-3 text-xs">
-          <div className="mb-1 flex items-center gap-1 font-medium">
-            <AlertCircle className="size-3.5" />
-            Anomalies from latest export
-          </div>
-          <ul className="ml-5 list-disc space-y-0.5 text-muted-foreground">
-            {lastResult.anomalies.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
+      {job ? (
+        <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
+          {job.status === "succeeded" ? (
+            <CheckCircle2 className="size-3.5 text-status-success" />
+          ) : job.status === "failed" || job.status === "cancelled" ? (
+            <AlertCircle className="size-3.5 text-status-warning" />
+          ) : (
+            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+          )}
+          <span className="text-muted-foreground">{job.message ?? job.status}</span>
         </div>
       ) : null}
     </div>

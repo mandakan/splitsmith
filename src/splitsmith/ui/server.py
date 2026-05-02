@@ -1860,8 +1860,19 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.post("/api/stages/{stage_number}/export")
     def export_stage(stage_number: int, req: ExportStageRequest) -> JSONResponse:
-        """Run the per-stage export: CSV / FCPXML / report. Idempotent --
-        re-running overwrites prior artefacts in place.
+        """Submit a per-stage export job.
+
+        Wraps the ``export_helpers.export_stage`` orchestrator (lossless trim
+        + CSV + FCPXML + report) in a JobRegistry entry so the SPA's
+        JobsPanel surfaces progress alongside detect-beep / trim /
+        shot-detect. Returns a Job snapshot; the SPA polls
+        ``/api/jobs/{id}`` until status leaves running, then re-fetches
+        ``/api/exports/overview`` to refresh paths and ``last_export_at``.
+
+        Pre-flight validations (stage exists, primary present, beep ready,
+        source reachable, scoreboard not placeholder) still raise HTTP
+        errors up front so the SPA can show a clear error before queueing
+        a useless job.
         """
         project = state.load()
         try:
@@ -1877,19 +1888,6 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                     "finish ingest + audit before exporting"
                 ),
             )
-
-        audit_dir = project.audit_path(state.project_root)
-        audit_file = audit_dir / f"stage{stage_number}.json"
-        exports_dir = project.exports_path(state.project_root)
-        # The export pipeline runs a lossless trim from the *source* video
-        # (the symlink under raw_dir resolves through). The audit-mode
-        # short-GOP file in <project>/trimmed/ is a scrub cache and is
-        # never used as the FCP-bound deliverable.
-        source_video = project.resolve_video_path(state.project_root, primary.path)
-
-        # Build the engine StageData from the stored stage. ``time_seconds``
-        # must be > 0 for the report's anomaly checks to make sense; reject
-        # placeholder stages that never got real scoreboard data.
         if stage.time_seconds <= 0 or stage.scorecard_updated_at is None:
             raise HTTPException(
                 status_code=400,
@@ -1898,14 +1896,61 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                     "scoreboard before exporting"
                 ),
             )
+        # Source-reachability surfaces as a structured 424 so the SPA
+        # renders the same "reconnect external storage" message used
+        # elsewhere -- even if the user only wants CSV/report (those would
+        # still work, but the explicit 424 lets them re-try after
+        # reconnecting rather than hunting for the partial degradation
+        # message in the per-row anomaly list).
+        if req.write_trim or req.write_fcpxml:
+            _ensure_source_reachable(
+                stage_number, project.resolve_video_path(state.project_root, primary.path)
+            )
+
+        existing = state.jobs.find_active(kind="export", stage_number=stage_number)
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="export",
+            stage_number=stage_number,
+            fn=lambda h, n=stage_number, r=req: _run_export_for_stage(h, n, r),
+        )
+        return JSONResponse(job.model_dump(mode="json"))
+
+    def _run_export_for_stage(
+        handle: JobHandle, stage_number: int, req: ExportStageRequest
+    ) -> None:
+        """Worker for /api/stages/{n}/export. Phases mirror the user's
+        mental model so the JobsPanel message is meaningful."""
         from ..config import StageData as EngineStageData
 
+        handle.update(progress=0.05, message="Loading project...")
+        proj = state.load()
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError("primary or beep disappeared mid-flight")
+
+        audit_file = proj.audit_path(state.project_root) / f"stage{stage_number}.json"
+        exports_dir = proj.exports_path(state.project_root)
+        source_video = proj.resolve_video_path(state.project_root, prim.path)
         engine_stage = EngineStageData(
-            stage_number=stage.stage_number,
-            stage_name=stage.stage_name,
-            time_seconds=stage.time_seconds,
-            scorecard_updated_at=stage.scorecard_updated_at,
+            stage_number=stg.stage_number,
+            stage_name=stg.stage_name,
+            time_seconds=stg.time_seconds,
+            scorecard_updated_at=stg.scorecard_updated_at,
         )
+
+        # Phase progress is approximate; trim dominates wall time when the
+        # source is large, so we hold at 0.4 through the trim phase and
+        # then jump on the small writers.
+        if req.write_trim:
+            handle.update(progress=0.15, message="Trimming source (lossless stream copy)...")
+        elif req.write_fcpxml:
+            handle.update(progress=0.15, message="Reading audit + preparing FCPXML...")
+        else:
+            handle.update(progress=0.15, message="Reading audit JSON...")
+        handle.check_cancel()
 
         try:
             result = export_helpers.export_stage(
@@ -1920,30 +1965,39 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 exports_dir=exports_dir,
                 source_video_path=source_video if source_video.exists() else None,
                 stage_data=engine_stage,
-                beep_time_in_source=primary.beep_time,
-                pre_buffer_seconds=project.trim_pre_buffer_seconds,
-                post_buffer_seconds=project.trim_post_buffer_seconds,
+                beep_time_in_source=prim.beep_time,
+                pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                post_buffer_seconds=proj.trim_post_buffer_seconds,
                 config=Config(),
             )
         except export_helpers.StageExportError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # Surface as a job failure with the exporter's own message so
+            # the JobsPanel row reads "audit JSON has no shots in shots[]"
+            # rather than a stack trace.
+            raise RuntimeError(str(exc)) from exc
 
-        # Touch updated_at so the overview's last_export_at reflects this run.
-        project.updated_at = datetime.now(UTC)
-        project.save(state.project_root)
-        return JSONResponse(
-            {
-                "stage_number": result.stage_number,
-                "csv_path": str(result.csv_path) if result.csv_path else None,
-                "fcpxml_path": str(result.fcpxml_path) if result.fcpxml_path else None,
-                "report_path": str(result.report_path) if result.report_path else None,
-                "trimmed_video_path": (
-                    str(result.trimmed_video_path) if result.trimmed_video_path else None
-                ),
-                "shots_written": result.shots_written,
-                "anomalies": result.anomalies,
-            }
-        )
+        handle.update(progress=0.95, message="Saving project...")
+        proj.updated_at = datetime.now(UTC)
+        proj.save(state.project_root)
+
+        # Final message summarises what shipped + flags any skipped
+        # artefacts (FCPXML without a trim, etc). The full list lives in
+        # the report.txt; the user can Reveal it for details.
+        bits: list[str] = []
+        if result.trimmed_video_path is not None:
+            bits.append("trim")
+        if result.csv_path is not None:
+            bits.append("csv")
+        if result.fcpxml_path is not None:
+            bits.append("fcpxml")
+        if result.report_path is not None:
+            bits.append("report")
+        summary = ", ".join(bits) if bits else "nothing written"
+        if result.anomalies:
+            n = len(result.anomalies)
+            word = "anomaly" if n == 1 else "anomalies"
+            summary += f" ({n} {word} -- see report.txt)"
+        handle.update(progress=1.0, message=f"Done: {summary}")
 
     @app.post("/api/files/reveal")
     def reveal_file(req: RevealRequest) -> JSONResponse:
