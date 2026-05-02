@@ -41,6 +41,9 @@ export interface AuditMarker {
   candidateNumber: number | null;
   confidence: number | null;
   peakAmplitude: number | null;
+  /** Per-shot freeform note. Persisted into the audit JSON in step 5;
+   *  in-memory only for now. */
+  note: string;
 }
 
 export interface MarkerLayerProps {

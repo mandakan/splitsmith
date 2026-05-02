@@ -1,7 +1,7 @@
 /**
  * Audit screen v2 (#15).
  *
- * Through Step 3 -- markers + interactions (in-memory).
+ * Through Step 4 -- markers + stepper + list drawer (in-memory).
  *
  * Contract:
  *   - Audit truth = primary's audio. The waveform is always the primary's.
@@ -17,15 +17,22 @@
  *   - Each shot with no candidate_number (or source="manual") becomes a
  *     standalone manual marker.
  *
- * Interactions in this step are in-memory only. Save flow + audit_events log
- * arrive in Step 5; right-click context menu is deferred to Step 7 polish.
+ * Step 4 adds the bottom stepper (◀ shot N/M ▶) and the right-side list
+ * drawer (toggled with `L`). The stepper walks kept-only shots in time
+ * order; jumping to a shot scrubs the playhead. The drawer shows every
+ * marker including rejected so the user can revisit filtered candidates.
+ *
+ * Interactions remain in-memory. Save flow + audit_events log arrive in
+ * Step 5; right-click context menu is deferred to Step 7 polish.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Crosshair, Loader2, Pause, Play, Undo2 } from "lucide-react";
+import { Crosshair, ListChecks, Loader2, Pause, Play, Undo2 } from "lucide-react";
 
+import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
+import { ShotStepper } from "@/components/ShotStepper";
 import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +74,11 @@ export function Audit() {
   const [markers, setMarkers] = useState<AuditMarker[]>([]);
   const undoStackRef = useRef<AuditMarker[][]>([]);
   const [focusedMarkerId, setFocusedMarkerId] = useState<string | null>(null);
+
+  // Stepper navigates kept shots (detected + manual) in time order. The
+  // index is decoupled from the playhead -- scrubbing doesn't reset it.
+  const [currentShotIndex, setCurrentShotIndex] = useState(0);
+  const [showDrawer, setShowDrawer] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -150,6 +162,8 @@ export function Audit() {
     setIsPlaying(false);
     setActiveVideoIndex(0);
     setFocusedMarkerId(null);
+    setCurrentShotIndex(0);
+    setShowDrawer(false);
     undoStackRef.current = [];
     const v = videoRef.current;
     if (v) {
@@ -341,11 +355,68 @@ export function Audit() {
           candidateNumber: null,
           confidence: null,
           peakAmplitude: null,
+          note: "",
         },
       ]);
       setFocusedMarkerId(id);
     },
     [markers, mutate],
+  );
+
+  const handleNoteChange = useCallback(
+    (id: string, note: string) => {
+      // Notes don't go on the undo stack -- a stray keystroke shouldn't
+      // bury the last marker drag. Step 5 will batch these into the
+      // audit_events log on save.
+      setMarkers((prev) => prev.map((m) => (m.id === id ? { ...m, note } : m)));
+    },
+    [],
+  );
+
+  // Kept shots = the sequence the stepper walks. Detected (kept) + manual
+  // markers, sorted by time. Rejected markers don't appear here -- the
+  // user reaches them via the list drawer.
+  const keptShots = useMemo(
+    () =>
+      markers
+        .filter((m) => m.kind === "detected" || m.kind === "manual")
+        .slice()
+        .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
+    [markers],
+  );
+
+  // Whenever the kept-shot list shrinks (reject / delete), keep the index
+  // in range. Don't change otherwise -- the user's position is sticky.
+  useEffect(() => {
+    if (keptShots.length === 0) {
+      if (currentShotIndex !== 0) setCurrentShotIndex(0);
+      return;
+    }
+    if (currentShotIndex >= keptShots.length) {
+      setCurrentShotIndex(keptShots.length - 1);
+    }
+  }, [keptShots, currentShotIndex]);
+
+  const stepShot = useCallback(
+    (delta: number) => {
+      if (keptShots.length === 0) return;
+      const next = Math.min(Math.max(currentShotIndex + delta, 0), keptShots.length - 1);
+      setCurrentShotIndex(next);
+      setFocusedMarkerId(keptShots[next].id);
+      handleScrub(keptShots[next].time);
+    },
+    [keptShots, currentShotIndex, handleScrub],
+  );
+
+  const jumpToMarker = useCallback(
+    (m: AuditMarker) => {
+      setFocusedMarkerId(m.id);
+      handleScrub(m.time);
+      // If the marker is a kept shot, line the stepper up with it too.
+      const idx = keptShots.findIndex((k) => k.id === m.id);
+      if (idx >= 0) setCurrentShotIndex(idx);
+    },
+    [handleScrub, keptShots],
   );
 
   // ---- Global keyboard shortcuts -----------------------------------------
@@ -366,10 +437,22 @@ export function Audit() {
         undo();
         return;
       }
+      if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.key === "m" || e.key === "M") {
+          e.preventDefault();
+          stepShot(e.shiftKey ? -1 : 1);
+          return;
+        }
+        if (e.key === "l" || e.key === "L") {
+          e.preventDefault();
+          setShowDrawer((v) => !v);
+          return;
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, undo]);
+  }, [togglePlay, undo, stepShot]);
 
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
@@ -432,7 +515,8 @@ export function Audit() {
           <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
           <p className="text-sm text-muted-foreground">
             Drag the waveform to scrub. Double-click to add a manual marker.
-            Click a marker to toggle keep/reject. Cmd+Z undoes.
+            Click a marker to toggle keep/reject. M / Shift+M step shots,
+            L toggles the marker list, Cmd+Z undoes.
           </p>
         </div>
         <StageSelector
@@ -558,13 +642,36 @@ export function Audit() {
                     <span>{detectedCount} detected</span>
                     <span>{rejectedCount} rejected</span>
                     <span>{manualCount} manual</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowDrawer((v) => !v)}
+                      aria-label="Toggle marker drawer (L)"
+                      title="Marker list (L)"
+                      aria-pressed={showDrawer}
+                    >
+                      <ListChecks className="size-4" />
+                    </Button>
                   </span>
                 </div>
+                <ShotStepper
+                  shots={keptShots}
+                  currentIndex={currentShotIndex}
+                  onStep={stepShot}
+                  onNoteChange={handleNoteChange}
+                />
               </>
             ) : null}
           </CardContent>
         </Card>
       ) : null}
+      <ListDrawer
+        open={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        markers={markers}
+        currentMarkerId={focusedMarkerId}
+        onJumpTo={jumpToMarker}
+      />
     </div>
   );
 }
@@ -712,6 +819,7 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
     candidateNumber: c.candidate_number,
     confidence: c.confidence ?? null,
     peakAmplitude: c.peak_amplitude ?? null,
+    note: "",
   }));
   // Manual shots: those without a matching candidate_number.
   for (const s of audit.shots ?? []) {
@@ -723,6 +831,7 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
         candidateNumber: s.candidate_number ?? null,
         confidence: null,
         peakAmplitude: null,
+        note: "",
       });
     }
   }
