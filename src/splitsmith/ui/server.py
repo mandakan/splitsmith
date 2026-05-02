@@ -25,6 +25,11 @@ Endpoints (locked v1 surface):
   GET  /api/videos/stream?path=...  -- serve a registered video file (Range)
   GET  /api/stages/{n}/audit        -- read the stage's audit JSON (404 if none)
   PUT  /api/stages/{n}/audit        -- atomically write the stage's audit JSON
+  GET  /api/fixture/audit?path=...  -- standalone fixture review (read JSON)
+  PUT  /api/fixture/audit?path=...  -- standalone fixture review (write JSON)
+  GET  /api/fixture/peaks?path=...  -- waveform peaks for a fixture's sibling WAV
+  GET  /api/fixture/audio?path=...  -- serve the fixture's sibling WAV (Range)
+  GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -45,7 +50,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -940,6 +945,117 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 tmp.unlink()
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return JSONResponse(payload)
+
+    # ----------------------------------------------------------------------
+    # Fixture-review endpoints (closes #19 -- the old splitsmith.review_server
+    # standalone). The /review SPA route reads a single audit fixture (JSON
+    # + sibling WAV + optional video) and edits it in place. No project
+    # context, no stages, no jobs. Localhost-only convention applies; paths
+    # are passed by the user via CLI / query string.
+    # ----------------------------------------------------------------------
+
+    def _resolve_fixture_path(path: str) -> Path:
+        """Validate + resolve a fixture path the SPA passed in. Localhost
+        only -- we trust the user's machine but still refuse non-existent
+        files cleanly so the SPA can show a 404 message."""
+        target = Path(path).expanduser()
+        try:
+            resolved = target.resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"fixture not found: {target}") from exc
+        if not resolved.is_file():
+            raise HTTPException(status_code=400, detail=f"fixture is not a file: {resolved}")
+        return resolved
+
+    @app.get("/api/fixture/audit")
+    def get_fixture_audit(path: str = Query(...)) -> JSONResponse:
+        """Read the fixture JSON at ``path``."""
+        target = _resolve_fixture_path(path)
+        try:
+            payload = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"fixture read failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    @app.put("/api/fixture/audit")
+    def put_fixture_audit(
+        path: str = Query(...),
+        payload: dict[str, Any] = Body(...),  # noqa: B008  FastAPI default-arg DI
+    ) -> JSONResponse:
+        """Atomically rewrite a fixture JSON. Same .bak backup pattern as
+        ``/api/stages/{n}/audit``: serialize -> .tmp -> rename existing
+        target to .bak (replacing any prior backup) -> rename .tmp to
+        target. A crashed write never leaves the SPA without a JSON."""
+        target = _resolve_fixture_path(path)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        backup = target.with_suffix(target.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if backup.exists():
+                backup.unlink()
+            target.replace(backup)
+            tmp.replace(target)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"fixture write failed: {exc}") from exc
+        return JSONResponse(payload)
+
+    @app.get("/api/fixture/peaks")
+    def get_fixture_peaks(
+        path: str = Query(...),
+        bins: int = Query(default=1200, ge=16, le=8192),
+    ) -> JSONResponse:
+        """Compute peaks for the fixture's sibling WAV (``<path>.with_suffix('.wav')``).
+
+        Returns the same payload as the project peaks endpoint so the
+        Review page can reuse the same client-side rendering, including
+        the ``beep_time`` and ``trimmed`` fields. The fixture is treated
+        as already-trimmed (clip-local timeline) by convention.
+        """
+        target = _resolve_fixture_path(path)
+        wav = target.with_suffix(".wav")
+        if not wav.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"fixture audio not found: {wav}",
+            )
+        result = waveform_helpers.ensure_peaks(wav, bins)
+        # The fixture JSON owns the canonical beep_time; we expose it via
+        # the audit endpoint instead of re-deriving here. peaks payload
+        # gets ``trimmed=true`` since fixtures are clip-local.
+        payload = result.model_dump(mode="json")
+        try:
+            fixture_json = json.loads(target.read_text(encoding="utf-8"))
+            payload["beep_time"] = fixture_json.get("beep_time")
+        except (OSError, json.JSONDecodeError):
+            payload["beep_time"] = None
+        payload["trimmed"] = True
+        return JSONResponse(payload)
+
+    @app.get("/api/fixture/audio")
+    def get_fixture_audio(path: str = Query(...)) -> FileResponse:
+        """Serve the WAV alongside ``path`` (same stem, .wav extension)."""
+        target = _resolve_fixture_path(path)
+        wav = target.with_suffix(".wav")
+        if not wav.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"fixture audio not found: {wav}",
+            )
+        return FileResponse(wav, media_type="audio/wav", filename=wav.name)
+
+    @app.get("/api/fixture/video")
+    def get_fixture_video(path: str = Query(...)) -> FileResponse:
+        """Serve an arbitrary video file the user binds to a fixture.
+
+        The CLI's ``splitsmith review --video <path>`` passes this through
+        to the SPA via a query param. Localhost-only; we don't restrict
+        the path beyond "must exist + must be a file".
+        """
+        target = _resolve_fixture_path(path)
+        media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
+        return FileResponse(target, media_type=media_type, filename=target.name)
 
     @app.get("/api/videos/stream")
     def stream_video(path: str = Query(...)) -> FileResponse:

@@ -7,6 +7,7 @@ import { Design } from "@/pages/Design";
 import { Export } from "@/pages/Export";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
+import { Review } from "@/pages/Review";
 
 export function App() {
   return (
@@ -20,6 +21,7 @@ export function App() {
             <Route path="audit/:stage" element={<Audit />} />
             <Route path="export" element={<Export />} />
             <Route path="export/:stage" element={<Export />} />
+            <Route path="review" element={<Review />} />
             <Route path="_design" element={<Design />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

@@ -1326,6 +1326,104 @@ def test_put_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_fixture_audit_round_trip(tmp_path: Path) -> None:
+    """The fixture endpoints read + write a JSON file in place. Closes #19's
+    standalone review SPA -- localhost-only, no project context."""
+    import json as _json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fixture = tmp_path / "blacksmith-h1.json"
+    fixture.write_text(
+        _json.dumps(
+            {
+                "stage_number": 3,
+                "stage_name": "H1",
+                "beep_time": 0.5,
+                "shots": [{"shot_number": 1, "time": 0.6}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resp = client.get(f"/api/fixture/audit?path={fixture}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["beep_time"] == 0.5
+    assert body["shots"][0]["time"] == 0.6
+
+    resp = client.put(
+        f"/api/fixture/audit?path={fixture}",
+        json={"stage_number": 3, "shots": [{"shot_number": 1, "time": 0.7}]},
+    )
+    assert resp.status_code == 200
+    on_disk = _json.loads(fixture.read_text(encoding="utf-8"))
+    assert on_disk["shots"][0]["time"] == 0.7
+    backup = fixture.with_suffix(fixture.suffix + ".bak")
+    assert backup.exists(), "previous version should be retained as .bak"
+    backup_data = _json.loads(backup.read_text(encoding="utf-8"))
+    assert backup_data["shots"][0]["time"] == 0.6
+
+
+def test_fixture_audit_404_on_missing_path(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get(f"/api/fixture/audit?path={tmp_path}/does-not-exist.json")
+    assert resp.status_code == 404
+
+
+def test_fixture_peaks_serves_sibling_wav(tmp_path: Path) -> None:
+    """Peaks endpoint reads <path>.with_suffix('.wav') and returns the
+    same shape the project peaks endpoint does."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fixture = tmp_path / "review.json"
+    fixture.write_text(
+        _json.dumps({"beep_time": 5.0, "shots": []}),
+        encoding="utf-8",
+    )
+    audio = np.zeros(48_000, dtype="float32")
+    audio[10_000:11_000] = 0.5
+    sf.write(fixture.with_suffix(".wav"), audio, 48_000)
+
+    resp = client.get(f"/api/fixture/peaks?path={fixture}&bins=64")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bins"] == 64
+    assert body["trimmed"] is True
+    assert body["beep_time"] == 5.0
+    assert len(body["peaks"]) == 64
+
+
+def test_fixture_audio_serves_sibling_wav(tmp_path: Path) -> None:
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fixture = tmp_path / "review.json"
+    fixture.write_text("{}", encoding="utf-8")
+    sf.write(fixture.with_suffix(".wav"), np.zeros(100, dtype="float32"), 48_000)
+
+    resp = client.get(f"/api/fixture/audio?path={fixture}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "audio/wav"
+    assert resp.content[:4] == b"RIFF"
+
+
+def test_fixture_video_serves_arbitrary_path(tmp_path: Path) -> None:
+    """Localhost convention: any path the user passes for --video is served
+    through. The standalone review SPA had the same trust model."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    video = tmp_path / "movie.mp4"
+    video.write_bytes(b"FAKE_VIDEO_BYTES")
+    resp = client.get(f"/api/fixture/video?path={video}")
+    assert resp.status_code == 200
+    assert resp.content == b"FAKE_VIDEO_BYTES"
+    assert resp.headers["content-type"].startswith("video/")
+
+
 def test_stream_video_serves_registered_file(tmp_path: Path) -> None:
     """Stream endpoint serves bytes for a path that's registered with the project."""
     client, _ = _seed_project_with_primary(tmp_path)

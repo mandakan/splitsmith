@@ -388,6 +388,33 @@ export const api = {
       method: "PUT",
       json: payload,
     }),
+
+  // -----------------------------------------------------------------------
+  // Fixture mode (closes #19): the /review SPA route reads + writes a single
+  // audit fixture (JSON + sibling WAV + optional video) without project
+  // context. Folds the old splitsmith.review_server standalone into this
+  // build so the audit primitives are shared.
+  // -----------------------------------------------------------------------
+
+  getFixtureAudit: (fixturePath: string) =>
+    request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`),
+
+  saveFixtureAudit: (fixturePath: string, payload: StageAudit) =>
+    request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`, {
+      method: "PUT",
+      json: payload,
+    }),
+
+  getFixturePeaks: (fixturePath: string, bins = 1200) =>
+    request<PeaksResult>(
+      `/api/fixture/peaks?path=${encodeURIComponent(fixturePath)}&bins=${bins}`,
+    ),
+
+  fixtureAudioUrl: (fixturePath: string) =>
+    `/api/fixture/audio?path=${encodeURIComponent(fixturePath)}`,
+
+  fixtureVideoUrl: (videoPath: string) =>
+    `/api/fixture/video?path=${encodeURIComponent(videoPath)}`,
 };
 
 export { ApiError };
