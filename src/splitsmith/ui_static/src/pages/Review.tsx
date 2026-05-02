@@ -20,6 +20,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   Crosshair,
+  HelpCircle,
   ListChecks,
   Loader2,
   Pause,
@@ -37,6 +38,7 @@ import {
   visibleKindsFromFilters,
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
+import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
@@ -90,6 +92,7 @@ export function Review() {
   const [focusedMarkerId, setFocusedMarkerId] = useState<string | null>(null);
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
   const [showDrawer, setShowDrawer] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const undoStackRef = useRef<AuditMarker[][]>([]);
 
   const sessionEventsRef = useRef<AuditEvent[]>([]);
@@ -477,6 +480,11 @@ export function Review() {
         undo();
         return;
       }
+      if (!inField && e.key === "?") {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void performSave();
@@ -637,13 +645,9 @@ export function Review() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
           <p className="text-sm text-muted-foreground">
-            Standalone fixture review. Drag the waveform to scrub. Arrow keys
-            nudge 250 ms (Shift = 25 ms). Double-click adds a manual marker.
-            M / Shift+M step kept shots, N / Shift+N step every marker,
-            K toggles the current shot, Alt+Arrow nudges the selected marker
-            (Shift = 1 ms), L toggles the marker list, R toggles loop,
-            Cmd+Z undoes,
-            Cmd+S saves.
+            Standalone fixture review. Drag the waveform to scrub. Double-click
+            to add a manual marker. Press <kbd>?</kbd> for the full keyboard
+            shortcuts.
           </p>
         </div>
       </div>
@@ -797,6 +801,15 @@ export function Review() {
                   >
                     <ListChecks className="size-4" />
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowHelp(true)}
+                    aria-label="Keyboard shortcuts (?)"
+                    title="Keyboard shortcuts (?)"
+                  >
+                    <HelpCircle className="size-4" />
+                  </Button>
                 </span>
               </div>
               <ShotStepper
@@ -816,6 +829,11 @@ export function Review() {
         markers={markers}
         currentMarkerId={focusedMarkerId}
         onJumpTo={jumpToMarker}
+      />
+      <HelpOverlay
+        open={showHelp}
+        onClose={() => setShowHelp(false)}
+        mode="review"
       />
       <SaveToast status={saveStatus} />
     </div>
