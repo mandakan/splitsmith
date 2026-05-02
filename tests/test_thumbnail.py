@@ -128,9 +128,7 @@ def test_ensure_clip_extracts_and_caches(tmp_path: Path) -> None:
         patch("splitsmith.thumbnail.shutil.which", return_value="/usr/bin/ffmpeg"),
         patch("splitsmith.thumbnail.subprocess.run", _ffmpeg_writes_clip()) as run,
     ):
-        first = thumbnail.ensure_clip(
-            source, cache_dir=cache_dir, center_time=12.5, duration_s=1.0
-        )
+        first = thumbnail.ensure_clip(source, cache_dir=cache_dir, center_time=12.5, duration_s=1.0)
         # Same key -> cache hit, ffmpeg not invoked again.
         second = thumbnail.ensure_clip(
             source, cache_dir=cache_dir, center_time=12.5, duration_s=1.0
@@ -205,8 +203,5 @@ def test_cached_clip_returns_none_on_miss(tmp_path: Path) -> None:
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"fake")
     assert (
-        thumbnail.cached_clip(
-            source, tmp_path / "thumbs", center_time=5.0, duration_s=1.0
-        )
-        is None
+        thumbnail.cached_clip(source, tmp_path / "thumbs", center_time=5.0, duration_s=1.0) is None
     )

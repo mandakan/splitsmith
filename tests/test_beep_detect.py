@@ -75,8 +75,8 @@ def test_detect_beep_returns_ranked_candidates() -> None:
     def _stamp(at_s: float, amp: float, dur_s: float = 0.300) -> None:
         n = int(sr * dur_s)
         t = np.arange(n) / sr
-        audio[int(sr * at_s) : int(sr * at_s) + n] += (
-            amp * np.sin(2 * np.pi * 3000 * t).astype(np.float32)
+        audio[int(sr * at_s) : int(sr * at_s) + n] += amp * np.sin(2 * np.pi * 3000 * t).astype(
+            np.float32
         )
 
     _stamp(1.0, 0.6)  # the "real" beep -- preceded by ~1 s of silence
@@ -89,12 +89,8 @@ def test_detect_beep_returns_ranked_candidates() -> None:
     assert scores == sorted(scores, reverse=True)
     # Winner == candidates[0].
     assert result.time == pytest.approx(result.candidates[0].time, abs=1e-9)
-    assert result.peak_amplitude == pytest.approx(
-        result.candidates[0].peak_amplitude, abs=1e-9
-    )
-    assert result.duration_ms == pytest.approx(
-        result.candidates[0].duration_ms, abs=1e-9
-    )
+    assert result.peak_amplitude == pytest.approx(result.candidates[0].peak_amplitude, abs=1e-9)
+    assert result.duration_ms == pytest.approx(result.candidates[0].duration_ms, abs=1e-9)
 
 
 def test_detect_beep_top_n_zero_returns_only_winner() -> None:

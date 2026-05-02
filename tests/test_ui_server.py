@@ -636,9 +636,7 @@ def test_detect_beep_persists_candidate_list(tmp_path: Path, monkeypatch) -> Non
 def test_select_beep_candidate_promotes_alternate(tmp_path: Path, monkeypatch) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
-    final = _wait_for_job(
-        client, client.post("/api/stages/1/detect-beep").json()["id"]
-    )
+    final = _wait_for_job(client, client.post("/api/stages/1/detect-beep").json()["id"])
     assert final["status"] == "succeeded"
 
     resp = client.post("/api/stages/1/beep/select", json={"time": 8.100})
@@ -655,9 +653,7 @@ def test_select_beep_candidate_promotes_alternate(tmp_path: Path, monkeypatch) -
     assert primary["processed"]["trim"] is False
 
 
-def test_select_beep_candidate_tolerates_sub_ms_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_select_beep_candidate_tolerates_sub_ms_drift(tmp_path: Path, monkeypatch) -> None:
     """The SPA may send a slightly-rounded time (3 decimals) while the
     server still has the full-precision candidate. The 1 ms tolerance
     keeps the click working."""
@@ -677,9 +673,7 @@ def test_select_beep_candidate_400_when_no_candidates(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
-def test_select_beep_candidate_400_when_time_no_match(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_select_beep_candidate_400_when_time_no_match(tmp_path: Path, monkeypatch) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
     _wait_for_job(client, client.post("/api/stages/1/detect-beep").json()["id"])
@@ -758,9 +752,7 @@ def test_beep_preview_serves_cached_clip(tmp_path: Path, monkeypatch) -> None:
 
     from splitsmith.ui import server as server_module
 
-    monkeypatch.setattr(
-        server_module.thumbnail_helpers, "ensure_clip", fake_ensure_clip
-    )
+    monkeypatch.setattr(server_module.thumbnail_helpers, "ensure_clip", fake_ensure_clip)
 
     resp = client.get("/api/stages/1/beep-preview")
     assert resp.status_code == 200
@@ -796,9 +788,7 @@ def test_beep_preview_t_query_overrides_center(tmp_path: Path, monkeypatch) -> N
 
     from splitsmith.ui import server as server_module
 
-    monkeypatch.setattr(
-        server_module.thumbnail_helpers, "ensure_clip", fake_ensure_clip
-    )
+    monkeypatch.setattr(server_module.thumbnail_helpers, "ensure_clip", fake_ensure_clip)
 
     resp = client.get("/api/stages/1/beep-preview?t=27.5")
     assert resp.status_code == 200

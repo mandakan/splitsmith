@@ -131,8 +131,7 @@ def _ensure_ui_built() -> None:
     npm = shutil.which("npm")
     if npm is None:
         logger.warning(
-            "ui_static/dist appears stale but npm is not on PATH; "
-            "serving whatever is in dist/"
+            "ui_static/dist appears stale but npm is not on PATH; " "serving whatever is in dist/"
         )
         return
 
@@ -694,9 +693,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             )
         handle.update(progress=1.0, message="Done")
 
-    def _run_shot_detect(
-        handle: JobHandle, stage_number: int, reset: bool = False
-    ) -> None:
+    def _run_shot_detect(handle: JobHandle, stage_number: int, reset: bool = False) -> None:
         """Worker that runs shot detection on the stage's audit clip.
 
         Reads the trimmed clip's WAV (extracting it on demand if needed),
@@ -947,9 +944,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/beep/select")
-    def select_beep_candidate(
-        stage_number: int, req: BeepSelectRequest
-    ) -> JSONResponse:
+    def select_beep_candidate(stage_number: int, req: BeepSelectRequest) -> JSONResponse:
         """Promote one of the ranked auto-detected candidates as authoritative.
 
         Lets the user fix a wrong auto-pick without typing a timestamp.
@@ -973,8 +968,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"stage {stage_number} has no candidate list yet; run "
-                    "detect-beep first"
+                    f"stage {stage_number} has no candidate list yet; run " "detect-beep first"
                 ),
             )
         # Match by time within 1 ms. Round-tripping floats through JSON +
@@ -1046,9 +1040,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/api/stages/{stage_number}/beep-preview")
-    def stage_beep_preview(
-        stage_number: int, t: float | None = None
-    ) -> FileResponse:
+    def stage_beep_preview(stage_number: int, t: float | None = None) -> FileResponse:
         """Serve a tiny MP4 around a beep timestamp (#27, #22).
 
         Default center is the primary's persisted ``beep_time``. The

@@ -175,9 +175,7 @@ def ensure_clip(
     if duration_s <= 0:
         raise ThumbnailError(f"duration_s must be positive, got {duration_s}")
 
-    hit = cached_clip(
-        source, cache_dir, center_time=center_time, duration_s=duration_s
-    )
+    hit = cached_clip(source, cache_dir, center_time=center_time, duration_s=duration_s)
     if hit is not None:
         return hit
 
