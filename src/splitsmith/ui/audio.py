@@ -223,8 +223,7 @@ def trimmed_video_path(
     if video.role == "primary":
         return project.trimmed_path(project_root) / f"stage{stage_number}_trimmed.mp4"
     return (
-        project.trimmed_path(project_root)
-        / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
+        project.trimmed_path(project_root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
     )
 
 

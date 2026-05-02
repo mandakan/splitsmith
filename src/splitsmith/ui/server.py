@@ -730,9 +730,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             )
         return project, stage, video
 
-    def _run_detect_beep_for_video(
-        handle: JobHandle, stage_number: int, video_id: str
-    ) -> None:
+    def _run_detect_beep_for_video(handle: JobHandle, stage_number: int, video_id: str) -> None:
         """Worker: detect ``video``'s beep, then auto-chain trim.
 
         Generic over role:
@@ -1310,9 +1308,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         """
         if video.beep_time is None or stage.time_seconds <= 0:
             return
-        if state.jobs.find_active(
-            kind="trim", stage_number=stage.stage_number, video_id=video.video_id
-        ) is not None:
+        if (
+            state.jobs.find_active(
+                kind="trim", stage_number=stage.stage_number, video_id=video.video_id
+            )
+            is not None
+        ):
             return
         state.jobs.submit(
             kind="trim",
