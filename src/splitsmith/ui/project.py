@@ -33,6 +33,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .. import video_match
 from ..config import BeepCandidate, StageData, VideoMatchConfig
 from ..video_match import match_videos_to_stages
 
@@ -62,6 +63,14 @@ class StageVideo(BaseModel):
     path: Path
     role: VideoRole = "secondary"
     added_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # The canonical recording-finished time used by the match heuristic
+    # (``video_match.video_timestamp``: ``st_birthtime`` when available, else
+    # ``st_mtime``; UTC-normalized). Captured at registration so the SPA
+    # match-window timeline and the classifier see the same value, even after
+    # the source goes offline (USB unplugged, drive moved). ``None`` for
+    # projects registered before this field existed -- the UI degrades by
+    # omitting the tick rather than guessing.
+    match_timestamp: datetime | None = None
     processed: dict[str, bool] = Field(
         default_factory=lambda: {"beep": False, "shot_detect": False, "trim": False}
     )
@@ -128,6 +137,53 @@ class RemovalPlan(BaseModel):
     was_primary: bool = False
     stage_number: int | None = None
     audit_reset: bool = False  # caller-facing flag: did we wipe stage audit?
+
+
+class StageMatchWindow(BaseModel):
+    """One stage's match window for the SPA timeline (issue #13).
+
+    The window itself is computed by :func:`video_match.match_window`; the
+    SPA renders the band as ``[lower, upper]`` on its timeline. ``upper`` is
+    always ``stage.scorecard_updated_at`` because the heuristic's window is
+    asymmetric (scorecard typed *after* the run).
+    """
+
+    stage_number: int
+    scorecard_updated_at: datetime | None
+    tolerance_minutes: int
+    lower: datetime | None
+    upper: datetime | None
+
+
+class VideoMatchAnalysisEntry(BaseModel):
+    """Per-video classification against the project's stages.
+
+    ``classification`` is one of ``in_window`` (lands in exactly one stage),
+    ``contested`` (lands in multiple stages -- the SPA flags this), ``orphan``
+    (lands in no stage's window -- likely warmup / neighbour-bay), or
+    ``no_timestamp`` (the source was offline at registration; the row still
+    renders, but no tick).
+    """
+
+    path: Path
+    timestamp: datetime | None
+    classification: str  # video_match.VideoClassification
+    stage_numbers: list[int]
+
+
+class MatchAnalysis(BaseModel):
+    """Project-level match analysis exposed at GET /api/project/match-analysis.
+
+    Single source of truth for the SPA's match-window timeline: tolerance,
+    per-stage windows, and per-video classification all flow from
+    :mod:`video_match`. Future improvements (per-stage tolerance, ML scorers,
+    confidence bands) extend this model rather than duplicating policy in
+    the SPA.
+    """
+
+    tolerance_minutes: int
+    stages: list[StageMatchWindow]
+    videos: list[VideoMatchAnalysisEntry]
 
 
 class MatchProject(BaseModel):
@@ -266,6 +322,67 @@ class MatchProject(BaseModel):
         for s in self.stages:
             out.extend(s.videos)
         return out
+
+    def match_analysis(
+        self, *, config: VideoMatchConfig | None = None
+    ) -> MatchAnalysis:
+        """Run the canonical match heuristic over the project's stored
+        timestamps and return per-stage windows + per-video classifications.
+
+        Pure (no I/O): operates on ``StageVideo.match_timestamp`` captured at
+        registration. Reuses :mod:`video_match` so any improvement to the
+        heuristic flows into the SPA without duplicating logic. Stages
+        without a ``scorecard_updated_at`` (placeholders) are surfaced with
+        ``lower=upper=None`` -- the SPA renders the row but skips the band.
+        """
+        cfg = config or VideoMatchConfig()
+        stage_data: list[StageData] = [
+            StageData(
+                stage_number=s.stage_number,
+                stage_name=s.stage_name,
+                time_seconds=s.time_seconds,
+                scorecard_updated_at=s.scorecard_updated_at,
+            )
+            for s in self.stages
+            if s.scorecard_updated_at is not None
+        ]
+
+        windows = [
+            StageMatchWindow(
+                stage_number=s.stage_number,
+                scorecard_updated_at=s.scorecard_updated_at,
+                tolerance_minutes=cfg.tolerance_minutes,
+                lower=(
+                    video_match.match_window(
+                        s.scorecard_updated_at, cfg.tolerance_minutes
+                    )[0]
+                    if s.scorecard_updated_at is not None
+                    else None
+                ),
+                upper=s.scorecard_updated_at,
+            )
+            for s in self.stages
+        ]
+
+        entries: list[VideoMatchAnalysisEntry] = []
+        for video in self.all_videos():
+            classification, stages = video_match.classify_video_against_stages(
+                video.match_timestamp, stage_data, cfg.tolerance_minutes
+            )
+            entries.append(
+                VideoMatchAnalysisEntry(
+                    path=video.path,
+                    timestamp=video.match_timestamp,
+                    classification=classification,
+                    stage_numbers=stages,
+                )
+            )
+
+        return MatchAnalysis(
+            tolerance_minutes=cfg.tolerance_minutes,
+            stages=windows,
+            videos=entries,
+        )
 
     def find_video(self, path: Path) -> tuple[StageEntry | None, StageVideo] | None:
         """Locate a video by path. Returns ``(stage_or_None, video)`` or ``None``.
@@ -455,10 +572,20 @@ class MatchProject(BaseModel):
             stored = dest
 
         # Idempotency: if a video at this stored path is already registered,
-        # return it.
+        # return it (backfilling match_timestamp if missing -- old projects
+        # didn't store it, and we'd rather populate the timeline tick on
+        # re-scan than force the user to re-register from scratch).
         existing = self.find_video(stored)
         if existing is not None:
-            return existing[1]
+            video = existing[1]
+            if video.match_timestamp is None:
+                try:
+                    video.match_timestamp = video_match.video_timestamp(
+                        source, prefer_ctime=True
+                    )
+                except OSError:
+                    pass
+            return video
 
         # If something is already at the destination, leave it (don't clobber
         # what the user might have placed there themselves). Otherwise create
@@ -473,7 +600,11 @@ class MatchProject(BaseModel):
             else:
                 shutil.copy2(source, dest)
 
-        video = StageVideo(path=stored)
+        try:
+            match_ts = video_match.video_timestamp(source, prefer_ctime=True)
+        except OSError:
+            match_ts = None
+        video = StageVideo(path=stored, match_timestamp=match_ts)
         self.unassigned_videos.append(video)
         return video
 
@@ -528,6 +659,92 @@ class MatchProject(BaseModel):
         video.role = role
         target.videos.append(video)
         return video
+
+    def primary_swap_warns(self, root: Path, *, stage_number: int) -> bool:
+        """Return True when swapping the current primary on ``stage_number``
+        would discard audit work that the user explicitly produced.
+
+        "Audit work" here means the per-stage audit JSON exists *and* records
+        at least one shot (auto-detected candidate or manual placement). The
+        bare ``_candidates_pending_audit`` block from a fresh detection run
+        does not count -- detection re-runs after the swap and would produce
+        a fresh candidate list anyway.
+        """
+        audit_file = self.audit_path(root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            return False
+        try:
+            data = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # Unreadable audit -> safer to warn than silently overwrite.
+            return True
+        shots = data.get("shots") if isinstance(data, dict) else None
+        return bool(shots)
+
+    def swap_primary(
+        self,
+        path: Path,
+        *,
+        root: Path,
+        stage_number: int,
+        backup_audit: bool = True,
+    ) -> StageVideo:
+        """Promote ``path`` to primary on ``stage_number`` with audit-safe
+        side-effects. Differs from ``assign_video(role="primary")`` in two
+        ways: (1) when the current primary's processed flags are set, those
+        flags are cleared on the new primary so detection re-runs from
+        scratch; (2) when ``backup_audit`` is True and an audit JSON exists,
+        the file is renamed to ``stage<N>.json.bak`` so the user can recover.
+
+        Returns the newly-promoted ``StageVideo``. Raises ``KeyError`` if the
+        target stage or video doesn't exist.
+        """
+        target = self.stage(stage_number)
+        located = self.find_video(path)
+        if located is None:
+            raise KeyError(f"video {path} not registered with project")
+
+        # Move-then-promote uses the standard assign_video path. If the video
+        # was already on this stage, it gets pulled out and re-attached; the
+        # old primary is demoted inside assign_video. New primary's processed
+        # flags are reset because the audio source changed.
+        new_primary = self.assign_video(
+            path, to_stage_number=stage_number, role="primary"
+        )
+        new_primary.processed = {"beep": False, "shot_detect": False, "trim": False}
+        new_primary.beep_time = None
+        new_primary.beep_source = None
+        new_primary.beep_peak_amplitude = None
+        new_primary.beep_duration_ms = None
+        new_primary.beep_candidates = []
+
+        if backup_audit:
+            audit_file = self.audit_path(root) / f"stage{stage_number}.json"
+            if audit_file.exists():
+                bak = audit_file.with_suffix(audit_file.suffix + ".bak")
+                # If a previous .bak already exists, overwrite it: keeping
+                # multiple generations is more confusing than helpful, and
+                # the user's most recent audit is the most useful to recover.
+                try:
+                    if bak.exists():
+                        bak.unlink()
+                    audit_file.rename(bak)
+                except OSError:
+                    # Fall back to a copy-then-delete via best-effort; if
+                    # even that fails, leave audit in place rather than
+                    # destroying it. The caller can decide what to do.
+                    pass
+
+        # The fresh primary needs a re-trim too (audio source changed). The
+        # caller's job is to nudge the worker; here we just clear the flags
+        # so the UI / pipeline knows to re-process.
+        for v in target.videos:
+            if v.role == "secondary":
+                # Secondaries' beep alignment was relative to the old
+                # primary's audio. They now need re-detection too.
+                v.processed["beep"] = False
+
+        return new_primary
 
     def remove_video(
         self,

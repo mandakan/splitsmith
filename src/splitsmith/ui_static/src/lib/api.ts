@@ -24,6 +24,12 @@ export interface StageVideo {
   path: string;
   role: VideoRole;
   added_at: string;
+  /** The recording-finished time the match heuristic uses for this video
+   *  (UTC ISO-8601). Captured at registration via the canonical
+   *  ``video_match.video_timestamp`` helper so the SPA, the CLI, and the
+   *  classifier agree. Null on legacy projects -- the timeline omits the
+   *  tick rather than guessing. */
+  match_timestamp: string | null;
   processed: { beep: boolean; shot_detect: boolean; trim: boolean };
   beep_time: number | null;
   beep_source: BeepSource | null;
@@ -117,6 +123,43 @@ export interface FsEntry {
 export interface FsProbeResponse {
   duration: number | null;
   thumbnail_url: string | null;
+}
+
+/** ``video_match.classify_video_against_stages`` output. ``contested`` ==
+ *  candidate for >= 2 stages' windows; ``orphan`` == in nobody's window;
+ *  ``no_timestamp`` == registration didn't capture a timestamp (legacy or
+ *  source offline). */
+export type VideoClassification =
+  | "in_window"
+  | "contested"
+  | "orphan"
+  | "no_timestamp";
+
+export interface StageMatchWindow {
+  stage_number: number;
+  scorecard_updated_at: string | null;
+  tolerance_minutes: number;
+  /** Window lower bound (UTC ISO-8601). Null for placeholder stages. */
+  lower: string | null;
+  /** Window upper bound (= scorecard_updated_at; the heuristic's window is
+   *  asymmetric because the scorecard is typed *after* the run). */
+  upper: string | null;
+}
+
+export interface VideoMatchAnalysisEntry {
+  path: string;
+  timestamp: string | null;
+  classification: VideoClassification;
+  stage_numbers: number[];
+}
+
+/** Result of GET /api/project/match-analysis. The SPA's match-window
+ *  timeline reads tolerance + windows + classifications from here so the
+ *  heuristic stays the single source of truth. */
+export interface MatchAnalysis {
+  tolerance_minutes: number;
+  stages: StageMatchWindow[];
+  videos: VideoMatchAnalysisEntry[];
 }
 
 export interface RemovalPlan {
@@ -268,6 +311,11 @@ async function request<T>(
 export const api = {
   getProject: () => request<MatchProject>("/api/project"),
 
+  /** Fetch the canonical match-window analysis (per-stage windows +
+   *  per-video classification). Drives the ingest screen's timeline; SPA
+   *  carries no policy of its own beyond rendering. */
+  getMatchAnalysis: () => request<MatchAnalysis>("/api/project/match-analysis"),
+
   listFolder: (path?: string, opts?: { probe?: boolean }) => {
     const params = new URLSearchParams();
     if (path) params.set("path", path);
@@ -327,6 +375,30 @@ export const api = {
         to_stage_number: toStageNumber,
         role,
       },
+    }),
+
+  /** Promote ``videoPath`` to primary on ``stageNumber``. The server
+   *  refuses with a 409 (``code: "audit_exists"``) when the stage has
+   *  shots in its audit JSON and ``confirm`` is false; the SPA should
+   *  prompt then re-call with ``confirm=true``. On confirm, the existing
+   *  audit JSON is renamed to ``.bak`` and detection re-runs on the new
+   *  primary's audio. */
+  swapPrimary: (videoPath: string, stageNumber: number, confirm = false) =>
+    request<MatchProject>("/api/assignments/swap-primary", {
+      method: "POST",
+      json: {
+        video_path: videoPath,
+        stage_number: stageNumber,
+        confirm,
+      },
+    }),
+
+  /** Toggle the ``skipped`` flag on a stage. Skipped stages don't block
+   *  the "next step" gate even when they have no videos / no primary. */
+  setStageSkipped: (stageNumber: number, skipped: boolean) =>
+    request<MatchProject>(`/api/stages/${stageNumber}/skip`, {
+      method: "POST",
+      json: { skipped },
     }),
 
   /** Submit a beep-detection job. Returns a Job snapshot; poll the SPA

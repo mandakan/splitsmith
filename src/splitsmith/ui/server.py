@@ -328,6 +328,27 @@ class BeepSelectRequest(BaseModel):
     time: float
 
 
+class SwapPrimaryRequest(BaseModel):
+    """Body for POST /api/assignments/swap-primary.
+
+    Promotes ``video_path`` to primary on ``stage_number``. When the stage
+    has audit work and ``confirm`` is False, the endpoint refuses with a
+    409 response describing what would be lost so the SPA can prompt the
+    user. Passing ``confirm=True`` performs the swap and renames the
+    existing audit JSON to ``stage<N>.json.bak``.
+    """
+
+    video_path: str
+    stage_number: int
+    confirm: bool = False
+
+
+class SkipStageRequest(BaseModel):
+    """Body for POST /api/stages/{n}/skip. Toggles ``stage.skipped``."""
+
+    skipped: bool
+
+
 class RemoveVideoRequest(BaseModel):
     """Body for POST /api/videos/remove (#24).
 
@@ -394,6 +415,20 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     @app.get("/api/project")
     def get_project() -> JSONResponse:
         return JSONResponse(state.load().model_dump(mode="json"))
+
+    @app.get("/api/project/match-analysis")
+    def get_match_analysis() -> JSONResponse:
+        """Run the canonical video-match heuristic over the project and return
+        per-stage windows + per-video classification.
+
+        Single source of truth for the SPA's match-window timeline:
+        tolerance, window edges, and per-video classification are all
+        produced by :mod:`splitsmith.video_match`. Future heuristic
+        improvements (per-stage tolerance, ML-based scoring, confidence
+        bands) extend this endpoint rather than adding policy to the SPA.
+        """
+        project = state.load()
+        return JSONResponse(project.match_analysis().model_dump(mode="json"))
 
     @app.post("/api/scoreboard/import")
     def import_scoreboard(req: ScoreboardImportRequest) -> JSONResponse:
@@ -1695,6 +1730,67 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/assignments/swap-primary")
+    def swap_primary(req: SwapPrimaryRequest) -> JSONResponse:
+        """Promote ``video_path`` to primary on ``stage_number``.
+
+        Audit-safe: when the stage has shots in its audit JSON, refuses with
+        a 409 response unless ``confirm=True`` is passed. On confirm, the
+        audit JSON is renamed to ``.bak`` so a bad swap is recoverable, and
+        the new primary's processed flags are cleared so detection re-runs.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(req.stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        warns = project.primary_swap_warns(state.project_root, stage_number=req.stage_number)
+        if warns and not req.confirm:
+            existing = stage.primary()
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "audit_exists",
+                    "message": (
+                        f"Stage {req.stage_number} has audit work on its current "
+                        "primary. Confirm the swap to back the audit up to .bak "
+                        "and re-run detection on the new primary."
+                    ),
+                    "stage_number": req.stage_number,
+                    "current_primary": str(existing.path) if existing else None,
+                    "new_primary": req.video_path,
+                },
+            )
+        try:
+            project.swap_primary(
+                Path(req.video_path),
+                root=state.project_root,
+                stage_number=req.stage_number,
+                backup_audit=warns,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/skip")
+    def set_stage_skipped(stage_number: int, req: SkipStageRequest) -> JSONResponse:
+        """Mark ``stage_number`` as skipped (or un-skip it).
+
+        A skipped stage is excluded from "next step" gating in the ingest
+        screen so the user can advance even when the stage has no videos
+        (e.g. they didn't film stage 4).
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        stage.skipped = req.skipped
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 

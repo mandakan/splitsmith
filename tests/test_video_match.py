@@ -179,3 +179,74 @@ def test_prefer_ctime_uses_birthtime_when_available(tmp_path: Path) -> None:
     # And with prefer_ctime=False, it falls back to the (bad) mtime -> still no match.
     result2 = match_videos_to_stages([video], [stage], VideoMatchConfig(prefer_ctime=False))
     assert result2.matches == []
+
+
+# ---------------------------------------------------------------------------
+# Window helper + classifier (production UI -- issue #13)
+# ---------------------------------------------------------------------------
+
+
+def test_match_window_is_asymmetric() -> None:
+    """The match window ends at scorecard_updated_at and extends ``tolerance``
+    backwards. The scorecard is typed *after* the run finishes, so anything
+    after it can't be the recording."""
+    from splitsmith.video_match import match_window
+
+    sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
+    lower, upper = match_window(sc, tolerance_minutes=15)
+    assert upper == sc
+    assert lower == sc - timedelta(minutes=15)
+
+
+def test_classify_video_against_stages_in_window() -> None:
+    from splitsmith.video_match import classify_video_against_stages
+    from splitsmith.config import StageData
+
+    sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
+    stages = [StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)]
+    cls, hits = classify_video_against_stages(
+        sc - timedelta(minutes=5), stages, tolerance_minutes=15
+    )
+    assert cls == "in_window"
+    assert hits == [1]
+
+
+def test_classify_video_against_stages_contested() -> None:
+    from splitsmith.video_match import classify_video_against_stages
+    from splitsmith.config import StageData
+
+    # Two stages whose windows overlap.
+    sc1 = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
+    sc2 = sc1 + timedelta(minutes=5)
+    stages = [
+        StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc1),
+        StageData(stage_number=2, stage_name="S2", time_seconds=10.0, scorecard_updated_at=sc2),
+    ]
+    # Timestamp inside both [sc1-15, sc1] and [sc2-15, sc2].
+    cls, hits = classify_video_against_stages(
+        sc1 - timedelta(minutes=2), stages, tolerance_minutes=15
+    )
+    assert cls == "contested"
+    assert sorted(hits) == [1, 2]
+
+
+def test_classify_video_against_stages_orphan() -> None:
+    from splitsmith.video_match import classify_video_against_stages
+    from splitsmith.config import StageData
+
+    sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
+    stages = [StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)]
+    # Way before any window.
+    cls, hits = classify_video_against_stages(
+        sc - timedelta(hours=3), stages, tolerance_minutes=15
+    )
+    assert cls == "orphan"
+    assert hits == []
+
+
+def test_classify_video_against_stages_no_timestamp() -> None:
+    from splitsmith.video_match import classify_video_against_stages
+
+    cls, hits = classify_video_against_stages(None, [], tolerance_minutes=15)
+    assert cls == "no_timestamp"
+    assert hits == []
