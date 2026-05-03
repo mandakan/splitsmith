@@ -48,6 +48,10 @@ app = typer.Typer(
 )
 console = Console()
 
+from .lab_cli import app as _lab_app  # noqa: E402
+
+app.add_typer(_lab_app, name="lab")
+
 
 # ---------------------------------------------------------------------------
 # Subcommands

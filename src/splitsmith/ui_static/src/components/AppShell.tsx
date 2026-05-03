@@ -1,4 +1,4 @@
-import { Crosshair, FileBarChart, FolderInput, Home, Palette } from "lucide-react";
+import { Crosshair, FileBarChart, FlaskConical, FolderInput, Home, Palette } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
@@ -10,6 +10,7 @@ const NAV = [
   { to: "/ingest", label: "Ingest", icon: FolderInput },
   { to: "/audit", label: "Audit", icon: Crosshair },
   { to: "/export", label: "Export", icon: FileBarChart },
+  { to: "/lab", label: "Lab", icon: FlaskConical },
 ];
 
 export function AppShell() {

@@ -106,6 +106,19 @@ pnpm build           # produces dist/ which the FastAPI backend serves
 pnpm dev             # Vite dev server on :5173, proxies /api to backend on :5174
 ```
 
+### `lab` -- algorithm Lab (fixtures, eval, tuning)
+
+The Lab is the algorithm-development surface. Lives at `/lab` in the UI and is mirrored as `splitsmith lab <cmd>` on the CLI. Fixture catalog, batch ensemble eval with per-fixture P/R/F1, live tuning sliders (cached-universe rescore in <100 ms), and a per-fixture diff overlay on the waveform. Tuning configs export to committable YAML; runs persist as deterministic JSON under `build/lab/runs/`.
+
+See [`LAB.md`](LAB.md) for the full guide -- end-to-end walk-through, fixture promotion, parameter tuning, and how to drive the loop in parallel with Claude Code.
+
+```bash
+uv run splitsmith lab fixtures           # list audited fixtures
+uv run splitsmith lab eval --summary-only
+uv run splitsmith lab rescore --universe build/lab/runs/latest.json --consensus 4 --summary-only
+uv run splitsmith lab promote --audit-json <project>/audit/stage4.json --audit-wav <project>/audio/stage4_audit.wav --slug stage-shots-myclub-2026-stage4
+```
+
 ### `review` -- audit a fixture in a local web UI
 
 Open a single-page browser UI for reviewing detected shots against the fixture's audio (and optional video). Marker pins on the waveform: click to toggle keep/reject, drag to fine-tune time, double-click empty waveform space to add a manual marker. Save (`Cmd+S`) writes back to the fixture JSON's `shots[]`.

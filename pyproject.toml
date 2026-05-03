@@ -80,6 +80,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PTH"]
 # Typer requires `typer.Option(...)` to be evaluated in the default; the B008
 # warning is a false positive for Typer-based CLIs.
 "src/splitsmith/cli.py" = ["B008"]
+"src/splitsmith/lab_cli.py" = ["B008"]
 # Scoreboard models intentionally mirror the documented `/api/v1/` wire shape
 # verbatim, which is mixed snake_case + camelCase. Translation to splitsmith's
 # snake_case happens in adapters, not in the parsed-response models.
