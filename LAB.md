@@ -214,8 +214,18 @@ review UI), and either:
 ### After adding a fixture
 
 The ensemble's calibration artifacts (`src/splitsmith/data/`) were
-built against the original calibration set. New fixtures **don't** alter
-calibration until you rebuild:
+built against the original calibration set. New fixtures **don't**
+alter calibration until you rebuild.
+
+**From the UI**: click **Rebuild calibration** in the Lab header. The
+popover lets you pick `target_recall` and `tolerance_ms` and requires
+an explicit confirmation checkbox before submitting -- the operation
+overwrites `src/splitsmith/data/ensemble_calibration.json` and
+`voter_c_gbdt.joblib`. Progress streams into the popover as the script
+logs; the cached `EnsembleRuntime` is invalidated on success so the
+next Run eval picks up the new thresholds.
+
+**From the CLI**:
 
 ```bash
 uv run python scripts/build_ensemble_artifacts.py
@@ -224,13 +234,19 @@ uv run python scripts/build_ensemble_artifacts.py
 The Lab's eval step re-computes per-candidate features on every call,
 so it can score against any fixture immediately. But the *thresholds*
 voter A/B/C/D use are still the shipped ones until you rebuild. If you
-want the new fixture to influence those thresholds, run the build
-script (this regenerates `src/splitsmith/data/ensemble_calibration.json`
-and `voter_c_gbdt.joblib`).
+want the new fixture to influence those thresholds, hit Rebuild
+calibration (or run the build script) -- this regenerates the JSON +
+joblib artifacts.
 
 For pure regression-tracking ("is the current pipeline still good on
 this new stage?"), no rebuild is needed -- just add the fixture and
 hit Run eval.
+
+> **Heads up**: rebuild calibration requires the CLAP / PANN feature
+> caches under `tests/fixtures/.cache/`. If you've added a new fixture,
+> build its caches first via `scripts/extract_clap_features.py` and
+> `scripts/extract_audio_embeddings.py`. The build script will refuse
+> to proceed without them.
 
 ---
 
@@ -409,7 +425,14 @@ fixtures regressed" works well.
 ## Reproducing and committing a tuning result
 
 When you find a config you like, capture it as YAML so it lives in git
-and can be replayed:
+and can be replayed.
+
+**From the UI**: click **Save as YAML** (next to Run eval). Pick a name,
+optionally write a note, and confirm. The popover shows the path on
+success. The button is disabled until at least one eval / rescore has
+populated the cache.
+
+**From the CLI**:
 
 ```bash
 uv run splitsmith lab save-config \
@@ -530,6 +553,8 @@ Top-level keys: `config`, `summary`, `universe`, `config_hash`, `built_at`.
 | POST | `/api/lab/eval` | `{slugs?, config?, persist?}` | Slow path. Caches universe server-side and (by default) writes `build/lab/runs/<...>.json`. |
 | POST | `/api/lab/rescore` | `{config}` | Uses last cached universe. 409 if no eval has run. |
 | POST | `/api/lab/promote` | `{stage_number, slug, overwrite?}` | Copies stage audit JSON + WAV into `tests/fixtures/`. |
+| POST | `/api/lab/save-config` | `{name, note?, overwrite?}` | Persists the active run's config + summary as `configs/ensemble.<name>.yaml`. 409 when no eval has run. |
+| POST | `/api/lab/rebuild-calibration` | `{target_recall?, tolerance_ms?, fixtures?}` | Submits a `rebuild_calibration` job that re-runs the calibration build script. Poll `/api/jobs/{id}` for progress. |
 
 ### CLI
 

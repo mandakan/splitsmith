@@ -577,3 +577,41 @@ def load_run(path: Path) -> EvalRun:
     """Read a persisted run JSON back into an ``EvalRun`` model."""
     payload = json.loads(path.read_text(encoding="utf-8"))
     return EvalRun.model_validate(payload)
+
+
+def save_config_yaml(
+    *,
+    run: EvalRun,
+    name: str,
+    output_dir: Path | None = None,
+    note: str | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Write ``configs/ensemble.<name>.yaml`` for a finished run.
+
+    Used by both the ``splitsmith lab save-config`` CLI and the
+    "Save as YAML" button in the Lab UI tuning panel. The YAML carries
+    the active ``EvalConfig``, the run's headline summary, and the
+    provenance needed to replay the result later.
+    """
+    import yaml  # local import: yaml is only needed in this code path
+
+    out_dir = (output_dir or Path("configs")).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / f"ensemble.{name}.yaml"
+    if target.exists() and not overwrite:
+        raise FileExistsError(f"refusing to overwrite {target} (pass overwrite=True to force)")
+    payload = {
+        "name": name,
+        "config": run.config.model_dump(),
+        "summary": run.summary.model_dump(),
+        "provenance": {
+            "built_at": run.built_at,
+            "config_hash": run.config_hash,
+            "fixtures": [f.slug for f in run.universe.fixtures],
+            "note": note,
+        },
+    }
+    with target.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(payload, fh, sort_keys=True, default_flow_style=False)
+    return target

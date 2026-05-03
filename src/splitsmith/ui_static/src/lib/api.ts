@@ -1010,6 +1010,12 @@ export const api = {
 
   promoteFixture: (payload: { stage_number: number; slug: string; overwrite?: boolean }) =>
     request<LabFixtureRecord>("/api/lab/promote", { method: "POST", json: payload }),
+
+  saveLabConfig: (payload: { name: string; note?: string; overwrite?: boolean }) =>
+    request<{ path: string }>("/api/lab/save-config", { method: "POST", json: payload }),
+
+  rebuildLabCalibration: (payload: { target_recall?: number; tolerance_ms?: number; fixtures?: string[] } = {}) =>
+    request<Job>("/api/lab/rebuild-calibration", { method: "POST", json: payload }),
 };
 
 export interface LabFixtureRecord {

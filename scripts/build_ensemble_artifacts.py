@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import joblib
@@ -208,33 +209,36 @@ def _train_voter_c(universe: list[dict], target_recall: float):
     return clf, threshold
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--fixture", action="append", help="Calibration fixture stem (repeatable).")
-    p.add_argument("--target-recall", type=float, default=0.95)
-    p.add_argument("--tolerance-ms", type=float, default=75.0)
-    args = p.parse_args()
+def build_artifacts(
+    fixtures: list[str] | None = None,
+    *,
+    target_recall: float = 0.95,
+    tolerance_ms: float = 75.0,
+    log: Callable[[str], None] = print,
+) -> dict:
+    """Run the calibration build and write artifacts under ``DATA_DIR``.
 
-    fixtures = args.fixture or DEFAULT_FIXTURES
-    print(f"Calibrating ensemble over {len(fixtures)} fixture(s)...")
-    universe = _build_universe(fixtures, args.tolerance_ms)
+    Importable so the production UI's "Rebuild calibration" button can
+    drive the same code path as the CLI. Logs progress through ``log``;
+    returns the calibration dict that was written.
+    """
+    fixtures = list(fixtures) if fixtures else list(DEFAULT_FIXTURES)
+    log(f"Calibrating ensemble over {len(fixtures)} fixture(s)...")
+    universe = _build_universe(fixtures, tolerance_ms)
     n_total = len(universe)
     n_pos = sum(c["label"] for c in universe)
-    print(
+    log(
         f"Universe: {n_total} candidates, {n_pos} positives "
         f"(across {len({c['fixture'] for c in universe})} fixtures)"
     )
-
     voter_a = _voter_a_floor(universe)
     voter_b = _voter_b_threshold(universe)
     voter_d = _voter_d_threshold(universe)
-    clf, voter_c = _train_voter_c(universe, target_recall=args.target_recall)
-    print(f"Voter A floor (lowest positive confidence): {voter_a:.4f}")
-    print(f"Voter B threshold (lowest positive CLAP diff): {voter_b:.4f}")
-    print(
-        f"Voter C threshold (GBDT, target recall {args.target_recall*100:.0f} %): " f"{voter_c:.4f}"
-    )
-    print(f"Voter D threshold (lowest positive PANN gunshot_prob): {voter_d:.4f}")
+    clf, voter_c = _train_voter_c(universe, target_recall=target_recall)
+    log(f"Voter A floor (lowest positive confidence): {voter_a:.4f}")
+    log(f"Voter B threshold (lowest positive CLAP diff): {voter_b:.4f}")
+    log(f"Voter C threshold (GBDT, target recall {target_recall*100:.0f} %): {voter_c:.4f}")
+    log(f"Voter D threshold (lowest positive PANN gunshot_prob): {voter_d:.4f}")
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     cal_path = DATA_DIR / "ensemble_calibration.json"
@@ -245,8 +249,8 @@ def main() -> None:
         "voter_b_threshold": voter_b,
         "voter_c_threshold": voter_c,
         "voter_d_threshold": voter_d,
-        "voter_c_target_recall": args.target_recall,
-        "tolerance_ms": args.tolerance_ms,
+        "voter_c_target_recall": target_recall,
+        "tolerance_ms": tolerance_ms,
         "clap_prompts_shot": list(feat.CLAP_PROMPTS_SHOT),
         "clap_prompts": list(feat.CLAP_PROMPTS),
         "calibration_fixtures": [f for f in fixtures if any(c["fixture"] == f for c in universe)],
@@ -257,8 +261,22 @@ def main() -> None:
     }
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
     joblib.dump(clf, model_path)
-    print(f"\nWrote {cal_path}")
-    print(f"Wrote {model_path}")
+    log(f"Wrote {cal_path}")
+    log(f"Wrote {model_path}")
+    return cal
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument("--fixture", action="append", help="Calibration fixture stem (repeatable).")
+    p.add_argument("--target-recall", type=float, default=0.95)
+    p.add_argument("--tolerance-ms", type=float, default=75.0)
+    args = p.parse_args()
+    build_artifacts(
+        fixtures=args.fixture or None,
+        target_recall=args.target_recall,
+        tolerance_ms=args.tolerance_ms,
+    )
 
 
 if __name__ == "__main__":

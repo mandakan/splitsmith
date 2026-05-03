@@ -33,6 +33,7 @@ from .core import (
     promote_stage_to_fixture,
     rescore_universe,
     run_eval,
+    save_config_yaml,
     save_run,
 )
 
@@ -51,5 +52,6 @@ __all__ = [
     "promote_stage_to_fixture",
     "rescore_universe",
     "run_eval",
+    "save_config_yaml",
     "save_run",
 ]

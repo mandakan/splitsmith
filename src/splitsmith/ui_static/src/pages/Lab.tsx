@@ -24,9 +24,11 @@ import {
   Beaker,
   CheckCircle2,
   ChevronRight,
+  Hammer,
   Loader2,
   Play,
   RotateCcw,
+  Save,
   Settings2,
 } from "lucide-react";
 
@@ -42,6 +44,7 @@ import {
 } from "@/components/ui/card";
 import {
   api,
+  type Job,
   type LabEvalConfig,
   type LabEvalFixture,
   type LabEvalRun,
@@ -134,6 +137,8 @@ export function Lab() {
               cfg {run.config_hash}
             </Badge>
           )}
+          <SaveYamlButton run={run} />
+          <RebuildCalibrationButton onCompleted={() => setRun(null)} />
           <Button onClick={runEval} disabled={evalLoading}>
             {evalLoading ? (
               <Loader2 className="size-4 animate-spin" />
@@ -758,6 +763,250 @@ function CandidateTable({
         </table>
       </div>
     </details>
+  );
+}
+
+function SaveYamlButton({ run }: { run: LabEvalRun | null }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [overwrite, setOverwrite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Suggest a slug derived from the active config hash so accidental
+  // double-clicks don't all collide on "ensemble.tuning.yaml".
+  useEffect(() => {
+    if (open && !name && run) {
+      setName(`tuning-${run.config_hash}`);
+    }
+  }, [open, name, run]);
+
+  const submit = useCallback(async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.saveLabConfig({ name: name.trim(), note: note.trim() || undefined, overwrite });
+      setResult(res.path);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [name, note, overwrite]);
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!run}
+        title={run ? "Save current tuning as configs/ensemble.<name>.yaml" : "Run eval first"}
+      >
+        <Save className="size-4" />
+        Save as YAML
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Save tuning
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Writes <span className="font-mono">configs/ensemble.&lt;name&gt;.yaml</span> with the active
+            config + summary + provenance. Replayable via <span className="font-mono">splitsmith lab load-config</span>.
+          </p>
+          <label className="mt-2 block text-[11px]">
+            <span className="text-muted-foreground">Name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+              placeholder="tighter-d"
+            />
+          </label>
+          <label className="mt-2 block text-[11px]">
+            <span className="text-muted-foreground">Note (optional)</span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs"
+              placeholder="Why this tuning is interesting..."
+            />
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-[11px]">
+            <input
+              type="checkbox"
+              checked={overwrite}
+              onChange={(e) => setOverwrite(e.target.checked)}
+            />
+            Overwrite if exists
+          </label>
+          {error && (
+            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+              {error}
+            </div>
+          )}
+          {result && (
+            <div className="mt-2 rounded bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-300">
+              Saved: <span className="font-mono">{result}</span>
+            </div>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+            <Button size="sm" onClick={submit} disabled={busy || !name.trim()}>
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [targetRecall, setTargetRecall] = useState(0.95);
+  const [toleranceMs, setToleranceMs] = useState(75);
+  const [submitting, setSubmitting] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+
+  // Poll the active job until it leaves the running state so the user
+  // sees progress without leaving the Lab.
+  useEffect(() => {
+    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") {
+      return;
+    }
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const next = await api.getJob(job.id);
+        if (stopped) return;
+        setJob(next);
+        if (next.status === "succeeded") {
+          onCompleted();
+        }
+      } catch (err) {
+        if (!stopped) setError(String(err));
+      }
+    };
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [job, onCompleted]);
+
+  const submit = useCallback(async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const j = await api.rebuildLabCalibration({
+        target_recall: targetRecall,
+        tolerance_ms: toleranceMs,
+      });
+      setJob(j);
+      setConfirmed(false);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [targetRecall, toleranceMs]);
+
+  const running = job && (job.status === "pending" || job.status === "running");
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!!running}
+        title="Re-run scripts/build_ensemble_artifacts.py and refresh shipped thresholds"
+      >
+        {running ? <Loader2 className="size-4 animate-spin" /> : <Hammer className="size-4" />}
+        Rebuild calibration
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Rebuild calibration
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Refits voter thresholds + the GBDT against every audited fixture and overwrites
+            <span className="font-mono"> src/splitsmith/data/</span>. Slow (model-bound). After it
+            completes, the next eval picks up the new thresholds.
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Requires the CLAP / PANN feature caches under
+            <span className="font-mono"> tests/fixtures/.cache/</span> -- build them first via the
+            extract scripts if a new fixture's cache is missing.
+          </p>
+          <label className="mt-2 block text-[11px]">
+            <span className="text-muted-foreground">Target recall ({targetRecall.toFixed(2)})</span>
+            <input
+              type="range"
+              min={0.8}
+              max={1.0}
+              step={0.01}
+              value={targetRecall}
+              onChange={(e) => setTargetRecall(Number(e.target.value))}
+              className="mt-1 w-full"
+            />
+          </label>
+          <label className="mt-2 block text-[11px]">
+            <span className="text-muted-foreground">Tolerance ms ({toleranceMs.toFixed(0)})</span>
+            <input
+              type="range"
+              min={15}
+              max={150}
+              step={5}
+              value={toleranceMs}
+              onChange={(e) => setToleranceMs(Number(e.target.value))}
+              className="mt-1 w-full"
+            />
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-[11px]">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+            />
+            I understand this overwrites the shipped calibration
+          </label>
+          {error && (
+            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+              {error}
+            </div>
+          )}
+          {job && (
+            <div className="mt-2 rounded bg-muted/50 px-2 py-1 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="font-mono">{job.status}</span>
+                {job.message && <span className="text-muted-foreground">{job.message}</span>}
+              </div>
+            </div>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+            <Button size="sm" onClick={submit} disabled={submitting || !!running || !confirmed}>
+              {submitting ? <Loader2 className="size-3.5 animate-spin" /> : "Run rebuild"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

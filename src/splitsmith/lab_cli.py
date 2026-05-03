@@ -191,25 +191,16 @@ def save_config(
     if not universe_path.exists():
         raise typer.BadParameter(f"run JSON not found: {universe_path}")
     run = lab_module.load_run(universe_path)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    target = output_dir / f"ensemble.{name}.yaml"
-    if target.exists() and not overwrite:
-        raise typer.BadParameter(f"refusing to overwrite {target} (pass --overwrite to force)")
-    fixtures_used = [f.slug for f in run.universe.fixtures]
-    payload = {
-        "name": name,
-        "config": run.config.model_dump(),
-        "summary": run.summary.model_dump(),
-        "provenance": {
-            "built_at": run.built_at,
-            "config_hash": run.config_hash,
-            "universe_path": str(universe_path),
-            "fixtures": fixtures_used,
-            "note": note,
-        },
-    }
-    with target.open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(payload, fh, sort_keys=True, default_flow_style=False)
+    try:
+        target = lab_module.save_config_yaml(
+            run=run,
+            name=name,
+            output_dir=output_dir,
+            note=note,
+            overwrite=overwrite,
+        )
+    except FileExistsError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     sys.stdout.write(str(target) + "\n")
 
 
