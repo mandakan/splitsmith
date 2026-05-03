@@ -3522,3 +3522,135 @@ def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> 
     assert resp.status_code == 200
     jobs_after = client.get("/api/jobs").json()
     assert any(j["kind"] == "shot_detect" for j in jobs_after)
+
+
+# ---------------------------------------------------------------------------
+# Global user-config endpoints (#75)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _user_config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect ``~/.splitsmith/`` to a per-test directory so the user's
+    real recent-projects list isn't touched by these tests.
+    """
+    from splitsmith import user_config
+
+    home = tmp_path / "user-config"
+    monkeypatch.setenv(user_config.ENV_HOME, str(home))
+    monkeypatch.delenv(user_config.ENV_DISABLE, raising=False)
+    return home
+
+
+def test_create_app_records_recent_project(tmp_path: Path, _user_config_home: Path) -> None:
+    from splitsmith import user_config
+
+    create_app(project_root=tmp_path / "match", project_name="Recent Match")
+    recent = user_config.get_recent_projects()
+    assert len(recent) == 1
+    assert recent[0].name == "Recent Match"
+    assert Path(recent[0].path) == (tmp_path / "match").resolve()
+
+
+def test_recent_projects_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
+    create_app(project_root=tmp_path / "alpha", project_name="Alpha")
+    app = create_app(project_root=tmp_path / "beta", project_name="Beta")
+    client = TestClient(app)
+
+    resp = client.get("/api/user/recent-projects")
+    assert resp.status_code == 200
+    body = resp.json()
+    names = [p["name"] for p in body["projects"]]
+    assert names[0] == "Beta"  # most-recent first
+    assert "Alpha" in names
+
+
+def test_forget_recent_project_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
+    create_app(project_root=tmp_path / "alpha", project_name="Alpha")
+    app = create_app(project_root=tmp_path / "beta", project_name="Beta")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/user/recent-projects/forget",
+        json={"path": str((tmp_path / "alpha").resolve())},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["removed"] is True
+    assert [p["name"] for p in body["projects"]] == ["Beta"]
+
+
+def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    # Empty: 404 (SPA renders the prompt rather than autopin).
+    assert client.get("/api/user/scoreboard-identity").status_code == 404
+
+    payload = {
+        "shooter_id": 12345,
+        "display_name": "Mathias Axell",
+        "division": "Production Optics",
+        "club": "Bromma PK",
+        "base_url": "https://shootnscoreit.com",
+    }
+    resp = client.put("/api/user/scoreboard-identity", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["shooter_id"] == 12345
+
+    # Now readable.
+    got = client.get("/api/user/scoreboard-identity")
+    assert got.status_code == 200
+    assert got.json()["display_name"] == "Mathias Axell"
+
+    # Delete clears it.
+    client.delete("/api/user/scoreboard-identity")
+    assert client.get("/api/user/scoreboard-identity").status_code == 404
+
+
+def test_user_config_disable_flag_makes_endpoints_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import user_config
+
+    monkeypatch.setenv(user_config.ENV_DISABLE, "1")
+    app = create_app(project_root=tmp_path / "match", project_name="Disabled")
+    client = TestClient(app)
+
+    # Recording was a no-op.
+    body = client.get("/api/user/recent-projects").json()
+    assert body == {"projects": []}
+
+    # PUT silently drops; GET still returns 404.
+    client.put("/api/user/scoreboard-identity", json={"shooter_id": 1})
+    assert client.get("/api/user/scoreboard-identity").status_code == 404
+
+
+def test_load_env_files_picks_up_user_config_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SSI token (and any other ``SPLITSMITH_*`` var) can live in
+    ``~/.splitsmith/.env`` -- it's per-user, not per-project. Project /
+    cwd files still win because they're loaded earlier with
+    ``override=False``.
+    """
+    pytest.importorskip("dotenv")
+    from splitsmith import user_config
+    from splitsmith.ui import server as server_mod
+
+    home = tmp_path / "user-home"
+    home.mkdir()
+    (home / ".env").write_text("SPLITSMITH_TEST_TOKEN=from-user-config\n")
+    monkeypatch.setenv(user_config.ENV_HOME, str(home))
+    monkeypatch.delenv(user_config.ENV_DISABLE, raising=False)
+    monkeypatch.delenv("SPLITSMITH_TEST_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    project_root = tmp_path / "no-env-project"
+    project_root.mkdir()
+    loaded = server_mod._load_env_files(project_root)
+    assert any(p.parent.resolve() == home.resolve() for p in loaded)
+
+    import os
+
+    assert os.environ.get("SPLITSMITH_TEST_TOKEN") == "from-user-config"
