@@ -3283,3 +3283,163 @@ def test_auto_beep_queued_on_scan_auto_assign(tmp_path: Path, monkeypatch) -> No
     assert primary["role"] == "primary"
     assert primary["processed"]["beep"] is True
     assert primary["beep_time"] == 4.5
+
+
+# -----------------------------------------------------------------------------
+# Beep-review flow (#71). Per-video flag with explicit user toggle, automatic
+# reset when the underlying beep_time changes, manual entries auto-marked
+# reviewed.
+# -----------------------------------------------------------------------------
+
+
+def test_beep_review_default_false_after_auto_detect(tmp_path: Path, monkeypatch) -> None:
+    """A freshly auto-detected beep needs explicit user review -- defaults
+    to ``beep_reviewed=False`` so the SPA can render the warning pill."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+
+    job = client.post("/api/stages/1/detect-beep").json()
+    final = _wait_for_job(client, job["id"])
+    assert final["status"] == "succeeded"
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary["beep_time"] == 12.453
+    assert primary["beep_source"] == "auto"
+    assert primary["beep_reviewed"] is False
+
+
+def test_beep_review_manual_entry_auto_marks_reviewed(tmp_path: Path) -> None:
+    """Manual override implies the user looked at the waveform to type
+    the value -- skip the review pill (#71)."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/stages/1/beep", json={"beep_time": 12.5})
+    assert resp.status_code == 200
+    primary = resp.json()["stages"][0]["videos"][0]
+    assert primary["beep_source"] == "manual"
+    assert primary["beep_reviewed"] is True
+
+
+def test_beep_review_endpoint_flips_flag(tmp_path: Path, monkeypatch) -> None:
+    """The dedicated review endpoint flips the flag without re-running
+    detection or trim."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+    job = client.post("/api/stages/1/detect-beep").json()
+    _wait_for_job(client, job["id"])
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    video_id = primary["video_id"]
+    assert primary["beep_reviewed"] is False
+
+    resp = client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    assert resp.status_code == 200
+    assert resp.json()["stages"][0]["videos"][0]["beep_reviewed"] is True
+
+    resp = client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": False})
+    assert resp.status_code == 200
+    assert resp.json()["stages"][0]["videos"][0]["beep_reviewed"] is False
+
+
+def test_beep_review_400_when_no_beep_yet(tmp_path: Path) -> None:
+    """Can't mark a beep reviewed before one has been detected -- the
+    server refuses with 400 so the SPA isn't tempted to show a green
+    pill on a video with no beep_time."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    video_id = primary["video_id"]
+
+    resp = client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    assert resp.status_code == 400
+
+
+def test_beep_review_resets_on_candidate_switch(tmp_path: Path, monkeypatch) -> None:
+    """Switching to a different ranked candidate is a fresh claim about
+    which moment is the beep -- prior approval doesn't carry over (#71)."""
+    from splitsmith.config import BeepCandidate
+
+    candidates = [
+        BeepCandidate(time=12.453, score=0.9, peak_amplitude=0.8, duration_ms=300.0),
+        BeepCandidate(time=11.000, score=0.7, peak_amplitude=0.6, duration_ms=280.0),
+    ]
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453, candidates=candidates)
+    job = client.post("/api/stages/1/detect-beep").json()
+    _wait_for_job(client, job["id"])
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    video_id = primary["video_id"]
+
+    # User reviews candidate #1.
+    client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    # Then switches to candidate #2.
+    resp = client.post("/api/stages/1/beep/select", json={"time": 11.000})
+    assert resp.status_code == 200
+    primary = resp.json()["stages"][0]["videos"][0]
+    assert primary["beep_time"] == 11.000
+    assert primary["beep_reviewed"] is False  # reset on switch
+
+
+def test_beep_review_resets_on_redetect(tmp_path: Path, monkeypatch) -> None:
+    """Re-running detection is a fresh claim -- prior approval doesn't
+    carry over."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+    job = client.post("/api/stages/1/detect-beep").json()
+    _wait_for_job(client, job["id"])
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    video_id = primary["video_id"]
+    client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+
+    _stub_detect(monkeypatch, beep_time=10.0)
+    job2 = client.post("/api/stages/1/detect-beep").json()
+    _wait_for_job(client, job2["id"])
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary["beep_time"] == 10.0
+    assert primary["beep_reviewed"] is False
+
+
+def test_shot_detect_gated_on_beep_review(tmp_path: Path, monkeypatch) -> None:
+    """Auto-detected beeps don't trigger the shot-detect ensemble until
+    the user reviews the beep (#71). Wasting CLAP / GBDT / PANN cycles
+    on an unconfirmed beep is the failure mode this gate prevents."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+
+    job = client.post("/api/stages/1/detect-beep").json()
+    _wait_for_job(client, job["id"])
+
+    # No shot_detect job queued -- the chain stops at trim until the
+    # user confirms.
+    jobs = client.get("/api/jobs").json()
+    assert not any(j["kind"] == "shot_detect" for j in jobs), [
+        (j["kind"], j["status"]) for j in jobs
+    ]
+
+
+def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> None:
+    """Once the user confirms the beep on a primary that's already
+    trimmed, the gated shot-detect fires -- this is the explicit
+    unblock point. Stub the heavy ensemble entrypoint so the test
+    doesn't pay model-loading cost; we only assert a job was queued."""
+    import splitsmith.ui.server as server_mod
+    from splitsmith.ui import audio as audio_helpers_mod
+
+    monkeypatch.setattr(
+        audio_helpers_mod,
+        "ensure_video_audit_trim",
+        lambda *a, **kw: Path("dummy.mp4"),
+    )
+    monkeypatch.setattr(server_mod, "_get_ensemble_runtime", lambda: object())
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+    job = client.post("/api/stages/1/detect-beep").json()
+    _wait_for_job(client, job["id"])
+
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary["processed"]["trim"] is True  # trim cached
+    video_id = primary["video_id"]
+    jobs_before = client.get("/api/jobs").json()
+    assert not any(j["kind"] == "shot_detect" for j in jobs_before)
+
+    resp = client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    assert resp.status_code == 200
+    jobs_after = client.get("/api/jobs").json()
+    assert any(j["kind"] == "shot_detect" for j in jobs_after)

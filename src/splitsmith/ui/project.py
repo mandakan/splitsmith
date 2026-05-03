@@ -81,6 +81,15 @@ class StageVideo(BaseModel):
     # via the ingest screen. Manual overrides survive subsequent auto-detect
     # attempts unless the user explicitly forces re-detection (issue #22).
     beep_source: Literal["auto", "manual"] | None = None
+    # Has the user explicitly listened to the detected beep and confirmed
+    # it's correct (issue #71)? Auto-detected beeps default to ``False`` --
+    # the SPA renders a "review" pill on the ingest screen until the user
+    # flips this with ``POST /api/stages/{n}/videos/{vid}/beep/review``,
+    # or via a manual ``beep_time`` entry (which implies they looked).
+    # Always resets to False whenever ``beep_time`` changes (re-detect,
+    # candidate switch, primary swap) since each new value is a fresh
+    # claim that needs its own confirmation.
+    beep_reviewed: bool = False
     # Diagnostic outputs from ``detect_beep`` -- not used by the pipeline but
     # surfaced in the UI to help the user judge auto-detection confidence.
     beep_peak_amplitude: float | None = None
@@ -1040,6 +1049,7 @@ class MatchProject(BaseModel):
         new_primary.beep_peak_amplitude = None
         new_primary.beep_duration_ms = None
         new_primary.beep_candidates = []
+        new_primary.beep_reviewed = False
 
         if backup_audit:
             audit_file = self.audit_path(root) / f"stage{stage_number}.json"
@@ -1143,6 +1153,7 @@ class MatchProject(BaseModel):
                     v.beep_peak_amplitude = None
                     v.beep_duration_ms = None
                     v.beep_candidates = []
+                    v.beep_reviewed = False
 
         return RemovalPlan(
             video_path=video.path,
