@@ -663,6 +663,17 @@ export const api = {
       json: payload,
     }),
 
+  /** Structured anomalies for the *saved* audit JSON (issue #42).
+   *
+   *  The audit screen does its own live recompute (see ``lib/anomalies``)
+   *  so the panel updates without a network round-trip on every keep /
+   *  reject. This endpoint exists for external consumers + integration
+   *  tests that want the same flags ``report.txt`` will produce. */
+  getStageAnomalies: (stageNumber: number) =>
+    request<{ anomalies: import("./anomalies").Anomaly[] }>(
+      `/api/stages/${stageNumber}/anomalies`,
+    ),
+
   /** Match-overview payload for the Analysis & Export screen. */
   getExportOverview: () => request<ExportOverview>("/api/exports/overview"),
 

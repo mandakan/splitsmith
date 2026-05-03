@@ -12,7 +12,12 @@ from splitsmith.config import (
     StageAnalysis,
     StageData,
 )
-from splitsmith.report import detect_anomalies, render_report, write_report
+from splitsmith.report import (
+    detect_anomalies,
+    detect_anomalies_structured,
+    render_report,
+    write_report,
+)
 
 
 def _stage(
@@ -94,6 +99,80 @@ def test_anomalies_shot_count_high() -> None:
         shots.append(_shot(i, shots[-1].time_from_beep + 0.30, 0.30))
     anomalies = detect_anomalies(shots, beep_time=10.0, stage_time=shots[-1].time_from_beep)
     assert any("false positives" in a for a in anomalies)
+
+
+# --- detect_anomalies_structured -----------------------------------------
+
+
+def test_anomalies_structured_no_shots_emits_warn() -> None:
+    """``no_shots`` is the discriminator for "stage hasn't been audited yet"."""
+    out = detect_anomalies_structured([], beep_time=10.0, stage_time=14.74)
+    assert len(out) == 1
+    assert out[0].kind == "no_shots"
+    assert out[0].severity == "warn"
+    assert out[0].shot_number is None
+    assert out[0].time is None
+
+
+def test_anomalies_structured_double_detection_carries_shot_number() -> None:
+    """Click-to-jump works because each shot anomaly carries the offending
+    shot's 1-based number + audit-timeline time."""
+    shots = [_shot(1, 1.0, 1.0), _shot(2, 1.05, 0.05)]  # 50ms split
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=1.05)
+    doubles = [a for a in out if a.kind == "double_detection"]
+    assert len(doubles) == 1
+    assert doubles[0].shot_number == 2
+    assert doubles[0].time == shots[1].time_from_beep
+    assert doubles[0].severity == "warn"
+
+
+def test_anomalies_structured_long_pause() -> None:
+    shots = [_shot(1, 1.0, 1.0), _shot(2, 4.5, 3.5)]  # 3.5s split
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=4.5)
+    longs = [a for a in out if a.kind == "long_pause"]
+    assert len(longs) == 1
+    assert longs[0].shot_number == 2
+
+
+def test_anomalies_structured_stage_time_mismatch_points_at_last_shot() -> None:
+    """The mismatch anomaly anchors on the last shot so click-to-jump puts
+    the user on the marker that decides the calculation."""
+    shots = [_shot(1, 1.0, 1.0), _shot(2, 1.5, 0.5)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=0.5)
+    mismatch = [a for a in out if a.kind == "stage_time_mismatch"]
+    assert len(mismatch) == 1
+    assert mismatch[0].shot_number == 2
+    assert mismatch[0].time == 1.5
+
+
+def test_anomalies_structured_count_band_is_info_severity() -> None:
+    """Shot-count anomalies are informational, not warnings -- the report
+    explicitly calls them out as "informational, not a hard error"."""
+    shots = [_shot(1, 1.0, 1.0), _shot(2, 1.5, 0.5)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=1.5)
+    count = [a for a in out if a.kind == "shot_count_low"]
+    assert len(count) == 1
+    assert count[0].severity == "info"
+    assert count[0].shot_number is None
+    assert count[0].time is None
+
+
+def test_anomalies_structured_high_count_uses_distinct_kind() -> None:
+    shots = [_shot(1, 1.0, 1.0)]
+    for i in range(2, 50):
+        shots.append(_shot(i, shots[-1].time_from_beep + 0.30, 0.30))
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=shots[-1].time_from_beep)
+    assert any(a.kind == "shot_count_high" for a in out)
+    assert not any(a.kind == "shot_count_low" for a in out)
+
+
+def test_detect_anomalies_string_messages_match_structured() -> None:
+    """The legacy string list is a stringification of the structured form;
+    report.txt rendering depends on this byte-for-byte equivalence."""
+    shots = [_shot(1, 1.0, 1.0), _shot(2, 1.05, 0.05)]
+    structured = detect_anomalies_structured(shots, beep_time=10.0, stage_time=0.5)
+    legacy = detect_anomalies(shots, beep_time=10.0, stage_time=0.5)
+    assert legacy == [a.message for a in structured]
 
 
 # --- render_report --------------------------------------------------------
