@@ -66,9 +66,18 @@ class ShooterNotFound(ScoreboardError):
 class StageTimesNotImplemented(ScoreboardError):
     """The live API doesn't expose per-competitor stage results yet.
 
-    Tracked upstream in ``ssi-scoreboard#400``. The HTTP client raises this
-    so the UI can render a "blocked on upstream" banner with a link, rather
-    than the generic upstream-failed copy.
+    Was the HTTP client's typed answer when ``ssi-scoreboard#400`` was
+    pending. The endpoint shipped, so this is now a defensive fallback for
+    deployments that haven't rolled it out (any 404 we *can't* attribute to
+    a missing competitor).
+    """
+
+
+class CompetitorNotInMatch(ScoreboardError):
+    """The picked competitor isn't part of the requested match.
+
+    Distinct from ``StageTimesNotImplemented`` so the UI can prompt the
+    user to pick a different shooter rather than pointing at the upstream.
     """
 
 
@@ -149,23 +158,21 @@ class SsiHttpClient:
     def get_stage_times(
         self, content_type: int, match_id: int, competitor_id: int
     ) -> CompetitorStageResults:
-        # Mirrors the path documented in ``ssi-scoreboard#400``:
-        # GET /match/{ct}/{id}/competitor/{cid}/stages. If the deployment
-        # answering us hasn't shipped that endpoint yet, we get a 404
-        # (mapped through ``_NotFound`` -> ``StageTimesNotImplemented``)
-        # so the UI can fall back to the "blocked on upstream" banner
-        # rather than a generic 502.
+        # Mirrors the live ``GET /match/{ct}/{id}/competitor/{cid}/stages``
+        # shipped in ssi-scoreboard#400. A 404 here -- now that the
+        # endpoint is part of the v1 contract -- means the competitor
+        # isn't in this match (the most realistic cause); we surface that
+        # as ``CompetitorNotInMatch`` so the UI can prompt for a re-pick
+        # rather than blaming the upstream.
         try:
             data = self._get_json(
                 f"/match/{content_type}/{match_id}/competitor/{competitor_id}/stages"
             )
         except _NotFound as exc:
-            raise StageTimesNotImplemented(
-                "the scoreboard returned 404 for "
-                f"/match/{content_type}/{match_id}/competitor/{competitor_id}"
-                "/stages. Either the competitor doesn't exist in this match, "
-                "or the deployment predates ssi-scoreboard#400. Drop a richer "
-                "offline JSON to populate stage times in the meantime."
+            raise CompetitorNotInMatch(
+                f"competitor {competitor_id} isn't part of match "
+                f"{content_type}/{match_id}. Pick a different shooter, "
+                "or check that the match still has them registered."
             ) from exc
         return CompetitorStageResults.model_validate(data)
 

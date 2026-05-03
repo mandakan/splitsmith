@@ -16,6 +16,7 @@ Sub-modules:
 
 from splitsmith.ui.scoreboard.cache import CachingScoreboardClient
 from splitsmith.ui.scoreboard.http import (
+    CompetitorNotInMatch,
     MatchNotFound,
     ScoreboardAuthError,
     ScoreboardError,
@@ -50,6 +51,7 @@ __all__ = [
     "CacheInfo",
     "CachingScoreboardClient",
     "CompetitorInfo",
+    "CompetitorNotInMatch",
     "CompetitorStageResult",
     "CompetitorStageResults",
     "LocalJsonScoreboard",

@@ -537,25 +537,27 @@ function ScoreboardSection({
   const stages = project?.stages ?? [];
   const realCount = stages.filter((s) => !s.placeholder).length;
   const placeholderCount = stages.filter((s) => s.placeholder).length;
-  // A match has been selected once the project carries a real
-  // scoreboard_match_id (drop-JSON path or online fetch). Once that's true
-  // the user is unlikely to revisit this card -- collapse it by default
-  // and let them re-open if they need to swap matches.
+  // The card is "done" when the user has picked a match *and* pinned
+  // themselves -- only then are placeholder stages overlaid with real
+  // times and there's no further work to do here. Auto-collapse fires
+  // on that transition; a match alone isn't enough because the user
+  // still needs to find their row inside it.
   const matchLoaded = !!project?.scoreboard_match_id;
-  const [expanded, setExpanded] = useState(!matchLoaded);
-  // Sync the local default if the project picks up a match in another tab
-  // (or after a re-fetch). User clicks override this until the match id
-  // changes again.
-  const [lastMatchId, setLastMatchId] = useState<string | null>(
-    project?.scoreboard_match_id ?? null,
-  );
+  const shooterPinned = project?.selected_shooter_id != null;
+  const ingestComplete = matchLoaded && shooterPinned;
+  const [expanded, setExpanded] = useState(!ingestComplete);
+  // Track the last "complete" state so we collapse on the transition
+  // (false -> true) without overriding manual user toggles. A subsequent
+  // un-pin or match-change re-expands.
+  const [lastComplete, setLastComplete] = useState(ingestComplete);
   useEffect(() => {
-    const current = project?.scoreboard_match_id ?? null;
-    if (current !== lastMatchId) {
-      setLastMatchId(current);
-      setExpanded(!current);
+    if (ingestComplete && !lastComplete) {
+      setExpanded(false);
+    } else if (!ingestComplete && lastComplete) {
+      setExpanded(true);
     }
-  }, [project?.scoreboard_match_id, lastMatchId]);
+    setLastComplete(ingestComplete);
+  }, [ingestComplete, lastComplete]);
 
   const description = realCount
     ? `${realCount} stages loaded for ${project!.competitor_name ?? "the primary competitor"}.`
@@ -616,7 +618,7 @@ function ScoreboardSection({
             />
           ) : null}
 
-          {project && matchLoaded && onlineReady ? (
+          {project && matchLoaded ? (
             <ShooterPinner
               project={project}
               busy={busy}
@@ -743,7 +745,29 @@ function OnlineMatchSearch({
           {results.map((m) => (
             <li
               key={`${m.content_type}-${m.id}`}
-              className="flex items-start justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40"
+              role="button"
+              tabIndex={0}
+              className={cn(
+                "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none",
+                busy && "pointer-events-none opacity-50",
+              )}
+              onClick={() => {
+                // Collapse the dropdown immediately so the user isn't
+                // staring at stale results while the populate request
+                // is in flight. The shooter pinner stays visible so the
+                // user can complete the next step.
+                onFetch(m.content_type, m.id);
+                setQuery("");
+                setResults(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onFetch(m.content_type, m.id);
+                  setQuery("");
+                  setResults(null);
+                }
+              }}
             >
               <div className="min-w-0 text-xs">
                 <div className="truncate font-medium">{m.name}</div>
@@ -752,22 +776,6 @@ function OnlineMatchSearch({
                   {m.venue ?? "venue tba"}
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  // Collapse the dropdown immediately so the user isn't
-                  // staring at stale results while the populate request
-                  // is in flight. The whole scoreboard card will collapse
-                  // once project.scoreboard_match_id changes.
-                  onFetch(m.content_type, m.id);
-                  setQuery("");
-                  setResults(null);
-                }}
-              >
-                Fetch full match
-              </Button>
             </li>
           ))}
         </ul>
@@ -779,10 +787,10 @@ function OnlineMatchSearch({
   );
 }
 
-/** Pinner that resolves "this is me" -> per-match competitor_id and posts
- *  to /select-shooter so the server can fetch + merge stage times. Gated
- *  on the project already having a scoreboard match loaded; without that
- *  context the pin is meaningless (issue #64). */
+/** Always-on shooter combobox: type-to-search, pick a row to pin. After
+ *  a successful pin shows a compact "this is me" badge with Refresh /
+ *  Change controls. Gated by ``ScoreboardSection`` on the project having
+ *  a match loaded -- without that the pin has nothing to merge into. */
 function ShooterPinner({
   project,
   busy,
@@ -796,13 +804,21 @@ function ShooterPinner({
   onRefreshTimes: () => void;
   onError: (e: ScoreboardErrorDetail | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ScoreboardShooterRef[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [picking, setPicking] = useState(false);
+  // Pre-pinned: render the compact badge but allow re-search via the
+  // input below. Newly cleared / first-pin: render the input directly.
+  const isPinned = project.selected_shooter_id != null;
+  const [showSearch, setShowSearch] = useState(!isPinned);
 
   useEffect(() => {
-    if (!open) return;
+    setShowSearch(!isPinned);
+  }, [isPinned]);
+
+  useEffect(() => {
+    if (!showSearch) return;
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       setResults(null);
@@ -823,146 +839,138 @@ function ShooterPinner({
       }
     }, 250);
     return () => window.clearTimeout(handle);
-  }, [query, open, onError]);
+  }, [query, showSearch, onError]);
 
-  const pickShooter = async (shooterId: number) => {
-    // Resolve competitor_id by reading the loaded MatchData. The server
-    // refuses to guess; the SPA derives the mapping each time so the
-    // server stays stateless w.r.t. shooter <-> competitor identity.
+  const pickShooter = async (shooter: ScoreboardShooterRef) => {
+    setPicking(true);
     try {
       const md = await api.getScoreboardMatchData();
-      const competitor = md.competitors.find((c) => c.shooterId === shooterId);
+      const competitor = md.competitors.find((c) => c.shooterId === shooter.shooterId);
       if (!competitor) {
         onError({
-          code: "scoreboard_offline",
-          message: `shooter ${shooterId} isn't in this match's competitor list`,
+          code: "competitor_not_in_match",
+          message: `${shooter.name} isn't a competitor in this match. Pick a different shooter.`,
         });
         return;
       }
-      onSelect(shooterId, competitor.id);
-      setOpen(false);
+      onSelect(shooter.shooterId, competitor.id);
       setQuery("");
       setResults(null);
+      setShowSearch(false);
     } catch (e) {
       const detail = asScoreboardError(e);
       if (detail) onError(detail);
+    } finally {
+      setPicking(false);
     }
   };
 
-  if (project.selected_shooter_id !== null) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs">
-        <span className="flex items-center gap-2">
-          <User className="size-3.5" />
-          Pinned shooter <code>{project.selected_shooter_id}</code> · competitor{" "}
-          <code>{project.selected_competitor_id}</code>
-        </span>
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={onRefreshTimes}
-            title="Re-pull stage times for this competitor"
-          >
-            <RefreshCw className="size-3.5" />
-            Refresh times
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => {
-              setOpen(true);
-            }}
-          >
-            Change
-          </Button>
-        </div>
-      </div>
-    );
-  }
-  if (!open) {
-    return (
-      <div className="space-y-1 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs">
-        <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-2 font-medium">
-            <User className="size-3.5 text-status-warning" />
-            Pin yourself to load stage times
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => setOpen(true)}
-          >
-            Find me
-          </Button>
-        </div>
-        <p className="text-muted-foreground">
-          Stage list is loaded but per-stage times aren't -- pick your row to
-          merge in your scorecard times.
-        </p>
-      </div>
-    );
-  }
   return (
     <div className="space-y-2">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="flex items-center gap-1.5 font-medium">
-          <User className="size-3.5" />
-          Find yourself
-        </span>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          disabled={busy}
-          placeholder="your name"
-          autoFocus
-          className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </label>
-      {searching ? (
-        <p className="text-xs text-muted-foreground">Searching...</p>
-      ) : null}
-      {results && results.length > 0 ? (
-        <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-1">
-          {results.map((s) => (
-            <li
-              key={s.shooterId}
-              className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40"
+      {isPinned && !showSearch ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs">
+          <span className="flex items-center gap-2">
+            <User className="size-3.5" />
+            Pinned shooter <code>{project.selected_shooter_id}</code> ·
+            competitor <code>{project.selected_competitor_id}</code>
+          </span>
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={onRefreshTimes}
+              title="Re-pull stage times for this competitor"
             >
-              <div className="min-w-0 text-xs">
-                <div className="truncate font-medium">{s.name}</div>
-                <div className="truncate text-muted-foreground">
-                  {s.club ?? "no club"} &middot; {s.division ?? "—"}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => void pickShooter(s.shooterId)}
-              >
-                Pin
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={busy}
-        onClick={() => {
-          setOpen(false);
-          setQuery("");
-          setResults(null);
-        }}
-      >
-        Cancel
-      </Button>
+              <RefreshCw className="size-3.5" />
+              Refresh times
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setShowSearch(true)}
+            >
+              Change
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="flex items-center gap-1.5 font-medium">
+              <User className="size-3.5" />
+              Pin yourself to load stage times
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Type your name -- pick your row to merge in your scorecard times.
+            </span>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              disabled={busy || picking}
+              placeholder="your name"
+              autoFocus={!isPinned}
+              className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
+          {searching ? (
+            <p className="text-xs text-muted-foreground">Searching...</p>
+          ) : null}
+          {picking ? (
+            <p className="text-xs text-muted-foreground">
+              Pinning + fetching stage times...
+            </p>
+          ) : null}
+          {results && results.length > 0 ? (
+            <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-1">
+              {results.map((s) => (
+                <li
+                  key={s.shooterId}
+                  role="button"
+                  tabIndex={0}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none",
+                    (busy || picking) && "pointer-events-none opacity-50",
+                  )}
+                  onClick={() => void pickShooter(s)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void pickShooter(s);
+                    }
+                  }}
+                >
+                  <div className="min-w-0 text-xs">
+                    <div className="truncate font-medium">{s.name}</div>
+                    <div className="truncate text-muted-foreground">
+                      {s.club ?? "no club"} &middot; {s.division ?? "—"}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {results && results.length === 0 && query.trim().length >= 2 && !searching ? (
+            <p className="text-xs text-muted-foreground">No shooters found.</p>
+          ) : null}
+          {isPinned ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || picking}
+              onClick={() => {
+                setShowSearch(false);
+                setQuery("");
+                setResults(null);
+              }}
+            >
+              Cancel
+            </Button>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -1024,7 +1032,12 @@ function ScoreboardErrorBanner({
     icon = <AlertCircle className="size-4 text-status-warning" />;
     title = "The dropped JSON has no stage times.";
     body =
-      "It's pure SSI v1 MatchData (match shell only). Drop a richer file or wait for the upstream API to expose per-competitor stage results.";
+      "It's pure SSI v1 MatchData (match shell only). Drop a richer file, or remove the local match.json so splitsmith goes online and pulls stage times via the live API.";
+  } else if (detail.code === "competitor_not_in_match") {
+    icon = <AlertCircle className="size-4 text-status-warning" />;
+    title = "That shooter isn't in this match.";
+    body =
+      "Pick a different row, or check the match itself in the SSI scoreboard. The pin wasn't saved.";
   } else {
     icon = <WifiOff className="size-4 text-status-warning" />;
     title = "Couldn't reach the scoreboard.";

@@ -450,14 +450,14 @@ def test_scoreboard_refresh_times_409_when_no_pin(tmp_path: Path) -> None:
     assert resp.status_code == 409
 
 
-def test_scoreboard_select_shooter_maps_upstream_404_to_blocked_banner(
+def test_scoreboard_select_shooter_rejects_competitor_not_in_match(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Deployments that haven't yet shipped ``ssi-scoreboard#400`` answer
-    the per-competitor stages path with a 404. The HTTP client must
-    translate that into ``StageTimesNotImplemented`` so the UI shows the
-    "blocked on upstream" banner instead of a confusing "match not
-    found" / generic 502 message."""
+    """Server-side validation: a ``competitor_id`` that isn't in the
+    loaded ``MatchData.competitors[]`` is rejected with 404
+    ``competitor_not_in_match`` *before* any pin is persisted, so the
+    project never ends up with an invalid pin that would break every
+    subsequent refresh-times call."""
     import httpx
 
     monkeypatch.setenv("SPLITSMITH_SSI_TOKEN", "fake")
@@ -470,16 +470,23 @@ def test_scoreboard_select_shooter_maps_upstream_404_to_blocked_banner(
     client.post("/api/scoreboard/upload", json={"data": fixture})
     (project_root / "scoreboard" / "match.json").unlink()
 
-    # Patch SsiHttpClient construction to install a mock transport that
-    # 404s the stage-times path -- simulating a deployment without #400.
+    # Mock the live API: get_match returns the fixture so the validate
+    # step has a competitor list to check against. The stages path
+    # should never be hit because validation fails first; assert that
+    # by counting calls.
     from splitsmith.ui.scoreboard import http as http_mod
 
     original_init = http_mod.SsiHttpClient.__init__
+    stage_calls = {"count": 0}
 
     def mocked_init(self, *args, **kwargs):  # noqa: ANN001
         def handler(request: httpx.Request) -> httpx.Response:
-            if "/competitor/" in request.url.path and request.url.path.endswith("/stages"):
-                return httpx.Response(404, json={"error": "not found"})
+            path = request.url.path
+            if path.endswith("/stages") and "/competitor/" in path:
+                stage_calls["count"] += 1
+                return httpx.Response(404)
+            if "/match/22/27190" in path:
+                return httpx.Response(200, json=fixture)
             return httpx.Response(500)
 
         kwargs["client"] = httpx.Client(
@@ -490,14 +497,17 @@ def test_scoreboard_select_shooter_maps_upstream_404_to_blocked_banner(
 
     monkeypatch.setattr(http_mod.SsiHttpClient, "__init__", mocked_init)
 
+    # 999999 is not in the fixture's competitors -- pre-validation should reject.
     resp = client.post(
         "/api/scoreboard/select-shooter",
-        json={"shooter_id": 40821, "competitor_id": 727562},
+        json={"shooter_id": 1, "competitor_id": 999999},
     )
-    assert resp.status_code == 502
-    detail = resp.json()["detail"]
-    assert detail["code"] == "stage_times_blocked_on_upstream"
-    assert detail["upstream_issue"] == "ssi-scoreboard#400"
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "competitor_not_in_match"
+    assert stage_calls["count"] == 0  # never reached the stages endpoint
+    proj = client.get("/api/project").json()
+    assert proj["selected_shooter_id"] is None
+    assert proj["selected_competitor_id"] is None
 
 
 def test_scoreboard_select_shooter_uses_live_stage_times_when_available(
@@ -544,7 +554,7 @@ def test_scoreboard_select_shooter_uses_live_stage_times_when_available(
             path = request.url.path
             if path.endswith("/stages") and "/competitor/" in path:
                 return httpx.Response(200, json=stage_results)
-            if path.startswith("/match/22/27190"):
+            if "/match/22/27190" in path:
                 return httpx.Response(200, json=fixture)
             return httpx.Response(500)
 

@@ -18,13 +18,13 @@ import respx
 from splitsmith.ui.scoreboard.http import (
     DEFAULT_BASE_URL,
     TOKEN_ENV_VAR,
+    CompetitorNotInMatch,
     MatchNotFound,
     ScoreboardAuthError,
     ScoreboardRateLimited,
     ScoreboardUpstreamError,
     ShooterNotFound,
     SsiHttpClient,
-    StageTimesNotImplemented,
 )
 from splitsmith.ui.scoreboard.models import (
     CompetitorStageResults,
@@ -225,17 +225,19 @@ def test_get_stage_times_parses_competitor_stage_results(
 
 
 @respx.mock
-def test_get_stage_times_404_maps_to_blocked_on_upstream(
+def test_get_stage_times_404_maps_to_competitor_not_in_match(
     client: SsiHttpClient,
 ) -> None:
-    """Deployments that haven't shipped #400 yet answer 404 on this path.
-    The client must translate that into ``StageTimesNotImplemented`` so
-    the UI shows the upstream-blocked banner rather than a generic 404."""
-    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190/competitor/727562/stages").mock(
+    """Now that ``ssi-scoreboard#400`` has shipped, a 404 on the stages
+    path means the requested competitor isn't in this match (typo'd cid,
+    DNS'd shooter, etc.). Map to ``CompetitorNotInMatch`` so the UI can
+    prompt the user to pick a different shooter rather than blaming the
+    upstream."""
+    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190/competitor/999999/stages").mock(
         return_value=httpx.Response(404, json={"error": "not found"})
     )
-    with pytest.raises(StageTimesNotImplemented, match="ssi-scoreboard#400"):
-        client.get_stage_times(22, 27190, 727562)
+    with pytest.raises(CompetitorNotInMatch, match="999999"):
+        client.get_stage_times(22, 27190, 999999)
 
 
 @respx.mock

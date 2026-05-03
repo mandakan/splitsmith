@@ -138,12 +138,18 @@ export interface StageTimesOfflinePureMatchDataDetail {
   message: string;
 }
 
+export interface CompetitorNotInMatchDetail {
+  code: "competitor_not_in_match";
+  message: string;
+}
+
 export type ScoreboardErrorDetail =
   | ScoreboardAuthDetail
   | ScoreboardRateLimitDetail
   | ScoreboardOfflineDetail
   | StageTimesBlockedOnUpstreamDetail
-  | StageTimesOfflinePureMatchDataDetail;
+  | StageTimesOfflinePureMatchDataDetail
+  | CompetitorNotInMatchDetail;
 
 /** One row in the ``GET /api/scoreboard/shooter/search`` array. */
 export interface ScoreboardShooterRef {
@@ -188,7 +194,8 @@ export function asScoreboardError(err: unknown): ScoreboardErrorDetail | null {
     code === "scoreboard_rate_limited" ||
     code === "scoreboard_offline" ||
     code === "stage_times_blocked_on_upstream" ||
-    code === "stage_times_offline_pure_matchdata"
+    code === "stage_times_offline_pure_matchdata" ||
+    code === "competitor_not_in_match"
   ) {
     return body as ScoreboardErrorDetail;
   }

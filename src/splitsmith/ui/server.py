@@ -86,6 +86,7 @@ from .project import (
 )
 from .scoreboard import (
     CachingScoreboardClient,
+    CompetitorNotInMatch,
     LocalJsonScoreboard,
     MatchNotFound,
     ScoreboardAuthError,
@@ -415,6 +416,14 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
         )
     if isinstance(exc, ShooterNotFound):
         raise HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, CompetitorNotInMatch):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "competitor_not_in_match",
+                "message": str(exc),
+            },
+        )
     raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -953,12 +962,20 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def scoreboard_select_shooter(req: SelectShooterRequest) -> JSONResponse:
         """Pin (shooter_id, competitor_id) and merge stage times into the project.
 
-        Failure modes (all leave shooter pin in place so the user can retry
-        with refresh-times -- no half-pinned state): the live API can't
-        serve stage times yet (502 ``stage_times_blocked_on_upstream``),
-        the dropped JSON is pure ``MatchData`` (400
-        ``stage_times_offline_pure_matchdata``), or the project has no
-        match loaded (409).
+        Validates the competitor against the loaded match before
+        persisting -- a wrong cid (typoed by hand, or the user picked a
+        shooter who isn't in this match) shouldn't leave the project
+        with an invalid pin that breaks every subsequent refresh.
+
+        Failure modes:
+        - 409 ``no_match_loaded``: project has no scoreboard match yet
+        - 404 ``competitor_not_in_match``: the cid isn't in the loaded
+          MatchData -- pin not persisted, user is asked to re-pick
+        - 400 ``stage_times_offline_pure_matchdata``: offline source
+          carries no stage results; pin *is* persisted so refresh-times
+          can retry once the user drops a richer JSON or goes online
+        - 502 ``scoreboard_offline``: transient upstream issue;
+          pin persisted so refresh-times retries on the same selection
         """
         project = state.load()
         if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
@@ -978,9 +995,28 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 detail="project's scoreboard_match_id isn't numeric",
             ) from exc
 
-        # Persist the pin first so a subsequent ``refresh-times`` can
-        # retry even if this fetch fails (the user can fix the upstream
-        # block without re-picking themselves).
+        # Validate the competitor is actually in this match before
+        # persisting. Cheap server-side guard (uses the cached MatchData),
+        # avoids the "I picked a shooter and now my project is in a bad
+        # state" pattern. 404 with a discrete code so the SPA can prompt
+        # the user to pick again rather than rendering an upstream banner.
+        with _resolve_scoreboard_client() as client:
+            try:
+                match_data = client.get_match(ct, mid)
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        if not any(c.id == req.competitor_id for c in match_data.competitors):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "competitor_not_in_match",
+                    "message": (
+                        f"competitor {req.competitor_id} isn't in this match. "
+                        "Pick a different shooter."
+                    ),
+                },
+            )
+
         project.selected_shooter_id = req.shooter_id
         project.selected_competitor_id = req.competitor_id
         project.save(state.project_root)
