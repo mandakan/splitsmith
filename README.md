@@ -18,10 +18,16 @@ Outputs (per stage):
 
 ## Requirements
 
-- macOS (primary target -- should work on Linux but FCP integration is Mac-only)
+- macOS (primary target), Linux, or Windows. FCPXML is generated on every platform but Final Cut Pro itself is macOS-only -- on Linux/Windows you'll need to copy the `.fcpxml` to a Mac to open it (or just use the splits CSV directly).
 - Python 3.11+
-- `uv` for dependency management (`brew install uv`)
-- `ffmpeg` and `ffprobe` (`brew install ffmpeg`)
+- `uv` for dependency management
+  - macOS: `brew install uv`
+  - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - Windows: `winget install --id=astral-sh.uv -e` (or `irm https://astral.sh/uv/install.ps1 | iex`)
+- `ffmpeg` and `ffprobe` on `PATH`
+  - macOS: `brew install ffmpeg`
+  - Linux: `apt install ffmpeg` (or your distro equivalent)
+  - Windows: `winget install --id=Gyan.FFmpeg -e` (or scoop/chocolatey)
 
 ## Install
 
@@ -163,14 +169,19 @@ The repo ships with a real Stage 3 sample (Tallmilan 2026, "Per told me to do it
 uv run splitsmith single \
     --video tests/fixtures/stage_sample.mp4 \
     --time 14.74 \
-    --output /tmp/demo_analysis \
+    --output ./demo_analysis \
     --stage-name "Per told me to do it" \
     --stage-number 3
 
 # Inspect what got produced
-ls -la /tmp/demo_analysis/
-cat /tmp/demo_analysis/stage3_per-told-me-to-do-it_report.txt
-open /tmp/demo_analysis/stage3_per-told-me-to-do-it.fcpxml   # opens in Final Cut Pro
+ls -la ./demo_analysis/
+cat ./demo_analysis/stage3_per-told-me-to-do-it_report.txt
+
+# Open the FCPXML in Final Cut Pro:
+#   macOS:   open ./demo_analysis/stage3_per-told-me-to-do-it.fcpxml
+#   Linux:   xdg-open ./demo_analysis/stage3_per-told-me-to-do-it.fcpxml
+#   Windows: start .\demo_analysis\stage3_per-told-me-to-do-it.fcpxml
+# (FCP itself is macOS-only; on other platforms copy the .fcpxml to a Mac.)
 ```
 
 Expected output:
@@ -299,7 +310,7 @@ Lower `shot_detect.onset_delta` if you're under-detecting shots from a heavily-c
 
 ## Troubleshooting
 
-- **"ffmpeg binary not found" / "ffprobe binary not found"** -- `brew install ffmpeg` (or set `--ffmpeg-binary` if installed elsewhere).
+- **"ffmpeg binary not found" / "ffprobe binary not found"** -- install via your platform's package manager (macOS `brew install ffmpeg`, Linux `apt install ffmpeg`, Windows `winget install --id=Gyan.FFmpeg`), or set `--ffmpeg-binary` if installed elsewhere.
 - **`process` aborts with "Ambiguous stages"** -- two videos fall in the same stage's window, or one video matches multiple stages. Either narrow the input directory or use `single` for each stage.
 - **Report shows ">> 32 shots, possible false positives"** -- expected on busy ranges. Cull in the CSV and regenerate the FCPXML.
 - **Last shot is detected after the official stage time** -- usually a neighbouring-bay shot fired during your last shot's echo window. Drop it in the CSV.
