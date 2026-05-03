@@ -38,6 +38,10 @@ Endpoints (locked v1 surface):
   GET  /api/fixture/peaks?path=...  -- waveform peaks for a fixture's sibling WAV
   GET  /api/fixture/audio?path=...  -- serve the fixture's sibling WAV (Range)
   GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
+  GET  /api/user/recent-projects    -- recently-opened MatchProject roots (#75)
+  POST /api/user/recent-projects/forget -- drop one entry from the list
+  GET  /api/user/scoreboard-identity -- saved SSI identity (404 if none)
+  PUT  /api/user/scoreboard-identity -- write the SSI identity
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
@@ -68,7 +72,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import beep_detect, report, video_probe
+from .. import beep_detect, report, user_config, video_probe
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
@@ -268,26 +272,30 @@ def _now_iso() -> str:
 
 
 def _load_env_files(project_root: Path) -> list[Path]:
-    """Pick up ``.env.local`` then ``.env`` from the project root *and* the
-    cwd the user launched the server from.
+    """Pick up ``.env.local`` then ``.env`` from the project root, the cwd
+    the user launched the server from, and the global user-config dir.
 
     ``SPLITSMITH_SSI_TOKEN`` (and any other ``SPLITSMITH_*`` env var) lives
     in one of these files for typical setups; without this hook the token
     only works if the user remembered to ``export`` it before launching
     ``splitsmith ui``.
 
-    Search order (later files override earlier ones, but never an explicit
-    ``export`` -- the process env always wins via ``override=False``):
+    Search order (process env always wins via ``override=False``; the
+    first file to define a key keeps it):
 
     1. ``<project_root>/.env`` -- shared per-project defaults
     2. ``<project_root>/.env.local`` -- per-machine secret, gitignored
     3. ``<cwd>/.env``           -- repo / launch-dir shared default
     4. ``<cwd>/.env.local``     -- repo / launch-dir per-machine secret
+    5. ``<user_config_dir>/.env`` -- global per-user default
+    6. ``<user_config_dir>/.env.local`` -- global per-user secret (#75)
 
-    The cwd entries cover the common case where the user keeps the token
-    next to the splitsmith repo they ``uv run splitsmith ui`` from, while
-    the project-root entries cover per-match configuration. Duplicate paths
-    (when the user runs from inside the project directory) are loaded once.
+    The user-config layer is the natural home for the SSI API token,
+    which is per-user rather than per-project; per-project settings still
+    win because they're loaded earlier.
+    Duplicate paths (when the user runs from inside the project directory,
+    or sets ``SPLITSMITH_HOME`` to one of the other locations) are loaded
+    once.
     """
     try:
         from dotenv import load_dotenv
@@ -296,10 +304,15 @@ def _load_env_files(project_root: Path) -> list[Path]:
 
     candidates: list[Path] = []
     seen: set[Path] = set()
-    cwd = Path.cwd().resolve()
-    for base in (project_root.resolve(), cwd):
+    bases: list[Path] = [project_root.resolve(), Path.cwd().resolve()]
+    if not user_config.is_disabled():
+        bases.append(user_config.user_config_dir())
+    for base in bases:
         for name in (".env", ".env.local"):
-            candidate = (base / name).resolve()
+            try:
+                candidate = (base / name).resolve()
+            except OSError:
+                continue
             if candidate in seen:
                 continue
             seen.add(candidate)
@@ -476,6 +489,27 @@ class HealthResponse(BaseModel):
 class ScoreboardImportRequest(BaseModel):
     data: dict[str, Any]
     overwrite: bool = False
+
+
+class ForgetRecentProjectRequest(BaseModel):
+    """Body for POST /api/user/recent-projects/forget (#75)."""
+
+    path: str
+
+
+class ScoreboardIdentityRequest(BaseModel):
+    """Body for PUT /api/user/scoreboard-identity (#75).
+
+    Mirrors :class:`splitsmith.user_config.ScoreboardIdentity`. ``shooter_id``
+    is required; everything else is optional so the SPA can save a partial
+    identity without forcing the user to fill division / club.
+    """
+
+    shooter_id: int
+    display_name: str | None = None
+    division: str | None = None
+    club: str | None = None
+    base_url: str | None = None
 
 
 class ScoreboardUploadRequest(BaseModel):
@@ -742,6 +776,17 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     loaded_env = _load_env_files(resolved_root)
     if loaded_env:
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
+
+    # Record this open in the global recent-projects list (issue #75). The
+    # disk name on the project may differ from ``project_name`` -- prefer
+    # whatever ``MatchProject.init`` settled on so re-opens don't flip the
+    # display name based on which CLI invocation got there first.
+    try:
+        loaded_project = MatchProject.load(resolved_root)
+        recorded_name = loaded_project.name or project_name
+    except Exception:  # pragma: no cover -- defensive: never block boot
+        recorded_name = project_name
+    user_config.record_project_open(resolved_root, recorded_name)
 
     app = FastAPI(
         title="splitsmith UI",
@@ -3244,6 +3289,56 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         stage.skipped = req.skipped
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
+
+    # ----------------------------------------------------------------------
+    # Global user config (#75)
+    # ----------------------------------------------------------------------
+    #
+    # Cross-project state lives in ``~/.splitsmith/`` (override via
+    # ``SPLITSMITH_HOME``; opt out with ``SPLITSMITH_DISABLE_USER_CONFIG=1``).
+    # The endpoints below let the SPA read the recent-projects list for its
+    # project picker and read/write the saved SSI Scoreboard identity so the
+    # scoreboard import flow can prefill 'me' instead of asking each project.
+
+    @app.get("/api/user/recent-projects")
+    def list_recent_projects() -> JSONResponse:
+        projects = user_config.get_recent_projects()
+        return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
+
+    @app.post("/api/user/recent-projects/forget")
+    def forget_recent_project(req: ForgetRecentProjectRequest) -> JSONResponse:
+        removed = user_config.remove_recent_project(Path(req.path))
+        projects = user_config.get_recent_projects()
+        return JSONResponse(
+            {
+                "removed": removed,
+                "projects": [p.model_dump(mode="json") for p in projects],
+            }
+        )
+
+    @app.get("/api/user/scoreboard-identity")
+    def get_scoreboard_identity() -> JSONResponse:
+        identity = user_config.load_scoreboard_identity()
+        if identity is None:
+            raise HTTPException(status_code=404, detail="no scoreboard identity saved")
+        return JSONResponse(identity.model_dump(mode="json"))
+
+    @app.put("/api/user/scoreboard-identity")
+    def put_scoreboard_identity(req: ScoreboardIdentityRequest) -> JSONResponse:
+        identity = user_config.ScoreboardIdentity(
+            shooter_id=req.shooter_id,
+            display_name=req.display_name,
+            division=req.division,
+            club=req.club,
+            base_url=req.base_url,
+        )
+        user_config.save_scoreboard_identity(identity)
+        return JSONResponse(identity.model_dump(mode="json"))
+
+    @app.delete("/api/user/scoreboard-identity")
+    def delete_scoreboard_identity() -> JSONResponse:
+        user_config.clear_scoreboard_identity()
+        return JSONResponse({"ok": True})
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)
