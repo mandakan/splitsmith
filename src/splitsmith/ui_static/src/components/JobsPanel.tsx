@@ -1,19 +1,20 @@
 /**
- * Global jobs panel (issue #26).
+ * Floating jobs FAB (issues #26, #51).
  *
- * Shows a popover with the currently active and recently finished jobs in
- * the AppShell header. Polls /api/jobs at 1 Hz when any job is active so
- * the user can see progress without digging into per-stage badges, and
- * lets them cancel a runaway trim mid-encode.
+ * Renders a fixed bottom-right action button that summarises the job
+ * registry and opens a popover with the same per-job rows the old
+ * in-header panel used. The FAB lives outside page scroll so multi-cam
+ * beep / trim runs stay visible on long screens (audit, export).
  *
- * Polling is paused when no jobs are running to keep the request volume
- * close to zero on idle screens.
+ * Polling cadence is 1 Hz while any job is active and 5 s otherwise so
+ * an idle screen barely talks to the backend.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Loader2,
   X,
@@ -29,6 +30,7 @@ const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
 // Show at most this many jobs in the popover to keep it scannable.
 const VISIBLE_LIMIT = 8;
+const POPOVER_ID = "jobs-panel-popover";
 
 const KIND_LABEL: Record<string, string> = {
   detect_beep: "Detect beep",
@@ -84,16 +86,23 @@ function StatusIcon({ job, className }: StatusIconProps) {
   }
   return (
     <Loader2
-      className={cn("size-4 animate-spin text-primary", className)}
+      className={cn("size-4 motion-safe:animate-spin text-primary", className)}
       aria-hidden
     />
   );
 }
 
+type FabState = "idle" | "running" | "failed";
+
 export function JobsPanel() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [open, setOpen] = useState(false);
   const [cancelInFlight, setCancelInFlight] = useState<Set<string>>(() => new Set());
+  // Failed-job ids the user has already seen. A failure stays "sticky"
+  // (destructive FAB state) until either the popover opens or the
+  // failed job ages out of the registry. Acked-but-still-failed jobs
+  // continue to render in the list, just without driving FAB state.
+  const [acked, setAcked] = useState<Set<string>>(() => new Set());
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -132,6 +141,71 @@ export function JobsPanel() {
     };
   }, [refresh]);
 
+  const sorted = useMemo(() => {
+    // Active first (newest first within active), then most recent finished.
+    const active = jobs.filter(isActive);
+    const finished = jobs.filter((j) => !isActive(j));
+    active.sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+    finished.sort((a, b) => {
+      const at = a.finished_at ?? a.updated_at;
+      const bt = b.finished_at ?? b.updated_at;
+      return new Date(bt).getTime() - new Date(at).getTime();
+    });
+    return [...active, ...finished].slice(0, VISIBLE_LIMIT);
+  }, [jobs]);
+
+  const activeCount = jobs.filter(isActive).length;
+  const unackedFailedIds = useMemo(
+    () =>
+      jobs
+        .filter((j) => j.status === "failed" && !acked.has(j.id))
+        .map((j) => j.id),
+    [jobs, acked],
+  );
+  const unackedFailedCount = unackedFailedIds.length;
+
+  // Drop ack entries for jobs that have aged out of the registry so
+  // the set doesn't grow unbounded across long sessions.
+  useEffect(() => {
+    setAcked((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(jobs.map((j) => j.id));
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [jobs]);
+
+  // Auto-open on a new failure. Re-fires when the unacked count grows,
+  // not when an existing failure remains unacked, so the popover doesn't
+  // keep popping back if the user closes it without clicking through.
+  const prevUnackCountRef = useRef(0);
+  useEffect(() => {
+    if (unackedFailedCount > prevUnackCountRef.current && !open) {
+      setOpen(true);
+    }
+    prevUnackCountRef.current = unackedFailedCount;
+  }, [unackedFailedCount, open]);
+
+  // Acknowledge unacked failures whenever the popover is open. Runs on
+  // open transitions and also while open if a new failure lands, so the
+  // failed badge clears immediately once the user has the panel up.
+  useEffect(() => {
+    if (!open || unackedFailedCount === 0) return;
+    setAcked((prev) => {
+      const next = new Set(prev);
+      unackedFailedIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [open, unackedFailedCount, unackedFailedIds]);
+
   // Close popover on outside click / Escape.
   useEffect(() => {
     if (!open) return;
@@ -152,24 +226,76 @@ export function JobsPanel() {
     };
   }, [open]);
 
-  const sorted = useMemo(() => {
-    // Active first (newest first within active), then most recent finished.
-    const active = jobs.filter(isActive);
-    const finished = jobs.filter((j) => !isActive(j));
-    active.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-    finished.sort((a, b) => {
-      const at = a.finished_at ?? a.updated_at;
-      const bt = b.finished_at ?? b.updated_at;
-      return new Date(bt).getTime() - new Date(at).getTime();
-    });
-    return [...active, ...finished].slice(0, VISIBLE_LIMIT);
-  }, [jobs]);
+  // Global Alt+J shortcut to open / focus the panel. Skip when an editable
+  // field is focused so the chord doesn't steal keystrokes from a textarea
+  // that wants Alt-modified input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key !== "j" && e.key !== "J") return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        (t && t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  const activeCount = jobs.filter(isActive).length;
-  const failedCount = jobs.filter((j) => j.status === "failed").length;
+  // Focus management: pull focus into the popover on open, return it to
+  // the FAB on close, and trap Tab inside while open.
+  const prevOpenRef = useRef(open);
+  useEffect(() => {
+    if (prevOpenRef.current && !open) {
+      triggerRef.current?.focus();
+    }
+    prevOpenRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const root = popoverRef.current;
+    if (!root) return;
+    const queryFocusables = () =>
+      Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+    const initial = queryFocusables();
+    if (initial.length > 0) initial[0].focus();
+    else root.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const list = queryFocusables();
+      if (list.length === 0) {
+        e.preventDefault();
+        root.focus();
+        return;
+      }
+      const first = list[0];
+      const last = list[list.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || active === root)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    root.addEventListener("keydown", onKey);
+    return () => {
+      root.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   const cancel = async (jobId: string) => {
     setCancelInFlight((prev) => {
@@ -191,47 +317,81 @@ export function JobsPanel() {
     }
   };
 
+  // Failed beats running beats idle so a failure stays loud even while
+  // a follow-up retry is in flight.
+  const fabState: FabState =
+    unackedFailedCount > 0 ? "failed" : activeCount > 0 ? "running" : "idle";
+
   const triggerLabel =
-    activeCount > 0
-      ? `${activeCount} job${activeCount === 1 ? "" : "s"} running`
-      : failedCount > 0
-        ? `${failedCount} recent failure${failedCount === 1 ? "" : "s"}`
-        : "Jobs";
+    fabState === "failed"
+      ? `Background jobs, ${unackedFailedCount} failed`
+      : fabState === "running"
+        ? `Background jobs, ${activeCount} running`
+        : "Background jobs";
+
+  const fabClass = cn(
+    "relative inline-flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-colors",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    fabState === "failed" &&
+      "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+    fabState === "running" && "bg-primary text-primary-foreground hover:bg-primary/90",
+    fabState === "idle" && "bg-muted text-muted-foreground hover:bg-accent",
+  );
 
   return (
-    <div className="relative">
-      <Button
+    <div
+      // Mobile-safe inset: respect the home-indicator and any right-edge
+      // safe area but never sit closer than 16px to the viewport edge.
+      style={{
+        bottom: "max(16px, calc(env(safe-area-inset-bottom) + 16px))",
+        right: "max(16px, calc(env(safe-area-inset-right) + 16px))",
+      }}
+      className="fixed z-50"
+    >
+      <button
         ref={triggerRef}
-        variant={activeCount > 0 ? "default" : "ghost"}
-        size="sm"
+        type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={POPOVER_ID}
         aria-label={triggerLabel}
-        className="gap-2"
+        className={fabClass}
       >
-        {activeCount > 0 ? (
-          <Loader2 className="size-4 animate-spin" aria-hidden />
+        {fabState === "failed" ? (
+          <AlertTriangle className="size-5" aria-hidden />
+        ) : fabState === "running" ? (
+          <Loader2 className="size-5 motion-safe:animate-spin" aria-hidden />
         ) : (
-          <Activity className="size-4" aria-hidden />
+          <Activity className="size-5" aria-hidden />
         )}
-        <span className="text-xs font-medium tracking-tight">Jobs</span>
-        {activeCount > 0 ? (
-          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-            {activeCount}
-          </Badge>
-        ) : failedCount > 0 ? (
-          <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-            {failedCount}
+        {fabState !== "idle" ? (
+          <Badge
+            variant={fabState === "failed" ? "destructive" : "secondary"}
+            className="absolute -right-1 -top-1 min-w-5 justify-center px-1 py-0 text-[10px]"
+          >
+            {fabState === "failed" ? unackedFailedCount : activeCount}
           </Badge>
         ) : null}
-      </Button>
+      </button>
+      {/* aria-live region for assistive tech: announce count changes
+          even when the popover is closed. Empty when idle so screen
+          readers stay quiet on idle screens. */}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {fabState === "failed"
+          ? `${unackedFailedCount} background job${unackedFailedCount === 1 ? "" : "s"} failed`
+          : fabState === "running"
+            ? `${activeCount} background job${activeCount === 1 ? "" : "s"} running`
+            : ""}
+      </span>
       {open ? (
         <div
           ref={popoverRef}
+          id={POPOVER_ID}
           role="dialog"
           aria-label="Background jobs"
-          className="absolute right-0 z-30 mt-2 w-96 max-w-[calc(100vw-1rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+          tabIndex={-1}
+          className="absolute bottom-full right-0 z-50 mb-2 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-lg focus:outline-none"
         >
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold tracking-tight">Background jobs</h2>
@@ -316,7 +476,7 @@ function JobRow({ job, busy, onCancel }: JobRowProps) {
             title="Cancel"
           >
             {busy ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden />
             ) : (
               <X className="size-3.5" aria-hidden />
             )}
