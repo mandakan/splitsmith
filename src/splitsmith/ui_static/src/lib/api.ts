@@ -1002,6 +1002,10 @@ export const api = {
 
   listLabFixtures: () => request<LabFixtureRecord[]>("/api/lab/fixtures"),
 
+  /** Hydrate the Lab page after a navigation: returns the most recent
+   *  eval/rescore in this server session, or 404 when none has run. */
+  getLastLabRun: () => request<LabEvalRun>("/api/lab/last-run"),
+
   runLabEval: (payload: { slugs?: string[]; config?: Partial<LabEvalConfig>; persist?: boolean }) =>
     request<LabEvalRun>("/api/lab/eval", { method: "POST", json: payload }),
 

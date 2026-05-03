@@ -83,6 +83,17 @@ export function Lab() {
       .listLabFixtures()
       .then(setCatalog)
       .catch((err) => setError(String(err)));
+    // Hydrate from the server's most-recent run cache so navigating
+    // away from /lab and back doesn't wipe the eval state.
+    api
+      .getLastLabRun()
+      .then((r) => {
+        setRun(r);
+        setConfig(r.config);
+      })
+      .catch(() => {
+        // 404 = no eval has run yet; that's the normal first-load case.
+      });
   }, []);
 
   const runEval = useCallback(async () => {
