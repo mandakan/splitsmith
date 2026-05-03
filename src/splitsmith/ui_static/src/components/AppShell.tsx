@@ -81,7 +81,6 @@ export function AppShell() {
             <ProjectHeader />
           )}
           <div className="flex items-center gap-2">
-            {fixtureMode ? null : <JobsPanel />}
             <ThemeToggle />
           </div>
         </header>
@@ -89,6 +88,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      {fixtureMode ? null : <JobsPanel />}
     </div>
   );
 }
