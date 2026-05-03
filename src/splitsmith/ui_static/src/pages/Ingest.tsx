@@ -559,16 +559,29 @@ function ScoreboardSection({
     setLastComplete(ingestComplete);
   }, [ingestComplete, lastComplete]);
 
-  const description = realCount
-    ? `${realCount} stages loaded for ${project!.competitor_name ?? "the primary competitor"}.`
+  const stageSummary = realCount
+    ? `${realCount} stages loaded`
     : placeholderCount
-      ? `${placeholderCount} placeholder stages -- upload a real scoreboard to fill in names, competitor metadata, and timestamps.`
+      ? `${placeholderCount} placeholder stages -- upload a real scoreboard or pin yourself online to fill in stage times`
       : "No stages yet. Drop in an SSI Scoreboard JSON, or search the live scoreboard.";
   const dropLabel = realCount
     ? "Replace scoreboard JSON (warns first)"
     : placeholderCount
       ? "Upload scoreboard to overlay placeholders"
       : "Drop or pick an SSI Scoreboard JSON";
+
+  // Collapsed-state summary: lead with the human-readable identity
+  // (match name + competitor name) so the user can see who's pinned
+  // without expanding. Numeric ids stay tucked into a tooltip.
+  const matchTitle = project?.name && project.name !== "Untitled match" ? project.name : null;
+  const competitorLabel = project?.competitor_name ?? null;
+  const idsTooltip = project?.scoreboard_match_id
+    ? `match ${project.scoreboard_match_id}${
+        project.scoreboard_content_type != null
+          ? ` (ct ${project.scoreboard_content_type})`
+          : ""
+      }${project.selected_competitor_id != null ? ` · cid ${project.selected_competitor_id}` : ""}`
+    : undefined;
 
   return (
     <Card>
@@ -585,30 +598,31 @@ function ScoreboardSection({
             {expanded ? "Hide" : "Change"}
           </span>
         </CardTitle>
-        <CardDescription className="flex flex-wrap items-center gap-x-2">
-          <span>{description}</span>
-          {project?.scoreboard_match_id ? (
-            <span className="text-xs text-muted-foreground">
-              · match <code>{project.scoreboard_match_id}</code>
-              {project.scoreboard_content_type !== null &&
-              project.scoreboard_content_type !== undefined
-                ? ` (ct ${project.scoreboard_content_type})`
-                : null}
+        <CardDescription
+          className="flex flex-wrap items-center gap-x-2"
+          title={idsTooltip}
+        >
+          {matchTitle ? (
+            <span className="font-medium text-foreground">{matchTitle}</span>
+          ) : null}
+          {competitorLabel ? (
+            <span className="text-foreground">
+              · {competitorLabel}
             </span>
           ) : null}
+          <span className="text-muted-foreground">
+            {matchTitle || competitorLabel ? "· " : ""}
+            {stageSummary}
+          </span>
         </CardDescription>
       </CardHeader>
       {expanded ? (
+        // Order is intentional: source badge (status), then the primary
+        // happy-path inputs (live search, then shooter pinner once a
+        // match is loaded), then the offline drop-zone fallback last
+        // and compact since most users will go online.
         <CardContent className="space-y-4">
           {source ? <ScoreboardSourceBadge source={source} /> : null}
-
-          <FileDropZone
-            accept=".json,application/json"
-            label={dropLabel}
-            icon={<FileJson className="size-5" />}
-            disabled={busy}
-            onFile={onScoreboard}
-          />
 
           {!isLocal && onlineReady ? (
             <OnlineMatchSearch
@@ -627,6 +641,13 @@ function ScoreboardSection({
               onError={setScoreboardError}
             />
           ) : null}
+
+          <CompactFileDropZone
+            accept=".json,application/json"
+            label={dropLabel}
+            disabled={busy}
+            onFile={onScoreboard}
+          />
         </CardContent>
       ) : null}
     </Card>
@@ -2549,16 +2570,21 @@ function StatusGlyph({ stage }: { stage: StageEntry }) {
   );
 }
 
-function FileDropZone({
+/** Compact, single-row drop zone used in the Scoreboard card.
+ *
+ *  The offline JSON path is the secondary option (most users will go
+ *  online), so it sits last in the card and reads as a one-line
+ *  affordance instead of the full-bleed marketing-style box. Same drag
+ *  + click semantics as ``FileDropZone``, just less screen real estate.
+ */
+function CompactFileDropZone({
   accept,
   label,
-  icon,
   disabled,
   onFile,
 }: {
   accept: string;
   label: string;
-  icon: React.ReactNode;
   disabled?: boolean;
   onFile: (f: File) => void;
 }) {
@@ -2566,8 +2592,8 @@ function FileDropZone({
   return (
     <label
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 px-4 py-6 text-sm transition-colors",
-        over && "border-ring bg-muted/40",
+        "group flex cursor-pointer items-center justify-between gap-3 rounded-md border border-dashed border-border bg-muted/10 px-3 py-2 text-xs transition-colors hover:bg-muted/20",
+        over && "border-ring bg-muted/30",
         disabled && "pointer-events-none opacity-50",
       )}
       onDragOver={(e) => {
@@ -2582,9 +2608,11 @@ function FileDropZone({
         if (file) onFile(file);
       }}
     >
-      {icon}
-      <span className="text-foreground">{label}</span>
-      <span className="text-xs text-muted-foreground">drag & drop, or click to browse</span>
+      <span className="flex items-center gap-2 text-muted-foreground">
+        <FileJson className="size-3.5 shrink-0" />
+        <span>{label}</span>
+      </span>
+      <span className="text-muted-foreground/70">drag &amp; drop or click</span>
       <input
         type="file"
         accept={accept}
@@ -2599,3 +2627,4 @@ function FileDropZone({
     </label>
   );
 }
+

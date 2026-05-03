@@ -869,8 +869,10 @@ def test_fs_list_default_path_uses_last_scanned_dir(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["path"] == str(seeded.resolve())
-    # The seeded dir is suggested first in bookmarks.
-    assert body["suggested_starts"][0] == str(seeded.resolve())
+    # The seeded dir is suggested first in bookmarks (the "Recent" group).
+    first = body["suggested_starts"][0]
+    assert first["path"] == str(seeded.resolve())
+    assert first["kind"] == "recent"
 
 
 def test_fs_list_404_on_missing_path(tmp_path: Path) -> None:

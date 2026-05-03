@@ -18,15 +18,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Clock,
+  Cloud,
   Film,
   Folder,
   FolderOpen,
+  HardDrive,
   Home,
   Loader2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type FsEntry, type FsListing } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type FsEntry,
+  type FsListing,
+  type SuggestedStart,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface FolderPickerProps {
@@ -134,30 +142,32 @@ export function FolderPicker({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr]">
-        <aside className="flex flex-col gap-1 text-sm">
-          {(listing?.suggested_starts ?? []).slice(0, 6).map((s, i) => (
-            <button
-              key={s}
-              type="button"
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                path === s && "bg-accent text-accent-foreground",
-              )}
-              onClick={() => void load(s)}
-              disabled={busy}
-              title={s}
-            >
-              {i === 0 ? <Clock className="size-3.5" /> : <Home className="size-3.5" />}
-              <span className="truncate text-xs">{s.split("/").filter(Boolean).pop() || "/"}</span>
-            </button>
-          ))}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[200px_1fr]">
+        <aside className="flex flex-col gap-3 text-sm">
+          <SuggestedStartsSidebar
+            starts={listing?.suggested_starts ?? []}
+            currentPath={path}
+            disabled={busy}
+            onPick={(p) => void load(p)}
+          />
         </aside>
 
-        <div className="min-h-[12rem] rounded-md border border-border bg-background">
+        <div className="relative min-h-[12rem] rounded-md border border-border bg-background">
+          {/* When ``busy && listing`` (we're navigating into a slow
+              folder while an old listing is still on screen), overlay a
+              translucent spinner instead of swapping the whole panel.
+              Keeps the user oriented and signals that the next listing
+              is coming. The first-load spinner case below renders
+              directly when there's no listing yet. */}
+          {busy && listing ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/70 backdrop-blur-[1px]">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : null}
           {busy && !listing ? (
-            <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+            <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
+              <span>Reading folder...</span>
             </div>
           ) : error ? (
             <div className="p-4 text-sm text-destructive">{error}</div>
@@ -278,6 +288,67 @@ export function FolderPicker({
       </div>
     </div>
   );
+}
+
+/** Sidebar bookmarks, grouped by ``kind`` so the user can scan
+ *  recent / home / removable+network sections separately. The wire
+ *  shape carries one entry per bookmark; we group client-side to keep
+ *  the contract simple. */
+function SuggestedStartsSidebar({
+  starts,
+  currentPath,
+  disabled,
+  onPick,
+}: {
+  starts: SuggestedStart[];
+  currentPath: string | null;
+  disabled: boolean;
+  onPick: (path: string) => void;
+}) {
+  const groups: { title: string; kinds: SuggestedStart["kind"][]; }[] = [
+    { title: "Recent", kinds: ["recent"] },
+    { title: "Home", kinds: ["home"] },
+    { title: "Removable & network", kinds: ["removable", "network"] },
+  ];
+  return (
+    <>
+      {groups.map((g) => {
+        const items = starts.filter((s) => g.kinds.includes(s.kind));
+        if (items.length === 0) return null;
+        return (
+          <div key={g.title} className="space-y-1">
+            <div className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {g.title}
+            </div>
+            {items.map((s) => (
+              <button
+                key={s.path}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                  currentPath === s.path && "bg-accent text-accent-foreground",
+                )}
+                onClick={() => onPick(s.path)}
+                disabled={disabled}
+                title={s.path}
+              >
+                <SidebarIcon kind={s.kind} />
+                <span className="truncate text-xs">{s.label}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function SidebarIcon({ kind }: { kind: SuggestedStart["kind"] }) {
+  const className = "size-3.5 shrink-0";
+  if (kind === "recent") return <Clock className={className} />;
+  if (kind === "removable") return <HardDrive className={className} />;
+  if (kind === "network") return <Cloud className={className} />;
+  return <Home className={className} />;
 }
 
 function VideoRowMulti({
