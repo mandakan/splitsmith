@@ -524,7 +524,8 @@
         "time": 13.3566,
         "ms_after_beep": 12857.0,
         "peak_amplitude": 0.0878,
-        "confidence": 0.014
+        "confidence": 0.014,
+        "reason": "wind"
       },
       {
         "candidate_number": 36,

@@ -3390,6 +3390,64 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def lab_fixtures() -> JSONResponse:
         return JSONResponse([r.model_dump(mode="json") for r in lab_module.list_fixtures()])
 
+    @app.get("/api/lab/snippet")
+    def lab_snippet(
+        audit_path: str = Query(...),
+        candidate_number: int = Query(..., ge=1),
+        pre_ms: int = Query(default=lab_module.DEFAULT_PRE_MS, ge=0, le=2000),
+        post_ms: int = Query(default=lab_module.DEFAULT_POST_MS, ge=0, le=2000),
+    ) -> FileResponse:
+        """Serve the per-candidate snippet WAV (issue #98).
+
+        Builds-on-first-request and caches under the fixture's
+        ``.cache/<slug>_snippets/`` directory.
+        """
+        try:
+            fixture_json = Path(audit_path).expanduser().resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"fixture not found: {audit_path}") from exc
+        try:
+            target = lab_module.extract_snippet(
+                fixture_json,
+                candidate_number,
+                pre_ms=pre_ms,
+                post_ms=post_ms,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return FileResponse(target, media_type="audio/wav", filename=target.name)
+
+    @app.post("/api/lab/snippets/precache")
+    def lab_snippets_precache(
+        payload: dict[str, Any] = Body(...),  # noqa: B008
+    ) -> JSONResponse:
+        """Submit a job that materialises every candidate snippet for a fixture."""
+        audit_path = payload.get("audit_path")
+        pre_ms = int(payload.get("pre_ms", lab_module.DEFAULT_PRE_MS))
+        post_ms = int(payload.get("post_ms", lab_module.DEFAULT_POST_MS))
+        if not isinstance(audit_path, str) or not audit_path:
+            raise HTTPException(
+                status_code=400,
+                detail="payload must include 'audit_path' (string)",
+            )
+        try:
+            target = Path(audit_path).expanduser().resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"fixture not found: {audit_path}") from exc
+
+        def _run(handle: JobHandle) -> None:
+            def progress(i: int, total: int, _cn: int) -> None:
+                handle.check_cancel()
+                handle.update(progress=i / total if total else 1.0, message=f"{i}/{total}")
+
+            n = lab_module.precache_all(target, pre_ms=pre_ms, post_ms=post_ms, progress=progress)
+            handle.update(progress=1.0, message=f"cached {n} snippets")
+
+        job = state.jobs.submit(kind="snippet_precache", fn=_run)
+        return JSONResponse(job.model_dump(mode="json"))
+
     @app.get("/api/lab/last-run")
     def lab_last_run() -> JSONResponse:
         """Return the most recent eval/rescore in this server session.

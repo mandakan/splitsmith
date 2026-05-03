@@ -17,7 +17,7 @@
  * surface change to AppShell, and no existing route was modified.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
@@ -25,9 +25,11 @@ import {
   CheckCircle2,
   ChevronRight,
   Hammer,
+  Headphones,
   Loader2,
   Pencil,
   Play,
+  Repeat,
   RotateCcw,
   Save,
   Settings2,
@@ -719,10 +721,12 @@ function FixtureDetail({
   const [time, setTime] = useState(0);
   const [savingLabel, setSavingLabel] = useState<number | null>(null);
   const [selectedCn, setSelectedCn] = useState<number | null>(null);
+  const [stepThrough, setStepThrough] = useState(false);
 
   useEffect(() => {
     setPeaks(null);
     setSelectedCn(null);
+    setStepThrough(false);
     api
       .getFixturePeaks(fixture.audit_path)
       .then(setPeaks)
@@ -749,6 +753,15 @@ function FixtureDetail({
     },
     [fixture.audit_path, onLabelChanged],
   );
+
+  // Step-through can register a "what's the next candidate after this
+  // one in my filter+sort?" resolver. Used by the keyboard handler to
+  // auto-advance after a label key. The candidate table doesn't set
+  // this, so labels in that mode just stay on the current row.
+  const advanceRef = useRef<((cn: number) => number | null) | null>(null);
+  const setAdvancer = useCallback((fn: ((cn: number) => number | null) | null) => {
+    advanceRef.current = fn;
+  }, []);
 
   // Keyboard shortcuts: row selection + label assignment.
   useEffect(() => {
@@ -785,6 +798,11 @@ function FixtureDetail({
       if (idx < 0) return;
       const c = cands[idx];
 
+      const advance = () => {
+        const next = advanceRef.current?.(c.candidate_number);
+        if (next != null) setSelectedCn(next);
+      };
+
       // Clear: 0 or Backspace.
       if (e.key === "0" || e.key === "Backspace") {
         e.preventDefault();
@@ -793,6 +811,7 @@ function FixtureDetail({
         } else {
           handleLabel(c.candidate_number, { reason: null });
         }
+        advance();
         return;
       }
 
@@ -802,12 +821,14 @@ function FixtureDetail({
         if (sub) {
           e.preventDefault();
           handleLabel(c.candidate_number, { subclass: sub });
+          advance();
         }
       } else {
         const reason = REASON_SHORTCUTS[key];
         if (reason) {
           e.preventDefault();
           handleLabel(c.candidate_number, { reason });
+          advance();
         }
       }
     }
@@ -897,13 +918,41 @@ function FixtureDetail({
           positivesBySubclass={fixture.metrics.positives_by_subclass}
         />
 
-        <CandidateTable
-          candidates={fixture.candidates}
-          onLabel={handleLabel}
-          savingLabel={savingLabel}
-          selectedCn={selectedCn}
-          onSelect={setSelectedCn}
-        />
+        <div className="flex items-center gap-2">
+          <Button
+            variant={stepThrough ? "default" : "outline"}
+            size="sm"
+            onClick={() => setStepThrough((v) => !v)}
+            title="Toggle step-through labeling mode (audio snippets + autoplay)"
+          >
+            <Headphones className="size-3.5" />
+            {stepThrough ? "Exit step-through" : "Step through"}
+          </Button>
+          {stepThrough && (
+            <span className="text-[11px] text-muted-foreground">
+              Click a candidate or use J/K. Snippet autoplays; press a label key to save and advance.
+            </span>
+          )}
+        </div>
+
+        {stepThrough ? (
+          <StepThroughPanel
+            fixture={fixture}
+            selectedCn={selectedCn}
+            onSelect={setSelectedCn}
+            registerAdvancer={setAdvancer}
+            savingLabel={savingLabel}
+            onLabel={handleLabel}
+          />
+        ) : (
+          <CandidateTable
+            candidates={fixture.candidates}
+            onLabel={handleLabel}
+            savingLabel={savingLabel}
+            selectedCn={selectedCn}
+            onSelect={setSelectedCn}
+          />
+        )}
         <KeyboardLegend selectedCn={selectedCn} />
       </CardContent>
     </Card>
@@ -1447,6 +1496,326 @@ function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) 
       )}
     </div>
   );
+}
+
+type StepFilter = "rejected_only" | "fps_only" | "unlabeled_only" | "all";
+type StepSort = "ensemble_score_asc" | "chronological" | "confidence_asc";
+
+function StepThroughPanel({
+  fixture,
+  selectedCn,
+  onSelect,
+  registerAdvancer,
+  savingLabel,
+  onLabel,
+}: {
+  fixture: LabEvalFixture;
+  selectedCn: number | null;
+  onSelect: (cn: number | null) => void;
+  registerAdvancer: (fn: ((cn: number) => number | null) | null) => void;
+  savingLabel: number | null;
+  onLabel: (
+    cn: number,
+    patch: { reason?: string | null; subclass?: string | null },
+  ) => void;
+}) {
+  const [filter, setFilter] = useState<StepFilter>("rejected_only");
+  const [sort, setSort] = useState<StepSort>("ensemble_score_asc");
+  const [preMs, setPreMs] = useState(100);
+  const [postMs, setPostMs] = useState(300);
+  const [loop, setLoop] = useState(true);
+  const [precaching, setPrecaching] = useState(false);
+
+  const ordered = useMemo(() => {
+    let list = [...fixture.candidates];
+    if (filter === "rejected_only") {
+      list = list.filter((c) => !c.kept);
+    } else if (filter === "fps_only") {
+      list = list.filter((c) => c.kept && c.truth === 0);
+    } else if (filter === "unlabeled_only") {
+      list = list.filter((c) => {
+        if (c.kept && c.truth === 1) return c.subclass == null;
+        return c.reason == null;
+      });
+    }
+    list.sort((a, b) => {
+      if (sort === "ensemble_score_asc") return a.ensemble_score - b.ensemble_score;
+      if (sort === "confidence_asc") return a.confidence - b.confidence;
+      return a.time - b.time;
+    });
+    return list;
+  }, [fixture.candidates, filter, sort]);
+
+  // Register the auto-advance resolver: given the current cn, return
+  // the next cn in the active filter+sort or null at the end.
+  useEffect(() => {
+    registerAdvancer((cn) => {
+      const idx = ordered.findIndex((c) => c.candidate_number === cn);
+      if (idx < 0 || idx >= ordered.length - 1) return null;
+      return ordered[idx + 1].candidate_number;
+    });
+    return () => registerAdvancer(null);
+  }, [ordered, registerAdvancer]);
+
+  // Default selection: first item in the active list.
+  useEffect(() => {
+    if (ordered.length === 0) return;
+    if (selectedCn == null || !ordered.some((c) => c.candidate_number === selectedCn)) {
+      onSelect(ordered[0].candidate_number);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered]);
+
+  const current = useMemo(
+    () => ordered.find((c) => c.candidate_number === selectedCn) ?? null,
+    [ordered, selectedCn],
+  );
+
+  const idxInList = current
+    ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
+    : -1;
+
+  const onPrecache = useCallback(async () => {
+    setPrecaching(true);
+    try {
+      await api.precacheLabSnippets({
+        audit_path: fixture.audit_path,
+        pre_ms: preMs,
+        post_ms: postMs,
+      });
+    } catch (err) {
+      console.error("precache failed", err);
+    } finally {
+      setPrecaching(false);
+    }
+  }, [fixture.audit_path, preMs, postMs]);
+
+  return (
+    <div className="rounded border border-primary/40 bg-primary/5 p-3">
+      <div className="mb-3 flex flex-wrap items-end gap-3 text-[11px]">
+        <label className="flex flex-col gap-1">
+          <span className="font-medium text-muted-foreground">Filter</span>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as StepFilter)}
+            className="rounded border border-border bg-background px-1 py-0.5"
+          >
+            <option value="rejected_only">Rejected only (recommended)</option>
+            <option value="fps_only">FPs only (kept negatives)</option>
+            <option value="unlabeled_only">Unlabeled only</option>
+            <option value="all">All candidates</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="font-medium text-muted-foreground">Sort</span>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as StepSort)}
+            className="rounded border border-border bg-background px-1 py-0.5"
+          >
+            <option value="ensemble_score_asc">Ensemble score asc (borderline first)</option>
+            <option value="confidence_asc">Confidence asc</option>
+            <option value="chronological">Chronological</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="font-medium text-muted-foreground">Pre ms ({preMs})</span>
+          <input
+            type="range"
+            min={0}
+            max={500}
+            step={10}
+            value={preMs}
+            onChange={(e) => setPreMs(Number(e.target.value))}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="font-medium text-muted-foreground">Post ms ({postMs})</span>
+          <input
+            type="range"
+            min={50}
+            max={800}
+            step={10}
+            value={postMs}
+            onChange={(e) => setPostMs(Number(e.target.value))}
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+          <Repeat className="size-3.5" /> Loop
+        </label>
+        <Button variant="outline" size="sm" onClick={onPrecache} disabled={precaching}>
+          {precaching ? <Loader2 className="size-3 animate-spin" /> : null}
+          Pre-cache all
+        </Button>
+        <span className="ml-auto text-muted-foreground">
+          {idxInList + 1} / {ordered.length}
+          {ordered.length === 0 && " (no candidates match filter)"}
+        </span>
+      </div>
+
+      {current ? (
+        <SnippetPlayer
+          fixture={fixture}
+          candidate={current}
+          loop={loop}
+          preMs={preMs}
+          postMs={postMs}
+        />
+      ) : (
+        <div className="rounded border border-dashed border-border/60 px-4 py-6 text-center text-xs text-muted-foreground">
+          Adjust the filter or run eval to populate the candidate list.
+        </div>
+      )}
+
+      {/* Compact list -- shows position in the queue + assigned labels. */}
+      <div className="mt-3 max-h-60 overflow-y-auto rounded border border-border/60 bg-background/50">
+        <table className="w-full text-[11px]">
+          <tbody>
+            {ordered.map((c) => {
+              const sel = c.candidate_number === selectedCn;
+              const saving = savingLabel === c.candidate_number;
+              const label = c.kept && c.truth === 1 ? c.subclass : c.reason;
+              return (
+                <tr
+                  key={c.candidate_number}
+                  className={cn(
+                    "cursor-pointer border-b border-border/30 font-mono",
+                    sel && "bg-primary/15 outline outline-1 outline-primary/60",
+                    !sel && c.kept && c.truth === 1 && "bg-emerald-500/5",
+                    !sel && c.kept && c.truth === 0 && "bg-orange-500/10",
+                  )}
+                  onClick={() => onSelect(c.candidate_number)}
+                >
+                  <td className="px-2 py-0.5">#{c.candidate_number}</td>
+                  <td className="px-2 py-0.5 text-right text-muted-foreground">
+                    {c.time.toFixed(3)}s
+                  </td>
+                  <td className="px-2 py-0.5 text-right text-muted-foreground">
+                    score {c.ensemble_score.toFixed(2)}
+                  </td>
+                  <td className="px-2 py-0.5 text-right">
+                    {label ? (
+                      <span className="rounded bg-muted px-1">{label}</span>
+                    ) : (
+                      <span className="text-muted-foreground">--</span>
+                    )}
+                  </td>
+                  <td className="w-4">
+                    {saving && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {current && (
+        <div className="mt-3 flex flex-wrap gap-1 text-[10px]">
+          {(current.kept && current.truth === 1 ? LAB_SUBCLASSES : LAB_REASONS).map((label) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() =>
+                current.kept && current.truth === 1
+                  ? onLabel(current.candidate_number, { subclass: label })
+                  : onLabel(current.candidate_number, { reason: label })
+              }
+              className="rounded border border-border/60 bg-background px-2 py-0.5 hover:bg-accent"
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              current.kept && current.truth === 1
+                ? onLabel(current.candidate_number, { subclass: null })
+                : onLabel(current.candidate_number, { reason: null })
+            }
+            className="rounded border border-border/60 bg-background px-2 py-0.5 text-muted-foreground hover:bg-accent"
+          >
+            clear
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SnippetPlayer({
+  fixture,
+  candidate,
+  loop,
+  preMs,
+  postMs,
+}: {
+  fixture: LabEvalFixture;
+  candidate: LabEvalFixture["candidates"][number];
+  loop: boolean;
+  preMs: number;
+  postMs: number;
+}) {
+  const url = api.labSnippetUrl(fixture.audit_path, candidate.candidate_number, {
+    pre_ms: preMs,
+    post_ms: postMs,
+  });
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Re-mount on candidate change so the snippet auto-loads + autoplays.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.load();
+    const tryPlay = () => {
+      el.play().catch(() => {
+        // Autoplay can be blocked until first user interaction; ignore.
+      });
+    };
+    tryPlay();
+  }, [url]);
+
+  const labelText =
+    candidate.kept && candidate.truth === 1 ? candidate.subclass : candidate.reason;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between text-xs">
+        <div>
+          <span className="font-mono">#{candidate.candidate_number}</span>
+          {" · "}
+          <span className="text-muted-foreground">
+            t={candidate.time.toFixed(3)}s · conf {candidate.confidence.toFixed(3)} · score{" "}
+            {candidate.ensemble_score.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={cn("rounded px-2 py-0.5 font-mono text-[10px]", outcomeColor(candidate))}>
+            {outcomeLabel(candidate)}
+          </span>
+          {labelText && (
+            <span className="rounded bg-muted px-2 py-0.5 font-mono text-[10px]">
+              {labelText}
+            </span>
+          )}
+        </div>
+      </div>
+      <audio ref={audioRef} src={url} controls loop={loop} className="w-full" preload="auto" />
+    </div>
+  );
+}
+
+function outcomeLabel(c: LabEvalFixture["candidates"][number]): string {
+  if (c.kept && c.truth === 1) return "TP";
+  if (c.kept && c.truth === 0) return "FP";
+  if (!c.kept && c.truth === 1) return "FN";
+  return "TN";
+}
+function outcomeColor(c: LabEvalFixture["candidates"][number]): string {
+  if (c.kept && c.truth === 1) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+  if (c.kept && c.truth === 0) return "bg-orange-500/20 text-orange-700 dark:text-orange-300";
+  if (!c.kept && c.truth === 1) return "bg-red-500/20 text-red-700 dark:text-red-300";
+  return "bg-muted text-muted-foreground";
 }
 
 function KeyboardLegend({ selectedCn }: { selectedCn: number | null }) {

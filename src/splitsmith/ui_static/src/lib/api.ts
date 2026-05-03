@@ -1027,6 +1027,25 @@ export const api = {
       json: payload,
     }),
 
+  /** URL of the per-candidate snippet WAV. Static-ish: built-on-demand
+   *  + cached server-side. Use directly as ``<audio src=...>``. */
+  labSnippetUrl: (
+    audit_path: string,
+    candidate_number: number,
+    opts?: { pre_ms?: number; post_ms?: number },
+  ) => {
+    const params = new URLSearchParams({
+      audit_path,
+      candidate_number: String(candidate_number),
+    });
+    if (opts?.pre_ms != null) params.set("pre_ms", String(opts.pre_ms));
+    if (opts?.post_ms != null) params.set("post_ms", String(opts.post_ms));
+    return `/api/lab/snippet?${params.toString()}`;
+  },
+
+  precacheLabSnippets: (payload: { audit_path: string; pre_ms?: number; post_ms?: number }) =>
+    request<Job>("/api/lab/snippets/precache", { method: "POST", json: payload }),
+
   rebuildLabCalibration: (payload: { target_recall?: number; tolerance_ms?: number; fixtures?: string[] } = {}) =>
     request<Job>("/api/lab/rebuild-calibration", { method: "POST", json: payload }),
 };
