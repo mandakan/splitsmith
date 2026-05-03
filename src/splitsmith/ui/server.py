@@ -3390,6 +3390,20 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def lab_fixtures() -> JSONResponse:
         return JSONResponse([r.model_dump(mode="json") for r in lab_module.list_fixtures()])
 
+    @app.get("/api/lab/last-run")
+    def lab_last_run() -> JSONResponse:
+        """Return the most recent eval/rescore in this server session.
+
+        Lets the SPA hydrate after a navigation away from /lab so
+        clicking around doesn't wipe the eval state. 404 when no eval
+        has been run yet (or when /api/lab/labels invalidated the
+        cache).
+        """
+        last_run = _lab_universe_cache.get("last_run")
+        if last_run is None:
+            raise HTTPException(status_code=404, detail="no eval has been run yet")
+        return JSONResponse(last_run.model_dump(mode="json"))
+
     @app.post("/api/lab/eval")
     def lab_eval(
         payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008

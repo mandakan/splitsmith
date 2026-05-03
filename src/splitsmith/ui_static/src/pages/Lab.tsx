@@ -53,6 +53,7 @@ import {
   type LabEvalRun,
   type LabFixtureRecord,
   type PeaksResult,
+  type StageAudit,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +83,17 @@ export function Lab() {
       .listLabFixtures()
       .then(setCatalog)
       .catch((err) => setError(String(err)));
+    // Hydrate from the server's most-recent run cache so navigating
+    // away from /lab and back doesn't wipe the eval state.
+    api
+      .getLastLabRun()
+      .then((r) => {
+        setRun(r);
+        setConfig(r.config);
+      })
+      .catch(() => {
+        // 404 = no eval has run yet; that's the normal first-load case.
+      });
   }, []);
 
   const runEval = useCallback(async () => {
@@ -179,14 +191,134 @@ export function Lab() {
         onSelect={(s) => navigate(s ? `/lab/${s}` : "/lab")}
       />
 
-      {focused && (
+      {focused ? (
         <FixtureDetail
           fixture={focused}
           onClose={() => navigate("/lab")}
           onLabelChanged={runEval}
         />
-      )}
+      ) : slug ? (
+        <FixtureDetailLite
+          record={catalog.find((r) => r.slug === slug) ?? null}
+          onClose={() => navigate("/lab")}
+          onRunEval={runEval}
+          evalLoading={evalLoading}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function FixtureDetailLite({
+  record,
+  onClose,
+  onRunEval,
+  evalLoading,
+}: {
+  record: LabFixtureRecord | null;
+  onClose: () => void;
+  onRunEval: () => void;
+  evalLoading: boolean;
+}) {
+  const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  const [audit, setAudit] = useState<StageAudit | null>(null);
+  const [time, setTime] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!record) return;
+    setPeaks(null);
+    setAudit(null);
+    setError(null);
+    Promise.all([
+      api.getFixturePeaks(record.audit_path),
+      api.getFixtureAudit(record.audit_path),
+    ])
+      .then(([p, a]) => {
+        setPeaks(p);
+        setAudit(a);
+      })
+      .catch((err) => setError(String(err)));
+  }, [record]);
+
+  if (!record) {
+    return (
+      <Card>
+        <CardContent className="py-4 text-sm text-muted-foreground">
+          Fixture not found in the catalog.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const shotTimes = audit?.shots?.map((s) => s.time) ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="font-mono text-base">{record.slug}</CardTitle>
+          <CardDescription>
+            {record.n_shots} ground-truth shots
+            {record.expected_rounds != null && ` · expected ${record.expected_rounds}`}
+            {record.beep_time != null && ` · beep ${record.beep_time.toFixed(3)}s`}
+            {" · pre-eval view (waveform + ground truth only)"}
+          </CardDescription>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link
+              to={`/review?fixture=${encodeURIComponent(record.audit_path)}`}
+              title="Open in the review editor"
+            >
+              <Pencil className="size-3.5" />
+              Re-label
+            </Link>
+          </Button>
+          <Button size="sm" onClick={onRunEval} disabled={evalLoading}>
+            {evalLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+            Run eval
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {error && (
+          <div className="rounded bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div>
+        )}
+        {peaks ? (
+          <Waveform
+            peaks={peaks.peaks}
+            duration={peaks.duration}
+            currentTime={time}
+            onScrub={setTime}
+            beepTime={peaks.beep_time}
+            height={140}
+          >
+            {shotTimes.map((t, i) => (
+              <Pin
+                key={`gt-${i}`}
+                time={t}
+                duration={peaks.duration}
+                color="var(--success, #22c55e)"
+                label={`shot ${i + 1}`}
+              />
+            ))}
+          </Waveform>
+        ) : (
+          <div className="flex h-[140px] items-center justify-center rounded border border-border/40 bg-muted/30 text-xs text-muted-foreground">
+            <Loader2 className="mr-2 size-4 animate-spin" /> loading waveform...
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Diffs (TP/FP/FN), the per-voter breakdown, the candidate table, and label
+          shortcuts only render after Run eval -- they need the per-candidate feature
+          universe (CLAP / PANN / GBDT) which is built by eval.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
