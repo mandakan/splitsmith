@@ -299,3 +299,110 @@ def test_attach_after_cancel_terminates_immediately() -> None:
     assert _wait_until(lambda: reg.get(job.id).status == JobStatus.CANCELLED)
     assert fake.terminated, "post-cancel attach must still terminate the proc"
     assert cancel_observed.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Failure acknowledgment (issue #73)
+# ---------------------------------------------------------------------------
+
+
+def test_acknowledge_flips_failed_job_to_seen() -> None:
+    reg = JobRegistry(max_concurrent=1)
+
+    def boom(_h):
+        raise ValueError("kaboom")
+
+    job = reg.submit(kind="test", fn=boom)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+    assert reg.get(job.id).acknowledged is False
+    snap = reg.acknowledge(job.id)
+    assert snap is not None
+    assert snap.acknowledged is True
+    # Idempotent: a second ack returns the same snapshot.
+    again = reg.acknowledge(job.id)
+    assert again is not None and again.acknowledged is True
+
+
+def test_acknowledge_noop_for_non_failed_job() -> None:
+    reg = JobRegistry(max_concurrent=1)
+    job = reg.submit(kind="test", fn=lambda _h: None)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+    snap = reg.acknowledge(job.id)
+    assert snap is not None
+    assert snap.acknowledged is False, "acknowledge() must not mark non-failed jobs"
+
+
+def test_acknowledge_unknown_job_returns_none() -> None:
+    reg = JobRegistry()
+    assert reg.acknowledge("does-not-exist") is None
+
+
+def test_acknowledge_all_failures_marks_only_unacked_failures() -> None:
+    reg = JobRegistry(max_concurrent=1)
+    fail_a = reg.submit(kind="a", fn=lambda _h: (_ for _ in ()).throw(RuntimeError("a")))
+    fail_b = reg.submit(kind="b", fn=lambda _h: (_ for _ in ()).throw(RuntimeError("b")))
+    ok = reg.submit(kind="ok", fn=lambda _h: None)
+
+    def _all_done() -> bool:
+        return all(
+            reg.get(j.id) is not None
+            and reg.get(j.id).status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
+            for j in (fail_a, fail_b, ok)
+        )
+
+    assert _wait_until(_all_done)
+
+    # Pre-ack one failure so we can confirm the bulk endpoint skips it.
+    reg.acknowledge(fail_a.id)
+
+    affected = reg.acknowledge_all_failures()
+    affected_ids = {j.id for j in affected}
+    assert affected_ids == {fail_b.id}
+    assert reg.get(fail_b.id).acknowledged is True
+    assert reg.get(ok.id).acknowledged is False, "non-failed jobs must stay untouched"
+
+
+def test_retention_protects_unacked_failures_from_succeeded_flood() -> None:
+    """An unacknowledged failure must survive a flurry of successes
+    that would otherwise push it past the retention cap."""
+    reg = JobRegistry(max_concurrent=1, retain_recent=2)
+
+    def boom(_h):
+        raise RuntimeError("boom")
+
+    fail = reg.submit(kind="fail", fn=boom)
+    assert _wait_until(lambda: reg.get(fail.id).status == JobStatus.FAILED)
+
+    for i in range(3):
+        reg.submit(kind=f"ok-{i}", fn=lambda _h: None)
+    assert _wait_until(
+        lambda: not any(
+            j.status in (JobStatus.PENDING, JobStatus.RUNNING) for j in reg.list()
+        )
+    )
+
+    surviving = {j.id for j in reg.list()}
+    assert fail.id in surviving, "unacknowledged failure must not be evicted"
+
+
+def test_retention_evicts_acked_failure_before_unacked() -> None:
+    """When the registry is forced to drop a failure, the dismissed one
+    goes first so the user keeps seeing the failures they haven't
+    acknowledged yet."""
+    reg = JobRegistry(max_concurrent=1, retain_recent=1)
+
+    def boom(_h):
+        raise RuntimeError("boom")
+
+    older = reg.submit(kind="older", fn=boom)
+    assert _wait_until(lambda: reg.get(older.id).status == JobStatus.FAILED)
+    reg.acknowledge(older.id)
+
+    newer = reg.submit(kind="newer", fn=boom)
+    assert _wait_until(lambda: reg.get(newer.id).status == JobStatus.FAILED)
+
+    # retention=1 with two failures (one acked, one not) must evict the
+    # acknowledged one and keep the unacknowledged one visible.
+    surviving = {j.id for j in reg.list()}
+    assert newer.id in surviving
+    assert older.id not in surviving
