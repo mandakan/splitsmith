@@ -90,11 +90,23 @@ cleanly across runs.
 
 ### 3. Drill into a fixture
 
-Click any row in the fixture table. The pencil icon at the right edge
-of each row deep-links into the review editor (`/review?fixture=...`)
-so you can re-label shots / edit the beep without leaving the SPA --
-the same shortcut is also available as a **Re-label** button on the
-fixture detail header. A detail card appears below with:
+Click any row in the fixture table. Two flavours of detail card render
+depending on whether eval has run:
+
+- **Before Run eval (lite view).** Just the waveform + ground-truth
+  shot pins, the audit metadata (beep time, expected rounds), and the
+  Re-label / Run eval / Close actions. Useful for sanity-checking a
+  newly-promoted fixture before paying the model-load cost.
+- **After Run eval (full view).** The waveform with TP/FP/FN diff
+  pins, per-voter recall, the diff list, the label breakdown, and the
+  candidate table with categorical-label shortcuts. Diffs and labels
+  need the per-candidate feature universe so they only appear here.
+
+The pencil icon at the right edge of each row deep-links into the
+review editor (`/review?fixture=...`) so you can re-label shots / edit
+the beep without leaving the SPA -- the same shortcut is also
+available as a **Re-label** button on the fixture detail header. The
+full (post-eval) detail card adds:
 
 - **Waveform** of the fixture's WAV. Pins overlay every kept candidate
   (green = TP, orange = FP, top-edge red = FN ground truth that no
