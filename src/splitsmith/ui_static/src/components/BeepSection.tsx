@@ -287,12 +287,54 @@ export function BeepSection({
   }
 
   const isManual = video.beep_source === "manual";
+  const reviewed = video.beep_reviewed;
+  // Three-state pill (#71): manual entry counts as reviewed
+  // automatically; auto-detect leaves the user a yellow "review" pill
+  // until they confirm. Pure visual nudge -- pipeline doesn't gate on
+  // it.
+  const pillVariant = reviewed
+    ? "statusComplete"
+    : isManual
+      ? "statusComplete"
+      : "statusWarning";
+  const pillLabel = reviewed
+    ? `beep · ${isManual ? "user" : "auto"} · reviewed`
+    : isManual
+      ? "beep · user"
+      : "beep · review";
+
+  const markReviewed = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.setBeepReviewed(stageNumber, videoId, true);
+      onProjectUpdate(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unmarkReviewed = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.setBeepReviewed(stageNumber, videoId, false);
+      onProjectUpdate(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={isManual ? "statusComplete" : "statusInProgress"} className="gap-1">
+        <Badge variant={pillVariant} className="gap-1">
           <Check className="size-3" />
-          beep · {isManual ? "user" : "auto"}
+          {pillLabel}
         </Badge>
         <span className="font-mono tabular-nums">{video.beep_time.toFixed(3)}s</span>
         {video.beep_peak_amplitude != null ? (
@@ -302,6 +344,28 @@ export function BeepSection({
         ) : null}
         {jobStatus ? <JobProgress job={jobStatus} /> : null}
         <div className="ml-auto flex gap-1">
+          {!reviewed ? (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => void markReviewed()}
+              disabled={busy}
+              title="Confirm the detected beep is correct after listening to the preview below"
+            >
+              <Check />
+              Mark reviewed
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void unmarkReviewed()}
+              disabled={busy}
+              title="Mark this beep as needing another review"
+            >
+              Unmark
+            </Button>
+          )}
           <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
             <Pencil />
             Edit

@@ -587,6 +587,16 @@ class BeepSelectRequest(BaseModel):
     time: float
 
 
+class BeepReviewRequest(BaseModel):
+    """Body for POST /api/stages/{n}/videos/{vid}/beep/review (#71).
+
+    Pure UI-state flag: pipeline doesn't gate on it. Setting ``True``
+    requires that ``beep_time`` already exists on the video.
+    """
+
+    reviewed: bool
+
+
 class ExportStageRequest(BaseModel):
     """Body for POST /api/stages/{n}/export.
 
@@ -1376,6 +1386,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         video.beep_duration_ms = beep.duration_ms
         video.beep_candidates = list(beep.candidates)
         video.processed["beep"] = True
+        # Auto-detected beeps need explicit user review (#71). Reset
+        # the flag here so a re-detect on a previously reviewed video
+        # invalidates the prior approval.
+        video.beep_reviewed = False
 
         trimmed_ok = False
         if stg.time_seconds > 0:
@@ -1406,10 +1420,15 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 handle.update(message=f"beep saved; trim failed: {exc}")
         handle.update(progress=0.85, message="Saving project...")
         proj.save(state.project_root)
-        if trimmed_ok and video.role == "primary":
-            # Shot detection is primary-only: secondaries don't carry their
-            # own shot timeline; the audit screen reads shots from the
-            # primary regardless of which camera the user is watching.
+        if trimmed_ok and video.role == "primary" and video.beep_reviewed:
+            # Shot detection is primary-only AND gated on the user
+            # confirming the beep (#71). Auto-detect always leaves
+            # ``beep_reviewed=False`` so this branch only fires for
+            # manual-override paths or after the user explicitly clicked
+            # "Mark reviewed" (which re-triggers chaining via
+            # ``set_beep_reviewed``). Saves the heavy CLAP / GBDT / PANN
+            # ensemble work when the beep timestamp is wrong, since
+            # everything downstream of it would be garbage anyway.
             if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
                 state.jobs.submit(
                     kind="shot_detect",
@@ -1646,8 +1665,15 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         proj.save(state.project_root)
         if (
             video.role == "primary"
+            and video.beep_reviewed
             and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
         ):
+            # Same gate as the detect-then-trim path (#71): don't burn
+            # CLAP / GBDT / PANN cycles on a beep the user hasn't
+            # confirmed. Manual entries pre-set ``beep_reviewed`` to True
+            # so this still runs; the auto-detect path waits for the
+            # user's explicit "Mark reviewed" click which re-fires
+            # shot_detect from there.
             state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
@@ -1937,6 +1963,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             video.beep_candidates = []
             video.processed["beep"] = False
             video.processed["trim"] = False
+            video.beep_reviewed = False
             if video.role == "primary":
                 video.processed["shot_detect"] = False
         else:
@@ -1947,6 +1974,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             video.beep_candidates = []
             video.processed["beep"] = True
             video.processed["trim"] = False
+            # Manual beep entry implies the user looked at the
+            # waveform to type the value -- skip the review pill (#71).
+            video.beep_reviewed = True
             if video.role == "primary":
                 video.processed["shot_detect"] = False
 
@@ -2013,6 +2043,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         video.beep_duration_ms = chosen.duration_ms
         video.processed["beep"] = True
         video.processed["trim"] = False
+        # Switching candidate is a fresh claim about which moment is
+        # the beep -- prior review approval doesn't carry over (#71).
+        video.beep_reviewed = False
         if video.role == "primary":
             video.processed["shot_detect"] = False
 
@@ -2070,6 +2103,46 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         )
         project.save(state.project_root)
         _maybe_chain_trim(stage, video)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/review")
+    def set_beep_reviewed(stage_number: int, video_id: str, req: BeepReviewRequest) -> JSONResponse:
+        """Flip ``video.beep_reviewed`` (issue #71).
+
+        Setting True requires ``beep_time`` to be set; setting False is
+        always allowed (e.g. user wants to re-review). For a primary
+        whose trim is already cached, marking True kicks off shot
+        detection -- this is the explicit unblock point for the
+        downstream pipeline (auto-detect leaves the flag False so the
+        ensemble doesn't burn cycles on an unconfirmed beep, and we
+        finally fire it here once the user has listened and approved).
+        """
+        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        if req.reviewed and video.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail="cannot mark a beep reviewed before one has been detected",
+            )
+        video.beep_reviewed = bool(req.reviewed)
+        project.save(state.project_root)
+
+        # When the user confirms the primary's beep AND the trim is
+        # already cached from the auto-detect chain, kick off the
+        # gated shot-detect now. No-op when trim hasn't run yet (it
+        # will run after, then auto-chain because the gate is open),
+        # or for secondaries (no shot timeline of their own).
+        if (
+            req.reviewed
+            and video.role == "primary"
+            and video.processed.get("trim")
+            and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+        ):
+            state.jobs.submit(
+                kind="shot_detect",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+            )
+
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/beep/select")

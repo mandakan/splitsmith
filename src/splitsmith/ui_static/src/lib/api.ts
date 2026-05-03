@@ -38,6 +38,12 @@ export interface StageVideo {
   processed: { beep: boolean; shot_detect: boolean; trim: boolean };
   beep_time: number | null;
   beep_source: BeepSource | null;
+  /** Has the user explicitly listened to the detected beep and
+   *  confirmed it (issue #71)? Auto-detected beeps default to false
+   *  until the user clicks "Mark reviewed" or types a manual override.
+   *  Resets when ``beep_time`` changes. The pipeline doesn't gate on
+   *  this -- it's a UI nudge to reduce wrong-beep regressions. */
+  beep_reviewed: boolean;
   beep_peak_amplitude: number | null;
   beep_duration_ms: number | null;
   /** Ranked alternative candidates from the most recent auto-detection run.
@@ -766,6 +772,16 @@ export const api = {
     request<MatchProject>(
       `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/select`,
       { method: "POST", json: { time } },
+    ),
+
+  /** Flip ``beep_reviewed`` on a single video (issue #71). Pure UI-state
+   *  endpoint -- no detection or trim chain runs. Setting ``true``
+   *  requires ``beep_time`` to already be set; the server returns 400
+   *  otherwise. */
+  setBeepReviewed: (stageNumber: number, videoId: string, reviewed: boolean) =>
+    request<MatchProject>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/review`,
+      { method: "POST", json: { reviewed } },
     ),
 
   /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
