@@ -23,12 +23,16 @@ from splitsmith.ui.scoreboard.http import (
     ScoreboardUpstreamError,
     ShooterNotFound,
     SsiHttpClient,
+    StageTimesNotImplemented,
+    StageTimesUnavailable,
 )
 from splitsmith.ui.scoreboard.local import LocalJsonScoreboard
 from splitsmith.ui.scoreboard.models import (
     AchievementProgress,
     CacheInfo,
     CompetitorInfo,
+    CompetitorStageResult,
+    CompetitorStageResults,
     MatchData,
     MatchRef,
     ShooterAggregateStats,
@@ -46,6 +50,8 @@ __all__ = [
     "CacheInfo",
     "CachingScoreboardClient",
     "CompetitorInfo",
+    "CompetitorStageResult",
+    "CompetitorStageResults",
     "LocalJsonScoreboard",
     "MatchData",
     "MatchNotFound",
@@ -63,5 +69,7 @@ __all__ = [
     "SquadInfo",
     "SsiHttpClient",
     "StageInfo",
+    "StageTimesNotImplemented",
+    "StageTimesUnavailable",
     "UpcomingMatch",
 ]

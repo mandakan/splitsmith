@@ -64,6 +64,8 @@ export interface MatchProject {
   competitor_name: string | null;
   scoreboard_match_id: string | null;
   scoreboard_content_type: number | null;
+  selected_shooter_id: number | null;
+  selected_competitor_id: number | null;
   match_date: string | null;
   stages: StageEntry[];
   unassigned_videos: StageVideo[];
@@ -124,10 +126,54 @@ export interface ScoreboardOfflineDetail {
   message: string;
 }
 
+export interface StageTimesBlockedOnUpstreamDetail {
+  code: "stage_times_blocked_on_upstream";
+  message: string;
+  upstream_issue: string;
+  upstream_url: string;
+}
+
+export interface StageTimesOfflinePureMatchDataDetail {
+  code: "stage_times_offline_pure_matchdata";
+  message: string;
+}
+
 export type ScoreboardErrorDetail =
   | ScoreboardAuthDetail
   | ScoreboardRateLimitDetail
-  | ScoreboardOfflineDetail;
+  | ScoreboardOfflineDetail
+  | StageTimesBlockedOnUpstreamDetail
+  | StageTimesOfflinePureMatchDataDetail;
+
+/** One row in the ``GET /api/scoreboard/shooter/search`` array. */
+export interface ScoreboardShooterRef {
+  shooterId: number;
+  name: string;
+  club: string | null;
+  division: string | null;
+  lastSeen: string;
+}
+
+/** One competitor inside ``GET /api/scoreboard/match-data``. The SPA reads
+ *  this to map a picked ``shooterId`` to the per-match ``competitor_id``
+ *  before posting to ``/select-shooter``. */
+export interface ScoreboardMatchCompetitor {
+  id: number;
+  shooterId: number;
+  name: string;
+  competitor_number: number | null;
+  club: string | null;
+  division: string | null;
+}
+
+export interface ScoreboardMatchData {
+  name: string;
+  date: string | null;
+  level: string | null;
+  competitors: ScoreboardMatchCompetitor[];
+  scoring_completed: number;
+  match_status: string;
+}
 
 /** Pull a typed scoreboard error out of an ApiError, or null if the body
  *  doesn't match. The Ingest screen renders different banner copy for each
@@ -140,7 +186,9 @@ export function asScoreboardError(err: unknown): ScoreboardErrorDetail | null {
   if (
     code === "scoreboard_auth" ||
     code === "scoreboard_rate_limited" ||
-    code === "scoreboard_offline"
+    code === "scoreboard_offline" ||
+    code === "stage_times_blocked_on_upstream" ||
+    code === "stage_times_offline_pure_matchdata"
   ) {
     return body as ScoreboardErrorDetail;
   }
@@ -536,6 +584,41 @@ export const api = {
       method: "POST",
       json: { content_type: contentType, match_id: matchId, overwrite },
     }),
+
+  /** Resolve the current source's ``MatchData``. The SPA uses this to map
+   *  a picked ``shooterId`` to a per-match ``competitor_id`` before
+   *  pinning. 404 when the project has no match loaded. */
+  getScoreboardMatchData: () =>
+    request<ScoreboardMatchData>("/api/scoreboard/match-data"),
+
+  /** Find shooters by name. Offline mode searches this match's competitor
+   *  list only; online mode hits the live shooter index. */
+  searchScoreboardShooters: (q: string) =>
+    request<ScoreboardShooterRef[]>(
+      `/api/scoreboard/shooter/search?q=${encodeURIComponent(q)}`,
+    ),
+
+  /** Pin (shooter, competitor) and merge stage times. The competitor id is
+   *  resolved client-side from ``getScoreboardMatchData``; the server
+   *  refuses to guess. The response carries the updated project plus a
+   *  ``stage_times_merged`` count for the SPA to confirm. */
+  selectScoreboardShooter: (shooterId: number, competitorId: number) =>
+    request<MatchProject & { stage_times_merged: number }>(
+      "/api/scoreboard/select-shooter",
+      {
+        method: "POST",
+        json: { shooter_id: shooterId, competitor_id: competitorId },
+      },
+    ),
+
+  /** Re-pull and re-merge stage times for the pinned competitor. Used for
+   *  in-progress matches where new scorecards land while the user is
+   *  ingesting; clears the project-local cache for every cid in the match. */
+  refreshScoreboardTimes: () =>
+    request<MatchProject & { stage_times_merged: number }>(
+      "/api/scoreboard/refresh-times",
+      { method: "POST" },
+    ),
 
 
   createPlaceholderStages: (req: PlaceholderStagesRequest) =>

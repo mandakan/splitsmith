@@ -22,8 +22,10 @@ import {
   FolderInput,
   HardDrive,
   PlayCircle,
+  RefreshCw,
   Search,
   Trash2,
+  User,
   Video as VideoIcon,
   WifiOff,
   XCircle,
@@ -50,6 +52,7 @@ import {
   type NonEmptyOldDirsDetail,
   type ScoreboardErrorDetail,
   type ScoreboardMatchRef,
+  type ScoreboardShooterRef,
   type ScoreboardSource,
   type StageEntry,
   type StageMatchWindow,
@@ -157,6 +160,50 @@ export function Ingest() {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSelectShooter = async (
+    shooterId: number,
+    competitorId: number,
+  ) => {
+    setBusy(true);
+    setScoreboardError(null);
+    try {
+      const resp = await api.selectScoreboardShooter(shooterId, competitorId);
+      setProject(resp);
+      void refreshAnalysis();
+      setError(null);
+    } catch (e) {
+      const detail = asScoreboardError(e);
+      if (detail) setScoreboardError(detail);
+      else setError(e instanceof Error ? e.message : String(e));
+      // Even on stage-times failure the server persists the pin, so
+      // pull the project to surface the new selected_* state.
+      try {
+        setProject(await api.getProject());
+      } catch {
+        /* best effort */
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRefreshTimes = async () => {
+    setBusy(true);
+    setScoreboardError(null);
+    try {
+      const resp = await api.refreshScoreboardTimes();
+      setProject(resp);
+      void refreshAnalysis();
+      setError(null);
+    } catch (e) {
+      const detail = asScoreboardError(e);
+      if (detail) setScoreboardError(detail);
+      else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -381,6 +428,8 @@ export function Ingest() {
             busy={busy}
             onScoreboard={handleScoreboard}
             onFetchOnline={handleFetchOnline}
+            onSelectShooter={handleSelectShooter}
+            onRefreshTimes={handleRefreshTimes}
             setScoreboardError={setScoreboardError}
           />
           <StartFromVideosSection
@@ -396,6 +445,8 @@ export function Ingest() {
           busy={busy}
           onScoreboard={handleScoreboard}
           onFetchOnline={handleFetchOnline}
+          onSelectShooter={handleSelectShooter}
+          onRefreshTimes={handleRefreshTimes}
           setScoreboardError={setScoreboardError}
         />
       )}
@@ -463,6 +514,8 @@ function ScoreboardSection({
   busy,
   onScoreboard,
   onFetchOnline,
+  onSelectShooter,
+  onRefreshTimes,
   setScoreboardError,
 }: {
   project: MatchProject | null;
@@ -470,6 +523,8 @@ function ScoreboardSection({
   busy: boolean;
   onScoreboard: (f: File) => void;
   onFetchOnline: (contentType: number, matchId: number) => void;
+  onSelectShooter: (shooterId: number, competitorId: number) => void;
+  onRefreshTimes: () => void;
   setScoreboardError: (e: ScoreboardErrorDetail | null) => void;
 }) {
   const isLocal = source?.mode === "local";
@@ -557,6 +612,16 @@ function ScoreboardSection({
             <OnlineMatchSearch
               busy={busy}
               onFetch={onFetchOnline}
+              onError={setScoreboardError}
+            />
+          ) : null}
+
+          {project && matchLoaded && onlineReady ? (
+            <ShooterPinner
+              project={project}
+              busy={busy}
+              onSelect={onSelectShooter}
+              onRefreshTimes={onRefreshTimes}
               onError={setScoreboardError}
             />
           ) : null}
@@ -714,6 +779,194 @@ function OnlineMatchSearch({
   );
 }
 
+/** Pinner that resolves "this is me" -> per-match competitor_id and posts
+ *  to /select-shooter so the server can fetch + merge stage times. Gated
+ *  on the project already having a scoreboard match loaded; without that
+ *  context the pin is meaningless (issue #64). */
+function ShooterPinner({
+  project,
+  busy,
+  onSelect,
+  onRefreshTimes,
+  onError,
+}: {
+  project: MatchProject;
+  busy: boolean;
+  onSelect: (shooterId: number, competitorId: number) => void;
+  onRefreshTimes: () => void;
+  onError: (e: ScoreboardErrorDetail | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<ScoreboardShooterRef[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setResults(null);
+      return;
+    }
+    const handle = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const refs = await api.searchScoreboardShooters(trimmed);
+        setResults(refs);
+        onError(null);
+      } catch (e) {
+        const detail = asScoreboardError(e);
+        if (detail) onError(detail);
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [query, open, onError]);
+
+  const pickShooter = async (shooterId: number) => {
+    // Resolve competitor_id by reading the loaded MatchData. The server
+    // refuses to guess; the SPA derives the mapping each time so the
+    // server stays stateless w.r.t. shooter <-> competitor identity.
+    try {
+      const md = await api.getScoreboardMatchData();
+      const competitor = md.competitors.find((c) => c.shooterId === shooterId);
+      if (!competitor) {
+        onError({
+          code: "scoreboard_offline",
+          message: `shooter ${shooterId} isn't in this match's competitor list`,
+        });
+        return;
+      }
+      onSelect(shooterId, competitor.id);
+      setOpen(false);
+      setQuery("");
+      setResults(null);
+    } catch (e) {
+      const detail = asScoreboardError(e);
+      if (detail) onError(detail);
+    }
+  };
+
+  if (project.selected_shooter_id !== null) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs">
+        <span className="flex items-center gap-2">
+          <User className="size-3.5" />
+          Pinned shooter <code>{project.selected_shooter_id}</code> · competitor{" "}
+          <code>{project.selected_competitor_id}</code>
+        </span>
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={onRefreshTimes}
+            title="Re-pull stage times for this competitor"
+          >
+            <RefreshCw className="size-3.5" />
+            Refresh times
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              setOpen(true);
+            }}
+          >
+            Change
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (!open) {
+    return (
+      <div className="space-y-1 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2 font-medium">
+            <User className="size-3.5 text-status-warning" />
+            Pin yourself to load stage times
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => setOpen(true)}
+          >
+            Find me
+          </Button>
+        </div>
+        <p className="text-muted-foreground">
+          Stage list is loaded but per-stage times aren't -- pick your row to
+          merge in your scorecard times.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="flex items-center gap-1.5 font-medium">
+          <User className="size-3.5" />
+          Find yourself
+        </span>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={busy}
+          placeholder="your name"
+          autoFocus
+          className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      </label>
+      {searching ? (
+        <p className="text-xs text-muted-foreground">Searching...</p>
+      ) : null}
+      {results && results.length > 0 ? (
+        <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-1">
+          {results.map((s) => (
+            <li
+              key={s.shooterId}
+              className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40"
+            >
+              <div className="min-w-0 text-xs">
+                <div className="truncate font-medium">{s.name}</div>
+                <div className="truncate text-muted-foreground">
+                  {s.club ?? "no club"} &middot; {s.division ?? "—"}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void pickShooter(s.shooterId)}
+              >
+                Pin
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => {
+          setOpen(false);
+          setQuery("");
+          setResults(null);
+        }}
+      >
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 function ScoreboardErrorBanner({
   detail,
   onDismiss,
@@ -748,6 +1001,30 @@ function ScoreboardErrorBanner({
     body = detail.retry_after !== null
       ? `Retry in ${Math.ceil(detail.retry_after)} seconds.`
       : "Wait a moment and retry.";
+  } else if (detail.code === "stage_times_blocked_on_upstream") {
+    icon = <AlertCircle className="size-4 text-status-warning" />;
+    title = "Stage times aren't published by the live API yet.";
+    body = (
+      <>
+        Tracked upstream in{" "}
+        <a
+          href={detail.upstream_url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+        >
+          {detail.upstream_issue}
+        </a>
+        . Until that ships, drop an offline JSON that carries per-competitor
+        stage results (the legacy <code>examples/*.json</code> shape, or a
+        combined SSI v1 export) to populate stage times.
+      </>
+    );
+  } else if (detail.code === "stage_times_offline_pure_matchdata") {
+    icon = <AlertCircle className="size-4 text-status-warning" />;
+    title = "The dropped JSON has no stage times.";
+    body =
+      "It's pure SSI v1 MatchData (match shell only). Drop a richer file or wait for the upstream API to expose per-competitor stage results.";
   } else {
     icon = <WifiOff className="size-4 text-status-warning" />;
     title = "Couldn't reach the scoreboard.";
@@ -1492,7 +1769,9 @@ function StageCard({
               {stage.time_seconds.toFixed(2)}s &middot;{" "}
               {stage.scorecard_updated_at
                 ? new Date(stage.scorecard_updated_at).toLocaleString()
-                : "no scorecard time"}
+                : stage.placeholder
+                  ? "times pending -- pin yourself in Scoreboard"
+                  : "no scorecard time"}
             </CardDescription>
           </div>
           <div className="flex flex-col items-end gap-1">

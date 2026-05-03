@@ -279,6 +279,19 @@ class MatchProject(BaseModel):
     # legacy projects that were imported via the older ``examples/``-shaped
     # scoreboard JSON.
     scoreboard_content_type: int | None = None
+    # Pinned shooter id from the SSI shooter index. Globally stable across
+    # matches; persisted on the project so re-opening doesn't ask again.
+    # Note: this is project state, not user state -- a project shared with
+    # a friend will pin to *your* id. We picked project-scoped because the
+    # next layer up (per-stage times) is per-(match, competitor), and the
+    # competitor id only makes sense in the match's context. See #64.
+    selected_shooter_id: int | None = None
+    # Pinned per-match competitor id (``competitors[].id`` from
+    # ``MatchData``). This is the id ``get_stage_times`` actually wants;
+    # the shooter id is the global anchor the user picks. Both are stored
+    # because we want to display the shooter id in the UI and use the
+    # competitor id for HTTP calls.
+    selected_competitor_id: int | None = None
     # Optional match date (the day the match was shot). Used as a hint for the
     # SSI Scoreboard suggestion flow and surfaced in the UI. Auto-filled from
     # the earliest video mtime when starting source-first; overwritten by
@@ -800,6 +813,47 @@ class MatchProject(BaseModel):
             for v in videos:
                 v.role = "secondary"
                 self.unassigned_videos.append(v)
+
+    def merge_stage_times(self, results: Any) -> int:
+        """Overlay per-stage timing onto existing stages keyed by ``stage_number``.
+
+        Used after a successful ``get_stage_times`` call (offline-richer
+        drop or live API once ssi-scoreboard#400 ships). Updates each
+        ``StageEntry`` in place: ``time_seconds``, ``scorecard_updated_at``,
+        and flips ``placeholder=False`` *only* when both fields populate
+        (a partial scorecard shouldn't claim the stage is fully real).
+
+        Returns the count of stages updated. Unknown ``stage_number``
+        values in the result are silently dropped -- the project's stage
+        list was decided by ``populate_from_match_data`` and shouldn't
+        grow as a side effect of a stage-times overlay.
+        """
+        from splitsmith.ui.scoreboard.models import CompetitorStageResults
+
+        if not isinstance(results, CompetitorStageResults):
+            results = CompetitorStageResults.model_validate(results)
+
+        stages_by_number = {s.stage_number: s for s in self.stages}
+        updated = 0
+        for r in results.results:
+            stage = stages_by_number.get(r.stage_number)
+            if stage is None:
+                continue
+            time_set = False
+            if r.time_seconds is not None:
+                stage.time_seconds = float(r.time_seconds)
+                time_set = True
+            scorecard_set = False
+            if r.scorecard_updated_at:
+                try:
+                    stage.scorecard_updated_at = datetime.fromisoformat(r.scorecard_updated_at)
+                    scorecard_set = True
+                except ValueError:
+                    pass
+            if time_set and scorecard_set:
+                stage.placeholder = False
+                updated += 1
+        return updated
 
     def register_video(
         self,

@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from splitsmith.ui.scoreboard.models import (
+    CompetitorStageResults,
     MatchData,
     MatchRef,
     ShooterDashboard,
@@ -36,4 +37,17 @@ class ScoreboardClient(Protocol):
 
     def get_shooter(self, shooter_id: int) -> ShooterDashboard:
         """Cross-match dashboard; mirrors ``GET /api/v1/shooter/{shooterId}``."""
+        ...
+
+    def get_stage_times(
+        self, content_type: int, match_id: int, competitor_id: int
+    ) -> CompetitorStageResults:
+        """Per-competitor, per-stage results for one (match, competitor) pair.
+
+        Mirrors the proposed ``GET /api/v1/match/{ct}/{id}/competitor/
+        {competitorId}/stages`` from ``ssi-scoreboard#400``. Implementations
+        that can't serve this raise a typed error (``StageTimesNotImplemented``
+        for "blocked on upstream", ``StageTimesUnavailable`` for "drop a
+        richer JSON") so the UI can render distinct guidance per cause.
+        """
         ...

@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from splitsmith.ui.scoreboard.models import (
+    CompetitorStageResults,
     MatchData,
     MatchRef,
     ShooterDashboard,
@@ -60,6 +61,25 @@ class MatchNotFound(ScoreboardError):
 
 class ShooterNotFound(ScoreboardError):
     """``GET /api/v1/shooter/{shooterId}`` returned 404."""
+
+
+class StageTimesNotImplemented(ScoreboardError):
+    """The live API doesn't expose per-competitor stage results yet.
+
+    Tracked upstream in ``ssi-scoreboard#400``. The HTTP client raises this
+    so the UI can render a "blocked on upstream" banner with a link, rather
+    than the generic upstream-failed copy.
+    """
+
+
+class StageTimesUnavailable(ScoreboardError):
+    """The offline source doesn't carry per-competitor stage results.
+
+    Raised by ``LocalJsonScoreboard`` when the dropped file is pure SSI v1
+    ``MatchData`` (match shell only). Distinct from
+    ``StageTimesNotImplemented`` so the UI can hint "drop a richer JSON or
+    pin yourself online" instead of pointing at the upstream issue.
+    """
 
 
 class SsiHttpClient:
@@ -125,6 +145,29 @@ class SsiHttpClient:
         except _NotFound as exc:
             raise ShooterNotFound(f"shooter {shooter_id} not found on scoreboard") from exc
         return ShooterDashboard.model_validate(data)
+
+    def get_stage_times(
+        self, content_type: int, match_id: int, competitor_id: int
+    ) -> CompetitorStageResults:
+        # Mirrors the path documented in ``ssi-scoreboard#400``:
+        # GET /match/{ct}/{id}/competitor/{cid}/stages. If the deployment
+        # answering us hasn't shipped that endpoint yet, we get a 404
+        # (mapped through ``_NotFound`` -> ``StageTimesNotImplemented``)
+        # so the UI can fall back to the "blocked on upstream" banner
+        # rather than a generic 502.
+        try:
+            data = self._get_json(
+                f"/match/{content_type}/{match_id}/competitor/{competitor_id}/stages"
+            )
+        except _NotFound as exc:
+            raise StageTimesNotImplemented(
+                "the scoreboard returned 404 for "
+                f"/match/{content_type}/{match_id}/competitor/{competitor_id}"
+                "/stages. Either the competitor doesn't exist in this match, "
+                "or the deployment predates ssi-scoreboard#400. Drop a richer "
+                "offline JSON to populate stage times in the meantime."
+            ) from exc
+        return CompetitorStageResults.model_validate(data)
 
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         try:

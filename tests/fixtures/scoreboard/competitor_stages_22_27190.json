@@ -1,0 +1,57 @@
+{
+  "ct": 22,
+  "matchId": 27190,
+  "competitorId": 727562,
+  "shooterId": 40821,
+  "division": "Optics Minor",
+  "results": [
+    {
+      "stage_number": 1,
+      "stage_name": "A bana Vänster Fm",
+      "stage_id": 93914,
+      "time_seconds": 18.42,
+      "scorecard_updated_at": "2026-05-02T08:14:11.512840+00:00",
+      "hit_factor": 5.43,
+      "stage_pct": 88.4,
+      "alphas": 14,
+      "charlies": 2,
+      "deltas": 0,
+      "misses": 0,
+      "no_shoots": 0,
+      "procedurals": 0,
+      "dq": false
+    },
+    {
+      "stage_number": 2,
+      "stage_name": "A bana Vänster Em",
+      "stage_id": 93915,
+      "time_seconds": 22.18,
+      "scorecard_updated_at": "2026-05-02T09:45:03.221177+00:00",
+      "hit_factor": 4.87,
+      "stage_pct": 81.3,
+      "alphas": 13,
+      "charlies": 3,
+      "deltas": 0,
+      "misses": 0,
+      "no_shoots": 0,
+      "procedurals": 0,
+      "dq": false
+    },
+    {
+      "stage_number": 3,
+      "stage_name": "B bana Höger",
+      "stage_id": 93916,
+      "time_seconds": 14.05,
+      "scorecard_updated_at": "2026-05-02T10:22:55.910412+00:00",
+      "hit_factor": 6.12,
+      "stage_pct": 92.7,
+      "alphas": 11,
+      "charlies": 1,
+      "deltas": 0,
+      "misses": 0,
+      "no_shoots": 0,
+      "procedurals": 0,
+      "dq": false
+    }
+  ]
+}

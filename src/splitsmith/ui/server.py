@@ -93,7 +93,10 @@ from .scoreboard import (
     ScoreboardError,
     ScoreboardRateLimited,
     ScoreboardUpstreamError,
+    ShooterNotFound,
     SsiHttpClient,
+    StageTimesNotImplemented,
+    StageTimesUnavailable,
 )
 from .scoreboard.local import DEFAULT_MATCH_FILENAME, DEFAULT_SCOREBOARD_DIRNAME
 
@@ -334,14 +337,28 @@ class _ScoreboardClientCtx:
             self._inner_http.close()
 
 
-def _validate_match_data(raw: dict[str, Any]):  # type: ignore[no-untyped-def]
-    """Parse a JSON dict as :class:`MatchData`. Raises ``ValueError`` on shape mismatch."""
-    from .scoreboard.models import MatchData
+class _NoOpClient:
+    """Inner stub so ``CachingScoreboardClient`` can be instantiated for cache
+    invalidation alone (no upstream call expected). All four protocol methods
+    raise -- callers shouldn't reach them when only ``invalidate_*`` is used.
+    """
 
-    try:
-        return MatchData.model_validate(raw)
-    except Exception as exc:  # pydantic ValidationError or other
-        raise ValueError(f"dropped JSON is not a valid SSI v1 match payload: {exc}") from exc
+    def search_matches(self, query: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("_NoOpClient.search_matches: cache-invalidate only")
+
+    def get_match(self, content_type: int, match_id: int):  # type: ignore[no-untyped-def]
+        raise RuntimeError("_NoOpClient.get_match: cache-invalidate only")
+
+    def find_shooter(self, name: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("_NoOpClient.find_shooter: cache-invalidate only")
+
+    def get_shooter(self, shooter_id: int):  # type: ignore[no-untyped-def]
+        raise RuntimeError("_NoOpClient.get_shooter: cache-invalidate only")
+
+    def get_stage_times(  # type: ignore[no-untyped-def]
+        self, content_type: int, match_id: int, competitor_id: int
+    ):
+        raise RuntimeError("_NoOpClient.get_stage_times: cache-invalidate only")
 
 
 def _raise_scoreboard_http(exc: ScoreboardError) -> None:
@@ -378,6 +395,26 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
                 "message": str(exc),
             },
         )
+    if isinstance(exc, StageTimesNotImplemented):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "stage_times_blocked_on_upstream",
+                "message": str(exc),
+                "upstream_issue": "ssi-scoreboard#400",
+                "upstream_url": "https://github.com/mandakan/ssi-scoreboard/issues/400",
+            },
+        )
+    if isinstance(exc, StageTimesUnavailable):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "stage_times_offline_pure_matchdata",
+                "message": str(exc),
+            },
+        )
+    if isinstance(exc, ShooterNotFound):
+        raise HTTPException(status_code=404, detail=str(exc))
     raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -457,6 +494,20 @@ class ScoreboardFetchRequest(BaseModel):
     content_type: int
     match_id: int
     overwrite: bool = False
+
+
+class SelectShooterRequest(BaseModel):
+    """Body for POST /api/scoreboard/select-shooter (#64).
+
+    Both ids are required: the SPA picks a shooter from
+    ``/api/scoreboard/shooter/search`` (which returns ``shooterId``), then
+    looks up the matching ``competitor_id`` in the loaded ``MatchData``
+    before posting. Server-side derivation of the competitor id would
+    require us to refetch ``MatchData`` here; the SPA already has it.
+    """
+
+    shooter_id: int
+    competitor_id: int
 
 
 class PlaceholderStagesRequest(BaseModel):
@@ -735,30 +786,67 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.post("/api/scoreboard/upload")
     def scoreboard_upload(req: ScoreboardUploadRequest) -> JSONResponse:
-        """Accept a dropped SSI v1 ``match.json`` and populate the project.
+        """Accept a dropped SSI ``match.json`` and populate the project.
 
-        Writes the JSON to ``<project>/scoreboard/match.json`` *first*, so
-        a subsequent reload still finds the offline source even if the
-        populate step throws. Validation errors leave the file in place so
-        the user can inspect it.
+        Three input shapes are accepted (see ``LocalJsonScoreboard``):
+        pure SSI v1 ``MatchData``, a richer combined v1+stages format, or
+        the legacy ``examples/`` shape. The file is written to
+        ``<project>/scoreboard/match.json`` *first*, so a subsequent reload
+        still finds the offline source even if populate throws. The
+        offline ``LocalJsonScoreboard`` then parses it and -- when the
+        file carries per-competitor stage results for exactly one
+        competitor -- auto-pins that competitor and merges the times so
+        the user lands on a fully-populated stage list in one drop.
         """
-        try:
-            match_data_obj = _validate_match_data(req.data)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
         local_path = _local_match_path()
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_text(
             json.dumps(req.data, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        try:
+            scoreboard = LocalJsonScoreboard(local_path)
+        except Exception as exc:  # validation, KeyError, etc.
+            raise HTTPException(
+                status_code=400,
+                detail=f"dropped JSON is not a recognized scoreboard payload: {exc}",
+            ) from exc
+
         project = state.load()
         try:
-            project.populate_from_match_data(match_data_obj, overwrite=req.overwrite)
+            project.populate_from_match_data(scoreboard.match, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        # Auto-pin path: a single-competitor richer file maps cleanly to
+        # "this is me." Multi-competitor files (e.g. the upstream-issue
+        # combined shape with multiple shooters' results) leave the user
+        # to pick via the shooter pinner -- we don't guess.
+        merged = 0
+        default_cid = scoreboard.default_competitor_id()
+        if default_cid is not None and scoreboard.has_stage_times:
+            try:
+                results = scoreboard.get_stage_times(
+                    scoreboard.content_type or 0,
+                    scoreboard.match_id or 0,
+                    default_cid,
+                )
+            except (KeyError, ScoreboardError):
+                results = None
+            if results is not None:
+                merged = project.merge_stage_times(results)
+                project.selected_competitor_id = default_cid
+                # The legacy file format only carries shooterId on
+                # competitors when the auto-built CompetitorInfo also
+                # had it; pull from the resolved match if available.
+                shooter = next(
+                    (c.shooterId for c in scoreboard.match.competitors if c.id == default_cid),
+                    None,
+                )
+                if shooter is not None:
+                    project.selected_shooter_id = shooter
         project.save(state.project_root)
-        return JSONResponse(project.model_dump(mode="json"))
+        return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
     @app.get("/api/scoreboard/search")
     def scoreboard_search(q: str = Query("", min_length=0)) -> JSONResponse:
@@ -772,7 +860,13 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.post("/api/scoreboard/fetch")
     def scoreboard_fetch(req: ScoreboardFetchRequest) -> JSONResponse:
-        """Fetch a full match (cache-first) and populate the project."""
+        """Fetch a full match (cache-first) and populate the project.
+
+        When the project already has a pinned competitor (carried over from
+        a previous session), auto-merge their stage times in the same
+        round-trip. New picks (no pin yet) still need ``/select-shooter``
+        afterwards -- the SPA flow stays the same.
+        """
         with _resolve_scoreboard_client() as client:
             try:
                 match_data = client.get_match(req.content_type, req.match_id)
@@ -785,8 +879,171 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             project.populate_from_match_data(match_data, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        merged = 0
+        if project.selected_competitor_id is not None:
+            try:
+                merged = _fetch_and_merge_stage_times(
+                    project,
+                    req.content_type,
+                    req.match_id,
+                    project.selected_competitor_id,
+                )
+            except HTTPException:
+                # Stage times failed (upstream not shipped yet, etc.).
+                # Persist the populated stage shell anyway so the user
+                # has something to work with; they can hit refresh-times
+                # once the upstream resolves.
+                project.save(state.project_root)
+                raise
+        else:
+            project.save(state.project_root)
+        return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
+
+    @app.get("/api/scoreboard/match-data")
+    def scoreboard_match_data() -> JSONResponse:
+        """Return the resolved ``MatchData`` for the project's loaded match.
+
+        The SPA needs this to map a picked ``shooterId`` to the per-match
+        ``competitor_id`` before calling ``/select-shooter``. We don't
+        denormalise that mapping onto the ``MatchProject`` because it
+        drifts when upstream re-fetches; serving on demand keeps the
+        cache as the single source of truth.
+        """
+        project = state.load()
+        if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
+            raise HTTPException(
+                status_code=404,
+                detail="project has no scoreboard match loaded yet",
+            )
+        try:
+            ct = project.scoreboard_content_type
+            mid = int(project.scoreboard_match_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "project's scoreboard_match_id isn't numeric; this match "
+                    "predates the v1 wiring (#50). Re-import via /upload or /fetch."
+                ),
+            ) from exc
+        with _resolve_scoreboard_client() as client:
+            try:
+                match_data = client.get_match(ct, mid)
+            except MatchNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        return JSONResponse(match_data.model_dump(mode="json"))
+
+    @app.get("/api/scoreboard/shooter/search")
+    def scoreboard_shooter_search(q: str = Query("", min_length=0)) -> JSONResponse:
+        """Find shooters by name. Offline mode searches this match's
+        competitor list only; online mode hits the live shooter index."""
+        if not q.strip():
+            return JSONResponse([])
+        with _resolve_scoreboard_client() as client:
+            try:
+                refs = client.find_shooter(q)
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        return JSONResponse([ref.model_dump(mode="json") for ref in refs])
+
+    @app.post("/api/scoreboard/select-shooter")
+    def scoreboard_select_shooter(req: SelectShooterRequest) -> JSONResponse:
+        """Pin (shooter_id, competitor_id) and merge stage times into the project.
+
+        Failure modes (all leave shooter pin in place so the user can retry
+        with refresh-times -- no half-pinned state): the live API can't
+        serve stage times yet (502 ``stage_times_blocked_on_upstream``),
+        the dropped JSON is pure ``MatchData`` (400
+        ``stage_times_offline_pure_matchdata``), or the project has no
+        match loaded (409).
+        """
+        project = state.load()
+        if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "project has no scoreboard match loaded; pick a match "
+                    "(drop JSON or fetch) before pinning a shooter"
+                ),
+            )
+        try:
+            ct = project.scoreboard_content_type
+            mid = int(project.scoreboard_match_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="project's scoreboard_match_id isn't numeric",
+            ) from exc
+
+        # Persist the pin first so a subsequent ``refresh-times`` can
+        # retry even if this fetch fails (the user can fix the upstream
+        # block without re-picking themselves).
+        project.selected_shooter_id = req.shooter_id
+        project.selected_competitor_id = req.competitor_id
         project.save(state.project_root)
-        return JSONResponse(project.model_dump(mode="json"))
+
+        merged = _fetch_and_merge_stage_times(project, ct, mid, req.competitor_id)
+        return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
+
+    @app.post("/api/scoreboard/refresh-times")
+    def scoreboard_refresh_times() -> JSONResponse:
+        """Re-pull and re-merge stage times for the pinned competitor.
+
+        Invalidates every cached stage-times entry for the match (not
+        just the pinned competitor) because in-progress matches often
+        update multiple shooters at once and a fresh pull is cheap. Use
+        this after the user knows the upstream has new scorecards.
+        """
+        project = state.load()
+        if (
+            project.selected_competitor_id is None
+            or project.scoreboard_match_id is None
+            or project.scoreboard_content_type is None
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="pin a shooter first; refresh-times has nothing to re-fetch",
+            )
+        try:
+            ct = project.scoreboard_content_type
+            mid = int(project.scoreboard_match_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="project's scoreboard_match_id isn't numeric",
+            ) from exc
+
+        # Drop every cached stage_times entry for this match so the
+        # next get_stage_times call goes upstream.
+        cache_dir = state.project_root / "scoreboard" / "cache"
+        if cache_dir.exists():
+            cache = CachingScoreboardClient(_NoOpClient(), cache_dir)
+            cache.invalidate_match_stage_times(ct, mid)
+
+        merged = _fetch_and_merge_stage_times(project, ct, mid, project.selected_competitor_id)
+        return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
+
+    def _fetch_and_merge_stage_times(
+        project: MatchProject, ct: int, mid: int, competitor_id: int
+    ) -> int:
+        """Shared helper -- get_stage_times + merge_stage_times, with the
+        right error mapping. Persists the project on success."""
+        with _resolve_scoreboard_client() as client:
+            try:
+                results = client.get_stage_times(ct, mid, competitor_id)
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail=str(exc),
+                ) from exc
+        merged = project.merge_stage_times(results)
+        project.save(state.project_root)
+        return merged
 
     @app.post("/api/project/placeholder-stages")
     def create_placeholder_stages(req: PlaceholderStagesRequest) -> JSONResponse:
