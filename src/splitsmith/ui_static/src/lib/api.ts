@@ -479,6 +479,12 @@ export interface Job {
    *  stays True on the terminal snapshot so the row can be labelled
    *  "Cancelled by user" instead of "Aborted". */
   cancel_requested: boolean;
+  /** True once the user has dismissed this failure via
+   *  /api/jobs/{id}/acknowledge (issue #73). Meaningful only on FAILED
+   *  jobs; the JobsPanel badge counts failures with acknowledged=false
+   *  and the registry rolls acknowledged failures off faster than
+   *  unacknowledged ones. */
+  acknowledged: boolean;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -846,6 +852,17 @@ export const api = {
    *  ffmpeg subprocess so the cancel takes effect immediately. */
   cancelJob: (jobId: string) =>
     request<Job>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+
+  /** Mark a single failed job as seen (issue #73). The badge stops
+   *  counting it and the registry rolls it off ahead of unacknowledged
+   *  failures. No-op for non-failed / already-acknowledged jobs. */
+  acknowledgeJob: (jobId: string) =>
+    request<Job>(`/api/jobs/${encodeURIComponent(jobId)}/acknowledge`, { method: "POST" }),
+
+  /** Bulk-dismiss every currently-unacknowledged failure. Returns the
+   *  jobs that actually flipped to acknowledged. */
+  acknowledgeAllFailures: () =>
+    request<Job[]>(`/api/jobs/acknowledge-failures`, { method: "POST" }),
 
   /** Poll a job until it leaves the running state. ``onUpdate`` fires on
    *  every snapshot (including the final one). Returns the terminal Job. */

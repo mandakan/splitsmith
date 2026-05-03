@@ -1,10 +1,16 @@
 /**
- * Floating jobs FAB (issues #26, #51).
+ * Floating jobs FAB (issues #26, #51, #73).
  *
  * Renders a fixed bottom-right action button that summarises the job
- * registry and opens a popover with the same per-job rows the old
- * in-header panel used. The FAB lives outside page scroll so multi-cam
- * beep / trim runs stay visible on long screens (audit, export).
+ * registry and opens a popover with the per-job rows. The FAB lives
+ * outside page scroll so multi-cam beep / trim runs stay visible on
+ * long screens (audit, export).
+ *
+ * Failures (#73) are first-class: the badge counts only failures the
+ * user hasn't dismissed, the popover splits failures into a red strip
+ * at the top with explicit "Dismiss" buttons, and a "Dismiss all"
+ * action clears the badge in one click. Acknowledgment is server-side
+ * (POST /api/jobs/{id}/acknowledge) so it survives a page reload.
  *
  * Polling cadence is 1 Hz while any job is active and 5 s otherwise so
  * an idle screen barely talks to the backend.
@@ -28,8 +34,11 @@ import { cn } from "@/lib/utils";
 
 const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
-// Show at most this many jobs in the popover to keep it scannable.
-const VISIBLE_LIMIT = 8;
+// Cap each section so a runaway registry can't stretch the popover off
+// screen. Failures get their own quota so a flood of successes can't
+// push the unread errors out of view.
+const FAILED_VISIBLE_LIMIT = 6;
+const SECTION_VISIBLE_LIMIT = 8;
 const POPOVER_ID = "jobs-panel-popover";
 
 const KIND_LABEL: Record<string, string> = {
@@ -44,6 +53,10 @@ function formatKind(kind: string): string {
 
 function isActive(job: Job): boolean {
   return job.status === "pending" || job.status === "running";
+}
+
+function isUnackedFailure(job: Job): boolean {
+  return job.status === "failed" && !job.acknowledged;
 }
 
 function jobLabel(job: Job): string {
@@ -98,13 +111,14 @@ export function JobsPanel() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [open, setOpen] = useState(false);
   const [cancelInFlight, setCancelInFlight] = useState<Set<string>>(() => new Set());
-  // Failed-job ids the user has already seen. A failure stays "sticky"
-  // (destructive FAB state) until either the popover opens or the
-  // failed job ages out of the registry. Acked-but-still-failed jobs
-  // continue to render in the list, just without driving FAB state.
-  const [acked, setAcked] = useState<Set<string>>(() => new Set());
+  // Per-row "Dismiss" click optimism: while the POST is in flight the
+  // row's button shows a spinner. The server is the source of truth
+  // for ``acknowledged`` -- we never set it client-only.
+  const [ackInFlight, setAckInFlight] = useState<Set<string>>(() => new Set());
+  const [bulkAckInFlight, setBulkAckInFlight] = useState(false);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const failedSectionRef = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -141,51 +155,51 @@ export function JobsPanel() {
     };
   }, [refresh]);
 
-  const sorted = useMemo(() => {
-    // Active first (newest first within active), then most recent finished.
-    const active = jobs.filter(isActive);
-    const finished = jobs.filter((j) => !isActive(j));
-    active.sort(
+  const failed = useMemo(
+    () => jobs.filter(isUnackedFailure),
+    [jobs],
+  );
+  const active = useMemo(() => jobs.filter(isActive), [jobs]);
+  const finished = useMemo(
+    () => jobs.filter((j) => !isActive(j) && !isUnackedFailure(j)),
+    [jobs],
+  );
+
+  // Sort each section by recency. Failures lead with most-recent first
+  // because the user just got paged to look at them.
+  const sortedFailed = useMemo(() => {
+    const list = [...failed];
+    list.sort(
+      (a, b) =>
+        new Date(b.finished_at ?? b.updated_at).getTime() -
+        new Date(a.finished_at ?? a.updated_at).getTime(),
+    );
+    return list.slice(0, FAILED_VISIBLE_LIMIT);
+  }, [failed]);
+  const sortedActive = useMemo(() => {
+    const list = [...active];
+    list.sort(
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-    finished.sort((a, b) => {
+    return list.slice(0, SECTION_VISIBLE_LIMIT);
+  }, [active]);
+  const sortedFinished = useMemo(() => {
+    const list = [...finished];
+    list.sort((a, b) => {
       const at = a.finished_at ?? a.updated_at;
       const bt = b.finished_at ?? b.updated_at;
       return new Date(bt).getTime() - new Date(at).getTime();
     });
-    return [...active, ...finished].slice(0, VISIBLE_LIMIT);
-  }, [jobs]);
+    return list.slice(0, SECTION_VISIBLE_LIMIT);
+  }, [finished]);
 
-  const activeCount = jobs.filter(isActive).length;
-  const unackedFailedIds = useMemo(
-    () =>
-      jobs
-        .filter((j) => j.status === "failed" && !acked.has(j.id))
-        .map((j) => j.id),
-    [jobs, acked],
-  );
-  const unackedFailedCount = unackedFailedIds.length;
+  const activeCount = active.length;
+  const unackedFailedCount = failed.length;
 
-  // Drop ack entries for jobs that have aged out of the registry so
-  // the set doesn't grow unbounded across long sessions.
-  useEffect(() => {
-    setAcked((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(jobs.map((j) => j.id));
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (live.has(id)) next.add(id);
-        else changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [jobs]);
-
-  // Auto-open on a new failure. Re-fires when the unacked count grows,
-  // not when an existing failure remains unacked, so the popover doesn't
-  // keep popping back if the user closes it without clicking through.
+  // Auto-open on a new failure. Re-fires when the unacked count grows
+  // so a fresh failure always surfaces; doesn't re-open if the user
+  // closes the panel without dismissing -- they took an action.
   const prevUnackCountRef = useRef(0);
   useEffect(() => {
     if (unackedFailedCount > prevUnackCountRef.current && !open) {
@@ -193,18 +207,6 @@ export function JobsPanel() {
     }
     prevUnackCountRef.current = unackedFailedCount;
   }, [unackedFailedCount, open]);
-
-  // Acknowledge unacked failures whenever the popover is open. Runs on
-  // open transitions and also while open if a new failure lands, so the
-  // failed badge clears immediately once the user has the panel up.
-  useEffect(() => {
-    if (!open || unackedFailedCount === 0) return;
-    setAcked((prev) => {
-      const next = new Set(prev);
-      unackedFailedIds.forEach((id) => next.add(id));
-      return next;
-    });
-  }, [open, unackedFailedCount, unackedFailedIds]);
 
   // Close popover on outside click / Escape.
   useEffect(() => {
@@ -297,6 +299,15 @@ export function JobsPanel() {
     };
   }, [open]);
 
+  // When the panel opens with unread failures, scroll the failures
+  // section into view inside the popover. Without this, a panel taller
+  // than the viewport could open with the failures off-screen.
+  useEffect(() => {
+    if (!open) return;
+    if (unackedFailedCount === 0) return;
+    failedSectionRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+  }, [open, unackedFailedCount]);
+
   const cancel = async (jobId: string) => {
     setCancelInFlight((prev) => {
       const next = new Set(prev);
@@ -314,6 +325,40 @@ export function JobsPanel() {
         next.delete(jobId);
         return next;
       });
+    }
+  };
+
+  const dismiss = async (jobId: string) => {
+    setAckInFlight((prev) => {
+      const next = new Set(prev);
+      next.add(jobId);
+      return next;
+    });
+    try {
+      const updated = await api.acknowledgeJob(jobId);
+      setJobs((prev) => prev.map((j) => (j.id === jobId ? updated : j)));
+    } catch {
+      /* ignore -- next poll will resync */
+    } finally {
+      setAckInFlight((prev) => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+    }
+  };
+
+  const dismissAll = async () => {
+    setBulkAckInFlight(true);
+    try {
+      const updated = await api.acknowledgeAllFailures();
+      if (updated.length === 0) return;
+      const byId = new Map(updated.map((j) => [j.id, j] as const));
+      setJobs((prev) => prev.map((j) => byId.get(j.id) ?? j));
+    } catch {
+      /* ignore -- next poll will resync */
+    } finally {
+      setBulkAckInFlight(false);
     }
   };
 
@@ -391,30 +436,94 @@ export function JobsPanel() {
           role="dialog"
           aria-label="Background jobs"
           tabIndex={-1}
-          className="absolute bottom-full right-0 z-50 mb-2 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-lg focus:outline-none"
+          className="absolute bottom-full right-0 z-50 mb-2 flex max-h-[70vh] w-96 max-w-[calc(100vw-2rem)] flex-col rounded-md border border-border bg-popover text-popover-foreground shadow-lg focus:outline-none"
         >
-          <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <h2 className="text-sm font-semibold tracking-tight">Background jobs</h2>
             <span className="text-xs text-muted-foreground">
               {activeCount > 0 ? `${activeCount} active` : "Idle"}
             </span>
           </div>
-          {sorted.length === 0 ? (
-            <p className="py-6 text-center text-xs text-muted-foreground">
-              No recent jobs.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {sorted.map((job) => (
-                <JobRow
-                  key={job.id}
-                  job={job}
-                  busy={cancelInFlight.has(job.id)}
-                  onCancel={() => cancel(job.id)}
-                />
-              ))}
-            </ul>
-          )}
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+            {unackedFailedCount > 0 ? (
+              <section
+                ref={failedSectionRef}
+                aria-label="Failed jobs"
+                className="overflow-hidden rounded-md border border-destructive/40 bg-destructive/5"
+              >
+                <div className="flex items-center justify-between border-b border-destructive/30 bg-destructive/10 px-2 py-1.5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+                    <AlertTriangle className="size-3.5" aria-hidden />
+                    {unackedFailedCount} failed
+                  </div>
+                  {unackedFailedCount > 1 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => void dismissAll()}
+                      disabled={bulkAckInFlight}
+                    >
+                      {bulkAckInFlight ? (
+                        <Loader2 className="size-3 motion-safe:animate-spin" aria-hidden />
+                      ) : null}
+                      Dismiss all
+                    </Button>
+                  ) : null}
+                </div>
+                <ul className="flex flex-col gap-1 p-1.5">
+                  {sortedFailed.map((job) => (
+                    <JobRow
+                      key={job.id}
+                      job={job}
+                      cancelBusy={cancelInFlight.has(job.id)}
+                      ackBusy={ackInFlight.has(job.id)}
+                      onCancel={() => cancel(job.id)}
+                      onDismiss={() => dismiss(job.id)}
+                      tone="failed"
+                    />
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+            {sortedActive.length > 0 ? (
+              <section aria-label="Active jobs" className="flex flex-col gap-1">
+                {sortedActive.map((job) => (
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    cancelBusy={cancelInFlight.has(job.id)}
+                    ackBusy={false}
+                    onCancel={() => cancel(job.id)}
+                    onDismiss={() => undefined}
+                    tone="default"
+                  />
+                ))}
+              </section>
+            ) : null}
+            {sortedFinished.length > 0 ? (
+              <section aria-label="Finished jobs" className="flex flex-col gap-1">
+                {sortedFinished.map((job) => (
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    cancelBusy={false}
+                    ackBusy={false}
+                    onCancel={() => undefined}
+                    onDismiss={() => undefined}
+                    tone="default"
+                  />
+                ))}
+              </section>
+            ) : null}
+            {sortedFailed.length === 0 &&
+            sortedActive.length === 0 &&
+            sortedFinished.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground">
+                No recent jobs.
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>
@@ -423,21 +532,38 @@ export function JobsPanel() {
 
 interface JobRowProps {
   job: Job;
-  busy: boolean;
+  cancelBusy: boolean;
+  ackBusy: boolean;
   onCancel: () => void;
+  onDismiss: () => void;
+  tone: "default" | "failed";
 }
 
-function JobRow({ job, busy, onCancel }: JobRowProps) {
+function JobRow({ job, cancelBusy, ackBusy, onCancel, onDismiss, tone }: JobRowProps) {
   const active = isActive(job);
+  const showDismiss = job.status === "failed" && !job.acknowledged;
+  const dismissedTag =
+    job.status === "failed" && job.acknowledged ? " (dismissed)" : "";
   const progressPct =
     job.progress != null ? Math.round(Math.min(1, Math.max(0, job.progress)) * 100) : null;
   const statusLine = job.cancel_requested
     ? "Cancelled by user"
     : job.status === "failed"
-      ? job.error ?? "Failed"
+      ? `${job.error ?? "Failed"}${dismissedTag}`
       : (job.message ?? job.status);
   return (
-    <li className="rounded-md border border-border/60 bg-card/50 p-2">
+    <li
+      className={cn(
+        "rounded-md border p-2",
+        tone === "failed"
+          ? "border-destructive/30 bg-card"
+          : "border-border/60 bg-card/50",
+        // Acknowledged failures live in the regular finished section but
+        // visually fade so the user can tell at a glance which entries
+        // are stale.
+        job.status === "failed" && job.acknowledged && "opacity-60",
+      )}
+    >
       <div className="flex items-start gap-2">
         <StatusIcon job={job} className="mt-0.5" />
         <div className="min-w-0 flex-1">
@@ -470,16 +596,30 @@ function JobRow({ job, busy, onCancel }: JobRowProps) {
             variant="ghost"
             size="icon"
             className="size-7 shrink-0"
-            disabled={busy || job.cancel_requested}
+            disabled={cancelBusy || job.cancel_requested}
             onClick={onCancel}
             aria-label={`Cancel ${jobLabel(job)}`}
             title="Cancel"
           >
-            {busy ? (
+            {cancelBusy ? (
               <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden />
             ) : (
               <X className="size-3.5" aria-hidden />
             )}
+          </Button>
+        ) : showDismiss ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-[11px]"
+            disabled={ackBusy}
+            onClick={onDismiss}
+            aria-label={`Dismiss failure: ${jobLabel(job)}`}
+          >
+            {ackBusy ? (
+              <Loader2 className="size-3 motion-safe:animate-spin" aria-hidden />
+            ) : null}
+            Dismiss
           </Button>
         ) : null}
       </div>

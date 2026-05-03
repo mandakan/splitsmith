@@ -2125,6 +2125,109 @@ def test_detect_beep_job_records_failure_when_ffmpeg_blows_up(tmp_path: Path, mo
     assert "ffmpeg fell over" in final["error"]
 
 
+def test_acknowledge_endpoint_marks_failed_job_as_seen(tmp_path: Path, monkeypatch) -> None:
+    """POST /api/jobs/{id}/acknowledge flips ``acknowledged`` on a failed
+    job (issue #73). The SPA drives the per-row "Dismiss" button against
+    this; subsequent /api/jobs snapshots return acknowledged=True so the
+    badge stops counting it."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise audio_helpers.AudioExtractionError("kaboom")
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+
+    submit = client.post("/api/stages/1/detect-beep")
+    assert submit.status_code == 200
+    job_id = submit.json()["id"]
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "failed"
+    assert final["acknowledged"] is False
+
+    ack = client.post(f"/api/jobs/{job_id}/acknowledge")
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] is True
+
+    listing = client.get("/api/jobs").json()
+    assert next(j for j in listing if j["id"] == job_id)["acknowledged"] is True
+
+
+def test_acknowledge_endpoint_404_for_unknown_job(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/jobs/does-not-exist/acknowledge")
+    assert resp.status_code == 404
+
+
+def test_acknowledge_endpoint_noop_for_succeeded_job(tmp_path: Path, monkeypatch) -> None:
+    """Acknowledging a non-failed job is a quiet no-op so the SPA's
+    optimistic flow doesn't have to special-case statuses."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 5.0
+    project.save(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    from splitsmith import beep_detect
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeBeep:
+        time = 1.0
+        peak_amplitude = 0.5
+        duration_ms = 80.0
+        candidates: list = []
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
+    (tmp_path / "z.wav").write_bytes(b"\x00")
+    monkeypatch.setattr(beep_detect, "load_audio", lambda p: ([0.0] * 100, 48_000))
+    monkeypatch.setattr(beep_detect, "detect_beep", lambda *a, **kw: FakeBeep())
+
+    submit = client.post("/api/stages/1/detect-beep")
+    job_id = submit.json()["id"]
+    assert _wait_for_job(client, job_id)["status"] == "succeeded"
+    resp = client.post(f"/api/jobs/{job_id}/acknowledge")
+    assert resp.status_code == 200
+    assert resp.json()["acknowledged"] is False
+
+
+def test_acknowledge_failures_bulk_endpoint(tmp_path: Path, monkeypatch) -> None:
+    """POST /api/jobs/acknowledge-failures dismisses every unacked failure
+    in one call and returns the snapshots that flipped, so the SPA can
+    apply the diff without an extra GET."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise audio_helpers.AudioExtractionError("kaboom")
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+
+    ids: list[str] = []
+    for _ in range(2):
+        submit = client.post("/api/stages/1/detect-beep")
+        jid = submit.json()["id"]
+        assert _wait_for_job(client, jid)["status"] == "failed"
+        ids.append(jid)
+
+    # Pre-ack one so the bulk endpoint reports only the other.
+    client.post(f"/api/jobs/{ids[0]}/acknowledge")
+
+    bulk = client.post("/api/jobs/acknowledge-failures")
+    assert bulk.status_code == 200
+    affected = bulk.json()
+    assert {j["id"] for j in affected} == {ids[1]}
+
+    listing = client.get("/api/jobs").json()
+    by_id = {j["id"]: j for j in listing}
+    assert by_id[ids[0]]["acknowledged"] is True
+    assert by_id[ids[1]]["acknowledged"] is True
+
+
 def test_post_trim_400_when_no_beep(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"

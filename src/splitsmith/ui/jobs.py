@@ -116,6 +116,12 @@ class Job(BaseModel):
     # status=CANCELLED. The flag stays True on the terminal snapshot so
     # the UI can label the row "Cancelled by user" instead of "Aborted".
     cancel_requested: bool = False
+    # True after the SPA POSTed /api/jobs/{id}/acknowledge (issue #73).
+    # The flag is meaningful only on FAILED jobs: the JobsPanel's badge
+    # counts only failures with acknowledged=False, and retention prefers
+    # evicting acknowledged failures so the user's dismissed errors roll
+    # off faster than the ones they haven't seen yet.
+    acknowledged: bool = False
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None
@@ -292,6 +298,45 @@ class JobRegistry:
                 logger.warning("cancel: terminate() failed for job %s", job_id, exc_info=True)
         return snapshot
 
+    def acknowledge(self, job_id: str) -> Job | None:
+        """Mark a failed job as seen by the user (issue #73).
+
+        No-op for non-FAILED jobs and for failures already acknowledged.
+        Returns the post-ack snapshot, or ``None`` if ``job_id`` is
+        unknown. Acknowledgment lowers the job's eviction priority, so
+        a dismissed failure rolls off the retained list before the
+        unacknowledged ones the user still hasn't seen.
+        """
+        with self._lock:
+            j = self._jobs.get(job_id)
+            if j is None:
+                return None
+            if j.status == JobStatus.FAILED and not j.acknowledged:
+                j.acknowledged = True
+                j.updated_at = datetime.now(UTC)
+            return j.model_copy(deep=True)
+
+    def acknowledge_all_failures(self) -> list[Job]:
+        """Mark every currently-unacknowledged FAILED job as seen.
+
+        Returns the snapshots that actually changed (already-acknowledged
+        failures and non-failed jobs are skipped). The SPA uses the
+        return value to decide whether to flash a "Dismissed N failures"
+        toast.
+        """
+        now = datetime.now(UTC)
+        affected: list[Job] = []
+        with self._lock:
+            for jid in self._order:
+                j = self._jobs.get(jid)
+                if j is None:
+                    continue
+                if j.status == JobStatus.FAILED and not j.acknowledged:
+                    j.acknowledged = True
+                    j.updated_at = now
+                    affected.append(j.model_copy(deep=True))
+        return affected
+
     def find_active(
         self,
         *,
@@ -427,10 +472,16 @@ class JobRegistry:
             self._subprocs.pop(job_id, None)
 
     def _trim_retained_locked(self) -> None:
-        """Evict oldest finished jobs once the retention limit is hit.
+        """Evict finished jobs once the retention limit is hit.
 
         Active jobs (PENDING / RUNNING) are never evicted. Called under
         ``self._lock``; do not acquire it again.
+
+        Eviction priority (issue #73): succeeded jobs go first, then
+        acknowledged failures, then unacknowledged failures last. Within
+        each tier we evict oldest first. This keeps an unseen failure
+        visible in the registry even when a flurry of trim/beep
+        successes would otherwise have pushed it off the tail.
         """
         finished = [
             jid
@@ -439,7 +490,19 @@ class JobRegistry:
             and self._jobs[jid].status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
         ]
         excess = len(finished) - self._retain
-        if excess > 0:
-            for jid in finished[:excess]:
-                self._jobs.pop(jid, None)
-                self._order.remove(jid)
+        if excess <= 0:
+            return
+
+        def _eviction_priority(jid: str) -> int:
+            j = self._jobs[jid]
+            if j.status == JobStatus.SUCCEEDED:
+                return 0
+            if j.status == JobStatus.FAILED and j.acknowledged:
+                return 1
+            return 2  # unacknowledged failure -- protect
+
+        order_index = {jid: i for i, jid in enumerate(self._order)}
+        ranked = sorted(finished, key=lambda jid: (_eviction_priority(jid), order_index[jid]))
+        for jid in ranked[:excess]:
+            self._jobs.pop(jid, None)
+            self._order.remove(jid)

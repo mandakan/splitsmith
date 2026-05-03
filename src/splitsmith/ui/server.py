@@ -27,6 +27,9 @@ Endpoints (locked v1 surface):
   GET  /api/stages/{n}/videos/{vid}/beep-preview -- per-video ~1s preview MP4
   GET  /api/jobs                    -- list all retained jobs
   GET  /api/jobs/{job_id}           -- poll a single job for progress / status
+  POST /api/jobs/{job_id}/cancel    -- cooperative cancel of a running job
+  POST /api/jobs/{job_id}/acknowledge      -- dismiss a failed job (issue #73)
+  POST /api/jobs/acknowledge-failures      -- dismiss every unacknowledged failure
   GET  /api/stages/{n}/audio        -- serve cached primary WAV (Range supported)
   GET  /api/stages/{n}/peaks?bins=N -- waveform peak data for the audit screen
   GET  /api/stages/{n}/beep-preview -- ~1s MP4 around the detected beep (#27)
@@ -2037,6 +2040,29 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def get_job(job_id: str) -> Job:
         """Poll a single job. SPA polls ~1 Hz while a job is active."""
         job = state.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+        return job
+
+    @app.post("/api/jobs/acknowledge-failures", response_model=list[Job])
+    def acknowledge_all_failures() -> list[Job]:
+        """Mark every currently-unacknowledged FAILED job as seen (issue #73).
+
+        Used by the JobsPanel "Dismiss all failures" header action. Returns
+        the snapshots that actually flipped to acknowledged so the SPA can
+        diff against its in-memory list without an extra refetch.
+        """
+        return state.jobs.acknowledge_all_failures()
+
+    @app.post("/api/jobs/{job_id}/acknowledge", response_model=Job)
+    def acknowledge_job(job_id: str) -> Job:
+        """Mark a single failed job as seen (issue #73).
+
+        No-op for jobs that aren't failed or are already acknowledged --
+        the snapshot is returned unchanged so the SPA can still pin its
+        local state to the server response.
+        """
+        job = state.jobs.acknowledge(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
