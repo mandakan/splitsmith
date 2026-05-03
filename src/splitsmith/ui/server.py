@@ -3388,12 +3388,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
     @app.get("/api/lab/fixtures")
     def lab_fixtures() -> JSONResponse:
-        return JSONResponse(
-            [r.model_dump(mode="json") for r in lab_module.list_fixtures()]
-        )
+        return JSONResponse([r.model_dump(mode="json") for r in lab_module.list_fixtures()])
 
     @app.post("/api/lab/eval")
-    def lab_eval(payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
+    def lab_eval(
+        payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
+    ) -> JSONResponse:
         slugs = payload.get("slugs")
         cfg_payload = payload.get("config") or {}
         cfg = lab_module.EvalConfig.model_validate(cfg_payload)
@@ -3524,7 +3524,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         tolerance_ms = float(payload.get("tolerance_ms", 75.0))
         fixtures = payload.get("fixtures")
         if fixtures is not None and not isinstance(fixtures, list):
-            raise HTTPException(status_code=400, detail="'fixtures' must be a list of slugs or omitted")
+            raise HTTPException(
+                status_code=400,
+                detail="'fixtures' must be a list of slugs or omitted",
+            )
 
         def _run(handle: JobHandle) -> None:
             # Import here to avoid pulling sklearn at server startup.

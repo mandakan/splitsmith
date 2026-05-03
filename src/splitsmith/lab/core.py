@@ -18,14 +18,11 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from ..beep_detect import load_audio
-from ..config import ShotDetectConfig
 from ..ensemble.api import (
     EnsembleConfig,
     EnsembleRuntime,
     detect_shots_ensemble,
 )
-from ..shot_detect import detect_shots
-
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_RUNS_ROOT = Path("build/lab/runs")
@@ -108,7 +105,10 @@ class EvalConfig(BaseModel):
     tolerance_ms: float = Field(default=75.0, gt=0.0)
     use_expected_rounds: bool = Field(
         default=True,
-        description="Pass the audit's ``stage_rounds.expected`` into the ensemble (adaptive voter C + apriori boost).",
+        description=(
+            "Pass the audit's ``stage_rounds.expected`` into the ensemble "
+            "(adaptive voter C + apriori boost)."
+        ),
     )
     voter_a_floor_override: float | None = None
     voter_b_threshold_override: float | None = None
@@ -484,11 +484,11 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
                 )
             )
         metrics = _metrics(fix.truth_times, new_cands)
-        rescored.append(
-            fix.model_copy(update={"candidates": new_cands, "metrics": metrics})
-        )
+        rescored.append(fix.model_copy(update={"candidates": new_cands, "metrics": metrics}))
 
-    new_universe = universe.model_copy(update={"fixtures": rescored, "tolerance_ms": config.tolerance_ms})
+    new_universe = universe.model_copy(
+        update={"fixtures": rescored, "tolerance_ms": config.tolerance_ms},
+    )
     return EvalRun(
         config=config,
         summary=_summary(rescored),
