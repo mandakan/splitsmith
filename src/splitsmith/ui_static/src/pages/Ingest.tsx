@@ -12,7 +12,7 @@
  * bay-cam dropped in days later) without losing audit work.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -83,6 +83,13 @@ export function Ingest() {
     video: StageVideo;
     stage: StageEntry | null;
   } | null>(null);
+
+  // Match window for the FolderPicker highlight + "Select N in match
+  // window" affordance: union of every stage's analysis window, padded
+  // by ~2h on each side to cover warm-up and the drive home with the
+  // cam still rolling. ``null`` until a scoreboard with at least one
+  // scorecard time is loaded.
+  const matchWindow = useMemo(() => computeMatchWindow(analysis), [analysis]);
 
   const refreshAnalysis = useCallback(async () => {
     // Cheap GET that re-runs the heuristic over current project state. Fire
@@ -435,6 +442,7 @@ export function Ingest() {
           <StartFromVideosSection
             project={project}
             busy={busy}
+            matchWindow={matchWindow}
             onSubmit={handleStartFromVideos}
           />
         </div>
@@ -454,6 +462,7 @@ export function Ingest() {
       <ScanSection
         disabled={busy || !project || project.stages.length === 0}
         initialPath={project?.last_scanned_dir ?? null}
+        matchWindow={matchWindow}
         onScan={handleScan}
         onScanFiles={handleScanFiles}
       />
@@ -1098,10 +1107,12 @@ function isSsiV1MatchData(data: unknown): boolean {
 function StartFromVideosSection({
   project,
   busy,
+  matchWindow,
   onSubmit,
 }: {
   project: MatchProject;
   busy: boolean;
+  matchWindow: { startEpoch: number; endEpoch: number } | null;
   onSubmit: (
     files: { path: string; mtime: number | null }[],
     stageCount: number,
@@ -1165,6 +1176,7 @@ function StartFromVideosSection({
         {picking ? (
           <FolderPicker
             initialPath={project.last_scanned_dir ?? null}
+            matchWindow={matchWindow}
             onSelect={() => {
               /* not used: this card always wants files, not a folder. */
             }}
@@ -1242,11 +1254,13 @@ function StartFromVideosSection({
 function ScanSection({
   disabled,
   initialPath,
+  matchWindow,
   onScan,
   onScanFiles,
 }: {
   disabled: boolean;
   initialPath: string | null;
+  matchWindow: { startEpoch: number; endEpoch: number } | null;
   onScan: (sourceDir: string) => void;
   onScanFiles: (sourcePaths: string[]) => void;
 }) {
@@ -1291,6 +1305,7 @@ function ScanSection({
         ) : (
           <FolderPicker
             initialPath={initialPath}
+            matchWindow={matchWindow}
             onSelect={(p) => {
               setOpen(false);
               onScan(p);
@@ -2628,3 +2643,35 @@ function CompactFileDropZone({
   );
 }
 
+
+/** Compute the union match window from per-stage analysis (epoch
+ *  seconds) for the FolderPicker highlight (#NN). Returns null when
+ *  no stage has a scorecard time yet -- the picker degrades to no
+ *  highlight, which is the right behaviour for placeholder-only
+ *  projects. The 2h padding on each side covers warm-up videos shot
+ *  before the first stage and clips recorded after the last scorecard
+ *  was typed (cool-down chatter, drive home with the cam rolling). */
+const MATCH_WINDOW_PADDING_SECONDS = 2 * 60 * 60;
+
+function computeMatchWindow(
+  analysis: MatchAnalysis | null,
+): { startEpoch: number; endEpoch: number } | null {
+  if (!analysis) return null;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const s of analysis.stages) {
+    if (s.lower) {
+      const t = new Date(s.lower).getTime() / 1000;
+      if (Number.isFinite(t) && t < lo) lo = t;
+    }
+    if (s.upper) {
+      const t = new Date(s.upper).getTime() / 1000;
+      if (Number.isFinite(t) && t > hi) hi = t;
+    }
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  return {
+    startEpoch: lo - MATCH_WINDOW_PADDING_SECONDS,
+    endEpoch: hi + MATCH_WINDOW_PADDING_SECONDS,
+  };
+}

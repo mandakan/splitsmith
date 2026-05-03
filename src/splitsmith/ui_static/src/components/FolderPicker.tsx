@@ -51,6 +51,14 @@ interface FolderPickerProps {
   onCancel?: () => void;
   /** Render mode: inline (e.g. inside a card) vs. compact. */
   mode?: "inline" | "compact";
+  /** Optional match window (epoch seconds, inclusive). Files whose
+   *  ``mtime`` falls inside this window are highlighted as likely
+   *  candidates so the user can spot them in a folder full of mixed
+   *  clips. Computed by the caller from the project's stage analysis;
+   *  null when no scoreboard times are loaded yet. The window already
+   *  includes whatever margin the caller wants (typically a couple of
+   *  hours on each side to cover warm-up + drive home with the cam). */
+  matchWindow?: { startEpoch: number; endEpoch: number } | null;
 }
 
 export function FolderPicker({
@@ -59,6 +67,7 @@ export function FolderPicker({
   onSelectFiles,
   onCancel,
   mode = "inline",
+  matchWindow = null,
 }: FolderPickerProps) {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [path, setPath] = useState<string | null>(initialPath ?? null);
@@ -124,6 +133,20 @@ export function FolderPicker({
   const selectAll = () => {
     setSelectedFiles(new Set(videoEntries.map((e) => e.name)));
   };
+
+  const selectInMatchWindow = () => {
+    setSelectedFiles(
+      new Set(
+        videoEntries
+          .filter((e) => isInMatchWindow(e.mtime, matchWindow))
+          .map((e) => e.name),
+      ),
+    );
+  };
+
+  const inWindowVideoCount = matchWindow
+    ? videoEntries.filter((e) => isInMatchWindow(e.mtime, matchWindow)).length
+    : 0;
 
   const confirmFiles = () => {
     if (!path || selectedCount === 0) return;
@@ -195,13 +218,19 @@ export function FolderPicker({
               <ul className="max-h-80 divide-y divide-border overflow-y-auto">
               {dirEntries.map((entry) => {
                 const childPath = path ? joinPath(path, entry.name) : entry.name;
+                const inWindow = isInMatchWindow(entry.mtime, matchWindow);
                 return (
                   <li key={`d-${entry.name}`}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+                        inWindow &&
+                          "border-l-2 border-l-status-info bg-status-info/5",
+                      )}
                       onClick={() => void load(childPath)}
                       disabled={busy}
+                      title={inWindow ? "Modified during the match window" : undefined}
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <Folder className="size-4 shrink-0 text-muted-foreground" />
@@ -228,6 +257,7 @@ export function FolderPicker({
                         fullPath={fullPath}
                         checked={checked}
                         busy={busy}
+                        inMatchWindow={isInMatchWindow(entry.mtime, matchWindow)}
                         onToggle={() => toggleSelect(entry.name)}
                         onProbed={(duration, thumbnail_url) => {
                           // Patch the listing in-place so the row remembers
@@ -274,6 +304,17 @@ export function FolderPicker({
               disabled={busy}
             >
               {selectedCount === videosHere ? "Clear selection" : "Select all"}
+            </button>
+          ) : null}
+          {multiFileMode && inWindowVideoCount > 0 ? (
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-status-info underline-offset-2 hover:underline"
+              onClick={selectInMatchWindow}
+              disabled={busy}
+              title="Select videos whose modified time falls inside the match window"
+            >
+              Select {inWindowVideoCount} in match window
             </button>
           ) : null}
         </div>
@@ -375,6 +416,7 @@ function VideoRowMulti({
   fullPath,
   checked,
   busy,
+  inMatchWindow,
   onToggle,
   onProbed,
 }: {
@@ -382,6 +424,7 @@ function VideoRowMulti({
   fullPath: string;
   checked: boolean;
   busy: boolean;
+  inMatchWindow: boolean;
   onToggle: () => void;
   onProbed: (duration: number | null, thumbnail_url: string | null) => void;
 }) {
@@ -414,9 +457,12 @@ function VideoRowMulti({
     >
       <label
         className={cn(
-          "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-accent/40",
+          "flex cursor-pointer items-center justify-between gap-2 border-l-2 border-l-transparent px-3 py-2 text-sm hover:bg-accent/40",
           checked && "bg-accent/30",
+          inMatchWindow && !checked && "border-l-status-info bg-status-info/5",
+          inMatchWindow && checked && "border-l-status-info",
         )}
+        title={inMatchWindow ? "Modified during the match window" : undefined}
       >
         <span className="flex min-w-0 items-center gap-2">
           <input
@@ -533,6 +579,14 @@ function SortHeader({
       </button>
     </div>
   );
+}
+
+function isInMatchWindow(
+  mtime: number | null | undefined,
+  win: { startEpoch: number; endEpoch: number } | null,
+): boolean {
+  if (!win || mtime == null) return false;
+  return mtime >= win.startEpoch && mtime <= win.endEpoch;
 }
 
 function formatMtime(epochSeconds: number): string {
