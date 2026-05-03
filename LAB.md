@@ -90,7 +90,11 @@ cleanly across runs.
 
 ### 3. Drill into a fixture
 
-Click any row in the fixture table. A detail card appears below with:
+Click any row in the fixture table. The pencil icon at the right edge
+of each row deep-links into the review editor (`/review?fixture=...`)
+so you can re-label shots / edit the beep without leaving the SPA --
+the same shortcut is also available as a **Re-label** button on the
+fixture detail header. A detail card appears below with:
 
 - **Waveform** of the fixture's WAV. Pins overlay every kept candidate
   (green = TP, orange = FP, top-edge red = FN ground truth that no
@@ -210,6 +214,25 @@ review UI), and either:
 - run `splitsmith audit-apply` to finalize, or
 - promote-then-audit by opening it in the production UI's `/review`
   route and editing in place.
+
+### Re-labeling an existing fixture
+
+You don't have to promote a stage from scratch to fix labels. Two ways:
+
+- **From the Lab UI**: in the fixture table, click the pencil icon at
+  the right edge of any row, or open the detail card and click
+  **Re-label**. Either deep-links to `/review?fixture=<audit_path>` --
+  the same audit screen used for stages, but pointed at the fixture's
+  JSON. Drag markers, accept/reject candidates, retune the beep, save
+  with Cmd+S. Writes back atomically with a `.bak` of the previous
+  version next to the JSON. The Lab catalog and metrics refresh on the
+  next Run eval.
+- **From the CLI**: `uv run splitsmith review tests/fixtures/<slug>.json`
+  starts the production UI and opens the review tab on that file.
+
+Re-labeling never re-triggers calibration on its own. If you want the
+new labels to influence the shipped voter thresholds, hit **Rebuild
+calibration** after.
 
 ### After adding a fixture
 

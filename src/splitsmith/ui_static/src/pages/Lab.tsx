@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
   Beaker,
@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Hammer,
   Loader2,
+  Pencil,
   Play,
   RotateCcw,
   Save,
@@ -511,7 +512,18 @@ function FixtureTable({
                       )}
                     </td>
                     <td className="px-2 py-2 text-muted-foreground">
-                      <ChevronRight className="size-3.5" />
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          to={`/review?fixture=${encodeURIComponent(rec.audit_path)}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          title="Re-label this fixture in the review editor"
+                          aria-label={`Re-label ${rec.slug}`}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Link>
+                        <ChevronRight className="size-3.5" />
+                      </div>
                     </td>
                   </tr>
                 );
@@ -559,9 +571,20 @@ function FixtureDetail({
             F1 {fixture.metrics.f1.toFixed(3)}
           </CardDescription>
         </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          Close
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link
+              to={`/review?fixture=${encodeURIComponent(fixture.audit_path)}`}
+              title="Open this fixture in the review editor (re-label shots, edit beep, save in place)"
+            >
+              <Pencil className="size-3.5" />
+              Re-label
+            </Link>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {peaks ? (
