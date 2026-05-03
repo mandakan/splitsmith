@@ -188,7 +188,7 @@ def _make_analysis(*, anomalies: list[str] | None = None) -> StageAnalysis:
     ]
     return StageAnalysis(
         stage=_stage(),
-        video_path=Path("/tmp/stage3.mp4"),
+        video_path=Path("stage3.mp4"),
         beep_time=19.873,
         shots=shots,
         anomalies=anomalies or [],
@@ -208,11 +208,12 @@ def test_render_report_includes_header_and_marker() -> None:
     assert "Detected beep at:     19.873s" in text
     # Last shot time_from_beep = 14.700, official 14.74 -> within 500ms -> [OK]
     assert "[OK]" in text
-    # File footer
+    # File footer. Compare against str(Path) so backslash separators on
+    # Windows match the rendered output.
     assert "Files:" in text
-    assert "analysis/stage3_trimmed.mp4" in text
-    assert "analysis/stage3_splits.csv" in text
-    assert "analysis/stage3.fcpxml" in text
+    assert str(files.video) in text
+    assert str(files.csv) in text
+    assert str(files.fcpxml) in text
 
 
 def test_render_report_marks_draw_and_transition() -> None:
@@ -236,7 +237,7 @@ def test_render_report_color_band_flags() -> None:
     ]
     analysis = StageAnalysis(
         stage=_stage(),
-        video_path=Path("/tmp/x.mp4"),
+        video_path=Path("x.mp4"),
         beep_time=10.0,
         shots=shots,
     )
@@ -275,7 +276,7 @@ def test_write_report_writes_to_path(tmp_path: Path) -> None:
 def test_render_report_no_shots() -> None:
     analysis = StageAnalysis(
         stage=_stage(),
-        video_path=Path("/tmp/x.mp4"),
+        video_path=Path("x.mp4"),
         beep_time=10.0,
         shots=[],
         anomalies=["No shots detected in the stage window."],
