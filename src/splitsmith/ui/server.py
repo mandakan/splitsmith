@@ -1167,6 +1167,16 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             project.last_scanned_dir = str(last_dir)
 
         project.save(state.project_root)
+
+        # Queue auto-beep for every freshly-primaried video (#67). Done
+        # after save so the persisted state reflects the assignment when
+        # the worker re-loads the project.
+        for stage_num, video_path in auto_assigned.items():
+            stage = project.stage(stage_num)
+            video = next((v for v in stage.videos if str(v.path) == video_path), None)
+            if video is not None:
+                _auto_queue_beep_if_needed(project, stage_num, video)
+
         return ScanResponse(
             registered=registered,
             auto_assigned=auto_assigned,
@@ -1400,6 +1410,53 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             fn=lambda h, n=stage_number, vid=video.video_id: _run_detect_beep_for_video(h, n, vid),
         )
         return JSONResponse(job.model_dump(mode="json"))
+
+    def _auto_queue_beep_if_needed(
+        project: MatchProject, stage_number: int, video: StageVideo
+    ) -> bool:
+        """Best-effort auto-queue of detect_beep on a freshly-assigned video.
+
+        Hooked into scan auto-assign, ``/assignments/move``, and
+        ``/assignments/swap-primary`` so the user doesn't have to click
+        "detect beep" on every camera before the audit screen is useful
+        (#67). Auto-firing is conservative -- we silently skip whenever
+        manual user action is the right call:
+
+        - already detected (``processed.beep``) or manually overridden
+          (``beep_source == "manual"``) -- never replace user input
+        - role ``ignored`` -- video is intentionally outside the pipeline
+        - source not reachable -- USB / SD card likely unplugged; the
+          user will retry by hand once it's back
+        - duplicate active job -- ``_submit_detect_beep`` already dedupes
+          by (kind, stage, video_id), but checking up front avoids the
+          unnecessary JSONResponse round-trip
+        - ``SPLITSMITH_AUTO_BEEP_DISABLED=1`` is set -- escape hatch for
+          tests that need to assert pre-detection state without racing
+          against an auto-fired worker
+
+        Returns True when a job was queued (or already running), False
+        when skipped. Callers don't need to react; the SPA picks up the
+        new job via its existing JobsPanel polling.
+        """
+        if os.environ.get("SPLITSMITH_AUTO_BEEP_DISABLED") == "1":
+            return False
+        if video.role == "ignored":
+            return False
+        if video.processed.get("beep") or video.beep_time is not None:
+            return False
+        if video.beep_source == "manual":
+            return False
+        source = project.resolve_video_path(state.project_root, video.path)
+        if not source.exists():
+            logger.info(
+                "auto-beep skipped for stage %d video %s: source not reachable (%s)",
+                stage_number,
+                video.video_id,
+                source,
+            )
+            return False
+        _submit_detect_beep(stage_number, video)
+        return True
 
     @app.post("/api/stages/{stage_number}/videos/{video_id}/detect-beep")
     def detect_beep_for_video(
@@ -2624,6 +2681,16 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         project.save(state.project_root)
+
+        # Auto-queue beep on assignment to a real stage (#67). Skip when
+        # unassigning (to_stage_number=None) or marking ignored -- those
+        # don't put the video into the pipeline.
+        if req.to_stage_number is not None and req.role != "ignored":
+            stage = project.stage(req.to_stage_number)
+            video = next((v for v in stage.videos if str(v.path) == req.video_path), None)
+            if video is not None:
+                _auto_queue_beep_if_needed(project, req.to_stage_number, video)
+
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/assignments/swap-primary")
@@ -2668,6 +2735,15 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         project.save(state.project_root)
+
+        # Auto-queue beep for the new primary (#67). swap_primary may
+        # clear ``processed.beep`` to force re-detection on the new
+        # video's audio; the helper picks up the cleared flag and queues
+        # accordingly. No-op when the video already had a current beep.
+        new_primary = project.stage(req.stage_number).primary()
+        if new_primary is not None:
+            _auto_queue_beep_if_needed(project, req.stage_number, new_primary)
+
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.get("/api/exports/overview")

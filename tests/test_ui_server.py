@@ -15,6 +15,24 @@ from splitsmith.ui.server import create_app
 from splitsmith.video_probe import ProbeError, ProbeResult
 
 
+@pytest.fixture(autouse=True)
+def _disable_auto_beep_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most tests in this module exercise specific beep flows (manual
+    overrides, force re-detect, candidate selection) and would race
+    against the on-assignment auto-fire from #67. Default to disabled
+    here; the new auto-fire tests explicitly re-enable via
+    :func:`_enable_auto_beep` so the assertions stay deterministic.
+    """
+    monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
+
+
+def _enable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt back into the on-assignment auto-fire for the calling test.
+    Pairs with the autouse disable fixture above.
+    """
+    monkeypatch.delenv("SPLITSMITH_AUTO_BEEP_DISABLED", raising=False)
+
+
 def _wait_for_job(client: TestClient, job_id: str, *, timeout: float = 5.0) -> dict:
     """Poll /api/jobs/{id} until the job is no longer running.
 
@@ -2926,3 +2944,340 @@ def test_per_video_endpoint_404_for_unknown_video_id(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     resp = client.post("/api/stages/1/videos/deadbeef0000/detect-beep")
     assert resp.status_code == 404
+
+
+# -----------------------------------------------------------------------------
+# Auto-fire beep on assignment (#67). Re-enables the env-var feature flag
+# the autouse fixture turns off for the rest of this module.
+# -----------------------------------------------------------------------------
+
+
+def _wait_for_jobs_to_drain(client: TestClient, *, timeout: float = 5.0) -> list[dict]:
+    """Poll /api/jobs until every job has left running/pending, then return
+    the final snapshot. Used by the auto-fire tests since the SPA-equivalent
+    flow doesn't return a job id from the assignment endpoint."""
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        jobs = client.get("/api/jobs").json()
+        active = [j for j in jobs if j["status"] in ("pending", "running")]
+        if not active:
+            return jobs
+        time.sleep(0.02)
+    raise AssertionError(f"jobs did not drain within {timeout}s: {jobs}")
+
+
+def test_auto_beep_queued_on_move_to_stage(tmp_path: Path, monkeypatch) -> None:
+    """Dragging a video onto a stage queues detect_beep automatically --
+    the user shouldn't have to click 'detect beep' on every camera."""
+    _enable_auto_beep(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=8.42)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    (src_dir / "VID.mp4").write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+
+    # Move triggers auto-fire.
+    resp = client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    assert resp.status_code == 200
+    jobs = _wait_for_jobs_to_drain(client)
+    auto_beep_jobs = [j for j in jobs if j["kind"] == "detect_beep"]
+    assert len(auto_beep_jobs) == 1
+    assert auto_beep_jobs[0]["status"] == "succeeded"
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary["beep_time"] == 8.42
+    assert primary["beep_source"] == "auto"
+    assert primary["processed"]["beep"] is True
+
+
+def test_auto_beep_fires_for_secondaries_too(tmp_path: Path, monkeypatch) -> None:
+    """The hook isn't primary-only -- secondaries assigned to a stage also
+    get beeped, since they need their own beep timestamp to align with
+    the primary's audit timeline."""
+    _enable_auto_beep(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=8.42)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    (src_dir / "PRIMARY.mp4").write_bytes(b"")
+    (src_dir / "SECONDARY.mp4").write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+
+    # Sequence the moves so each worker's project save doesn't race the
+    # other -- the per-job runner loads project state on entry and
+    # writes it back on exit; concurrent saves would clobber each
+    # other's ``processed.beep`` flag.
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/PRIMARY.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    _wait_for_jobs_to_drain(client)
+    client.post(
+        "/api/assignments/move",
+        json={
+            "video_path": "raw/SECONDARY.mp4",
+            "to_stage_number": 1,
+            "role": "secondary",
+        },
+    )
+    _wait_for_jobs_to_drain(client)
+    stage = client.get("/api/project").json()["stages"][0]
+    assert all(v["processed"]["beep"] for v in stage["videos"])
+
+
+def test_auto_beep_skipped_for_unassigned_destination(tmp_path: Path, monkeypatch) -> None:
+    """Moving a video back to the unassigned tray (to_stage_number=None)
+    must not queue a beep job -- there's no stage context for the
+    audio-cache layout or the trim chain to use."""
+    _enable_auto_beep(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=8.42)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    (src_dir / "VID.mp4").write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+
+    # Move to stage -> auto-beep
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    _wait_for_jobs_to_drain(client)
+    job_count_after_assign = len(client.get("/api/jobs").json())
+
+    # Move back to tray -> no new job (idempotent on already-beeped is
+    # also covered: the helper would skip even if we re-assigned).
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": None, "role": "secondary"},
+    )
+    assert len(client.get("/api/jobs").json()) == job_count_after_assign
+
+
+def test_auto_beep_skipped_when_already_processed(tmp_path: Path, monkeypatch) -> None:
+    """A video that already has ``processed.beep == True`` (because the
+    user clicked detect-beep manually, or we already auto-fired) doesn't
+    re-fire on a subsequent move between stages."""
+    _enable_auto_beep(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=8.42)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S1",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "stage_number": 2,
+                        "stage_name": "S2",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    },
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    (src_dir / "VID.mp4").write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+
+    # First move to stage 1 -> auto-fires.
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    _wait_for_jobs_to_drain(client)
+    jobs_before = len(client.get("/api/jobs").json())
+
+    # Move to stage 2 -> processed.beep is already True, no new job.
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": 2, "role": "primary"},
+    )
+    assert len(client.get("/api/jobs").json()) == jobs_before
+
+
+def test_auto_beep_disabled_via_env_var(tmp_path: Path, monkeypatch) -> None:
+    """The autouse fixture disables auto-beep for the rest of this module
+    via the env var; this test makes the contract explicit."""
+    monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
+    _stub_detect(monkeypatch, beep_time=8.42)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    (src_dir / "VID.mp4").write_bytes(b"")
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+    client.post(
+        "/api/assignments/move",
+        json={"video_path": "raw/VID.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    # No auto job; primary still un-beeped until the user clicks detect.
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary["processed"]["beep"] is False
+
+
+def test_auto_beep_queued_on_scan_auto_assign(tmp_path: Path, monkeypatch) -> None:
+    """Scanning a folder with ``auto_assign_primary=true`` and matching
+    timestamps lands a primary on the stage; the auto-fire hook queues
+    its beep without the user clicking anything."""
+    _enable_auto_beep(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=4.5)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T12:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/scoreboard/import", json={"data": sb})
+
+    # Drop a video whose mtime matches the stage's scorecard window so
+    # auto_match picks it up.
+    src_dir = tmp_path / "videos"
+    src_dir.mkdir()
+    src = src_dir / "VID.mp4"
+    src.write_bytes(b"")
+    import os as _os
+
+    target_mtime = 1767268500  # within +/- tolerance of 2026-01-01T12:00:00Z
+    _os.utime(src, (target_mtime, target_mtime))
+
+    client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": True},
+    )
+    _wait_for_jobs_to_drain(client)
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary["role"] == "primary"
+    assert primary["processed"]["beep"] is True
+    assert primary["beep_time"] == 4.5
