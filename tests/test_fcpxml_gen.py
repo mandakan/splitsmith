@@ -359,6 +359,190 @@ def test_generate_fcpxml_inserts_overlay_as_lane_1_connected_clip(tmp_path: Path
     assert overlay_clip.attrib["duration"] == "600/30s"  # 20s @ 30fps
 
 
+def test_generate_fcpxml_attaches_secondary_cam_on_lane_1(tmp_path: Path) -> None:
+    """Single secondary cam with the same beep offset as the primary -> a
+    connected ``asset-clip`` on lane=1 with offset=0 (cams sync at the beep
+    by default since both trims share the same pre-buffer)."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "v_cam_abc.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_30fps(),
+                beep_offset_seconds=5.0,
+                label="Cam abc",
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    assert len(assets) == 2
+    secondary_asset = assets[1]
+    media = secondary_asset.find("media-rep")
+    assert media is not None and media.attrib["src"].endswith("v_cam_abc.mp4")
+    nested = root.findall(".//spine/asset-clip/asset-clip")
+    assert len(nested) == 1
+    cam_clip = nested[0]
+    assert cam_clip.attrib["lane"] == "1"
+    assert cam_clip.attrib["offset"] == "0s"
+    assert cam_clip.attrib["start"] == "0s"
+    assert cam_clip.attrib["name"] == "Cam abc"
+
+
+def test_generate_fcpxml_secondary_with_short_pre_uses_offset(tmp_path: Path) -> None:
+    """A cam whose beep landed earlier than the primary's beep_offset (short
+    head: secondary trim has less pre-roll) gets a positive offset on the
+    parent timeline so its beep still aligns with the primary's beep."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "cam_short.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_30fps(),
+                beep_offset_seconds=2.0,  # cam's beep at clip-local 2s, primary at 5s
+                label="Cam short",
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    cam_clip = root.find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    # Difference is 3s @ 30fps = 90 frames -> 90/30s
+    assert cam_clip.attrib["offset"] == "90/30s"
+    assert cam_clip.attrib["start"] == "0s"
+
+
+def test_generate_fcpxml_secondary_with_long_pre_uses_start(tmp_path: Path) -> None:
+    """A cam whose clip-local beep sits later than the primary's beep gets
+    offset=0 and a positive ``start``: we skip into the cam's media so its
+    beep frame coincides with the primary's beep frame at parent t=pb."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "cam_long.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_30fps(),
+                beep_offset_seconds=7.0,  # cam beep is 2s later in its own media
+                label="Cam long",
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    cam_clip = root.find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    assert cam_clip.attrib["offset"] == "0s"
+    # Skip 2s = 60 frames @ 30fps
+    assert cam_clip.attrib["start"] == "60/30s"
+
+
+def test_generate_fcpxml_overlay_lane_above_all_secondaries(tmp_path: Path) -> None:
+    """When N cams attach AND the overlay is present, the overlay rides on
+    lane=N+1 so it stays on top of every cam regardless of count."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    cam_a = tmp_path / "cam_a.mp4"
+    cam_a.write_bytes(b"")
+    cam_b = tmp_path / "cam_b.mp4"
+    cam_b.write_bytes(b"")
+    overlay = tmp_path / "v_overlay.mov"
+    overlay.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        overlay_path=overlay,
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=cam_a, video=_meta_30fps(), beep_offset_seconds=5.0, label="A"
+            ),
+            fcpxml_mod.SecondaryClip(
+                video_path=cam_b, video=_meta_30fps(), beep_offset_seconds=5.0, label="B"
+            ),
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    # primary + 2 cams + overlay = 4 assets
+    assert len(assets) == 4
+    nested = root.findall(".//spine/asset-clip/asset-clip")
+    assert len(nested) == 3
+    lanes = [int(c.attrib["lane"]) for c in nested]
+    # Cams lane=1, lane=2 in input order; overlay lane=3 (above both cams).
+    assert sorted(lanes) == [1, 2, 3]
+    # The clip on lane=3 must reference the overlay asset, not a cam.
+    overlay_clip = next(c for c in nested if c.attrib["lane"] == "3")
+    assert overlay_clip.attrib["name"] == "Splitsmith overlay"
+
+
+def test_generate_fcpxml_skips_missing_secondary(tmp_path: Path) -> None:
+    """A secondary whose file vanished between submit and write is silently
+    skipped (mirrors the overlay's missing-file behaviour) -- the rest of
+    the FCPXML is unchanged so other cams still ship."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=tmp_path / "missing_cam.mp4",
+                video=_meta_30fps(),
+                beep_offset_seconds=5.0,
+                label="Missing",
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    assert len(assets) == 1  # only the primary
+    nested = root.findall(".//spine/asset-clip/asset-clip")
+    assert nested == []
+
+
 def test_generate_fcpxml_raises_on_missing_video(tmp_path: Path) -> None:
     out = tmp_path / "v.fcpxml"
     with pytest.raises(FileNotFoundError):

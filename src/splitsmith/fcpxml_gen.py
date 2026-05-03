@@ -23,11 +23,31 @@ import json
 import plistlib
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from .config import OutputConfig, Shot, SplitColorThresholds, VideoMetadata
+
+
+@dataclass(frozen=True)
+class SecondaryClip:
+    """One secondary cam attached to the primary as a connected clip (issue #54).
+
+    Each secondary is its own lossless trim placed on V2/V3/... and slipped on
+    the parent timeline so the cam's beep lands at the same second as the
+    primary's. ``beep_offset_seconds`` is the clip-local time of the beep in
+    this cam's trim -- typically equal to the project's ``pre_buffer_seconds``,
+    but may be less if the cam's beep landed within the pre-buffer of the
+    file (a short head wipes some of the pre-roll).
+    """
+
+    video_path: Path
+    video: VideoMetadata
+    beep_offset_seconds: float
+    label: str = "Secondary cam"
+
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -112,6 +132,7 @@ def generate_fcpxml(
     config: OutputConfig,
     overlay_path: Path | None = None,
     overlay_video: VideoMetadata | None = None,
+    secondaries: list[SecondaryClip] | None = None,
 ) -> None:
     """Write a minimal FCPXML 1.10 timeline for the trimmed video.
 
@@ -125,10 +146,17 @@ def generate_fcpxml(
 
     ``overlay_path``: optional pre-rendered alpha MOV (issue #45) to place
     on V2 as a connected clip. When the file exists the timeline gets a
-    second asset + a lane=1 asset-clip nested in the V1 clip; when it's
+    second asset + a lane=N asset-clip nested in the V1 clip; when it's
     None the FCPXML is unchanged. ``overlay_video`` is the probed metadata
     for the overlay -- when omitted, the trimmed video's metadata is used
     (the renderer mirrors the source frame-for-frame so this is correct).
+
+    ``secondaries``: optional list of secondary cams (issue #54). Each is
+    placed as a connected clip on lane=1, lane=2, ... below the overlay,
+    with its head slipped so the cam's beep lines up frame-aligned with the
+    primary's beep. Missing files are silently skipped (mirrors the overlay
+    behaviour) so the same XML works whether all cams shipped or only the
+    primary did.
     """
     if not video_path.exists():
         raise FileNotFoundError(f"video not found: {video_path}")
@@ -142,7 +170,11 @@ def generate_fcpxml(
 
     asset_id = "r2"
     format_id = "r1"
-    overlay_asset_id = "r3"
+    # Resource IDs after the primary asset are allocated in this order:
+    # secondary cams first, then overlay last so the overlay always lives on
+    # the highest lane (V2/V3/... below it) regardless of cam count.
+    usable_secondaries = [s for s in (secondaries or []) if s.video_path.exists()]
+    overlay_asset_id = f"r{3 + len(usable_secondaries)}"
     use_overlay = overlay_path is not None and overlay_path.exists()
 
     fcpxml = ET.Element("fcpxml", {"version": config.fcpxml_version})
@@ -189,6 +221,52 @@ def generate_fcpxml(
         "media-rep",
         {"kind": "original-media", "src": video_path.resolve().as_uri()},
     )
+
+    # Secondary cam assets (issue #54). Each gets its own ``asset`` resource so
+    # FCP can ingest the cam's video + audio independently of the primary.
+    # IDs run r3..r(3+N-1); overlay (when present) takes the next ID after.
+    secondary_asset_entries: list[tuple[SecondaryClip, str, str]] = []
+    for idx, sec in enumerate(usable_secondaries):
+        sec_id = f"r{3 + idx}"
+        sec_frame_duration = Fraction(sec.video.frame_rate_den, sec.video.frame_rate_num)
+        sec_duration_frames = int(round(sec.video.duration_seconds / float(sec_frame_duration)))
+        # Mix-and-match cam frame rates would make the offset / duration math
+        # parent-vs-child rational; v1 punts on that and uses the primary's
+        # frame rate to express secondary durations. Cams shot on the same
+        # match day are typically the same fps, and the trim is stream-copy
+        # so the source rate is preserved -- if they differ, FCP will round
+        # on import (acceptable for a connected cam) but the spec for
+        # multi-rate timelines is out of scope here.
+        sec_duration_in_parent_frames = int(
+            round(sec.video.duration_seconds / float(frame_duration))
+        )
+        sec_duration_parent_str = _frame_aligned_str(sec_duration_in_parent_frames, fd_num, fd_den)
+        sec_asset = ET.SubElement(
+            resources,
+            "asset",
+            {
+                "id": sec_id,
+                "name": sec.video_path.stem,
+                "start": "0s",
+                "duration": _frame_aligned_str(
+                    sec_duration_frames,
+                    sec.video.frame_rate_den,
+                    sec.video.frame_rate_num,
+                ),
+                "hasVideo": "1",
+                "hasAudio": "1",
+                "format": format_id,
+                "videoSources": "1",
+                "audioSources": "1",
+                "audioChannels": "2",
+            },
+        )
+        ET.SubElement(
+            sec_asset,
+            "media-rep",
+            {"kind": "original-media", "src": sec.video_path.resolve().as_uri()},
+        )
+        secondary_asset_entries.append((sec, sec_id, sec_duration_parent_str))
 
     overlay_meta = overlay_video if overlay_video is not None else video
     overlay_duration_str: str | None = None
@@ -249,18 +327,52 @@ def generate_fcpxml(
         },
     )
 
+    # Secondary cam connected clips (issue #54). Lanes 1..N. Each cam's head
+    # is slipped on the parent timeline so its beep aligns frame-for-frame
+    # with the primary's beep. Two cases:
+    #   - sb <= pb: place head later on the timeline by ``pb - sb`` frames,
+    #     start the cam from frame 0.
+    #   - sb >  pb: head sits at parent t=0; skip ``sb - pb`` frames of the
+    #     cam so the beep still lines up.
+    fd_seconds_for_align = float(frame_duration)
+    for lane_idx, (sec, sec_id, sec_duration_parent_str) in enumerate(
+        secondary_asset_entries, start=1
+    ):
+        delta_frames = round((beep_offset_seconds - sec.beep_offset_seconds) / fd_seconds_for_align)
+        if delta_frames >= 0:
+            sec_offset_str = _frame_aligned_str(delta_frames, fd_num, fd_den)
+            sec_start_str = "0s"
+        else:
+            sec_offset_str = "0s"
+            sec_start_str = _frame_aligned_str(-delta_frames, fd_num, fd_den)
+        ET.SubElement(
+            asset_clip,
+            "asset-clip",
+            {
+                "ref": sec_id,
+                "lane": str(lane_idx),
+                "offset": sec_offset_str,
+                "name": sec.label,
+                "start": sec_start_str,
+                "duration": sec_duration_parent_str,
+                "format": format_id,
+            },
+        )
+
     if use_overlay and overlay_duration_str is not None:
-        # Connected clip on V2 (lane=1). FCPXML stacks lanes above 0 over
-        # the primary, so this puts the overlay on top of the trim with
-        # its own alpha. ``offset="0s"`` aligns its head to the primary's
-        # head; the renderer matches the trim duration so we don't need a
-        # nested clip for trims.
+        # Connected clip on the lane above all secondary cams (lane=N+1 when
+        # N cams attach; lane=1 in the single-cam default). FCPXML stacks
+        # higher lanes over lower ones, so this keeps the overlay's typography
+        # on top of every cam regardless of count. ``offset="0s"`` aligns its
+        # head to the primary's head; the renderer matches the trim duration
+        # so we don't need a nested clip for trims.
+        overlay_lane = len(secondary_asset_entries) + 1
         ET.SubElement(
             asset_clip,
             "asset-clip",
             {
                 "ref": overlay_asset_id,
-                "lane": "1",
+                "lane": str(overlay_lane),
                 "offset": "0s",
                 "name": "Splitsmith overlay",
                 "start": "0s",

@@ -10,6 +10,7 @@ import csv
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -271,6 +272,156 @@ def test_slugify_matches_cli_format() -> None:
     assert exports_mod._slugify("Stage 1 -- H1") == "stage-1-h1"
     assert exports_mod._slugify("All Symbols!@#") == "all-symbols"
     assert exports_mod._slugify("") == "stage"
+
+
+def test_export_stage_trims_secondaries_and_records_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each secondary cam gets its own ``stage<N>_<slug>_cam_<id>_trimmed.mp4``
+    and the result records the per-cam paths so the SPA / FCPXML can wire
+    them up. The ffmpeg call is stubbed to avoid shelling out (#54)."""
+    audit_path = tmp_path / "stage1.json"
+    audit_path.write_text(
+        json.dumps(
+            _audit_payload(
+                shots=[
+                    {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
+                ]
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    primary_src = tmp_path / "primary.mp4"
+    primary_src.write_bytes(b"")
+    cam_a_src = tmp_path / "cam_a.mp4"
+    cam_a_src.write_bytes(b"")
+    cam_b_src = tmp_path / "cam_b.mp4"
+    cam_b_src.write_bytes(b"")
+
+    from splitsmith import trim as trim_module
+    from splitsmith.config import TrimResult
+
+    captured: list[tuple[Path, Path]] = []
+
+    def fake_trim_video(input_path: Path, output_path: Path, **kwargs: Any) -> TrimResult:
+        captured.append((input_path, output_path))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"")
+        return TrimResult(output_path=output_path, start_time=0.0, end_time=20.0)
+
+    monkeypatch.setattr(trim_module, "trim_video", fake_trim_video)
+    monkeypatch.setattr(exports_mod.trim, "trim_video", fake_trim_video)
+
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=True,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+        ),
+        audit_path=audit_path,
+        exports_dir=tmp_path / "exports",
+        source_video_path=primary_src,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+        secondaries=[
+            exports_mod.SecondaryExport(
+                video_id="aaaaaa", source_path=cam_a_src, beep_time_in_source=11.0
+            ),
+            exports_mod.SecondaryExport(
+                video_id="bbbbbb", source_path=cam_b_src, beep_time_in_source=9.5
+            ),
+        ],
+    )
+
+    # 1 primary + 2 secondaries = 3 ffmpeg calls.
+    assert len(captured) == 3
+    sec_outputs = {p.name for _, p in captured}
+    assert "stage1_stage-1-h1_trimmed.mp4" in sec_outputs
+    assert "stage1_stage-1-h1_cam_aaaaaa_trimmed.mp4" in sec_outputs
+    assert "stage1_stage-1-h1_cam_bbbbbb_trimmed.mp4" in sec_outputs
+
+    assert set(result.secondary_trimmed_paths) == {"aaaaaa", "bbbbbb"}
+    for vid, p in result.secondary_trimmed_paths.items():
+        assert p.exists()
+        assert p.name == f"stage1_stage-1-h1_cam_{vid}_trimmed.mp4"
+
+
+def test_export_stage_skips_secondary_when_source_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Secondary source missing (USB unplugged, file deleted between
+    Generate clicks) -> the cam is dropped with an anomaly explaining what
+    happened. The primary's export is unaffected."""
+    audit_path = tmp_path / "stage1.json"
+    audit_path.write_text(
+        json.dumps(
+            _audit_payload(
+                shots=[
+                    {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
+                ]
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    primary_src = tmp_path / "primary.mp4"
+    primary_src.write_bytes(b"")
+
+    from splitsmith import trim as trim_module
+    from splitsmith.config import TrimResult
+
+    def fake_trim_video(input_path: Path, output_path: Path, **kwargs: Any) -> TrimResult:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"")
+        return TrimResult(output_path=output_path, start_time=0.0, end_time=20.0)
+
+    monkeypatch.setattr(trim_module, "trim_video", fake_trim_video)
+    monkeypatch.setattr(exports_mod.trim, "trim_video", fake_trim_video)
+
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=True,
+            write_csv=True,
+            write_fcpxml=False,
+            write_report=False,
+        ),
+        audit_path=audit_path,
+        exports_dir=tmp_path / "exports",
+        source_video_path=primary_src,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="S",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+        secondaries=[
+            exports_mod.SecondaryExport(
+                video_id="ghost",
+                source_path=tmp_path / "ghost.mp4",  # never created
+                beep_time_in_source=11.0,
+            ),
+        ],
+    )
+
+    assert result.trimmed_video_path is not None and result.trimmed_video_path.exists()
+    assert result.secondary_trimmed_paths == {}
+    assert any("secondary cam ghost" in a for a in result.anomalies)
 
 
 def test_export_overview_status(tmp_path: Path) -> None:

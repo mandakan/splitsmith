@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,23 @@ class StageExportRequest:
 
 
 @dataclass(frozen=True)
+class SecondaryExport:
+    """One secondary cam to ship alongside the primary (issue #54).
+
+    The export pipeline trims each secondary into ``exports/`` with a
+    ``cam_<video_id>`` suffix and references it from the multi-cam FCPXML
+    as a connected clip. ``video_id`` is the project's stable per-video
+    handle (:attr:`StageVideo.video_id`); secondaries without a beep can't
+    sync, so the caller filters them out before passing them in.
+    """
+
+    video_id: str
+    source_path: Path
+    beep_time_in_source: float
+    label: str = "Secondary cam"
+
+
+@dataclass(frozen=True)
 class StageExportResult:
     """Paths produced (or skipped) by :func:`export_stage`."""
 
@@ -55,6 +72,10 @@ class StageExportResult:
     overlay_path: Path | None
     shots_written: int
     anomalies: list[str]
+    # Per-cam lossless trims keyed by ``StageVideo.video_id`` (issue #54).
+    # Empty when the stage is single-cam or all secondaries failed to trim.
+    # The FCPXML references each present file as a connected clip.
+    secondary_trimmed_paths: dict[str, Path] = field(default_factory=dict)
 
 
 class StageExportError(RuntimeError):
@@ -155,6 +176,7 @@ def export_stage(
     pre_buffer_seconds: float,
     post_buffer_seconds: float,
     config: Config,
+    secondaries: list[SecondaryExport] | None = None,
 ) -> StageExportResult:
     """Run the export for one stage. Pure orchestration over the engine
     modules; never re-detects.
@@ -249,6 +271,50 @@ def export_stage(
                     # from FCPXML so the user gets *something* usable.
                     trimmed_path = exports_dir / f"{base}_trimmed.mp4"
 
+    # Per-cam lossless trims (issue #54). Each secondary's trim lands at
+    # ``stage<N>_<slug>_cam_<video_id>_trimmed.mp4`` so its name mirrors the
+    # audit-mode cache slot in <project>/trimmed/. Skipped silently when
+    # ``write_trim`` is off (CSV-only re-run); per-cam ffmpeg failures are
+    # surfaced as anomalies so the FCPXML can still reference the cams that
+    # did make it. Stale prior-run trims are kept so an aborted re-run still
+    # ships a multi-cam timeline.
+    secondary_trimmed: dict[str, Path] = {}
+    secondary_inputs = list(secondaries or [])
+    if request.write_trim:
+        for sec in secondary_inputs:
+            sec_target = exports_dir / f"{base}_cam_{sec.video_id}_trimmed.mp4"
+            if not sec.source_path.exists():
+                skip_reasons.append(
+                    f"secondary cam {sec.video_id} trim not written: source not "
+                    f"reachable: {sec.source_path}"
+                )
+                if sec_target.exists():
+                    secondary_trimmed[sec.video_id] = sec_target
+                continue
+            try:
+                trim.trim_video(
+                    sec.source_path,
+                    sec_target,
+                    beep_time=sec.beep_time_in_source,
+                    stage_time=stage_data.time_seconds,
+                    pre_buffer_seconds=pre_buffer_seconds,
+                    post_buffer_seconds=post_buffer_seconds,
+                    mode="lossless",
+                    overwrite=True,
+                )
+                secondary_trimmed[sec.video_id] = sec_target
+            except (trim.FFmpegError, FileNotFoundError, RuntimeError) as exc:
+                skip_reasons.append(f"secondary cam {sec.video_id} trim not written: {exc}")
+                if sec_target.exists():
+                    secondary_trimmed[sec.video_id] = sec_target
+    else:
+        # When trim is off, surface stale per-cam trims so the FCPXML can
+        # still wire them up (mirrors the primary's stale-trim handling).
+        for sec in secondary_inputs:
+            sec_target = exports_dir / f"{base}_cam_{sec.video_id}_trimmed.mp4"
+            if sec_target.exists():
+                secondary_trimmed[sec.video_id] = sec_target
+
     csv_path: Path | None = None
     if request.write_csv:
         csv_path = exports_dir / f"{base}_splits.csv"
@@ -330,6 +396,37 @@ def export_stage(
             fcpxml_path = exports_dir / f"{base}.fcpxml"
             try:
                 meta = fcpxml_gen.probe_video(fcp_video)
+                # Multi-cam wiring (issue #54). Probe each surviving secondary
+                # trim and pass it as a connected clip; ffprobe failures only
+                # drop that cam from the timeline (other cams still ship).
+                fcp_secondaries: list[fcpxml_gen.SecondaryClip] = []
+                # Preserve the input order so cam lane assignments are stable
+                # across re-runs (the dict was built in input-order earlier).
+                for sec in secondary_inputs:
+                    sec_path = secondary_trimmed.get(sec.video_id)
+                    if sec_path is None or not sec_path.exists():
+                        continue
+                    try:
+                        sec_meta = fcpxml_gen.probe_video(sec_path)
+                    except fcpxml_gen.FFprobeError as exc:
+                        skip_reasons.append(
+                            f"secondary cam {sec.video_id} dropped from FCPXML: {exc}"
+                        )
+                        continue
+                    # Each cam was trimmed with the same pre-buffer as the
+                    # primary, so its clip-local beep is at
+                    # ``min(pre_buffer, beep_time_in_source)`` -- short heads
+                    # truncate the pre-roll, in which case the cam's beep
+                    # sits earlier in the file.
+                    sec_beep_offset = min(pre_buffer_seconds, sec.beep_time_in_source)
+                    fcp_secondaries.append(
+                        fcpxml_gen.SecondaryClip(
+                            video_path=sec_path,
+                            video=sec_meta,
+                            beep_offset_seconds=sec_beep_offset,
+                            label=sec.label,
+                        )
+                    )
                 # Beep offset within the lossless trim: the trim cut at
                 # ``beep_time - pre_buffer`` from source, so the beep lives
                 # ``pre_buffer`` seconds into the clip.
@@ -342,6 +439,7 @@ def export_stage(
                     project_name=base,
                     config=config.output,
                     overlay_path=fcp_overlay_path,
+                    secondaries=fcp_secondaries or None,
                 )
             except (fcpxml_gen.FFprobeError, OSError) as exc:
                 skip_reasons.append(f"fcpxml not written: {exc}")
@@ -373,6 +471,7 @@ def export_stage(
             color_thresholds=config.output.split_color_thresholds,
         )
 
+    secondary_paths_present = {vid: p for vid, p in secondary_trimmed.items() if p.exists()}
     return StageExportResult(
         stage_number=stage_data.stage_number,
         trimmed_video_path=(
@@ -384,6 +483,7 @@ def export_stage(
         overlay_path=overlay_path if overlay_path is not None and overlay_path.exists() else None,
         shots_written=len(shots),
         anomalies=anomalies,
+        secondary_trimmed_paths=secondary_paths_present,
     )
 
 
