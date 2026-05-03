@@ -21,11 +21,29 @@ from splitsmith.ui.project import (
     PROJECT_FILE,
     SCHEMA_VERSION,
     SUBDIRS,
+    VIDEO_EXTENSIONS,
     MatchProject,
     StageEntry,
     StageVideo,
     atomic_write_json,
 )
+
+
+def test_video_extensions_includes_common_camera_formats() -> None:
+    expected = {
+        ".mp4",
+        ".mov",
+        ".m4v",
+        ".mts",
+        ".m2ts",
+        ".mkv",
+        ".avi",
+        ".mxf",
+        ".lrv",
+        ".360",
+        ".webm",
+    }
+    assert expected.issubset(VIDEO_EXTENSIONS)
 
 
 def test_init_creates_layout(tmp_path: Path) -> None:

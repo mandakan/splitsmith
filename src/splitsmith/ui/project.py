@@ -38,7 +38,19 @@ from .. import video_match
 from ..config import BeepCandidate, StageData, VideoMatchConfig
 from ..video_match import match_videos_to_stages
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".mts",
+    ".m2ts",
+    ".mkv",
+    ".avi",
+    ".mxf",
+    ".lrv",
+    ".360",
+    ".webm",
+}
 
 PROJECT_FILE = "project.json"
 SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard", "probes", "thumbs")
