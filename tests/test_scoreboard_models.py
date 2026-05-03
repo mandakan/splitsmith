@@ -103,6 +103,11 @@ def test_protocol_is_runtime_checkable() -> None:
         def get_shooter(self, shooter_id: int):  # noqa: ANN201
             raise NotImplementedError
 
+        def get_stage_times(  # noqa: ANN201
+            self, content_type: int, match_id: int, competitor_id: int
+        ):
+            raise NotImplementedError
+
     assert isinstance(_Stub(), ScoreboardClient)
 
 

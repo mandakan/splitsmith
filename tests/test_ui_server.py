@@ -169,12 +169,16 @@ def test_import_scoreboard_409_on_conflict(tmp_path: Path) -> None:
     assert resp.status_code == 200
 
 
+_SCOREBOARD_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "scoreboard"
+_EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+
+
 def _load_v1_match_fixture() -> dict:
     """Read the SSI v1 match fixture used by ``test_scoreboard_*``."""
     import json
 
     return json.loads(
-        Path("tests/fixtures/scoreboard/match_22_27190.json").read_text(encoding="utf-8")
+        (_SCOREBOARD_FIXTURES_DIR / "match_22_27190.json").read_text(encoding="utf-8")
     )
 
 
@@ -299,6 +303,279 @@ def test_scoreboard_search_returns_401_when_no_token_and_no_local(
     detail = resp.json()["detail"]
     assert detail["code"] == "scoreboard_auth"
     assert detail["env_var"] == "SPLITSMITH_SSI_TOKEN"
+
+
+def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Path) -> None:
+    """Dropping the legacy ``examples/*.json`` shape (single competitor with
+    per-stage times) auto-pins that competitor and merges the times so the
+    user lands on a fully-populated stage list in one drop. This is the
+    bridge that lets pre-#50 users keep working without re-exporting."""
+    import json as _json
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    legacy = _json.loads(
+        (_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8")
+    )
+    resp = client.post("/api/scoreboard/upload", json={"data": legacy})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage_times_merged"] == 8
+    assert body["selected_competitor_id"] == 1
+    assert all(not s["placeholder"] for s in body["stages"])
+    assert all(s["time_seconds"] > 0 for s in body["stages"])
+    assert all(s["scorecard_updated_at"] is not None for s in body["stages"])
+
+
+def test_scoreboard_upload_pure_v1_does_not_auto_merge(tmp_path: Path) -> None:
+    """Pure ``MatchData`` carries no per-competitor stages -- the upload
+    populates placeholders only, leaving the user to pin themselves."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    fixture = _load_v1_match_fixture()
+    resp = client.post("/api/scoreboard/upload", json={"data": fixture})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage_times_merged"] == 0
+    assert body["selected_competitor_id"] is None
+    assert all(s["placeholder"] for s in body["stages"])
+
+
+def test_scoreboard_upload_combined_v1_auto_merges_when_single_competitor(
+    tmp_path: Path,
+) -> None:
+    """Combined v1 fixture (MatchData + ``competitor_stages`` for one cid)
+    auto-merges the same way the legacy file does."""
+    import json as _json
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    combined = _json.loads(
+        (_SCOREBOARD_FIXTURES_DIR / "match_22_27190_with_stages.json").read_text(encoding="utf-8")
+    )
+    resp = client.post("/api/scoreboard/upload", json={"data": combined})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage_times_merged"] == 10
+    assert body["selected_competitor_id"] is not None
+    assert body["selected_shooter_id"] is not None
+    assert all(not s["placeholder"] for s in body["stages"])
+
+
+def test_scoreboard_select_shooter_blocked_on_pure_v1(tmp_path: Path) -> None:
+    """When the offline source is pure ``MatchData``, select-shooter still
+    persists the pin (so refresh-times can retry once upstream lands) but
+    returns a 400 with the offline-pure-matchdata code so the UI can hint
+    "drop a richer JSON" instead of a generic upstream banner."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    fixture = _load_v1_match_fixture()
+    client.post("/api/scoreboard/upload", json={"data": fixture})
+
+    resp = client.post(
+        "/api/scoreboard/select-shooter",
+        json={"shooter_id": 40821, "competitor_id": 727562},
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["code"] == "stage_times_offline_pure_matchdata"
+    proj = client.get("/api/project").json()
+    assert proj["selected_shooter_id"] == 40821
+    assert proj["selected_competitor_id"] == 727562
+
+
+def test_scoreboard_refresh_times_re_merges(tmp_path: Path) -> None:
+    """refresh-times invalidates the stage-times cache and re-runs the
+    fetch+merge."""
+    import json as _json
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    legacy = _json.loads(
+        (_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8")
+    )
+    client.post("/api/scoreboard/upload", json={"data": legacy})
+    resp = client.post("/api/scoreboard/refresh-times")
+    assert resp.status_code == 200
+    assert resp.json()["stage_times_merged"] == 8
+
+
+def test_scoreboard_match_data_endpoint_exposes_competitors(tmp_path: Path) -> None:
+    """The SPA needs ``competitors[]`` to map a picked shooter id to a
+    competitor id before calling /select-shooter."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    fixture = _load_v1_match_fixture()
+    client.post("/api/scoreboard/upload", json={"data": fixture})
+
+    resp = client.get("/api/scoreboard/match-data")
+    assert resp.status_code == 200
+    md = resp.json()
+    assert md["name"] == "SPSK Open 2026"
+    assert isinstance(md["competitors"], list)
+    assert len(md["competitors"]) > 0
+    assert {"id", "shooterId", "name"}.issubset(md["competitors"][0])
+
+
+def test_scoreboard_match_data_404_when_no_match_loaded(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.get("/api/scoreboard/match-data")
+    assert resp.status_code == 404
+
+
+def test_scoreboard_select_shooter_409_when_no_match(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/scoreboard/select-shooter",
+        json={"shooter_id": 1, "competitor_id": 1},
+    )
+    assert resp.status_code == 409
+
+
+def test_scoreboard_refresh_times_409_when_no_pin(tmp_path: Path) -> None:
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    fixture = _load_v1_match_fixture()
+    client.post("/api/scoreboard/upload", json={"data": fixture})
+    resp = client.post("/api/scoreboard/refresh-times")
+    assert resp.status_code == 409
+
+
+def test_scoreboard_select_shooter_rejects_competitor_not_in_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Server-side validation: a ``competitor_id`` that isn't in the
+    loaded ``MatchData.competitors[]`` is rejected with 404
+    ``competitor_not_in_match`` *before* any pin is persisted, so the
+    project never ends up with an invalid pin that would break every
+    subsequent refresh-times call."""
+    import httpx
+
+    monkeypatch.setenv("SPLITSMITH_SSI_TOKEN", "fake")
+    monkeypatch.chdir(tmp_path)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    fixture = _load_v1_match_fixture()
+    client.post("/api/scoreboard/upload", json={"data": fixture})
+    (project_root / "scoreboard" / "match.json").unlink()
+
+    # Mock the live API: get_match returns the fixture so the validate
+    # step has a competitor list to check against. The stages path
+    # should never be hit because validation fails first; assert that
+    # by counting calls.
+    from splitsmith.ui.scoreboard import http as http_mod
+
+    original_init = http_mod.SsiHttpClient.__init__
+    stage_calls = {"count": 0}
+
+    def mocked_init(self, *args, **kwargs):  # noqa: ANN001
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path.endswith("/stages") and "/competitor/" in path:
+                stage_calls["count"] += 1
+                return httpx.Response(404)
+            if "/match/22/27190" in path:
+                return httpx.Response(200, json=fixture)
+            return httpx.Response(500)
+
+        kwargs["client"] = httpx.Client(
+            base_url=http_mod.DEFAULT_BASE_URL,
+            transport=httpx.MockTransport(handler),
+        )
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(http_mod.SsiHttpClient, "__init__", mocked_init)
+
+    # 999999 is not in the fixture's competitors -- pre-validation should reject.
+    resp = client.post(
+        "/api/scoreboard/select-shooter",
+        json={"shooter_id": 1, "competitor_id": 999999},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "competitor_not_in_match"
+    assert stage_calls["count"] == 0  # never reached the stages endpoint
+    proj = client.get("/api/project").json()
+    assert proj["selected_shooter_id"] is None
+    assert proj["selected_competitor_id"] is None
+
+
+def test_scoreboard_select_shooter_uses_live_stage_times_when_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once the upstream ships, the live API returns ``CompetitorStageResults``
+    and the project ends up with real ``time_seconds`` / ``scorecard_updated_at``
+    on every stage -- no offline JSON drop needed."""
+    import httpx
+
+    monkeypatch.setenv("SPLITSMITH_SSI_TOKEN", "fake")
+    monkeypatch.chdir(tmp_path)
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    fixture = _load_v1_match_fixture()
+    client.post("/api/scoreboard/upload", json={"data": fixture})
+    (project_root / "scoreboard" / "match.json").unlink()
+
+    stage_results = {
+        "ct": 22,
+        "matchId": 27190,
+        "competitorId": 727562,
+        "shooterId": 40821,
+        "division": "Optics Minor",
+        "stages": [
+            {
+                "stage_number": s,
+                "time_seconds": 18.0 + s,
+                "scorecard_updated_at": f"2026-05-02T{8 + (s - 1) // 2:02d}:"
+                f"{((s - 1) * 23) % 60:02d}:00+00:00",
+            }
+            for s in range(1, 11)
+        ],
+    }
+
+    from splitsmith.ui.scoreboard import http as http_mod
+
+    original_init = http_mod.SsiHttpClient.__init__
+
+    def mocked_init(self, *args, **kwargs):  # noqa: ANN001
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path.endswith("/stages") and "/competitor/" in path:
+                return httpx.Response(200, json=stage_results)
+            if "/match/22/27190" in path:
+                return httpx.Response(200, json=fixture)
+            return httpx.Response(500)
+
+        kwargs["client"] = httpx.Client(
+            base_url=http_mod.DEFAULT_BASE_URL,
+            transport=httpx.MockTransport(handler),
+        )
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(http_mod.SsiHttpClient, "__init__", mocked_init)
+
+    resp = client.post(
+        "/api/scoreboard/select-shooter",
+        json={"shooter_id": 40821, "competitor_id": 727562},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage_times_merged"] == 10
+    assert all(not s["placeholder"] for s in body["stages"])
+    assert body["selected_shooter_id"] == 40821
+    assert body["selected_competitor_id"] == 727562
 
 
 def test_scoreboard_fetch_uses_local_match_when_present(tmp_path: Path) -> None:

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from splitsmith.ui.scoreboard.models import (
+    CompetitorStageResults,
     MatchData,
     MatchRef,
     ShooterDashboard,
@@ -107,9 +108,96 @@ class CachingScoreboardClient:
     def is_cached(self, content_type: int, match_id: int) -> bool:
         return self._match_cache_path(content_type, match_id).exists()
 
+    def get_stage_times(
+        self, content_type: int, match_id: int, competitor_id: int
+    ) -> CompetitorStageResults:
+        cache_path = self._stage_times_cache_path(content_type, match_id, competitor_id)
+        cached = _read_envelope(cache_path)
+        if cached is not None and not cached.get("in_progress", False):
+            return CompetitorStageResults.model_validate(cached["data"])
+
+        results = self._inner.get_stage_times(content_type, match_id, competitor_id)
+        # Inherit the in_progress flag from the parent match envelope when
+        # available so we don't accidentally pin half-typed scorecards.
+        # Falling back to True keeps the cache safe (refetch next time)
+        # rather than locking in a partial result.
+        in_progress = self._sibling_match_in_progress(content_type, match_id, default=True)
+        envelope = {
+            "version": CACHE_VERSION,
+            "endpoint": "stage_times",
+            "params": {
+                "content_type": content_type,
+                "match_id": match_id,
+                "competitor_id": competitor_id,
+            },
+            "cached_at": _utc_now_iso(),
+            "in_progress": in_progress,
+            "data": results.model_dump(by_alias=True),
+        }
+        _write_envelope(cache_path, envelope)
+        return results
+
+    def invalidate_stage_times(self, content_type: int, match_id: int, competitor_id: int) -> bool:
+        """Drop the cached entry for one (match, competitor) pair."""
+        path = self._stage_times_cache_path(content_type, match_id, competitor_id)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
+    def invalidate_match_stage_times(self, content_type: int, match_id: int) -> int:
+        """Drop *all* cached stage-times entries for this match.
+
+        Used by ``/api/scoreboard/refresh-times``: when the user wants a
+        fresh pull, every competitor's cached results for the match should
+        go too. Returns the number of files removed.
+        """
+        prefix = f"stage_times_{_match_prefix(content_type, match_id)}_"
+        removed = 0
+        for path in self._cache_dir.glob(f"{prefix}*.json"):
+            try:
+                path.unlink()
+                removed += 1
+            except FileNotFoundError:
+                pass
+        return removed
+
     def _match_cache_path(self, content_type: int, match_id: int) -> Path:
         params = {"content_type": content_type, "match_id": match_id}
         return self._cache_dir / f"match_{_param_hash('match', params)}.json"
+
+    def _stage_times_cache_path(self, content_type: int, match_id: int, competitor_id: int) -> Path:
+        # Keep the match prefix unhashed so ``invalidate_match_stage_times``
+        # can glob all cids for one match without reading every envelope.
+        match_prefix = _match_prefix(content_type, match_id)
+        params = {
+            "content_type": content_type,
+            "match_id": match_id,
+            "competitor_id": competitor_id,
+        }
+        return (
+            self._cache_dir
+            / f"stage_times_{match_prefix}_{_param_hash('stage_times', params)}.json"
+        )
+
+    def _sibling_match_in_progress(
+        self, content_type: int, match_id: int, *, default: bool
+    ) -> bool:
+        envelope = _read_envelope(self._match_cache_path(content_type, match_id))
+        if envelope is None:
+            return default
+        return bool(envelope.get("in_progress", default))
+
+
+def _match_prefix(content_type: int, match_id: int) -> str:
+    """Stable plain-text prefix for stage-times cache filenames.
+
+    Glob-friendly: ``invalidate_match_stage_times`` deletes every cid for
+    a match by listing ``stage_times_{ct}_{mid}_*.json`` instead of
+    reading + matching each envelope. The hashed competitor segment still
+    appears after the prefix.
+    """
+    return f"{content_type}_{match_id}"
 
 
 def _param_hash(endpoint: str, params: dict[str, Any]) -> str:

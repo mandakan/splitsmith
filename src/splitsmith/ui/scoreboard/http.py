@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from splitsmith.ui.scoreboard.models import (
+    CompetitorStageResults,
     MatchData,
     MatchRef,
     ShooterDashboard,
@@ -60,6 +61,34 @@ class MatchNotFound(ScoreboardError):
 
 class ShooterNotFound(ScoreboardError):
     """``GET /api/v1/shooter/{shooterId}`` returned 404."""
+
+
+class StageTimesNotImplemented(ScoreboardError):
+    """The live API doesn't expose per-competitor stage results yet.
+
+    Was the HTTP client's typed answer when ``ssi-scoreboard#400`` was
+    pending. The endpoint shipped, so this is now a defensive fallback for
+    deployments that haven't rolled it out (any 404 we *can't* attribute to
+    a missing competitor).
+    """
+
+
+class CompetitorNotInMatch(ScoreboardError):
+    """The picked competitor isn't part of the requested match.
+
+    Distinct from ``StageTimesNotImplemented`` so the UI can prompt the
+    user to pick a different shooter rather than pointing at the upstream.
+    """
+
+
+class StageTimesUnavailable(ScoreboardError):
+    """The offline source doesn't carry per-competitor stage results.
+
+    Raised by ``LocalJsonScoreboard`` when the dropped file is pure SSI v1
+    ``MatchData`` (match shell only). Distinct from
+    ``StageTimesNotImplemented`` so the UI can hint "drop a richer JSON or
+    pin yourself online" instead of pointing at the upstream issue.
+    """
 
 
 class SsiHttpClient:
@@ -125,6 +154,27 @@ class SsiHttpClient:
         except _NotFound as exc:
             raise ShooterNotFound(f"shooter {shooter_id} not found on scoreboard") from exc
         return ShooterDashboard.model_validate(data)
+
+    def get_stage_times(
+        self, content_type: int, match_id: int, competitor_id: int
+    ) -> CompetitorStageResults:
+        # Mirrors the live ``GET /match/{ct}/{id}/competitor/{cid}/stages``
+        # shipped in ssi-scoreboard#400. A 404 here -- now that the
+        # endpoint is part of the v1 contract -- means the competitor
+        # isn't in this match (the most realistic cause); we surface that
+        # as ``CompetitorNotInMatch`` so the UI can prompt for a re-pick
+        # rather than blaming the upstream.
+        try:
+            data = self._get_json(
+                f"/match/{content_type}/{match_id}/competitor/{competitor_id}/stages"
+            )
+        except _NotFound as exc:
+            raise CompetitorNotInMatch(
+                f"competitor {competitor_id} isn't part of match "
+                f"{content_type}/{match_id}. Pick a different shooter, "
+                "or check that the match still has them registered."
+            ) from exc
+        return CompetitorStageResults.model_validate(data)
 
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         try:

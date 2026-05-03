@@ -18,6 +18,7 @@ import respx
 from splitsmith.ui.scoreboard.http import (
     DEFAULT_BASE_URL,
     TOKEN_ENV_VAR,
+    CompetitorNotInMatch,
     MatchNotFound,
     ScoreboardAuthError,
     ScoreboardRateLimited,
@@ -25,7 +26,13 @@ from splitsmith.ui.scoreboard.http import (
     ShooterNotFound,
     SsiHttpClient,
 )
-from splitsmith.ui.scoreboard.models import MatchData, MatchRef, ShooterDashboard, ShooterRef
+from splitsmith.ui.scoreboard.models import (
+    CompetitorStageResults,
+    MatchData,
+    MatchRef,
+    ShooterDashboard,
+    ShooterRef,
+)
 from splitsmith.ui.scoreboard.protocol import ScoreboardClient
 
 FIXTURES = Path(__file__).parent / "fixtures" / "scoreboard"
@@ -182,6 +189,55 @@ def test_network_error_maps_to_upstream_error(client: SsiHttpClient) -> None:
     respx.get(f"{DEFAULT_BASE_URL}/events").mock(side_effect=httpx.ConnectError("boom"))
     with pytest.raises(ScoreboardUpstreamError, match="offline JSON"):
         client.search_matches("x")
+
+
+@respx.mock
+def test_get_stage_times_parses_competitor_stage_results(
+    client: SsiHttpClient,
+) -> None:
+    """Once ``ssi-scoreboard#400`` ships, the client should round-trip
+    the per-competitor stages payload through ``CompetitorStageResults``."""
+    payload = {
+        "ct": 22,
+        "matchId": 27190,
+        "competitorId": 727562,
+        "shooterId": 40821,
+        "division": "Optics Minor",
+        "stages": [
+            {
+                "stage_number": 1,
+                "stage_name": "K-vallen",
+                "time_seconds": 18.42,
+                "scorecard_updated_at": "2026-05-02T08:14:11+00:00",
+                "hit_factor": 5.43,
+            }
+        ],
+    }
+    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190/competitor/727562/stages").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    got = client.get_stage_times(22, 27190, 727562)
+    assert isinstance(got, CompetitorStageResults)
+    assert got.competitorId == 727562
+    assert len(got.stages) == 1
+    assert got.stages[0].stage_number == 1
+    assert got.stages[0].time_seconds == 18.42
+
+
+@respx.mock
+def test_get_stage_times_404_maps_to_competitor_not_in_match(
+    client: SsiHttpClient,
+) -> None:
+    """Now that ``ssi-scoreboard#400`` has shipped, a 404 on the stages
+    path means the requested competitor isn't in this match (typo'd cid,
+    DNS'd shooter, etc.). Map to ``CompetitorNotInMatch`` so the UI can
+    prompt the user to pick a different shooter rather than blaming the
+    upstream."""
+    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190/competitor/999999/stages").mock(
+        return_value=httpx.Response(404, json={"error": "not found"})
+    )
+    with pytest.raises(CompetitorNotInMatch, match="999999"):
+        client.get_stage_times(22, 27190, 999999)
 
 
 @respx.mock

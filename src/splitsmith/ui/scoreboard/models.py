@@ -255,3 +255,47 @@ class ShooterDashboard(_ApiModel):
     stats: ShooterAggregateStats
     achievements: list[AchievementProgress] | None = None
     upcomingMatches: list[UpcomingMatch] | None = None
+
+
+class CompetitorStageResult(_ApiModel):
+    """One scored stage for one competitor.
+
+    Mirrors the proposed shape in ``ssi-scoreboard#400``: per-stage timing,
+    score breakdown, and rank context for a single (match, competitor)
+    pair. Optional fields are nullable because partially-typed scorecards
+    are common during a live match.
+    """
+
+    stage_number: int
+    stage_name: str | None = None
+    stage_id: int | None = None
+    time_seconds: float | None = None
+    scorecard_updated_at: str | None = None
+    hit_factor: float | None = None
+    stage_points: float | None = None
+    stage_pct: float | None = None
+    alphas: int | None = None
+    charlies: int | None = None
+    deltas: int | None = None
+    misses: int | None = None
+    no_shoots: int | None = None
+    procedurals: int | None = None
+    dq: bool | None = None
+
+
+class CompetitorStageResults(_ApiModel):
+    """``GET /api/v1/match/{ct}/{id}/competitor/{competitorId}/stages``
+    response body.
+
+    Matches the shape shipped in ``ssi-scoreboard#400``. The wrapper field
+    is ``stages`` (not ``results``) to mirror the upstream payload exactly
+    so a parsed model round-trips back to the wire shape with no adapter,
+    same convention as the rest of this module.
+    """
+
+    ct: int | None = None
+    matchId: int | None = None
+    competitorId: int
+    shooterId: int | None = None
+    division: str | None = None
+    stages: list[CompetitorStageResult]
