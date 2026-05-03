@@ -251,9 +251,28 @@ How to label from the UI:
    update right away.
 4. Clear a label by selecting ``--``.
 
-**Keyboard shortcuts** (faster than the dropdown for the half-day
-labeling pass): click any row to select it (or ``J`` / ``K`` /
-arrow keys to navigate), then press a single key:
+**Step-through mode** (issue #98 -- by far the fastest path for a
+labeling pass): in the fixture detail card, click **Step through**.
+The candidate table is replaced with a list + an audio player that
+**auto-plays a short snippet of each candidate's audio** as you
+focus it. Loop is on by default; pre-roll / post-roll lengths are
+sliders.
+
+- Filter to "Rejected only" (default) so you skip TPs.
+- Sort by "Ensemble score asc" (default) so the borderline FPs land
+  first -- the labels matter most there.
+- Pressing a label key both saves AND advances to the next candidate.
+- "Pre-cache all" submits a job that materialises every candidate's
+  snippet up front; the corpus-wide pre-cache for 12 fixtures is
+  under 10 seconds total.
+
+The snippet endpoint is ``GET /api/lab/snippet?audit_path=&candidate_number=&pre_ms=&post_ms=``;
+files cache under ``tests/fixtures/.cache/<slug>_snippets/`` and
+build on demand.
+
+**Keyboard shortcuts** (work in both modes): click any row to select
+it (or ``J`` / ``K`` / arrow keys to navigate), then press a single
+key:
 
 | Key | Reason (rejected) | Subclass (TP) |
 | --- | --- | --- |
@@ -669,6 +688,8 @@ Top-level keys: `config`, `summary`, `universe`, `config_hash`, `built_at`.
 | POST | `/api/lab/rescore` | `{config}` | Uses last cached universe. 409 if no eval has run. |
 | POST | `/api/lab/promote` | `{stage_number, slug, overwrite?}` | Copies stage audit JSON + WAV into `tests/fixtures/`. |
 | POST | `/api/lab/labels` | `{audit_path, labels: [{candidate_number, reason?, subclass?}]}` | Patches categorical labels on a fixture's audit JSON. Drops the cached universe so the next eval reloads. |
+| GET | `/api/lab/snippet?audit_path=&candidate_number=&pre_ms=&post_ms=` | -- | Per-candidate audio snippet (built-on-demand + cached under `tests/fixtures/.cache/<slug>_snippets/`). |
+| POST | `/api/lab/snippets/precache` | `{audit_path, pre_ms?, post_ms?}` | Submits a job that materialises every candidate's snippet for a fixture. Poll `/api/jobs/{id}`. |
 | POST | `/api/lab/save-config` | `{name, note?, overwrite?}` | Persists the active run's config + summary as `configs/ensemble.<name>.yaml`. 409 when no eval has run. |
 | POST | `/api/lab/rebuild-calibration` | `{target_recall?, tolerance_ms?, fixtures?}` | Submits a `rebuild_calibration` job that re-runs the calibration build script. Poll `/api/jobs/{id}` for progress. |
 
