@@ -215,6 +215,58 @@ review UI), and either:
 - promote-then-audit by opening it in the production UI's `/review`
   route and editing in place.
 
+### Categorical labeling (issue #86)
+
+Each candidate in the fixture catalog can carry a category label so eval can
+break down precision *by failure mode*:
+
+- **Rejected (FP) candidates**: optional ``reason`` --
+  ``cross_bay``, ``echo``, ``wind``, ``movement``, ``steel_ring``,
+  ``speech``, ``handling``, ``agc_artifact``, ``other``, ``unknown``.
+- **Kept (TP) candidates**: optional ``subclass`` -- ``paper``, ``steel``,
+  ``unknown``.
+
+How to label from the UI:
+
+1. Open a fixture's detail card in the Lab.
+2. The candidate table at the bottom now has a **label** column. Each
+   row shows a dropdown -- positives get the subclass options, rejected
+   candidates get the FP reasons.
+3. Picking a value auto-saves through ``POST /api/lab/labels``. The
+   detail card refreshes (eval re-runs in the background) so the
+   "Label breakdown" panel + the corpus-wide counts on the Summary card
+   update right away.
+4. Clear a label by selecting ``--``.
+
+How to label from the CLI:
+
+```bash
+uv run splitsmith lab label \
+  --audit-json tests/fixtures/stage-shots-myclub-2026-stage4.json \
+  --candidate 12 \
+  --reason cross_bay
+```
+
+Use ``--clear-reason`` / ``--clear-subclass`` to remove an existing
+label. Atomic write with a ``.bak`` backup of the prior JSON.
+
+What you get back, in eval output:
+
+- ``EvalRun.summary.fp_by_reason`` -- corpus-wide FP composition.
+- ``EvalRun.summary.positives_by_subclass`` -- corpus-wide TP composition.
+- ``EvalFixture.metrics.fp_by_reason`` / ``positives_by_subclass`` -- per fixture.
+
+Unlabeled FPs / positives are counted under the ``unlabeled`` key, so
+you can track labeling progress over time. The "Label breakdown" panel
+in the fixture detail and the summary card render these directly.
+
+> **Why bother labeling?** With 12 fixtures and ~1500-2000 negatives, you
+> don't have enough data for a clean multi-class classifier. But labels
+> still pay off in three ways: (1) measurement -- "of 35 surviving FPs,
+> 22 are cross_bay" beats "the user thinks cross-bay is the worst";
+> (2) hard negatives for binary specialist voters (cross-bay first); (3)
+> ready-to-go training set for #10 (vision) and #18 (community corpus).
+
 ### Re-labeling an existing fixture
 
 You don't have to promote a stage from scratch to fix labels. Two ways:
@@ -576,6 +628,7 @@ Top-level keys: `config`, `summary`, `universe`, `config_hash`, `built_at`.
 | POST | `/api/lab/eval` | `{slugs?, config?, persist?}` | Slow path. Caches universe server-side and (by default) writes `build/lab/runs/<...>.json`. |
 | POST | `/api/lab/rescore` | `{config}` | Uses last cached universe. 409 if no eval has run. |
 | POST | `/api/lab/promote` | `{stage_number, slug, overwrite?}` | Copies stage audit JSON + WAV into `tests/fixtures/`. |
+| POST | `/api/lab/labels` | `{audit_path, labels: [{candidate_number, reason?, subclass?}]}` | Patches categorical labels on a fixture's audit JSON. Drops the cached universe so the next eval reloads. |
 | POST | `/api/lab/save-config` | `{name, note?, overwrite?}` | Persists the active run's config + summary as `configs/ensemble.<name>.yaml`. 409 when no eval has run. |
 | POST | `/api/lab/rebuild-calibration` | `{target_recall?, tolerance_ms?, fixtures?}` | Submits a `rebuild_calibration` job that re-runs the calibration build script. Poll `/api/jobs/{id}` for progress. |
 

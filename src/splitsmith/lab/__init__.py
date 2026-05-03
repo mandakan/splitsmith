@@ -19,6 +19,9 @@ JSON so they're greppable, diffable, and Claude-Code-friendly.
 """
 
 from .core import (
+    REASON_VALUES,
+    SUBCLASS_VALUES,
+    CandidateLabel,
     EvalCandidate,
     EvalConfig,
     EvalFixture,
@@ -28,6 +31,7 @@ from .core import (
     FixtureRecord,
     PromoteRequest,
     RunSummary,
+    apply_labels,
     list_fixtures,
     load_run,
     promote_stage_to_fixture,
@@ -38,6 +42,9 @@ from .core import (
 )
 
 __all__ = [
+    "REASON_VALUES",
+    "SUBCLASS_VALUES",
+    "CandidateLabel",
     "EvalCandidate",
     "EvalConfig",
     "EvalFixture",
@@ -47,6 +54,7 @@ __all__ = [
     "FixtureRecord",
     "PromoteRequest",
     "RunSummary",
+    "apply_labels",
     "list_fixtures",
     "load_run",
     "promote_stage_to_fixture",

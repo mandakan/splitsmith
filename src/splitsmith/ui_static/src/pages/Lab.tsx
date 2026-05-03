@@ -45,6 +45,8 @@ import {
 } from "@/components/ui/card";
 import {
   api,
+  LAB_REASONS,
+  LAB_SUBCLASSES,
   type Job,
   type LabEvalConfig,
   type LabEvalFixture,
@@ -177,7 +179,13 @@ export function Lab() {
         onSelect={(s) => navigate(s ? `/lab/${s}` : "/lab")}
       />
 
-      {focused && <FixtureDetail fixture={focused} onClose={() => navigate("/lab")} />}
+      {focused && (
+        <FixtureDetail
+          fixture={focused}
+          onClose={() => navigate("/lab")}
+          onLabelChanged={runEval}
+        />
+      )}
     </div>
   );
 }
@@ -215,11 +223,20 @@ function SummaryCard({
           Across {s.n_fixtures} fixtures and {s.n_truth} ground-truth shots.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Metric label="Precision" value={fmtPct(s.precision)} />
-        <Metric label="Recall" value={fmtPct(s.recall)} />
-        <Metric label="F1" value={s.f1.toFixed(3)} />
-        <Metric label="TP / FP / FN" value={`${s.true_positives} / ${s.false_positives} / ${s.false_negatives}`} />
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Metric label="Precision" value={fmtPct(s.precision)} />
+          <Metric label="Recall" value={fmtPct(s.recall)} />
+          <Metric label="F1" value={s.f1.toFixed(3)} />
+          <Metric
+            label="TP / FP / FN"
+            value={`${s.true_positives} / ${s.false_positives} / ${s.false_negatives}`}
+          />
+        </div>
+        <LabelBreakdown
+          fpByReason={s.fp_by_reason}
+          positivesBySubclass={s.positives_by_subclass}
+        />
       </CardContent>
     </Card>
   );
@@ -539,12 +556,15 @@ function FixtureTable({
 function FixtureDetail({
   fixture,
   onClose,
+  onLabelChanged,
 }: {
   fixture: LabEvalFixture;
   onClose: () => void;
+  onLabelChanged: () => void;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [time, setTime] = useState(0);
+  const [savingLabel, setSavingLabel] = useState<number | null>(null);
 
   useEffect(() => {
     setPeaks(null);
@@ -553,6 +573,27 @@ function FixtureDetail({
       .then(setPeaks)
       .catch(() => setPeaks(null));
   }, [fixture.audit_path]);
+
+  const handleLabel = useCallback(
+    async (
+      candidate_number: number,
+      patch: { reason?: string | null; subclass?: string | null },
+    ) => {
+      setSavingLabel(candidate_number);
+      try {
+        await api.applyLabLabels({
+          audit_path: fixture.audit_path,
+          labels: [{ candidate_number, ...patch }],
+        });
+        onLabelChanged();
+      } catch (err) {
+        console.error("label save failed", err);
+      } finally {
+        setSavingLabel(null);
+      }
+    },
+    [fixture.audit_path, onLabelChanged],
+  );
 
   const fps = fixture.candidates.filter((c) => c.kept && c.truth === 0);
   const fns = fixture.truth_times.filter((t) => {
@@ -631,7 +672,16 @@ function FixtureDetail({
           <DiffList fps={fps} fns={fns} />
         </div>
 
-        <CandidateTable candidates={fixture.candidates} />
+        <LabelBreakdown
+          fpByReason={fixture.metrics.fp_by_reason}
+          positivesBySubclass={fixture.metrics.positives_by_subclass}
+        />
+
+        <CandidateTable
+          candidates={fixture.candidates}
+          onLabel={handleLabel}
+          savingLabel={savingLabel}
+        />
       </CardContent>
     </Card>
   );
@@ -730,15 +780,22 @@ function DiffList({
 
 function CandidateTable({
   candidates,
+  onLabel,
+  savingLabel,
 }: {
   candidates: LabEvalFixture["candidates"];
+  onLabel: (
+    candidate_number: number,
+    patch: { reason?: string | null; subclass?: string | null },
+  ) => void;
+  savingLabel: number | null;
 }) {
   return (
-    <details className="rounded border border-border/60">
+    <details className="rounded border border-border/60" open>
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Candidates ({candidates.length})
+        Candidates ({candidates.length}) -- label rejected with FP class, kept with paper/steel
       </summary>
-      <div className="max-h-72 overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-card text-[10px] uppercase tracking-wide text-muted-foreground">
             <tr className="border-b border-border/40">
@@ -752,6 +809,7 @@ function CandidateTable({
               <th className="px-2 py-1 text-right font-medium">score</th>
               <th className="px-2 py-1 text-center font-medium">kept</th>
               <th className="px-2 py-1 text-center font-medium">truth</th>
+              <th className="px-2 py-1 text-left font-medium">label</th>
             </tr>
           </thead>
           <tbody>
@@ -759,6 +817,7 @@ function CandidateTable({
               const isTP = c.kept && c.truth === 1;
               const isFP = c.kept && c.truth === 0;
               const isFN = !c.kept && c.truth === 1;
+              const saving = savingLabel === c.candidate_number;
               return (
                 <tr
                   key={c.candidate_number}
@@ -779,6 +838,13 @@ function CandidateTable({
                   <td className="px-2 py-1 text-right">{c.ensemble_score.toFixed(2)}</td>
                   <td className="px-2 py-1 text-center">{c.kept ? "Y" : ""}</td>
                   <td className="px-2 py-1 text-center">{c.truth ? "Y" : ""}</td>
+                  <td className="px-2 py-1">
+                    <LabelDropdown
+                      candidate={c}
+                      onChange={(patch) => onLabel(c.candidate_number, patch)}
+                      saving={saving}
+                    />
+                  </td>
                 </tr>
               );
             })}
@@ -786,6 +852,116 @@ function CandidateTable({
         </table>
       </div>
     </details>
+  );
+}
+
+function LabelDropdown({
+  candidate,
+  onChange,
+  saving,
+}: {
+  candidate: LabEvalFixture["candidates"][number];
+  onChange: (patch: { reason?: string | null; subclass?: string | null }) => void;
+  saving: boolean;
+}) {
+  // Kept positive (TP): edit subclass. Kept FP: edit reason. Rejected
+  // candidates aren't worth labelling -- they don't survive consensus
+  // so they don't pollute precision -- but we still let the user tag a
+  // reason for rejected ones if they want a record (e.g. for #87
+  // mining cross-references).
+  const isKept = candidate.kept;
+  const isPositive = candidate.truth === 1;
+  if (isKept && isPositive) {
+    return (
+      <div className="flex items-center gap-1">
+        <select
+          value={candidate.subclass ?? ""}
+          onChange={(e) => onChange({ subclass: e.target.value || null })}
+          className="rounded border border-border/60 bg-background px-1 py-0.5 text-[11px]"
+          disabled={saving}
+        >
+          <option value="">--</option>
+          {LAB_SUBCLASSES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        {saving && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        value={candidate.reason ?? ""}
+        onChange={(e) => onChange({ reason: e.target.value || null })}
+        className={cn(
+          "rounded border border-border/60 bg-background px-1 py-0.5 text-[11px]",
+          isKept && !isPositive && "border-orange-400/60",
+        )}
+        disabled={saving}
+      >
+        <option value="">--</option>
+        {LAB_REASONS.map((r) => (
+          <option key={r} value={r}>
+            {r}
+          </option>
+        ))}
+      </select>
+      {saving && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+    </div>
+  );
+}
+
+function LabelBreakdown({
+  fpByReason,
+  positivesBySubclass,
+}: {
+  fpByReason: Record<string, number>;
+  positivesBySubclass: Record<string, number>;
+}) {
+  const fpEntries = Object.entries(fpByReason).filter(([, n]) => n > 0);
+  const subEntries = Object.entries(positivesBySubclass).filter(([, n]) => n > 0);
+  if (fpEntries.length === 0 && subEntries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="rounded border border-border/60 p-3 text-xs">
+      <div className="mb-2 font-semibold uppercase tracking-wide text-muted-foreground">
+        Label breakdown
+      </div>
+      {fpEntries.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[10px] uppercase text-orange-500">false positives by class</div>
+          <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono">
+            {fpEntries
+              .sort((a, b) => b[1] - a[1])
+              .map(([k, n]) => (
+                <li key={k} className="flex justify-between">
+                  <span>{k}</span>
+                  <span className="text-muted-foreground">{n}</span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+      {subEntries.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase text-emerald-600">positives by subclass</div>
+          <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono">
+            {subEntries
+              .sort((a, b) => b[1] - a[1])
+              .map(([k, n]) => (
+                <li key={k} className="flex justify-between">
+                  <span>{k}</span>
+                  <span className="text-muted-foreground">{n}</span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
