@@ -3618,12 +3618,100 @@ def _linux_network_mounts(network_fstypes: set[str]) -> set[str]:
     return out
 
 
+# GetDriveTypeW return values (winbase.h). REMOVABLE/FIXED/CDROM/RAMDISK
+# all collapse to ``"removable"`` for picker purposes; only REMOTE gets
+# its own bucket and only UNKNOWN / NO_ROOT_DIR are filtered out.
+_DRIVE_UNKNOWN = 0
+_DRIVE_NO_ROOT_DIR = 1
+_DRIVE_REMOTE = 4
+
+
 def _discover_windows_drives() -> list[tuple[Path, str, str]]:
+    """Enumerate Windows drives via Win32 + classify type & label.
+
+    Replaces the old D-Z directory-existence scan with kernel32 calls so
+    we can: (a) skip drives that aren't actually present, (b) classify
+    mapped network drives (``DRIVE_REMOTE``) as ``"network"`` instead of
+    lumping everything under ``"removable"``, and (c) read the volume
+    label so the picker shows ``"INSTA360 (D:)"`` rather than just
+    ``"D:"``.
+
+    UNC shares without a drive letter (``\\\\nas\\share``) aren't
+    enumerated -- the typical Windows workflow maps network drives to a
+    letter via "Map Network Drive", which this picks up.
+    """
+    drives = _query_windows_drives()
     out: list[tuple[Path, str, str]] = []
-    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":  # skip C: (system)
-        path = Path(f"{letter}:\\")
-        if _is_dir_with_timeout(path):
-            out.append((path, f"{letter}:", "removable"))
+    for letter, (drive_type, label) in sorted(drives.items()):
+        if letter == "C":  # skip system drive, matching prior behaviour
+            continue
+        if drive_type in (_DRIVE_UNKNOWN, _DRIVE_NO_ROOT_DIR):
+            continue
+        kind = "network" if drive_type == _DRIVE_REMOTE else "removable"
+        display = f"{label} ({letter}:)" if label else f"{letter}:"
+        out.append((Path(f"{letter}:\\"), display, kind))
+    return out
+
+
+def _query_windows_drives() -> dict[str, tuple[int, str | None]]:
+    """Return ``{letter: (drive_type, volume_label)}`` for present drives.
+
+    Empty on non-Windows or any kernel32 failure -- the caller falls back
+    to "no removable drives discovered". Volume label is skipped for
+    ``DRIVE_REMOTE`` because ``GetVolumeInformationW`` can hang on a
+    stale share; the drive letter is still reported so the user can
+    still navigate to it manually.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return {}
+
+    try:
+        # ``ctypes.windll`` is only defined on Windows; on Linux/macOS the
+        # AttributeError below short-circuits to {}.
+        kernel32: Any = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return {}
+
+    try:
+        bitmask = int(kernel32.GetLogicalDrives())
+    except OSError:
+        return {}
+    if not bitmask:
+        return {}
+
+    out: dict[str, tuple[int, str | None]] = {}
+    for i in range(26):
+        if not (bitmask >> i) & 1:
+            continue
+        letter = chr(ord("A") + i)
+        root = f"{letter}:\\"
+        try:
+            drive_type = int(kernel32.GetDriveTypeW(ctypes.c_wchar_p(root)))
+        except OSError:
+            continue
+        label: str | None = None
+        if drive_type != _DRIVE_REMOTE:
+            label_buf = ctypes.create_unicode_buffer(261)  # MAX_PATH + 1
+            fs_buf = ctypes.create_unicode_buffer(261)
+            try:
+                ok = kernel32.GetVolumeInformationW(
+                    ctypes.c_wchar_p(root),
+                    label_buf,
+                    wintypes.DWORD(len(label_buf)),
+                    None,
+                    None,
+                    None,
+                    fs_buf,
+                    wintypes.DWORD(len(fs_buf)),
+                )
+            except OSError:
+                ok = 0
+            if ok:
+                label = label_buf.value or None
+        out[letter] = (drive_type, label)
     return out
 
 
