@@ -2101,6 +2101,16 @@ function ThumbnailFloat({
  *  inside the band; videos in another stage's window or orphaned still get
  *  a faint tick so the user can see neighbours visually. Videos without a
  *  timestamp are skipped entirely. */
+/** Per-stage timeline showing the window during which a video had to be
+ *  recorded to match this stage (``scorecard_updated_at - tolerance_minutes``
+ *  through ``scorecard_updated_at``), with marks for any registered
+ *  videos whose timestamp lands in or near the window.
+ *
+ *  Only renders when there's something useful to look at -- assigned
+ *  videos, or unassigned-but-contested videos pointing at this stage.
+ *  Stage cards with no relevant ticks would just show empty bars +
+ *  jargon, which confused users (#NN); the previous version drew
+ *  neighbour-stage ticks at low opacity, which read as decoration. */
 function MatchWindowTimeline({
   stage,
   window: matchWindow,
@@ -2117,7 +2127,7 @@ function MatchWindowTimeline({
   if (!Number.isFinite(lowerSec) || !Number.isFinite(upperSec)) return null;
   const tolSec = matchWindow.tolerance_minutes * 60;
 
-  const ticks = videoEntries
+  const allTicks = videoEntries
     .filter((e) => e.timestamp !== null)
     .map((e) => {
       const ts = new Date(e.timestamp as string).getTime() / 1000;
@@ -2133,6 +2143,16 @@ function MatchWindowTimeline({
       };
     });
 
+  // Only show ticks that are *about* this stage. Neighbour-stage ticks
+  // at low opacity were the source of the "what is this bar?" confusion
+  // -- they read as decoration when the user expected stage-specific
+  // information.
+  const ticks = allTicks.filter(
+    (t) => t.inThisStage || (t.contested && t.otherStages.includes(stage.stage_number)),
+  );
+
+  // Suppress the whole timeline when there's no relevant tick. An empty
+  // bar with just the window band carries no actionable information.
   if (ticks.length === 0) return null;
 
   // Visible range: at least the window plus a half-tolerance on each side,
@@ -2149,13 +2169,19 @@ function MatchWindowTimeline({
     const fname = t.path.split("/").pop();
     const time = new Date(t.ts * 1000).toLocaleTimeString();
     if (t.inThisStage) return `${fname} @ ${time} (${t.role ?? "unassigned"})`;
-    if (t.contested) return `${fname} @ ${time} (contested: stages ${t.otherStages.join(", ")})`;
-    if (t.otherStages.length) return `${fname} @ ${time} (in stage ${t.otherStages[0]})`;
-    return `${fname} @ ${time} (orphan)`;
+    return `${fname} @ ${time} (also fits stages ${t.otherStages.join(", ")})`;
   };
 
   return (
-    <div className="mt-2 select-none" aria-hidden>
+    <div
+      className="mt-2 select-none"
+      aria-hidden
+      title={
+        `Match window for stage ${stage.stage_number}: videos recorded within ` +
+        `${matchWindow.tolerance_minutes} minutes before the scorecard time. ` +
+        `Bars mark each registered video's timestamp.`
+      }
+    >
       <div className="relative h-3 rounded-full border border-border bg-muted/30">
         <div
           className="absolute top-0 h-full bg-status-info/20"
@@ -2175,11 +2201,7 @@ function MatchWindowTimeline({
             key={t.path}
             className={cn(
               "absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-sm",
-              t.inThisStage
-                ? t.role === "primary"
-                  ? "h-4 w-1 bg-status-info"
-                  : "bg-foreground"
-                : "bg-muted-foreground/40",
+              t.role === "primary" ? "h-4 w-1 bg-status-info" : "bg-foreground",
               t.contested && "outline outline-1 outline-status-warning",
             )}
             style={{ left: pct(t.ts) }}
@@ -2189,7 +2211,7 @@ function MatchWindowTimeline({
       </div>
       <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
         <span>{new Date(lo * 1000).toLocaleTimeString()}</span>
-        <span>scorecard - {matchWindow.tolerance_minutes} min ... scorecard</span>
+        <span>match window ({matchWindow.tolerance_minutes} min before scorecard)</span>
         <span>{new Date(hi * 1000).toLocaleTimeString()}</span>
       </div>
     </div>
