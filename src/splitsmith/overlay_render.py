@@ -219,6 +219,11 @@ _FONT_FALLBACKS: tuple[str, ...] = (
     "/Library/Fonts/Andale Mono.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    # Windows: Consolas ships with Vista+, Courier New / Lucida Console are
+    # always present. PIL accepts forward slashes here on Windows too.
+    "C:/Windows/Fonts/consola.ttf",
+    "C:/Windows/Fonts/lucon.ttf",
+    "C:/Windows/Fonts/cour.ttf",
 )
 
 
