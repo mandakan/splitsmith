@@ -524,7 +524,7 @@ def test_scoreboard_select_shooter_uses_live_stage_times_when_available(
         "competitorId": 727562,
         "shooterId": 40821,
         "division": "Optics Minor",
-        "results": [
+        "stages": [
             {
                 "stage_number": s,
                 "time_seconds": 18.0 + s,

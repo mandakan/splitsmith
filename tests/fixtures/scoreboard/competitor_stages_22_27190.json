@@ -4,10 +4,10 @@
   "competitorId": 727562,
   "shooterId": 40821,
   "division": "Optics Minor",
-  "results": [
+  "stages": [
     {
       "stage_number": 1,
-      "stage_name": "A bana Vänster Fm",
+      "stage_name": "A bana V\u00e4nster Fm",
       "stage_id": 93914,
       "time_seconds": 18.42,
       "scorecard_updated_at": "2026-05-02T08:14:11.512840+00:00",
@@ -23,7 +23,7 @@
     },
     {
       "stage_number": 2,
-      "stage_name": "A bana Vänster Em",
+      "stage_name": "A bana V\u00e4nster Em",
       "stage_id": 93915,
       "time_seconds": 22.18,
       "scorecard_updated_at": "2026-05-02T09:45:03.221177+00:00",
@@ -39,7 +39,7 @@
     },
     {
       "stage_number": 3,
-      "stage_name": "B bana Höger",
+      "stage_name": "B bana H\u00f6ger",
       "stage_id": 93916,
       "time_seconds": 14.05,
       "scorecard_updated_at": "2026-05-02T10:22:55.910412+00:00",

@@ -835,7 +835,7 @@ class MatchProject(BaseModel):
 
         stages_by_number = {s.stage_number: s for s in self.stages}
         updated = 0
-        for r in results.results:
+        for r in results.stages:
             stage = stages_by_number.get(r.stage_number)
             if stage is None:
                 continue

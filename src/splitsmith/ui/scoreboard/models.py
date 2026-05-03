@@ -287,10 +287,10 @@ class CompetitorStageResults(_ApiModel):
     """``GET /api/v1/match/{ct}/{id}/competitor/{competitorId}/stages``
     response body.
 
-    The endpoint isn't shipped yet upstream (``ssi-scoreboard#400``) -- the
-    model is shipped now so the offline ``LocalJsonScoreboard`` path can
-    serve it from richer dropped JSON, and so the HTTP path has a typed
-    target the moment the upstream lands.
+    Matches the shape shipped in ``ssi-scoreboard#400``. The wrapper field
+    is ``stages`` (not ``results``) to mirror the upstream payload exactly
+    so a parsed model round-trips back to the wire shape with no adapter,
+    same convention as the rest of this module.
     """
 
     ct: int | None = None
@@ -298,4 +298,4 @@ class CompetitorStageResults(_ApiModel):
     competitorId: int
     shooterId: int | None = None
     division: str | None = None
-    results: list[CompetitorStageResult]
+    stages: list[CompetitorStageResult]

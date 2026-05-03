@@ -203,7 +203,7 @@ def test_get_stage_times_parses_competitor_stage_results(
         "competitorId": 727562,
         "shooterId": 40821,
         "division": "Optics Minor",
-        "results": [
+        "stages": [
             {
                 "stage_number": 1,
                 "stage_name": "K-vallen",
@@ -219,9 +219,9 @@ def test_get_stage_times_parses_competitor_stage_results(
     got = client.get_stage_times(22, 27190, 727562)
     assert isinstance(got, CompetitorStageResults)
     assert got.competitorId == 727562
-    assert len(got.results) == 1
-    assert got.results[0].stage_number == 1
-    assert got.results[0].time_seconds == 18.42
+    assert len(got.stages) == 1
+    assert got.stages[0].stage_number == 1
+    assert got.stages[0].time_seconds == 18.42
 
 
 @respx.mock

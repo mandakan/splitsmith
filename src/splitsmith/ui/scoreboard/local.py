@@ -190,7 +190,7 @@ class LocalJsonScoreboard:
             competitorId=competitor_id,
             shooterId=self._shooter_id_for(competitor_id),
             division=self._division_for(competitor_id),
-            results=list(results),
+            stages=list(results),
         )
 
     def _shooter_id_for(self, competitor_id: int) -> int | None:
@@ -356,7 +356,7 @@ def _from_combined_v1(
             continue
         results = [
             CompetitorStageResult.model_validate(r)
-            for r in entry.get("results", [])
+            for r in entry.get("stages", [])
             if isinstance(r, dict)
         ]
         out[cid] = results
