@@ -25,6 +25,11 @@ htmlcov/
 *.swo
 .DS_Store
 
+# Local env files (contain bearer tokens for scoreboard.urdr.dev etc).
+.env
+.env.local
+.env.*.local
+
 # Project-specific
 analysis/
 match_raw/
