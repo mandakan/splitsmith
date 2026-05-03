@@ -22,6 +22,7 @@ Endpoints (locked v1 surface):
   POST /api/stages/{n}/videos/{vid}/detect-beep -- per-video beep detection
   POST /api/stages/{n}/videos/{vid}/beep         -- per-video manual override
   POST /api/stages/{n}/videos/{vid}/beep/select  -- per-video candidate select
+  POST /api/stages/{n}/videos/{vid}/beep/snap    -- propose a snapped beep near a user hint
   POST /api/stages/{n}/videos/{vid}/trim         -- per-video audit-mode trim
   GET  /api/stages/{n}/videos/{vid}/beep-preview -- per-video ~1s preview MP4
   GET  /api/jobs                    -- list all retained jobs
@@ -72,7 +73,7 @@ from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
-from ..config import Config
+from ..config import BeepDetectConfig, Config
 from . import audio as audio_helpers
 from . import exports as export_helpers
 from .jobs import Job, JobCancelled, JobHandle, JobRegistry
@@ -597,6 +598,33 @@ class BeepReviewRequest(BaseModel):
     reviewed: bool
 
 
+class BeepSnapRequest(BaseModel):
+    """Body for POST /api/stages/{n}/videos/{vid}/beep/snap.
+
+    ``hint_time`` is the user's ear-aligned guess (seconds into source).
+    ``window_s`` is the half-window the snap is allowed to search inside
+    -- defaults to 1.5 s. Wider than the eyeball precision of a click
+    on a long-range waveform, narrow enough that competing in-stage
+    transients (steel rings, shots) don't enter the candidate pool when
+    the marker is anywhere reasonable.
+    """
+
+    hint_time: float
+    window_s: float = 1.5
+
+
+class BeepSnapResponse(BaseModel):
+    """Result of a snap-to-beep proposal. Stateless -- the SPA decides
+    whether to accept (PUT the snapped time as the manual override) or
+    dismiss (keep the user's hint)."""
+
+    snapped_time: float
+    delta: float
+    peak_amplitude: float
+    score: float
+    duration_ms: float
+
+
 class ExportStageRequest(BaseModel):
     """Body for POST /api/stages/{n}/export.
 
@@ -720,6 +748,12 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         description="Production UI backend (issue #11/#12).",
         version="0.1.0",
     )
+    # Stash on app.state so the uvicorn server wrapper in :func:`serve`
+    # can read live job state when handling Ctrl-C: the signal handler
+    # needs to enumerate pending / running jobs to tell the user what's
+    # being waited on, and the registry isn't otherwise reachable from
+    # outside the closure.
+    app.state.splitsmith_state = state
 
     # ----------------------------------------------------------------------
     # API
@@ -1419,7 +1453,29 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 )
                 handle.update(message=f"beep saved; trim failed: {exc}")
         handle.update(progress=0.85, message="Saving project...")
-        proj.save(state.project_root)
+        # Read-modify-write the project file: extract / detection /
+        # ffmpeg trim can take 30+ s during which the user may have
+        # toggled ``beep_reviewed`` on other stages. Reloading and
+        # copying our targeted fields onto the fresh project preserves
+        # those concurrent edits instead of stomping them with the
+        # snapshot we loaded at job start.
+        fresh = state.load()
+        try:
+            stg_fresh = fresh.stage(stage_number)
+        except KeyError:
+            stg_fresh = None
+        v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
+        if v_fresh is not None:
+            v_fresh.beep_time = video.beep_time
+            v_fresh.beep_source = video.beep_source
+            v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
+            v_fresh.beep_duration_ms = video.beep_duration_ms
+            v_fresh.beep_candidates = list(video.beep_candidates)
+            v_fresh.beep_reviewed = video.beep_reviewed
+            v_fresh.processed["beep"] = True
+            if trimmed_ok:
+                v_fresh.processed["trim"] = True
+            fresh.save(state.project_root)
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
             # Shot detection is primary-only AND gated on the user
             # confirming the beep (#71). Auto-detect always leaves
@@ -1661,8 +1717,14 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             runner=_cancellable_runner(handle),
         )
         handle.update(progress=0.85, message="Saving project...")
-        video.processed["trim"] = True
-        proj.save(state.project_root)
+        # Read-modify-write to avoid stomping concurrent edits made
+        # while ffmpeg was running (e.g. another stage's beep review).
+        fresh = state.load()
+        stg_fresh = fresh.stage(stage_number)
+        v_fresh = stg_fresh.find_video_by_id(video_id)
+        if v_fresh is not None:
+            v_fresh.processed["trim"] = True
+            fresh.save(state.project_root)
         if (
             video.role == "primary"
             and video.beep_reviewed
@@ -1861,8 +1923,18 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             audit_file.replace(backup)
         tmp.replace(audit_file)
 
-        prim.processed["shot_detect"] = True
-        proj.save(state.project_root)
+        # Read-modify-write the project file: a long-running shot_detect
+        # job must not save the snapshot it loaded at start, because the
+        # user may have toggled ``beep_reviewed`` on other stages in the
+        # interim (the review action kicks shot_detect, so concurrent
+        # bursts are the common case). Reloading from disk and mutating
+        # only the targeted field preserves those concurrent edits.
+        fresh = state.load()
+        stg_fresh = fresh.stage(stage_number)
+        prim_fresh = stg_fresh.primary()
+        if prim_fresh is not None:
+            prim_fresh.processed["shot_detect"] = True
+            fresh.save(state.project_root)
         handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
 
     @app.post("/api/stages/{stage_number}/shot-detect")
@@ -2090,6 +2162,98 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         if req.beep_time is not None:
             _maybe_chain_trim(stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/snap")
+    def snap_beep_for_video(stage_number: int, video_id: str, req: BeepSnapRequest) -> JSONResponse:
+        """Refine a user-placed beep marker by snapping it to the strongest
+        tone in a tight window around the hint.
+
+        The user has listened to the audio and dropped a marker close to
+        the beep; this endpoint runs the same bandpass + envelope detector
+        on a slice of the WAV and returns the rise-foot leading edge of
+        the strongest run inside ``[hint - window_s, hint + window_s]``.
+        Stateless: caller decides whether to accept the proposal as a
+        manual override (POST .../beep) or dismiss it.
+
+        404 when no run in the window meets the duration / amplitude
+        criteria. The SPA surfaces that as "no beep found nearby; widen
+        the window or move the marker".
+        """
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        source = project.resolve_video_path(state.project_root, video.path)
+        _ensure_source_reachable(stage_number, source)
+        if req.hint_time < 0.0:
+            raise HTTPException(status_code=400, detail="hint_time must be >= 0")
+        if req.window_s <= 0.0:
+            raise HTTPException(status_code=400, detail="window_s must be > 0")
+
+        audio_path = audio_helpers.ensure_video_audio(
+            state.project_root, stage_number, video, source, project=project
+        )
+        audio, sr = beep_detect.load_audio(audio_path)
+        duration_s = audio.size / sr if sr > 0 else 0.0
+        if duration_s <= 0:
+            raise HTTPException(status_code=500, detail="cached audio is empty")
+        if req.hint_time > duration_s:
+            raise HTTPException(
+                status_code=400,
+                detail=f"hint_time {req.hint_time:.3f}s exceeds audio duration {duration_s:.3f}s",
+            )
+
+        slice_start_s = max(0.0, req.hint_time - req.window_s)
+        slice_end_s = min(duration_s, req.hint_time + req.window_s)
+        start_idx = int(round(slice_start_s * sr))
+        end_idx = int(round(slice_end_s * sr))
+        if end_idx <= start_idx:
+            raise HTTPException(
+                status_code=400,
+                detail="snap window is empty after clipping to audio bounds",
+            )
+        sliced = audio[start_idx:end_idx]
+
+        # Relax detection thresholds: the user has already localized the
+        # beep with their marker, so the snap doesn't need the full-clip
+        # detector's belt-and-braces against false positives.
+        # - silence_window_s shrinks to fit the slice (the configured
+        #   1.5 s pre-window would be silently truncated otherwise).
+        # - search_window_s = 0 disables the front-of-audio cap (the
+        #   slice itself is the cap).
+        # - min_duration_ms drops to 40 ms so a clipped / faint beep
+        #   whose envelope only briefly clears the cutoff still
+        #   registers. The full-clip detector keeps 150 ms to suppress
+        #   short clicks; in a 2 s window centred on the marker, those
+        #   competing transients aren't a concern.
+        # - min_abs_peak drops to 0.01 so a quiet recording (Insta360
+        #   GO 3S beep at low gain) still has a candidate run.
+        cfg = BeepDetectConfig(
+            silence_window_s=min(0.3, max(0.05, req.window_s * 0.6)),
+            silence_pre_skip_s=0.05,
+            search_window_s=0.0,
+            top_n_candidates=8,
+            min_duration_ms=40,
+            min_abs_peak=0.01,
+            min_amplitude=0.05,
+        )
+        try:
+            detection = beep_detect.detect_beep(sliced, sr, cfg)
+        except beep_detect.BeepNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        # Times in ``detection`` are slice-local; shift back to source
+        # time. Pick the candidate closest to the user's hint -- in a
+        # tight window the hint is the prior, not silence-preference.
+        hint_in_slice = req.hint_time - slice_start_s
+        chosen = min(detection.candidates, key=lambda c: abs(c.time - hint_in_slice))
+        snapped_time = float(chosen.time + slice_start_s)
+        return JSONResponse(
+            BeepSnapResponse(
+                snapped_time=snapped_time,
+                delta=snapped_time - req.hint_time,
+                peak_amplitude=float(chosen.peak_amplitude),
+                score=float(chosen.score),
+                duration_ms=float(chosen.duration_ms),
+            ).model_dump()
+        )
 
     @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/select")
     def select_beep_candidate_for_video(
@@ -3413,7 +3577,15 @@ def serve(
     port: int = 5174,
     reload: bool = False,
 ) -> None:
-    """Boot uvicorn synchronously. Used by the ``splitsmith ui`` CLI command."""
+    """Boot uvicorn synchronously. Used by the ``splitsmith ui`` CLI command.
+
+    Wraps ``uvicorn.Server`` so the first Ctrl-C prints a summary of the
+    background jobs that are still running (detect_beep, trim,
+    shot_detect) -- otherwise uvicorn's graceful-shutdown wait looks
+    like the process hanging. Uvicorn already promotes a second Ctrl-C
+    to a force-exit; we just decorate the first press with the job
+    inventory + a hint about pressing again.
+    """
     import uvicorn
 
     _ensure_ui_built()
@@ -3426,4 +3598,77 @@ def serve(
         logger.warning("reload=True is not supported yet; running without reload")
 
     app = create_app(project_root=project_root, project_name=project_name)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = _JobAwareServer(config, app)
+    server.run()
+
+
+class _JobAwareServer:
+    """Lazy wrapper that builds a ``uvicorn.Server`` subclass on demand.
+
+    The subclass override has to live next to the import to avoid
+    pulling uvicorn into module import; we lift it via a closure inside
+    :meth:`run` so unit tests don't pay the import cost.
+    """
+
+    def __init__(self, config: Any, app: FastAPI) -> None:
+        self._config = config
+        self._app = app
+
+    def run(self) -> None:
+        import uvicorn
+
+        app = self._app
+
+        class _Inner(uvicorn.Server):
+            def handle_exit(self, sig: int, frame: Any) -> None:  # type: ignore[override]
+                # First press: announce active jobs so the wait is
+                # visible; let uvicorn flip should_exit and shut down
+                # gracefully. Second press (uvicorn already detects
+                # repeat SIGINT) escalates to force_exit, which kills
+                # in-flight requests + the job thread pool.
+                if not self.should_exit:
+                    _print_active_jobs(app)
+                uvicorn.Server.handle_exit(self, sig, frame)
+
+        server = _Inner(self._config)
+        server.run()
+
+
+def _print_active_jobs(app: FastAPI) -> None:
+    """Dump pending / running jobs to stderr on first Ctrl-C."""
+    state = getattr(app.state, "splitsmith_state", None)
+    if state is None:
+        return
+    try:
+        jobs = state.jobs.list()
+    except Exception:  # pragma: no cover -- defensive: never block shutdown
+        logger.warning("could not enumerate jobs on shutdown", exc_info=True)
+        return
+    from .jobs import JobStatus
+
+    active = [j for j in jobs if j.status in (JobStatus.PENDING, JobStatus.RUNNING)]
+    print("", file=sys.stderr, flush=True)
+    if not active:
+        print("Shutting down (no background jobs running).", file=sys.stderr, flush=True)
+        return
+    print(
+        f"Shutting down -- waiting for {len(active)} background job"
+        f"{'' if len(active) == 1 else 's'}:",
+        file=sys.stderr,
+        flush=True,
+    )
+    for j in active:
+        bits = [j.kind]
+        if j.stage_number is not None:
+            bits.append(f"stage {j.stage_number}")
+        msg = j.message or j.status.value
+        bits.append(msg)
+        if j.progress is not None:
+            bits.append(f"{round(j.progress * 100)}%")
+        print(f"  - {' / '.join(bits)}", file=sys.stderr, flush=True)
+    print(
+        "Press Ctrl-C again to force quit (in-flight ffmpeg / detection " "will be killed).",
+        file=sys.stderr,
+        flush=True,
+    )

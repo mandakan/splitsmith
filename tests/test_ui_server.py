@@ -1149,6 +1149,85 @@ def test_select_beep_candidate_400_when_time_no_match(tmp_path: Path, monkeypatc
     assert "8.100" in detail
 
 
+_BEEP_FIXTURE_WAV = Path(__file__).parent / "fixtures" / "beep-test.wav"
+_BEEP_FIXTURE_TRUTH = 4.877  # seconds (rise-foot, see beep-test.json)
+
+
+def _stub_video_audio_with_fixture(monkeypatch) -> None:
+    """Point the snap endpoint's audio loader at the real beep fixture WAV.
+
+    The seeded primary's source is a zero-byte ``.mp4`` so we can't run
+    ffmpeg against it; the fixture WAV gives the snap detector a real
+    signal to refine against.
+    """
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_ensure(root, n, video, source, **kwargs):  # type: ignore[no-untyped-def]
+        return _BEEP_FIXTURE_WAV
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure)
+
+
+def test_snap_beep_refines_user_hint_to_truth(tmp_path: Path, monkeypatch) -> None:
+    """User dropped a marker ~70 ms after the real beep; the snap endpoint
+    pulls it back to the rise-foot leading edge within tolerance."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_video_audio_with_fixture(monkeypatch)
+
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    video_id = primary["video_id"]
+
+    hint = _BEEP_FIXTURE_TRUTH + 0.072
+    resp = client.post(
+        f"/api/stages/1/videos/{video_id}/beep/snap",
+        json={"hint_time": hint, "window_s": 0.5},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # 20 ms tolerance matches the fixture's ground-truth tolerance.
+    assert abs(body["snapped_time"] - _BEEP_FIXTURE_TRUTH) <= 0.020
+    assert body["delta"] == pytest.approx(body["snapped_time"] - hint, abs=1e-9)
+    assert body["peak_amplitude"] > 0.0
+    assert body["duration_ms"] > 0.0
+
+
+def test_snap_beep_400_on_negative_hint(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_video_audio_with_fixture(monkeypatch)
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    resp = client.post(
+        f"/api/stages/1/videos/{primary['video_id']}/beep/snap",
+        json={"hint_time": -0.1, "window_s": 0.5},
+    )
+    assert resp.status_code == 400
+
+
+def test_snap_beep_400_on_zero_window(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_video_audio_with_fixture(monkeypatch)
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    resp = client.post(
+        f"/api/stages/1/videos/{primary['video_id']}/beep/snap",
+        json={"hint_time": 4.0, "window_s": 0.0},
+    )
+    assert resp.status_code == 400
+
+
+def test_snap_beep_404_when_window_excludes_beep(tmp_path: Path, monkeypatch) -> None:
+    """A hint nowhere near the actual beep with a tight window returns 404
+    so the SPA can prompt the user to widen the window or move the marker."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_video_audio_with_fixture(monkeypatch)
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    # Place the hint into the post-beep silence; 50 ms half-window has
+    # nothing crossing the run-duration threshold.
+    resp = client.post(
+        f"/api/stages/1/videos/{primary['video_id']}/beep/snap",
+        json={"hint_time": 0.30, "window_s": 0.05},
+    )
+    assert resp.status_code == 404
+
+
 def test_manual_override_clears_candidate_list(tmp_path: Path, monkeypatch) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     _stub_detect(monkeypatch, beep_time=12.453, candidates=_three_candidates())
