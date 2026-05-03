@@ -24,6 +24,8 @@ from typing import Any
 import librosa
 import numpy as np
 
+from .agc_state import compute_agc_features
+
 # Shot-positive prompts (used for the (shot - not-shot) differential
 # voter B keys on, and as a column subset of voter C's feature vector).
 CLAP_PROMPTS_SHOT: tuple[str, ...] = (
@@ -67,6 +69,9 @@ _HAND_FEATURE_NAMES: tuple[str, ...] = (
     "tail_amp",
     "ratio_1_20",
     "ratio_5_20",
+    "agc_state",
+    "time_since_last_loud_event",
+    "peak_floor_ratio",
 )
 
 HAND_FEATURE_DIM: int = len(_HAND_FEATURE_NAMES)
@@ -137,6 +142,8 @@ def compute_hand_features(
     pre10 = int(0.010 * sample_rate)
     abs_audio = None  # lazy-built below if needed
 
+    agc = compute_agc_features(audio, sample_rate, candidate_times, peak_amplitudes)
+
     for k, t in enumerate(candidate_times):
         idx = int(round(float(t) * sample_rate))
         pre_lo, pre_hi = max(0, idx - win), idx
@@ -196,6 +203,9 @@ def compute_hand_features(
         out[k, 8] = tail_amp
         out[k, 9] = ratio_1_20
         out[k, 10] = ratio_5_20
+        out[k, 11] = agc.agc_state[k]
+        out[k, 12] = agc.time_since_last_loud_event[k]
+        out[k, 13] = agc.peak_floor_ratio[k]
     return out
 
 

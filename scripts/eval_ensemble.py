@@ -43,6 +43,7 @@ import numpy as np
 
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
+from splitsmith.ensemble.features import compute_hand_features
 from splitsmith.shot_detect import detect_shots
 
 DEFAULT_FIXTURES = [
@@ -124,100 +125,6 @@ def _label(
                 "drift_ms": None,
             })
     return labels, misses
-
-
-def _hand_features(
-    audio: np.ndarray,
-    sr: int,
-    t: float,
-    all_times: list[float],
-    beep_time: float,
-    confidence: float,
-    peak_amp: float,
-) -> list[float]:
-    """Subset of the train_classifier feature set -- only the ones with
-    non-negligible importance from earlier runs. Keeps voter C compact."""
-    idx = int(round(t * sr))
-    n = audio.size
-    win = int(0.050 * sr)
-    pre_lo, pre_hi = max(0, idx - win), idx
-    post_lo, post_hi = idx, min(n, idx + win)
-    rms_pre = (
-        float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2)))
-        if pre_hi > pre_lo
-        else 0.0
-    )
-    rms_post = (
-        float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2)))
-        if post_hi > post_lo
-        else 0.0
-    )
-    pre10 = int(0.010 * sr)
-    a_lo = max(0, idx - pre10)
-    pre_amp = float(np.max(np.abs(audio[a_lo:idx]))) if idx > a_lo else 0.0
-    attack = (peak_amp - pre_amp) / 0.010
-    sorted_t = sorted(all_times)
-    j = sorted_t.index(t)
-    gap_prev = (sorted_t[j] - sorted_t[j - 1]) if j > 0 else 5.0
-    # Reverb-tail amplitude (user observation 2026-05-01): movement /
-    # handling false positives lack the gunshot's sustained 50-200 ms
-    # decay. Find local peak in the 10 ms after rise-foot timestamp,
-    # measure mean |audio| in [peak + 50 ms, peak + 200 ms]. Used
-    # absolute (not normalised by peak) because cross-bay shots have
-    # low peak + medium tail; the ratio confounds them with shots.
-    peak_search_n = int(0.010 * sr)
-    psearch_hi = min(n, idx + peak_search_n)
-    if psearch_hi > idx:
-        peak_local_idx = idx + int(np.argmax(np.abs(audio[idx:psearch_hi])))
-    else:
-        peak_local_idx = idx
-    tail_lo = min(n, peak_local_idx + int(0.050 * sr))
-    tail_hi = min(n, peak_local_idx + int(0.200 * sr))
-    tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi]))) if tail_hi > tail_lo else 0.0
-
-    # Multi-resolution envelope ratios (added 2026-05-01). Smooths the
-    # rectified signal at 1 / 5 / 20 ms inside a +/-25 ms window centred on
-    # the local peak and forms amplitude-invariant ratios. Sub-ms peak
-    # vs slower-window peak captures the impulsive vs sustained character
-    # that the candidate generator's 10 ms smoothing hides. Per-feature
-    # medians are weak (~1.14x for ratio_1_20) but the GBDT finds nonlinear
-    # interactions: leave-one-fixture-out gives +2.9 pp precision at the
-    # same recall vs. without these features (5/8 fixtures improve, 2
-    # regress 1.5-3 pp). Cannot help cross-bay shots, which share impulsive
-    # shape with local shots and only differ in amplitude (issue #X).
-    mr_lo = max(0, peak_local_idx - int(0.025 * sr))
-    mr_hi = min(n, peak_local_idx + int(0.025 * sr))
-    seg = np.abs(audio[mr_lo:mr_hi].astype(np.float64))
-    p_1 = _smoothed_peak(seg, 1.0, sr)
-    p_5 = _smoothed_peak(seg, 5.0, sr)
-    p_20 = _smoothed_peak(seg, 20.0, sr)
-    ratio_1_20 = p_1 / (p_20 + 1e-9)
-    ratio_5_20 = p_5 / (p_20 + 1e-9)
-
-    return [
-        peak_amp,
-        confidence,
-        rms_pre,
-        rms_post,
-        rms_post / (rms_pre + 1e-6),
-        attack,
-        gap_prev,
-        (t - beep_time) * 1000.0,
-        tail_amp,
-        ratio_1_20,
-        ratio_5_20,
-    ]
-
-
-def _smoothed_peak(seg: np.ndarray, win_ms: float, sr: int) -> float:
-    """Peak of ``seg`` after a moving-average smoothing of width ``win_ms``."""
-    if seg.size == 0:
-        return 0.0
-    w = max(1, int(round(win_ms * 1e-3 * sr)))
-    if w >= seg.size:
-        return float(seg.mean())
-    k = np.ones(w, dtype=np.float64) / w
-    return float(np.convolve(seg, k, mode="valid").max())
 
 
 def main() -> None:
@@ -332,16 +239,13 @@ def main() -> None:
             )
         gunshot_prob = pann["gunshot_prob"]
 
+        cand_times_arr = np.array([s.time_absolute for s in all_shots], dtype=np.float64)
+        confs_arr = np.array([s.confidence for s in all_shots], dtype=np.float64)
+        peaks_arr = np.array([s.peak_amplitude for s in all_shots], dtype=np.float64)
+        feats_matrix = compute_hand_features(
+            audio, sr, cand_times_arr, truth["beep_time"], confs_arr, peaks_arr
+        )
         for i, shot in enumerate(all_shots):
-            feats = _hand_features(
-                audio,
-                sr,
-                shot.time_absolute,
-                cand_t,
-                truth["beep_time"],
-                shot.confidence,
-                shot.peak_amplitude,
-            )
             universe.append(
                 {
                     "fixture": fix,
@@ -350,7 +254,7 @@ def main() -> None:
                     "vote_a": int(round(shot.time_absolute, 6) in safe_times),
                     "clap_diff": float(diff[i]),
                     "gunshot_prob": float(gunshot_prob[i]),
-                    "hand_feats": feats,
+                    "hand_feats": feats_matrix[i].tolist(),
                     "clap_sims": list(sims[i]),
                 }
             )

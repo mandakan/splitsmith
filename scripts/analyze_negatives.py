@@ -27,9 +27,8 @@ import numpy as np
 
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
+from splitsmith.ensemble.features import _HAND_FEATURE_NAMES, compute_hand_features
 from splitsmith.shot_detect import detect_shots
-
-_DROP_MR = False  # set by --no-mr CLI flag for ablation runs
 
 DEFAULT_FIXTURES = [
     "stage-shots",
@@ -85,92 +84,6 @@ def _label(cand_t, truth_shots, tol_ms):
     return labels, misses
 
 
-def _hand_features(audio, sr, t, all_times, beep_time, confidence, peak_amp):
-    idx = int(round(t * sr))
-    n = audio.size
-    win = int(0.050 * sr)
-    pre_lo, pre_hi = max(0, idx - win), idx
-    post_lo, post_hi = idx, min(n, idx + win)
-    rms_pre = float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2))) if pre_hi > pre_lo else 0.0
-    rms_post = float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2))) if post_hi > post_lo else 0.0
-    pre10 = int(0.010 * sr)
-    a_lo = max(0, idx - pre10)
-    pre_amp = float(np.max(np.abs(audio[a_lo:idx]))) if idx > a_lo else 0.0
-    attack = (peak_amp - pre_amp) / 0.010
-    sorted_t = sorted(all_times)
-    j = sorted_t.index(t)
-    gap_prev = (sorted_t[j] - sorted_t[j - 1]) if j > 0 else 5.0
-
-    # Reverb-tail discriminator (user observation 2026-05-01: movement /
-    # handling false positives lack the gunshot's sustained 50-200 ms decay).
-    # ABSOLUTE tail amplitude beats tail/peak ratio: cross-bay shots have low
-    # peak + high tail (high ratio) while real shots have high peak + medium
-    # tail (lower ratio), so normalising obscures the discriminator. Absolute
-    # tail consistently splits pos > neg across all fixtures and amplitude
-    # classes; on the new stage 1 fixture it's a 2.6x ratio.
-    peak_search_n = int(0.010 * sr)
-    psearch_hi = min(n, idx + peak_search_n)
-    if psearch_hi > idx:
-        peak_local_idx = idx + int(np.argmax(np.abs(audio[idx:psearch_hi])))
-    else:
-        peak_local_idx = idx
-    tail_lo = min(n, peak_local_idx + int(0.050 * sr))
-    tail_hi = min(n, peak_local_idx + int(0.200 * sr))
-    if tail_hi > tail_lo:
-        tail_amp = float(np.mean(np.abs(audio[tail_lo:tail_hi])))
-    else:
-        tail_amp = 0.0
-
-    # NOTE 2026-05-01: tried adding direct-to-reverb ratio (5 ms direct / 45 ms
-    # tail) and attack_2ms. attack_2ms was individually discriminative but
-    # redundant with attack_10ms; DRR was confounded by the rise-foot
-    # timestamp falling inside the rise rather than at the impulse. Both
-    # regressed held-out precision and were reverted.
-
-    # PROTOTYPE 2026-05-01: multi-resolution envelope ratios. The candidate
-    # generator smooths the envelope at 10 ms which discards the sub-ms
-    # structure that distinguishes a muzzle blast (sharp 0.5-1 ms pressure
-    # spike) from wind / handling (rounded 5-20 ms onset). Smoothing the
-    # rectified raw signal at multiple scales and taking ratios exposes the
-    # impulsive-vs-sustained character in an amplitude-invariant way.
-    # ratio_1_20 ~ "how peaky is the 1 ms peak relative to its 20 ms
-    # neighbourhood"; impulsive sources -> high, sustained -> ~1.0.
-    mr_lo = max(0, peak_local_idx - int(0.025 * sr))
-    mr_hi = min(n, peak_local_idx + int(0.025 * sr))
-    seg = np.abs(audio[mr_lo:mr_hi].astype(np.float64))
-    p_1 = _smoothed_peak(seg, 1.0, sr)
-    p_5 = _smoothed_peak(seg, 5.0, sr)
-    p_20 = _smoothed_peak(seg, 20.0, sr)
-    ratio_1_20 = p_1 / (p_20 + 1e-9)
-    ratio_5_20 = p_5 / (p_20 + 1e-9)
-
-    if _DROP_MR:
-        return [
-            peak_amp, confidence, rms_pre, rms_post,
-            rms_post / (rms_pre + 1e-6), attack, gap_prev,
-            (t - beep_time) * 1000.0,
-            tail_amp,
-        ]
-    return [
-        peak_amp, confidence, rms_pre, rms_post,
-        rms_post / (rms_pre + 1e-6), attack, gap_prev,
-        (t - beep_time) * 1000.0,
-        tail_amp,
-        ratio_1_20, ratio_5_20,
-    ]
-
-
-def _smoothed_peak(seg: np.ndarray, win_ms: float, sr: int) -> float:
-    """Peak of ``seg`` after a moving-average smoothing of width ``win_ms``."""
-    if seg.size == 0:
-        return 0.0
-    w = max(1, int(round(win_ms * 1e-3 * sr)))
-    if w >= seg.size:
-        return float(seg.mean())
-    k = np.ones(w, dtype=np.float64) / w
-    return float(np.convolve(seg, k, mode="valid").max())
-
-
 def _build_universe(fixtures, tol_ms):
     universe = []
     for fix in fixtures:
@@ -188,17 +101,19 @@ def _build_universe(fixtures, tol_ms):
         not_idx = [i for i, p in enumerate(prompts) if p not in _CLAP_PROMPTS_SHOT]
         diff = sims[:, shot_idx].mean(axis=1) - sims[:, not_idx].mean(axis=1)
 
+        cand_arr = np.array(cand_t, dtype=np.float64)
+        confs_arr = np.array([s.confidence for s in shots], dtype=np.float64)
+        peaks_arr = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
+        feats_matrix = compute_hand_features(
+            audio, sr, cand_arr, truth["beep_time"], confs_arr, peaks_arr
+        )
         for i, sh in enumerate(shots):
-            feats = _hand_features(
-                audio, sr, sh.time_absolute, cand_t,
-                truth["beep_time"], sh.confidence, sh.peak_amplitude,
-            )
             universe.append({
                 "fixture": fix,
                 "t": sh.time_absolute,
                 "label": labels[i],
                 "clap_diff": float(diff[i]),
-                "hand_feats": feats,
+                "hand_feats": feats_matrix[i].tolist(),
                 "clap_sims": list(sims[i]),
                 "peak": float(sh.peak_amplitude),
                 "conf_detector": float(sh.confidence),
@@ -276,11 +191,7 @@ def main() -> None:
                    help="Sample weight multiplier for hard negatives (1.0 = off).")
     p.add_argument("--show", type=int, default=15,
                    help="How many top mistakes to print per category.")
-    p.add_argument("--no-mr", action="store_true",
-                   help="Drop multi-resolution envelope ratios (ablation).")
     args = p.parse_args()
-    global _DROP_MR
-    _DROP_MR = args.no_mr
 
     universe = _build_universe(DEFAULT_FIXTURES, args.tolerance_ms)
     X, y = _to_xy(universe)
@@ -290,12 +201,7 @@ def main() -> None:
 
     # Per-feature separation: median(pos) / median(neg) for the hand features
     # only (CLAP sims dominate the X tail and aren't of interest here).
-    feat_names = [
-        "peak_amp", "confidence", "rms_pre", "rms_post", "rms_post/pre",
-        "attack", "gap_prev", "ms_since_beep", "tail_amp",
-    ]
-    if not _DROP_MR:
-        feat_names += ["mr_ratio_1_20", "mr_ratio_5_20"]
+    feat_names = list(_HAND_FEATURE_NAMES)
     pos_mask = y == 1
     neg_mask = y == 0
     print("=== Per-feature pos vs neg medians (hand features) ===")
