@@ -994,6 +994,121 @@ export const api = {
 
   fixtureVideoUrl: (videoPath: string) =>
     `/api/fixture/video?path=${encodeURIComponent(videoPath)}`,
+
+  // -----------------------------------------------------------------------
+  // Lab: fixture management + ensemble eval + tuning. Mirrors splitsmith.lab
+  // (the Python module) -- see src/splitsmith/lab/core.py for shapes.
+  // -----------------------------------------------------------------------
+
+  listLabFixtures: () => request<LabFixtureRecord[]>("/api/lab/fixtures"),
+
+  runLabEval: (payload: { slugs?: string[]; config?: Partial<LabEvalConfig>; persist?: boolean }) =>
+    request<LabEvalRun>("/api/lab/eval", { method: "POST", json: payload }),
+
+  rescoreLabUniverse: (config: Partial<LabEvalConfig>) =>
+    request<LabEvalRun>("/api/lab/rescore", { method: "POST", json: { config } }),
+
+  promoteFixture: (payload: { stage_number: number; slug: string; overwrite?: boolean }) =>
+    request<LabFixtureRecord>("/api/lab/promote", { method: "POST", json: payload }),
 };
+
+export interface LabFixtureRecord {
+  slug: string;
+  audit_path: string;
+  audio_path: string;
+  has_audio: boolean;
+  n_shots: number;
+  expected_rounds: number | null;
+  stage_time_seconds: number | null;
+  beep_time: number | null;
+  source: string | null;
+  audit_mtime: number;
+  audio_mtime: number | null;
+}
+
+export interface LabEvalConfig {
+  consensus: number;
+  apriori_boost: number;
+  tolerance_ms: number;
+  use_expected_rounds: boolean;
+  voter_a_floor_override: number | null;
+  voter_b_threshold_override: number | null;
+  voter_c_threshold_override: number | null;
+  voter_d_threshold_override: number | null;
+}
+
+export interface LabEvalCandidate {
+  candidate_number: number;
+  time: number;
+  ms_after_beep: number;
+  confidence: number;
+  peak_amplitude: number;
+  score_c: number;
+  clap_diff: number;
+  gunshot_prob: number;
+  vote_a: number;
+  vote_b: number;
+  vote_c: number;
+  vote_d: number;
+  vote_total: number;
+  apriori_boost: number;
+  ensemble_score: number;
+  kept: boolean;
+  truth: number;
+  matched_shot_number: number | null;
+}
+
+export interface LabEvalFixtureMetrics {
+  n_truth: number;
+  n_kept: number;
+  true_positives: number;
+  false_positives: number;
+  false_negatives: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  voter_recall: Record<string, number>;
+}
+
+export interface LabEvalFixture {
+  slug: string;
+  audit_path: string;
+  audio_path: string;
+  expected_rounds: number | null;
+  candidates: LabEvalCandidate[];
+  truth_times: number[];
+  metrics: LabEvalFixtureMetrics;
+  audit_mtime: number;
+  audio_mtime: number | null;
+}
+
+export interface LabRunSummary {
+  n_fixtures: number;
+  n_truth: number;
+  n_kept: number;
+  true_positives: number;
+  false_positives: number;
+  false_negatives: number;
+  precision: number;
+  recall: number;
+  f1: number;
+}
+
+export interface LabEvalUniverse {
+  fixtures: LabEvalFixture[];
+  voter_a_floor: number;
+  voter_b_threshold: number;
+  voter_c_threshold: number;
+  voter_d_threshold: number;
+  tolerance_ms: number;
+}
+
+export interface LabEvalRun {
+  config: LabEvalConfig;
+  summary: LabRunSummary;
+  universe: LabEvalUniverse;
+  config_hash: string;
+  built_at: string;
+}
 
 export { ApiError };

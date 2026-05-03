@@ -33,6 +33,7 @@ import {
   CheckCircle2,
   ChevronsRight,
   Crosshair,
+  FlaskConical,
   HelpCircle,
   ListChecks,
   Loader2,
@@ -1239,6 +1240,12 @@ export function Audit() {
                       <Save className="size-4" />
                     )}
                   </Button>
+                  {stageNumber != null && stage && (
+                    <PromoteFixtureButton
+                      stageNumber={stageNumber}
+                      defaultSlug={`stage-shots-${slugify(project?.name ?? "match")}-stage${stageNumber}`}
+                    />
+                  )}
                   <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{detectedCount} detected</span>
                     <span>{rejectedCount} rejected</span>
@@ -1840,4 +1847,107 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
   return `${m}:${s.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
+}
+
+export function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "match";
+}
+
+interface PromoteFixtureButtonProps {
+  stageNumber: number;
+  defaultSlug: string;
+}
+
+function PromoteFixtureButton({ stageNumber, defaultSlug }: PromoteFixtureButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [slug, setSlug] = useState(defaultSlug);
+  const [overwrite, setOverwrite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Refresh the suggested slug whenever the stage changes.
+  useEffect(() => {
+    setSlug(defaultSlug);
+    setResult(null);
+    setError(null);
+  }, [defaultSlug]);
+
+  const submit = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const rec = await api.promoteFixture({ stage_number: stageNumber, slug, overwrite });
+      setResult(rec.audit_path);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [stageNumber, slug, overwrite]);
+
+  return (
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        title="Save audited stage as a test fixture"
+      >
+        <FlaskConical className="size-4" />
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-72 rounded-md border border-border bg-popover p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Promote to fixture
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Copies this stage's audit JSON + audit-clip WAV into tests/fixtures/.
+          </p>
+          <label className="mt-2 block text-[11px]">
+            <span className="text-muted-foreground">Slug</span>
+            <input
+              type="text"
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+            />
+          </label>
+          <label className="mt-2 flex items-center gap-2 text-[11px]">
+            <input
+              type="checkbox"
+              checked={overwrite}
+              onChange={(e) => setOverwrite(e.target.checked)}
+            />
+            Overwrite if exists
+          </label>
+          {error && (
+            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+              {error}
+            </div>
+          )}
+          {result && (
+            <div className="mt-2 rounded bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-300">
+              Saved: <span className="font-mono">{result}</span>
+            </div>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+            <Button size="sm" onClick={submit} disabled={busy || !slug.trim()}>
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

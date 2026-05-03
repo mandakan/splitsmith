@@ -3367,6 +3367,110 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         return JSONResponse({"ok": True})
 
     # ----------------------------------------------------------------------
+    # Lab: fixture management + ensemble eval + tuning
+    # ----------------------------------------------------------------------
+    #
+    # End-user-visible only via the /lab route in the SPA. Heavy CLAP/PANN
+    # runtime is loaded once on first /api/lab/eval call and cached on the
+    # FastAPI app instance so subsequent eval / rescore calls amortise it.
+
+    from .. import lab as lab_module
+
+    _lab_runtime_cache: dict[str, Any] = {}
+    _lab_universe_cache: dict[str, Any] = {}  # session: most recent run
+
+    def _get_lab_runtime() -> Any:
+        rt = _lab_runtime_cache.get("runtime")
+        if rt is None:
+            rt = ensemble_module.api.load_ensemble_runtime()
+            _lab_runtime_cache["runtime"] = rt
+        return rt
+
+    @app.get("/api/lab/fixtures")
+    def lab_fixtures() -> JSONResponse:
+        return JSONResponse(
+            [r.model_dump(mode="json") for r in lab_module.list_fixtures()]
+        )
+
+    @app.post("/api/lab/eval")
+    def lab_eval(payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
+        slugs = payload.get("slugs")
+        cfg_payload = payload.get("config") or {}
+        cfg = lab_module.EvalConfig.model_validate(cfg_payload)
+        runtime = _get_lab_runtime()
+        run = lab_module.run_eval(
+            runtime,
+            slugs=slugs if isinstance(slugs, list) else None,
+            config=cfg,
+        )
+        if payload.get("persist", True):
+            try:
+                lab_module.save_run(run)
+            except OSError as exc:
+                logger.warning("lab: save_run failed: %s", exc)
+        _lab_universe_cache["universe"] = run.universe
+        return JSONResponse(run.model_dump(mode="json"))
+
+    @app.post("/api/lab/rescore")
+    def lab_rescore(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+        cfg = lab_module.EvalConfig.model_validate(payload.get("config") or {})
+        universe = _lab_universe_cache.get("universe")
+        if universe is None:
+            raise HTTPException(
+                status_code=409,
+                detail="no cached eval universe; call /api/lab/eval first",
+            )
+        run = lab_module.rescore_universe(universe, cfg)
+        _lab_universe_cache["universe"] = run.universe
+        return JSONResponse(run.model_dump(mode="json"))
+
+    @app.post("/api/lab/promote")
+    def lab_promote(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+        stage_n = payload.get("stage_number")
+        slug = payload.get("slug")
+        overwrite = bool(payload.get("overwrite", False))
+        if not isinstance(stage_n, int) or not isinstance(slug, str) or not slug:
+            raise HTTPException(
+                status_code=400,
+                detail="payload must include integer 'stage_number' and string 'slug'",
+            )
+        project = state.load()
+        try:
+            stg = project.stage(stage_n)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_json = project.audit_path(state.project_root) / f"stage{stage_n}.json"
+        try:
+            audit_audio = _resolve_audit_audio(project, stage_n)
+        except HTTPException:
+            raise
+        audit_wav = audit_audio.audio_path
+        if not audit_json.exists() or not audit_wav.exists():
+            raise HTTPException(
+                status_code=409,
+                detail="stage has no audit JSON / WAV; run shot-detect first",
+            )
+        try:
+            rec = lab_module.promote_stage_to_fixture(
+                lab_module.PromoteRequest(
+                    audit_json_path=audit_json,
+                    audit_wav_path=audit_wav,
+                    fixture_slug=slug,
+                    overwrite=overwrite,
+                    extra_metadata={
+                        "project_root": str(state.project_root),
+                        "stage_number": stage_n,
+                        "stage_name": getattr(stg, "name", None),
+                    },
+                )
+            )
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return JSONResponse(rec.model_dump(mode="json"))
+
+    # ----------------------------------------------------------------------
     # Static asset serving (SPA)
     # ----------------------------------------------------------------------
     #
