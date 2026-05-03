@@ -20,9 +20,12 @@ import {
   Crosshair,
   FileJson,
   FolderInput,
+  HardDrive,
   PlayCircle,
+  Search,
   Trash2,
   Video as VideoIcon,
+  WifiOff,
   XCircle,
 } from "lucide-react";
 
@@ -41,9 +44,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
   api,
+  asScoreboardError,
   type MatchAnalysis,
   type MatchProject,
   type NonEmptyOldDirsDetail,
+  type ScoreboardErrorDetail,
+  type ScoreboardMatchRef,
+  type ScoreboardSource,
   type StageEntry,
   type StageMatchWindow,
   type StageVideo,
@@ -60,6 +67,8 @@ export function Ingest() {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [analysis, setAnalysis] = useState<MatchAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scoreboardError, setScoreboardError] = useState<ScoreboardErrorDetail | null>(null);
+  const [scoreboardSource, setScoreboardSource] = useState<ScoreboardSource | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<{
     video: StageVideo;
@@ -92,15 +101,25 @@ export function Ingest() {
       // heuristic output. Analysis lags slightly when the project is a
       // bare placeholder (no scoreboard yet); that's fine, the timeline
       // just doesn't show until stages have scorecard times.
-      const [proj, ana] = await Promise.all([
+      const [proj, ana, src] = await Promise.all([
         api.getProject(),
         api.getMatchAnalysis().catch(() => null),
+        api.getScoreboardSource().catch(() => null),
       ]);
       setProject(proj);
       setAnalysis(ana);
+      setScoreboardSource(src);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const refreshScoreboardSource = useCallback(async () => {
+    try {
+      setScoreboardSource(await api.getScoreboardSource());
+    } catch {
+      // best effort
     }
   }, []);
 
@@ -126,11 +145,49 @@ export function Ingest() {
           return;
         }
       }
-      const updated = await api.importScoreboard(data, overwrite);
+      // Auto-detect: SSI v1 ``MatchData`` has a top-level ``stages`` array;
+      // the legacy ``examples/`` shape is wrapped in ``{match, competitors}``
+      // with per-competitor stage scores. Dispatch to the matching endpoint
+      // so both formats keep working without forcing the user to choose.
+      const updated = isSsiV1MatchData(data)
+        ? await api.uploadScoreboard(data, overwrite)
+        : await api.importScoreboard(data, overwrite);
       setProject(updated);
+      await refreshScoreboardSource();
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFetchOnline = async (
+    contentType: number,
+    matchId: number,
+  ) => {
+    setBusy(true);
+    setScoreboardError(null);
+    try {
+      const realStages = (project?.stages ?? []).filter((s) => !s.placeholder);
+      const overwrite = realStages.length > 0;
+      if (overwrite) {
+        const ok = window.confirm(
+          "This project already has scoreboard-backed stages. Fetching will replace them and orphan any current video assignments. Continue?",
+        );
+        if (!ok) {
+          setBusy(false);
+          return;
+        }
+      }
+      const updated = await api.fetchScoreboardMatch(contentType, matchId, overwrite);
+      setProject(updated);
+      await refreshScoreboardSource();
+      setError(null);
+    } catch (e) {
+      const detail = asScoreboardError(e);
+      if (detail) setScoreboardError(detail);
+      else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -304,12 +361,27 @@ export function Ingest() {
         </Card>
       ) : null}
 
+      {scoreboardError ? (
+        <ScoreboardErrorBanner
+          detail={scoreboardError}
+          onDismiss={() => setScoreboardError(null)}
+        />
+      ) : null}
+
       {project && project.stages.length === 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        // Stack on a fresh project: the FolderPicker inside Start-from-videos
+        // (and the search results inside Scoreboard) need full card width to
+        // render filenames + dates without clipping. Squeezing two of these
+        // into a 50/50 grid produced the clipped picker rows we saw on first
+        // launch -- give each card the row.
+        <div className="space-y-4">
           <ScoreboardSection
             project={project}
+            source={scoreboardSource}
             busy={busy}
             onScoreboard={handleScoreboard}
+            onFetchOnline={handleFetchOnline}
+            setScoreboardError={setScoreboardError}
           />
           <StartFromVideosSection
             project={project}
@@ -320,8 +392,11 @@ export function Ingest() {
       ) : (
         <ScoreboardSection
           project={project}
+          source={scoreboardSource}
           busy={busy}
           onScoreboard={handleScoreboard}
+          onFetchOnline={handleFetchOnline}
+          setScoreboardError={setScoreboardError}
         />
       )}
 
@@ -384,50 +459,328 @@ export function Ingest() {
 
 function ScoreboardSection({
   project,
+  source,
   busy,
   onScoreboard,
+  onFetchOnline,
+  setScoreboardError,
 }: {
   project: MatchProject | null;
+  source: ScoreboardSource | null;
   busy: boolean;
   onScoreboard: (f: File) => void;
+  onFetchOnline: (contentType: number, matchId: number) => void;
+  setScoreboardError: (e: ScoreboardErrorDetail | null) => void;
 }) {
+  const isLocal = source?.mode === "local";
+  const tokenReady = source?.http_token_set ?? false;
+  // Online search goes through SsiHttpClient, so it's only useful when the
+  // token is set. When it isn't, gate it behind a single inline hint
+  // instead of letting the request fire and surface a duplicate top-level
+  // banner.
+  const onlineReady = isLocal || tokenReady;
   const stages = project?.stages ?? [];
   const realCount = stages.filter((s) => !s.placeholder).length;
   const placeholderCount = stages.filter((s) => s.placeholder).length;
+  // A match has been selected once the project carries a real
+  // scoreboard_match_id (drop-JSON path or online fetch). Once that's true
+  // the user is unlikely to revisit this card -- collapse it by default
+  // and let them re-open if they need to swap matches.
+  const matchLoaded = !!project?.scoreboard_match_id;
+  const [expanded, setExpanded] = useState(!matchLoaded);
+  // Sync the local default if the project picks up a match in another tab
+  // (or after a re-fetch). User clicks override this until the match id
+  // changes again.
+  const [lastMatchId, setLastMatchId] = useState<string | null>(
+    project?.scoreboard_match_id ?? null,
+  );
+  useEffect(() => {
+    const current = project?.scoreboard_match_id ?? null;
+    if (current !== lastMatchId) {
+      setLastMatchId(current);
+      setExpanded(!current);
+    }
+  }, [project?.scoreboard_match_id, lastMatchId]);
+
   const description = realCount
     ? `${realCount} stages loaded for ${project!.competitor_name ?? "the primary competitor"}.`
     : placeholderCount
       ? `${placeholderCount} placeholder stages -- upload a real scoreboard to fill in names, competitor metadata, and timestamps.`
-      : "No stages yet. Drop in an SSI Scoreboard JSON to load them.";
+      : "No stages yet. Drop in an SSI Scoreboard JSON, or search the live scoreboard.";
   const dropLabel = realCount
     ? "Replace scoreboard JSON (warns first)"
     : placeholderCount
       ? "Upload scoreboard to overlay placeholders"
       : "Drop or pick an SSI Scoreboard JSON";
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileJson className="size-5" />
-          Scoreboard
+      <CardHeader
+        className="cursor-pointer"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <FileJson className="size-5" />
+            Scoreboard
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {expanded ? "Hide" : "Change"}
+          </span>
         </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription className="flex flex-wrap items-center gap-x-2">
+          <span>{description}</span>
+          {project?.scoreboard_match_id ? (
+            <span className="text-xs text-muted-foreground">
+              · match <code>{project.scoreboard_match_id}</code>
+              {project.scoreboard_content_type !== null &&
+              project.scoreboard_content_type !== undefined
+                ? ` (ct ${project.scoreboard_content_type})`
+                : null}
+            </span>
+          ) : null}
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <FileDropZone
-          accept=".json,application/json"
-          label={dropLabel}
-          icon={<FileJson className="size-5" />}
+      {expanded ? (
+        <CardContent className="space-y-4">
+          {source ? <ScoreboardSourceBadge source={source} /> : null}
+
+          <FileDropZone
+            accept=".json,application/json"
+            label={dropLabel}
+            icon={<FileJson className="size-5" />}
+            disabled={busy}
+            onFile={onScoreboard}
+          />
+
+          {!isLocal && onlineReady ? (
+            <OnlineMatchSearch
+              busy={busy}
+              onFetch={onFetchOnline}
+              onError={setScoreboardError}
+            />
+          ) : null}
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}
+
+function ScoreboardSourceBadge({ source }: { source: ScoreboardSource }) {
+  if (source.mode === "local") {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-status-success/40 bg-status-success/5 px-3 py-2 text-xs">
+        <HardDrive className="size-4 text-status-success" />
+        <span>
+          Loaded from local JSON, no network used.
+          {source.local_match_json_path ? (
+            <>
+              {" "}
+              <span className="font-mono text-muted-foreground" title={source.local_match_json_path}>
+                {source.local_match_json_path.split("/").slice(-3).join("/")}
+              </span>
+            </>
+          ) : null}
+        </span>
+      </div>
+    );
+  }
+  if (!source.http_token_set) {
+    // The auth-needed state is *not* a runtime error -- the user simply
+    // hasn't configured a token yet. Render this as guidance and gate
+    // search/fetch behind it so we don't fire requests we know will fail
+    // (and surface a duplicate banner). The setup hint lives here only.
+    return (
+      <div className="space-y-1 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs">
+        <div className="flex items-center gap-2 font-medium">
+          <AlertCircle className="size-4 text-status-warning" />
+          <span>
+            Set <code>SPLITSMITH_SSI_TOKEN</code> to enable live search.
+          </span>
+        </div>
+        <p className="text-muted-foreground">
+          Drop the line into <code>&lt;project&gt;/.env.local</code> (preferred) or
+          <code> .env</code>, then restart the server. The drop-JSON path above
+          works without any token.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+      <Search className="size-4 text-muted-foreground" />
+      <span>Online mode: queries hit the live SSI scoreboard.</span>
+    </div>
+  );
+}
+
+function OnlineMatchSearch({
+  busy,
+  onFetch,
+  onError,
+}: {
+  busy: boolean;
+  onFetch: (contentType: number, matchId: number) => void;
+  onError: (e: ScoreboardErrorDetail | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<ScoreboardMatchRef[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  // Per #50: debounce typing at ~250ms so each keystroke doesn't fire a
+  // request. Cleared on every keystroke so the trailing edge wins.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setResults(null);
+      return;
+    }
+    const handle = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const refs = await api.searchScoreboardMatches(trimmed);
+        setResults(refs);
+        onError(null);
+      } catch (e) {
+        const detail = asScoreboardError(e);
+        if (detail) onError(detail);
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [query, onError]);
+
+  return (
+    <div className="space-y-2">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="flex items-center gap-1.5 font-medium">
+          <Search className="size-3.5" />
+          Search the live scoreboard
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Find a match by name, then "Fetch full match" to populate the stage list.
+        </span>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
           disabled={busy}
-          onFile={onScoreboard}
+          placeholder="e.g. SPSK Open"
+          className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
-        {project?.scoreboard_match_id ? (
-          <p className="text-xs text-muted-foreground">
-            Match id: <code>{project.scoreboard_match_id}</code>
-          </p>
-        ) : null}
+      </label>
+      {searching ? (
+        <p className="text-xs text-muted-foreground">Searching...</p>
+      ) : null}
+      {results && results.length > 0 ? (
+        <ul className="max-h-72 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-1">
+          {results.map((m) => (
+            <li
+              key={`${m.content_type}-${m.id}`}
+              className="flex items-start justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40"
+            >
+              <div className="min-w-0 text-xs">
+                <div className="truncate font-medium">{m.name}</div>
+                <div className="truncate text-muted-foreground">
+                  {m.date.slice(0, 10)} &middot; {m.level} &middot;{" "}
+                  {m.venue ?? "venue tba"}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  // Collapse the dropdown immediately so the user isn't
+                  // staring at stale results while the populate request
+                  // is in flight. The whole scoreboard card will collapse
+                  // once project.scoreboard_match_id changes.
+                  onFetch(m.content_type, m.id);
+                  setQuery("");
+                  setResults(null);
+                }}
+              >
+                Fetch full match
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {results && results.length === 0 && query.trim().length >= 2 && !searching ? (
+        <p className="text-xs text-muted-foreground">No matches found.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ScoreboardErrorBanner({
+  detail,
+  onDismiss,
+}: {
+  detail: ScoreboardErrorDetail;
+  onDismiss: () => void;
+}) {
+  let icon: React.ReactNode;
+  let title: string;
+  let body: React.ReactNode;
+  if (detail.code === "scoreboard_auth") {
+    icon = <AlertCircle className="size-4 text-status-warning" />;
+    title = "Scoreboard rejected the bearer token.";
+    body = (
+      <>
+        Check that <code>{detail.env_var}</code> is current (tokens can rotate
+        or expire) and restart the server.{" "}
+        <a
+          href={detail.docs_url}
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+        >
+          Docs
+        </a>
+        .
+      </>
+    );
+  } else if (detail.code === "scoreboard_rate_limited") {
+    icon = <AlertCircle className="size-4 text-status-warning" />;
+    title = "Rate-limited by the scoreboard.";
+    body = detail.retry_after !== null
+      ? `Retry in ${Math.ceil(detail.retry_after)} seconds.`
+      : "Wait a moment and retry.";
+  } else {
+    icon = <WifiOff className="size-4 text-status-warning" />;
+    title = "Couldn't reach the scoreboard.";
+    body = "Try the offline JSON path -- drop a file into the scoreboard zone above.";
+  }
+  return (
+    <Card className="border-status-warning/50 bg-status-warning/5">
+      <CardContent className="flex items-start gap-2 py-3 text-sm">
+        {icon}
+        <div className="flex-1">
+          <div className="font-medium">{title}</div>
+          <div className="text-xs text-muted-foreground">{body}</div>
+        </div>
+        <Button size="sm" variant="ghost" onClick={onDismiss}>
+          Dismiss
+        </Button>
       </CardContent>
     </Card>
+  );
+}
+
+/** Heuristic: SSI v1 ``MatchData`` carries a top-level ``stages: []`` array
+ *  alongside ``competitors: []``; the legacy ``examples/`` shape wraps both
+ *  in ``{match: {...}, competitors: [...]}`` with per-competitor stages. The
+ *  drop handler dispatches to the matching backend endpoint so users don't
+ *  have to know which they have. */
+function isSsiV1MatchData(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
+  const obj = data as Record<string, unknown>;
+  return (
+    Array.isArray(obj.stages) &&
+    Array.isArray(obj.competitors) &&
+    typeof obj.stages_count !== "undefined"
   );
 }
 

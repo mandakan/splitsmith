@@ -169,6 +169,159 @@ def test_import_scoreboard_409_on_conflict(tmp_path: Path) -> None:
     assert resp.status_code == 200
 
 
+def _load_v1_match_fixture() -> dict:
+    """Read the SSI v1 match fixture used by ``test_scoreboard_*``."""
+    import json
+
+    return json.loads(
+        Path("tests/fixtures/scoreboard/match_22_27190.json").read_text(encoding="utf-8")
+    )
+
+
+def test_scoreboard_loads_token_from_project_env_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``<project>/.env.local`` is the canonical place for SPLITSMITH_SSI_TOKEN.
+
+    Without this autoload the user has to remember ``export SPLITSMITH_SSI_TOKEN``
+    in every shell that launches ``splitsmith ui`` -- avoidable friction.
+    Existing process env still wins (override=False), so an explicit export
+    keeps beating the file.
+    """
+    monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
+    project_root = tmp_path / "match"
+    project_root.mkdir(parents=True)
+    (project_root / ".env.local").write_text(
+        "SPLITSMITH_SSI_TOKEN=token-from-env-local\n", encoding="utf-8"
+    )
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    src = client.get("/api/scoreboard/source").json()
+    assert src["http_token_set"] is True
+
+
+def test_scoreboard_loads_token_from_cwd_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ``.env`` next to where the user *launched* the server (typically
+    the repo root) is the most common spot. It must work even when the
+    project lives somewhere else entirely."""
+    monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
+    launch_dir = tmp_path / "repo"
+    project_root = tmp_path / "matches" / "spsk"
+    launch_dir.mkdir(parents=True)
+    project_root.mkdir(parents=True)
+    (launch_dir / ".env").write_text("SPLITSMITH_SSI_TOKEN=token-from-cwd\n", encoding="utf-8")
+    monkeypatch.chdir(launch_dir)
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+    src = client.get("/api/scoreboard/source").json()
+    assert src["http_token_set"] is True
+
+
+def test_scoreboard_source_reports_online_when_no_local_file(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    resp = client.get("/api/scoreboard/source")
+    assert resp.status_code == 200
+    assert resp.json()["mode"] == "online"
+    assert resp.json()["local_match_json_path"] is None
+
+
+def test_scoreboard_upload_writes_local_json_and_populates_project(tmp_path: Path) -> None:
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+
+    fixture = _load_v1_match_fixture()
+    resp = client.post("/api/scoreboard/upload", json={"data": fixture})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "SPSK Open 2026"
+    assert body["scoreboard_match_id"] == "27190"
+    assert body["scoreboard_content_type"] == 22
+    assert len(body["stages"]) == 10
+    # Per #50: stages from MatchData lack per-competitor times -> placeholder.
+    assert all(s["placeholder"] for s in body["stages"])
+
+    # File was written to <project>/scoreboard/match.json.
+    local_path = project_root / "scoreboard" / "match.json"
+    assert local_path.exists()
+
+    # Source endpoint now reports local mode (the offline path is active).
+    src = client.get("/api/scoreboard/source").json()
+    assert src["mode"] == "local"
+    assert src["local_match_json_path"] == str(local_path)
+
+
+def test_scoreboard_upload_rejects_non_v1_payload(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    # Legacy ``examples/`` shape is *not* MatchData -- the upload endpoint
+    # should bounce it with a 400 rather than silently misparsing.
+    legacy = {"match": {"id": "1", "name": "Legacy"}, "competitors": []}
+    resp = client.post("/api/scoreboard/upload", json={"data": legacy})
+    assert resp.status_code == 400
+
+
+def test_scoreboard_search_uses_local_when_match_json_present(tmp_path: Path) -> None:
+    """DI: with a local match.json on disk, the search endpoint must serve
+    from LocalJsonScoreboard (no SPLITSMITH_SSI_TOKEN required, no network)."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+
+    fixture = _load_v1_match_fixture()
+    assert client.post("/api/scoreboard/upload", json={"data": fixture}).status_code == 200
+
+    # No SPLITSMITH_SSI_TOKEN env var; must still work because the local
+    # JSON path doesn't go through SsiHttpClient.
+    resp = client.get("/api/scoreboard/search", params={"q": "SPSK"})
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
+def test_scoreboard_search_returns_401_when_no_token_and_no_local(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No local file + no token -> the SsiHttpClient constructor raises
+    ScoreboardAuthError, which the endpoint maps to a 401 with a structured
+    body the SPA can render as the "set SPLITSMITH_SSI_TOKEN" banner."""
+    monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
+    # chdir to a clean dir so the splitsmith repo's own ``.env.local``
+    # (which carries a real token) doesn't leak into the test process.
+    monkeypatch.chdir(tmp_path)
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    resp = client.get("/api/scoreboard/search", params={"q": "anything"})
+    assert resp.status_code == 401
+    detail = resp.json()["detail"]
+    assert detail["code"] == "scoreboard_auth"
+    assert detail["env_var"] == "SPLITSMITH_SSI_TOKEN"
+
+
+def test_scoreboard_fetch_uses_local_match_when_present(tmp_path: Path) -> None:
+    """When a local match.json is dropped, /api/scoreboard/fetch must also
+    use the offline path -- no network call. We verify by clearing the
+    token (LocalJsonScoreboard doesn't need it) and asking for the same
+    (ct, id) that the dropped file claims to be."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+
+    fixture = _load_v1_match_fixture()
+    client.post("/api/scoreboard/upload", json={"data": fixture})
+
+    resp = client.post(
+        "/api/scoreboard/fetch",
+        json={"content_type": 22, "match_id": 27190, "overwrite": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scoreboard_match_id"] == "27190"
+
+
 def test_placeholder_stages_endpoint_creates_stages(tmp_path: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)
