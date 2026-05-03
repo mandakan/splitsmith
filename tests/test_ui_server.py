@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -495,17 +496,25 @@ def _stub_detect(
     beep_time: float = 12.453,
     *,
     candidates: list | None = None,
+    gate: threading.Event | None = None,
 ) -> None:
     """Replace the per-video beep detector with a fast stub returning a
     deterministic BeepDetection. The endpoint is otherwise wrapped around
     ffmpeg + librosa, which we don't want to invoke from a unit test.
     Both the legacy ``detect_primary_beep`` shim and the new
     ``detect_video_beep`` are patched so callers on either path get the
-    stubbed result."""
+    stubbed result.
+
+    ``gate`` lets a test hold the fake detector until a barrier is
+    released, simulating the real 2-10s detect-beep window so dedup tests
+    aren't a race against a synchronous return.
+    """
     from splitsmith.config import BeepCandidate, BeepDetection
     from splitsmith.ui import audio as audio_helpers
 
     def fake(*args, **kwargs):  # type: ignore[no-untyped-def]
+        if gate is not None:
+            assert gate.wait(timeout=5.0), "_stub_detect gate never released"
         cands: list[BeepCandidate] = candidates or []
         return BeepDetection(
             time=beep_time,
@@ -2426,7 +2435,12 @@ def test_per_video_detect_beep_dedupes_per_video(tmp_path: Path, monkeypatch) ->
     """Two simultaneous detect-beep posts for the same video adopt one job;
     a post for a different video on the same stage runs in parallel."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    _stub_detect(monkeypatch, beep_time=3.0)
+    # Gate the fake detector so the first job stays RUNNING long enough
+    # for the second POST to land in find_active. Without this the stub
+    # returns synchronously and the worker can flip the job to SUCCEEDED
+    # before the second submit checks for an active dedup target.
+    gate = threading.Event()
+    _stub_detect(monkeypatch, beep_time=3.0, gate=gate)
 
     primary_id = _video_id_for(client, 1, "primary")
     sec_id = _video_id_for(client, 1, "secondary")
@@ -2435,6 +2449,7 @@ def test_per_video_detect_beep_dedupes_per_video(tmp_path: Path, monkeypatch) ->
     j3 = client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()
     assert j1["id"] == j2["id"]  # same video -> same job
     assert j1["id"] != j3["id"]  # different video -> different job
+    gate.set()
     _wait_for_job(client, j1["id"])
     _wait_for_job(client, j3["id"])
 
