@@ -2172,6 +2172,27 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             handle.update(progress=0.15, message="Reading audit JSON...")
         handle.check_cancel()
 
+        # Multi-cam (issue #54). Each secondary with a known beep ships
+        # alongside the primary so a single Generate click produces the
+        # complete multi-cam timeline. Cams without a beep yet -- e.g.
+        # registered but ingest didn't finish -- are silently skipped; the
+        # SPA's ingest screen flags those rows separately.
+        secondaries: list[export_helpers.SecondaryExport] = []
+        for sv in stg.videos:
+            if sv.role != "secondary":
+                continue
+            if sv.beep_time is None:
+                continue
+            sec_source = proj.resolve_video_path(state.project_root, sv.path)
+            secondaries.append(
+                export_helpers.SecondaryExport(
+                    video_id=sv.video_id,
+                    source_path=sec_source,
+                    beep_time_in_source=sv.beep_time,
+                    label=f"Cam {sv.video_id}",
+                )
+            )
+
         try:
             result = export_helpers.export_stage(
                 request=export_helpers.StageExportRequest(
@@ -2190,6 +2211,7 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 pre_buffer_seconds=proj.trim_pre_buffer_seconds,
                 post_buffer_seconds=proj.trim_post_buffer_seconds,
                 config=Config(),
+                secondaries=secondaries,
             )
         except export_helpers.StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
@@ -2207,6 +2229,9 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         bits: list[str] = []
         if result.trimmed_video_path is not None:
             bits.append("trim")
+        if result.secondary_trimmed_paths:
+            n = len(result.secondary_trimmed_paths)
+            bits.append(f"{n} secondary trim{'s' if n != 1 else ''}")
         if result.csv_path is not None:
             bits.append("csv")
         if result.fcpxml_path is not None:
