@@ -43,6 +43,7 @@ import {
   Undo2,
 } from "lucide-react";
 
+import { AnomalyPanel } from "@/components/AnomalyPanel";
 import {
   DEFAULT_FILTERS,
   FilterBar,
@@ -77,6 +78,10 @@ import {
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
+import {
+  detectAnomalies,
+  keptShotsFromMarkers,
+} from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { cn } from "@/lib/utils";
 
@@ -687,6 +692,32 @@ export function Audit() {
     [handleScrub, keptShots],
   );
 
+  // ---- Live anomalies (issue #42) ----------------------------------------
+  // Recomputed on every marker mutation -- pure function, zero detection
+  // cost. Mirrors ``report.detect_anomalies_structured`` so the panel
+  // shows what report.txt will once Generate runs.
+  const anomalies = useMemo(() => {
+    if (!stage) return [];
+    const shots = keptShotsFromMarkers(markers, auditBeep);
+    return detectAnomalies(shots, stage.time_seconds);
+  }, [markers, auditBeep, stage]);
+
+  // Anomaly rows that mention a shot number jump to that kept shot's
+  // marker on click -- the killer feature: "Shot 48 is too close" -> one
+  // click puts the playhead on shot 48 with shot 47 in view.
+  const handleAnomalyJump = useCallback(
+    (shotNumber: number) => {
+      // ``shot_number`` in the anomaly is a 1-based index into the
+      // kept-shots list (detected + manual, sorted by time) -- the same
+      // ordering ``keptShotsFromMarkers`` produces. Map back to the
+      // matching marker via that ordering.
+      const target = keptShots[shotNumber - 1];
+      if (!target) return;
+      jumpToMarker(target);
+    },
+    [keptShots, jumpToMarker],
+  );
+
   const pixelsPerSecond = useMemo(
     () => zoomToPixelsPerSecond(zoom, waveformViewport, peaks?.duration ?? 0),
     [zoom, waveformViewport, peaks],
@@ -1238,6 +1269,10 @@ export function Audit() {
                   currentIndex={currentShotIndex}
                   onStep={stepShot}
                   onNoteChange={handleNoteChange}
+                />
+                <AnomalyPanel
+                  anomalies={anomalies}
+                  onJumpToShot={handleAnomalyJump}
                 />
               </>
             ) : null}

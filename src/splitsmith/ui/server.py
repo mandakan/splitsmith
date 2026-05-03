@@ -66,7 +66,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import beep_detect, video_probe
+from .. import beep_detect, report, video_probe
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
@@ -1645,6 +1645,43 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 tmp.unlink()
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return JSONResponse(payload)
+
+    @app.get("/api/stages/{stage_number}/anomalies")
+    def get_stage_anomalies(stage_number: int) -> JSONResponse:
+        """Return structured anomalies for the saved audit JSON (issue #42).
+
+        Single source of truth for ``report.detect_anomalies_structured``:
+        the audit screen also runs the same rules client-side for live
+        feedback while the user keeps / rejects markers, but consumers
+        that only need a snapshot (external tooling, integration tests,
+        the report.txt writer) can hit this endpoint instead of reading
+        the JSON and re-deriving.
+
+        Returns ``{anomalies: []}`` when the stage has no audit JSON, no
+        beep yet, or an empty ``shots[]`` -- the SPA renders these as
+        "no anomalies" / "no shots audited yet" depending on context.
+        """
+        project = state.load()
+        try:
+            stg = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            return JSONResponse({"anomalies": []})
+        try:
+            audit_payload = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+
+        prim = stg.primary()
+        beep_time = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
+        shots = export_helpers.audit_shots_to_engine_shots(
+            audit_payload, beep_time_in_source=beep_time
+        )
+        anomalies = report.detect_anomalies_structured(shots, beep_time, stg.time_seconds)
+        return JSONResponse({"anomalies": [a.model_dump() for a in anomalies]})
 
     # ----------------------------------------------------------------------
     # Fixture-review endpoints (closes #19 -- the old splitsmith.review_server

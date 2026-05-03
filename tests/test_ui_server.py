@@ -1688,6 +1688,57 @@ def test_put_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_get_stage_anomalies_empty_when_no_audit_file(tmp_path: Path) -> None:
+    """No audit JSON yet -> empty anomalies list (issue #42).
+
+    The audit screen calls this on mount; pre-detection there's nothing
+    useful to flag, so the panel renders the "looks clean" empty state.
+    """
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/stages/1/anomalies")
+    assert resp.status_code == 200
+    assert resp.json() == {"anomalies": []}
+
+
+def test_get_stage_anomalies_flags_double_detection_with_shot_number(
+    tmp_path: Path,
+) -> None:
+    """The endpoint returns structured anomalies that carry the offending
+    shot's 1-based number so the SPA can scroll to that marker on click."""
+    import json as _json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    audit_dir = project_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    # Two shots 50 ms apart -> double-detection rule fires on shot 2.
+    payload = {
+        "stage_number": 1,
+        "stage_name": "Stage One",
+        "shots": [
+            {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 1000},
+            {"shot_number": 2, "candidate_number": 2, "time": 1.05, "ms_after_beep": 1050},
+        ],
+    }
+    (audit_dir / "stage1.json").write_text(_json.dumps(payload), encoding="utf-8")
+
+    resp = client.get("/api/stages/1/anomalies")
+    assert resp.status_code == 200
+    anomalies = resp.json()["anomalies"]
+    kinds = {a["kind"] for a in anomalies}
+    assert "double_detection" in kinds
+    double = next(a for a in anomalies if a["kind"] == "double_detection")
+    assert double["shot_number"] == 2
+    assert double["severity"] == "warn"
+    assert double["time"] == 1.05
+
+
+def test_get_stage_anomalies_404_when_stage_unknown(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/stages/99/anomalies")
+    assert resp.status_code == 404
+
+
 def test_fixture_audit_round_trip(tmp_path: Path) -> None:
     """The fixture endpoints read + write a JSON file in place. Closes #19's
     standalone review SPA -- localhost-only, no project context."""

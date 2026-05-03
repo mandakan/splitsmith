@@ -8,11 +8,23 @@ Anomaly rules (from SPEC.md):
 
 ASCII-only output (per CLAUDE.md): tags use ``[OK]``, ``[!]``, etc. instead of
 Unicode glyphs so the report renders the same in any terminal / pager.
+
+Two flavours of the anomaly check live here:
+
+- :func:`detect_anomalies_structured` returns :class:`Anomaly` records
+  carrying ``kind`` + ``shot_number`` + ``time`` so the audit screen can
+  render clickable entries that jump to the offending marker (issue #42).
+- :func:`detect_anomalies` is the legacy string-list shape used by the
+  CLI / report.txt; it stringifies the structured output so the rendered
+  report bytes are unchanged.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel
 
 from .config import ReportFiles, Shot, SplitColorThresholds, StageAnalysis
 
@@ -24,47 +36,127 @@ _SLOW_DRAW_S = 1.500  # shot 1 split greater than this gets a slow-draw note
 _TYPICAL_ROUND_RANGE = (8, 32)  # informational shot-count band
 
 
-def detect_anomalies(
+AnomalyKind = Literal[
+    "no_shots",
+    "stage_time_mismatch",
+    "double_detection",
+    "long_pause",
+    "shot_count_low",
+    "shot_count_high",
+]
+AnomalySeverity = Literal["info", "warn"]
+
+
+class Anomaly(BaseModel):
+    """Structured anomaly emitted by :func:`detect_anomalies_structured`.
+
+    ``kind`` tags the rule so the SPA can group / filter without parsing
+    ``message``. ``shot_number`` (1-based, matches :class:`Shot.shot_number`)
+    and ``time`` (seconds from beep) are populated for shot-bound anomalies
+    so the audit screen can scroll to the offending marker on click.
+    Stage-level anomalies (count band, no shots) leave both null.
+    """
+
+    kind: AnomalyKind
+    severity: AnomalySeverity
+    message: str
+    shot_number: int | None = None
+    time: float | None = None
+
+
+def detect_anomalies_structured(
     shots: list[Shot],
     beep_time: float,  # noqa: ARG001 -- kept for symmetry with caller; absolute beep time
     stage_time: float,
-) -> list[str]:
-    """Return human-readable anomaly strings; empty list means "all clean"."""
-    anomalies: list[str] = []
+) -> list[Anomaly]:
+    """Return structured :class:`Anomaly` records; empty list means "all clean"."""
+    anomalies: list[Anomaly] = []
 
     if not shots:
-        anomalies.append("No shots detected in the stage window.")
+        anomalies.append(
+            Anomaly(
+                kind="no_shots",
+                severity="warn",
+                message="No shots detected in the stage window.",
+            )
+        )
         return anomalies
 
     last_after_beep = shots[-1].time_from_beep
     delta = last_after_beep - stage_time
     if abs(delta) > _OFFICIAL_TIME_TOLERANCE_S:
         anomalies.append(
-            f"Last detected shot is {abs(delta) * 1000:.0f} ms "
-            f"{'after' if delta > 0 else 'before'} official stage time "
-            f"({last_after_beep:.3f} s vs {stage_time:.3f} s)."
+            Anomaly(
+                kind="stage_time_mismatch",
+                severity="warn",
+                message=(
+                    f"Last detected shot is {abs(delta) * 1000:.0f} ms "
+                    f"{'after' if delta > 0 else 'before'} official stage time "
+                    f"({last_after_beep:.3f} s vs {stage_time:.3f} s)."
+                ),
+                shot_number=shots[-1].shot_number,
+                time=last_after_beep,
+            )
         )
 
     for s in shots[1:]:  # shot 1's "split" is the draw, not a real split
         if s.split < _DOUBLE_DETECTION_MAX_S:
             anomalies.append(
-                f"Shot {s.shot_number} split is {s.split * 1000:.0f} ms "
-                f"(< {_DOUBLE_DETECTION_MAX_S * 1000:.0f} ms): possible double-detection."
+                Anomaly(
+                    kind="double_detection",
+                    severity="warn",
+                    message=(
+                        f"Shot {s.shot_number} split is {s.split * 1000:.0f} ms "
+                        f"(< {_DOUBLE_DETECTION_MAX_S * 1000:.0f} ms): "
+                        f"possible double-detection."
+                    ),
+                    shot_number=s.shot_number,
+                    time=s.time_from_beep,
+                )
             )
         elif s.split > _LONG_PAUSE_MAX_S:
             anomalies.append(
-                f"Shot {s.shot_number} split is {s.split:.3f} s "
-                f"(> {_LONG_PAUSE_MAX_S:.1f} s): missed shot or long transition?"
+                Anomaly(
+                    kind="long_pause",
+                    severity="warn",
+                    message=(
+                        f"Shot {s.shot_number} split is {s.split:.3f} s "
+                        f"(> {_LONG_PAUSE_MAX_S:.1f} s): missed shot or long transition?"
+                    ),
+                    shot_number=s.shot_number,
+                    time=s.time_from_beep,
+                )
             )
 
     lo, hi = _TYPICAL_ROUND_RANGE
     if not (lo <= len(shots) <= hi):
+        is_low = len(shots) < lo
         anomalies.append(
-            f"Detected {len(shots)} shots; typical IPSC stages have {lo}-{hi}. Review for "
-            f"{'missed shots' if len(shots) < lo else 'false positives (echoes / other bays)'}."
+            Anomaly(
+                kind="shot_count_low" if is_low else "shot_count_high",
+                severity="info",
+                message=(
+                    f"Detected {len(shots)} shots; typical IPSC stages have {lo}-{hi}. "
+                    f"Review for "
+                    f"{'missed shots' if is_low else 'false positives (echoes / other bays)'}."
+                ),
+            )
         )
 
     return anomalies
+
+
+def detect_anomalies(
+    shots: list[Shot],
+    beep_time: float,
+    stage_time: float,
+) -> list[str]:
+    """Return human-readable anomaly strings; empty list means "all clean".
+
+    Thin wrapper over :func:`detect_anomalies_structured` so the report.txt
+    bullet rendering stays byte-identical to its pre-#42 output.
+    """
+    return [a.message for a in detect_anomalies_structured(shots, beep_time, stage_time)]
 
 
 def render_report(
