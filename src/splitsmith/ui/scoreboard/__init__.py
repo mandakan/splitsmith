@@ -9,8 +9,21 @@ Sub-modules:
   documented at https://github.com/mandakan/ssi-scoreboard ``docs/api-v1.md``
 - ``local``: ``LocalJsonScoreboard`` -- offline implementation that serves
   a single dropped match file (issue #48)
+- ``http``: ``SsiHttpClient`` -- live online implementation (issue #49)
+- ``cache``: ``CachingScoreboardClient`` -- project-local disk cache
+  decorator that wraps any ``ScoreboardClient`` (issue #49)
 """
 
+from splitsmith.ui.scoreboard.cache import CachingScoreboardClient
+from splitsmith.ui.scoreboard.http import (
+    MatchNotFound,
+    ScoreboardAuthError,
+    ScoreboardError,
+    ScoreboardRateLimited,
+    ScoreboardUpstreamError,
+    ShooterNotFound,
+    SsiHttpClient,
+)
 from splitsmith.ui.scoreboard.local import LocalJsonScoreboard
 from splitsmith.ui.scoreboard.models import (
     AchievementProgress,
@@ -31,16 +44,24 @@ from splitsmith.ui.scoreboard.protocol import ScoreboardClient
 __all__ = [
     "AchievementProgress",
     "CacheInfo",
+    "CachingScoreboardClient",
     "CompetitorInfo",
     "LocalJsonScoreboard",
     "MatchData",
+    "MatchNotFound",
     "MatchRef",
+    "ScoreboardAuthError",
     "ScoreboardClient",
+    "ScoreboardError",
+    "ScoreboardRateLimited",
+    "ScoreboardUpstreamError",
     "ShooterAggregateStats",
     "ShooterDashboard",
     "ShooterMatchSummary",
+    "ShooterNotFound",
     "ShooterRef",
     "SquadInfo",
+    "SsiHttpClient",
     "StageInfo",
     "UpcomingMatch",
 ]

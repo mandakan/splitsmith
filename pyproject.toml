@@ -19,6 +19,7 @@ dependencies = [
     "soundfile>=0.12.1",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    "httpx>=0.28.0",
     # Ensemble shot-detection runtime (issue #31). Heavy ML deps live in
     # the runtime path because the production audit UI needs voters
     # B (CLAP), C (GBDT), and D (PANN) to seed shots[] correctly.
@@ -62,6 +63,7 @@ dev = [
     "ruff>=0.4.0",
     "black>=24.0.0",
     "mypy>=1.10.0",
+    "respx>=0.21.1",
 ]
 
 [tool.ruff]
@@ -79,6 +81,11 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PTH"]
 # verbatim, which is mixed snake_case + camelCase. Translation to splitsmith's
 # snake_case happens in adapters, not in the parsed-response models.
 "src/splitsmith/ui/scoreboard/models.py" = ["N815"]
+# Public scoreboard exceptions use the `*NotFound` / `*RateLimited` naming
+# prescribed by the API contract in issue #49 rather than the N818 `*Error`
+# convention. The names are part of the documented surface; renaming would
+# break callers.
+"src/splitsmith/ui/scoreboard/http.py" = ["N818"]
 
 [tool.black]
 line-length = 100
