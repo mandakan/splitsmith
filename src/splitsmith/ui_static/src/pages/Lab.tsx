@@ -553,6 +553,27 @@ function FixtureTable({
   );
 }
 
+// Single-key shortcuts when a candidate row is selected.
+// For rejected (FP / not-kept) candidates: set ``reason``.
+// For kept positives (TP): set ``subclass`` (paper/steel/unknown).
+const REASON_SHORTCUTS: Record<string, string> = {
+  x: "cross_bay",
+  e: "echo",
+  w: "wind",
+  m: "movement",
+  s: "steel_ring",
+  h: "handling",
+  a: "agc_artifact",
+  y: "speech", // mnemonic: spYech (s is steel_ring)
+  o: "other",
+  u: "unknown",
+};
+const SUBCLASS_SHORTCUTS: Record<string, string> = {
+  p: "paper",
+  s: "steel",
+  u: "unknown",
+};
+
 function FixtureDetail({
   fixture,
   onClose,
@@ -565,9 +586,11 @@ function FixtureDetail({
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [time, setTime] = useState(0);
   const [savingLabel, setSavingLabel] = useState<number | null>(null);
+  const [selectedCn, setSelectedCn] = useState<number | null>(null);
 
   useEffect(() => {
     setPeaks(null);
+    setSelectedCn(null);
     api
       .getFixturePeaks(fixture.audit_path)
       .then(setPeaks)
@@ -594,6 +617,71 @@ function FixtureDetail({
     },
     [fixture.audit_path, onLabelChanged],
   );
+
+  // Keyboard shortcuts: row selection + label assignment.
+  useEffect(() => {
+    function isTypingTarget(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false;
+      if (t.isContentEditable) return true;
+      const tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      const cands = fixture.candidates;
+      if (cands.length === 0) return;
+      const idx = selectedCn != null ? cands.findIndex((c) => c.candidate_number === selectedCn) : -1;
+
+      // Navigation: j/k or ArrowDown/Up. Wraps at edges.
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = idx < 0 ? 0 : Math.min(cands.length - 1, idx + 1);
+        setSelectedCn(cands[next].candidate_number);
+        return;
+      }
+      if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = idx < 0 ? cands.length - 1 : Math.max(0, idx - 1);
+        setSelectedCn(cands[next].candidate_number);
+        return;
+      }
+      if (e.key === "Escape") {
+        setSelectedCn(null);
+        return;
+      }
+      if (idx < 0) return;
+      const c = cands[idx];
+
+      // Clear: 0 or Backspace.
+      if (e.key === "0" || e.key === "Backspace") {
+        e.preventDefault();
+        if (c.kept && c.truth === 1) {
+          handleLabel(c.candidate_number, { subclass: null });
+        } else {
+          handleLabel(c.candidate_number, { reason: null });
+        }
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (c.kept && c.truth === 1) {
+        const sub = SUBCLASS_SHORTCUTS[key];
+        if (sub) {
+          e.preventDefault();
+          handleLabel(c.candidate_number, { subclass: sub });
+        }
+      } else {
+        const reason = REASON_SHORTCUTS[key];
+        if (reason) {
+          e.preventDefault();
+          handleLabel(c.candidate_number, { reason });
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fixture.candidates, selectedCn, handleLabel]);
 
   const fps = fixture.candidates.filter((c) => c.kept && c.truth === 0);
   const fns = fixture.truth_times.filter((t) => {
@@ -681,7 +769,10 @@ function FixtureDetail({
           candidates={fixture.candidates}
           onLabel={handleLabel}
           savingLabel={savingLabel}
+          selectedCn={selectedCn}
+          onSelect={setSelectedCn}
         />
+        <KeyboardLegend selectedCn={selectedCn} />
       </CardContent>
     </Card>
   );
@@ -782,6 +873,8 @@ function CandidateTable({
   candidates,
   onLabel,
   savingLabel,
+  selectedCn,
+  onSelect,
 }: {
   candidates: LabEvalFixture["candidates"];
   onLabel: (
@@ -789,11 +882,22 @@ function CandidateTable({
     patch: { reason?: string | null; subclass?: string | null },
   ) => void;
   savingLabel: number | null;
+  selectedCn: number | null;
+  onSelect: (cn: number | null) => void;
 }) {
+  // Auto-scroll the selected row into view when it changes via keyboard nav.
+  useEffect(() => {
+    if (selectedCn == null) return;
+    const el = document.querySelector(`[data-cn="${selectedCn}"]`);
+    if (el && "scrollIntoView" in el) {
+      (el as HTMLElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selectedCn]);
+
   return (
     <details className="rounded border border-border/60" open>
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Candidates ({candidates.length}) -- label rejected with FP class, kept with paper/steel
+        Candidates ({candidates.length}) -- click a row + use shortcut keys (or the dropdown)
       </summary>
       <div className="max-h-96 overflow-y-auto">
         <table className="w-full text-xs">
@@ -818,15 +922,19 @@ function CandidateTable({
               const isFP = c.kept && c.truth === 0;
               const isFN = !c.kept && c.truth === 1;
               const saving = savingLabel === c.candidate_number;
+              const selected = selectedCn === c.candidate_number;
               return (
                 <tr
                   key={c.candidate_number}
+                  data-cn={c.candidate_number}
                   className={cn(
-                    "border-b border-border/20 font-mono",
+                    "cursor-pointer border-b border-border/20 font-mono",
                     isTP && "bg-emerald-500/5",
                     isFP && "bg-orange-500/10",
                     isFN && "bg-red-500/10",
+                    selected && "outline outline-2 outline-primary/70",
                   )}
+                  onClick={() => onSelect(selected ? null : c.candidate_number)}
                 >
                   <td className="px-2 py-1">{c.candidate_number}</td>
                   <td className="px-2 py-1 text-right">{c.time.toFixed(3)}</td>
@@ -1205,6 +1313,38 @@ function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) 
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function KeyboardLegend({ selectedCn }: { selectedCn: number | null }) {
+  return (
+    <div
+      className={cn(
+        "rounded border border-border/60 px-3 py-2 text-[11px] text-muted-foreground",
+        selectedCn != null && "border-primary/60 bg-primary/5 text-foreground",
+      )}
+    >
+      <div className="mb-1 font-semibold uppercase tracking-wide">
+        Keyboard {selectedCn != null ? `(row #${selectedCn} selected)` : "(click or J/K to select a row)"}
+      </div>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 font-mono text-[10px] sm:grid-cols-4">
+        <span><kbd>J</kbd> / <kbd>↓</kbd> next</span>
+        <span><kbd>K</kbd> / <kbd>↑</kbd> prev</span>
+        <span><kbd>Esc</kbd> deselect</span>
+        <span><kbd>0</kbd> / <kbd>Bksp</kbd> clear</span>
+        <span><kbd>X</kbd> cross_bay</span>
+        <span><kbd>E</kbd> echo</span>
+        <span><kbd>W</kbd> wind</span>
+        <span><kbd>M</kbd> movement</span>
+        <span><kbd>S</kbd> steel_ring / steel</span>
+        <span><kbd>H</kbd> handling</span>
+        <span><kbd>A</kbd> agc_artifact</span>
+        <span><kbd>Y</kbd> speech</span>
+        <span><kbd>O</kbd> other</span>
+        <span><kbd>U</kbd> unknown</span>
+        <span><kbd>P</kbd> paper (TP only)</span>
+      </div>
     </div>
   );
 }

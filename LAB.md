@@ -228,15 +228,43 @@ break down precision *by failure mode*:
 
 How to label from the UI:
 
-1. Open a fixture's detail card in the Lab.
-2. The candidate table at the bottom now has a **label** column. Each
-   row shows a dropdown -- positives get the subclass options, rejected
-   candidates get the FP reasons.
+1. Open a fixture's detail card in the Lab (click a row in the
+   catalog table).
+2. Scroll to the **Candidates** table at the bottom of the detail
+   card. Each row has a dropdown in the ``label`` column -- positives
+   get the subclass options, rejected candidates get the FP reasons.
 3. Picking a value auto-saves through ``POST /api/lab/labels``. The
    detail card refreshes (eval re-runs in the background) so the
    "Label breakdown" panel + the corpus-wide counts on the Summary card
    update right away.
 4. Clear a label by selecting ``--``.
+
+**Keyboard shortcuts** (faster than the dropdown for the half-day
+labeling pass): click any row to select it (or ``J`` / ``K`` /
+arrow keys to navigate), then press a single key:
+
+| Key | Reason (rejected) | Subclass (TP) |
+| --- | --- | --- |
+| ``X`` | cross_bay | -- |
+| ``E`` | echo | -- |
+| ``W`` | wind | -- |
+| ``M`` | movement | -- |
+| ``S`` | steel_ring | steel |
+| ``H`` | handling | -- |
+| ``A`` | agc_artifact | -- |
+| ``Y`` | speech | -- |
+| ``O`` | other | -- |
+| ``U`` | unknown | unknown |
+| ``P`` | -- | paper |
+| ``0`` / ``Bksp`` | clear | clear |
+| ``J`` / ``↓`` | next row | -- |
+| ``K`` / ``↑`` | prev row | -- |
+| ``Esc`` | deselect | -- |
+
+The legend at the bottom of the fixture detail shows the active
+selection and the available shortcuts. Shortcuts are scoped to the
+selected row only and are silently ignored when an input / textarea
+has focus.
 
 How to label from the CLI:
 
