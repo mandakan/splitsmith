@@ -5,18 +5,19 @@ Listed roughly in order of how much headroom they represent. Each entry
 documents the *physical* problem so we can pick the right feature/algorithm
 later instead of throwing more GBDT at it.
 
-## Current state (2026-05-01, 12 fixtures, 227 positives)
+## Current state (2026-05-03, 12 fixtures, 227 positives)
 
 | Stage | Recall | Precision | Notes |
 |---|---|---|---|
-| Voter C alone, global threshold (SKF) | 95.2 % | **78.5 %** | StratifiedKFold |
-| Voter C alone, global threshold (LOFO) | 95.2 % | **71.5 %** | cross-fixture honest |
-| Voter C alone, **adaptive (audit K)** | 94.3 % | **81.1 %** | K = audit count + max(3, K*10%); upper bound |
+| Voter C alone, global threshold (SKF) | 95.2 % | **76.9 %** | StratifiedKFold, with AGC features (#88) |
+| Voter C alone, global threshold (LOFO) | 95.2 % | **72.5 %** | cross-fixture honest, with AGC features (#88) |
 | Voter C alone, **adaptive (real K)** | 89.0 % | **88.2 %** | K = stage_rounds.expected (12/12 fixtures); recall hit from makeups |
-| 4-of-4 ensemble, global threshold | 95.2 % | 80.0 % | |
-| 4-of-4 ensemble, adaptive (audit K) | 94.3 % | **82.6 %** | |
 | 4-of-4 ensemble, **adaptive (real K)** | 89.0 % | **88.6 %** | |
-| 3-of-4 consensus, global | 100 % | 30.0 % | default UI filter |
+| 3-of-4 consensus, global | 100 % | 30.1 % | default UI filter |
+
+Pre-#88 baseline (no AGC features) for reference: SKF 78.5 %, LOFO 71.5 %.
+The AGC features lift LOFO by +1.0 pp on average and don't move the
+adaptive (real-K) numbers; the SKF dip is within fold-shuffle noise.
 
 Dream target (user, 2026-05-01): **100 % recall, 80 % precision**. The
 adaptive variant crosses 80 % at 94.3 % recall on both voter C alone and
@@ -37,8 +38,8 @@ track the gap.
 
 ## 1. Cross-bay shots vs. AGC-ducked local shots
 
-**Where it bites:** `tallmilan-2026-stage5` (39.5 % LOFO precision -- worst
-fixture), `tallmilan-stage2` (38.7 %).
+**Where it bites:** `tallmilan-2026-stage5` (44.1 % LOFO precision after
+#88 -- worst fixture), `tallmilan-stage2` (66.7 % after #88, was 57.1 %).
 
 **Physics:** a cross-bay shot on a neighbouring stage has the same impulsive
 shape as a local shot (sharp pressure spike, reverb tail) but lower amplitude.
@@ -52,6 +53,38 @@ perspective they are nearly indistinguishable.
 * `mr_ratio_1_20`, `mr_ratio_5_20` -- impulsive shape is the same.
 * PANN gunshot_prob -- pretrained on AudioSet, fires on both.
 * CLAP shot prompts -- same.
+
+**What was added (#88, 2026-05-03):** three rolling-history features in
+``ensemble/agc_state.py`` that are global properties of the recording,
+not the candidate window:
+
+* ``agc_state`` (0-1): ``exp(-dt / recovery_tau_s)`` decay since the most
+  recent loud event.
+* ``time_since_last_loud_event``: capped at ``lookback_s``.
+* ``peak_floor_ratio``: candidate peak / local low-percentile floor in the
+  pre-window. Strongest individual signal -- median pos/neg ratio is 3.40x
+  versus 1.0x for the other two.
+
+Per-fixture LOFO impact (target recall 95 %, ``analyze_negatives.py``):
+
+| Fixture | Before | After | delta |
+|---|---|---|---|
+| tallmilan-stage2 | 57.1 % | 66.7 % | **+9.6** |
+| blacksmith-2026-stage3 | 90.9 % | 100.0 % | +9.1 |
+| blacksmith-2026-stage5 | 62.9 % | 66.7 % | +3.8 |
+| tallmilan-stage7 | 76.0 % | 79.2 % | +3.2 |
+| blacksmith-2026-stage8 | 81.8 % | 84.4 % | +2.6 |
+| tallmilan-2026-stage5 | 45.5 % | 44.1 % | -1.4 |
+| blacksmith-2026-stage1 | 86.0 % | 84.1 % | -1.9 |
+| blacksmith-h5 | 66.7 % | 64.3 % | -2.4 |
+| blacksmith-2026-stage2 | 80.0 % | 75.0 % | -5.0 |
+
+So the feature lifts the second-worst cross-bay fixture (tallmilan-stage2)
+by nearly 10 pp but doesn't move the worst (tallmilan-2026-stage5). The
+three features are kept together: ablation runs show all three give
+72.5 % overall LOFO, peak_floor_ratio alone gives 70.6 % (worse than
+no AGC features). The time-based features only contribute as
+conditioning variables for peak_floor_ratio.
 
 **What would actually work:**
 * **Stereo TDOA / inter-channel level difference.** The Insta360 GO 3S

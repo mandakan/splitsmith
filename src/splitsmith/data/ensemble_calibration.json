@@ -1,7 +1,7 @@
 {
   "voter_a_floor": 0.01847127532497797,
   "voter_b_threshold": 0.11580950021743774,
-  "voter_c_threshold": 0.09775335426402208,
+  "voter_c_threshold": 0.08259430400325778,
   "voter_d_threshold": 0.0012177228927612305,
   "voter_c_target_recall": 0.95,
   "tolerance_ms": 75.0,
@@ -39,6 +39,6 @@
   ],
   "n_calibration_candidates": 949,
   "n_calibration_positives": 227,
-  "voter_c_feature_dim": 22,
-  "built_at": "2026-05-02T12:11:59.331971+00:00"
+  "voter_c_feature_dim": 25,
+  "built_at": "2026-05-03T18:28:07.769274+00:00"
 }
