@@ -1,0 +1,1740 @@
+{
+  "shooterId": 40821,
+  "profile": {
+    "name": "Mathias Rinaldo",
+    "club": "",
+    "division": "Pistol Caliber Carbine Optics Minor",
+    "lastSeen": "2026-05-03T05:56:14.884Z",
+    "region": "SWE",
+    "region_display": "Sweden",
+    "category": "S",
+    "ics_alias": "pewpewu2",
+    "license": "8864"
+  },
+  "matchCount": 109,
+  "matches": [
+    {
+      "ct": "22",
+      "matchId": "27190",
+      "name": "SPSK Open 2026",
+      "date": "2026-05-02T07:00:00+00:00",
+      "venue": "",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Optics Minor",
+      "competitorId": 727562,
+      "competitorsInDivision": 18,
+      "stageCount": 10,
+      "avgHF": 5.83462585,
+      "matchPct": null,
+      "totalA": 144,
+      "totalC": 31,
+      "totalD": 2,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 1,
+      "consistencyIndex": 77.11272647412228,
+      "squadmateShooterIds": [
+        29612,
+        47327,
+        35233,
+        28939,
+        49462,
+        46575,
+        49261
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "26186",
+      "name": "Skepplanda Challenge 2026",
+      "date": "2026-04-24T07:00:00+00:00",
+      "venue": "Skepplanda Skyttecenter",
+      "level": "l3",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Pistol Caliber Carbine Minor",
+      "competitorId": 726568,
+      "competitorsInDivision": 33,
+      "stageCount": 12,
+      "avgHF": 6.0786994583333325,
+      "matchPct": null,
+      "totalA": 159,
+      "totalC": 48,
+      "totalD": 3,
+      "totalMiss": 1,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 69.75978535093277,
+      "squadmateShooterIds": [
+        39487,
+        43870,
+        5951,
+        5377,
+        17477,
+        34884,
+        47878,
+        49261
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "27838",
+      "name": "LaholmsPsk klubbmatch 26-5",
+      "date": "2026-04-23T16:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 747493,
+      "competitorsInDivision": 2,
+      "stageCount": 5,
+      "avgHF": 8.6869418,
+      "matchPct": null,
+      "totalA": 96,
+      "totalC": 17,
+      "totalD": 0,
+      "totalMiss": 2,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 76.58177644018245,
+      "squadmateShooterIds": [
+        49223,
+        11876,
+        49261,
+        26570,
+        49233,
+        25179,
+        21955
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "28145",
+      "name": "Träningsläger 1.4",
+      "date": "2026-04-20T07:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Shotgun",
+      "division": "Open Minor",
+      "competitorId": 755040,
+      "competitorsInDivision": 5,
+      "stageCount": 0,
+      "avgHF": null,
+      "matchPct": null,
+      "totalA": 0,
+      "totalC": 0,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": null,
+      "squadmateShooterIds": [
+        29787,
+        1679,
+        49261,
+        27744
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "28125",
+      "name": "Träningsläger 1.3",
+      "date": "2026-04-19T07:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Shotgun",
+      "division": "Open Minor",
+      "competitorId": 754411,
+      "competitorsInDivision": 12,
+      "stageCount": 8,
+      "avgHF": 4.8317668625,
+      "matchPct": null,
+      "totalA": 110,
+      "totalC": 0,
+      "totalD": 0,
+      "totalMiss": 2,
+      "totalNoShoots": 1,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 5,
+      "consistencyIndex": 74.63317687656397,
+      "squadmateShooterIds": [
+        19717,
+        49261,
+        5194,
+        1081,
+        9957
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "26193",
+      "name": "SDC 1 - SSIN Hanebjerg",
+      "date": "2026-04-12T08:00:00+00:00",
+      "venue": "",
+      "level": "l2",
+      "region": "DNK",
+      "discipline": "IPSC Handgun",
+      "division": "Optics Minor",
+      "competitorId": 739225,
+      "competitorsInDivision": 22,
+      "stageCount": 0,
+      "avgHF": null,
+      "matchPct": null,
+      "totalA": 0,
+      "totalC": 0,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": null,
+      "squadmateShooterIds": [
+        5861,
+        527,
+        10091,
+        49223,
+        49261,
+        41022,
+        26570,
+        26571,
+        37711,
+        19971,
+        50181,
+        55456
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "26659",
+      "name": "Jönköping Shotgun Challenge 2026",
+      "date": "2026-03-29T06:00:00+00:00",
+      "venue": "Ryhovsgatan 6, 553 03 Jönköping",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Shotgun",
+      "division": "Open Minor",
+      "competitorId": 719629,
+      "competitorsInDivision": 42,
+      "stageCount": 8,
+      "avgHF": 5.0392006,
+      "matchPct": null,
+      "totalA": 96,
+      "totalC": 4,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 1,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 5,
+      "consistencyIndex": 73.84728443872137,
+      "squadmateShooterIds": [
+        10829,
+        19190,
+        51520,
+        1406,
+        3442,
+        49261,
+        27256,
+        4879,
+        5751,
+        49223
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "25782",
+      "name": "MSG Handgun/PCC Cup Deltävling 1",
+      "date": "2026-03-28T07:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 741267,
+      "competitorsInDivision": 14,
+      "stageCount": 6,
+      "avgHF": 7.078408016666668,
+      "matchPct": null,
+      "totalA": 102,
+      "totalC": 14,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 72.8274552998311,
+      "squadmateShooterIds": [
+        35948,
+        10091,
+        40758,
+        527,
+        49223,
+        41022,
+        37711,
+        50181,
+        49261
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "26067",
+      "name": "Bergen Open Spring 2026",
+      "date": "2026-03-07T08:00:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "region": "NOR",
+      "discipline": "IPSC Handgun",
+      "division": "Optics Minor",
+      "competitorId": 713971,
+      "competitorsInDivision": 36,
+      "stageCount": 0,
+      "avgHF": null,
+      "matchPct": null,
+      "totalA": 0,
+      "totalC": 0,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": null,
+      "squadmateShooterIds": [
+        55229,
+        34671,
+        41022,
+        52273,
+        18611,
+        12760,
+        24573,
+        55103,
+        49223,
+        727,
+        25681,
+        65688
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "25100",
+      "name": "HUGELSTA SIX STATION (FALL 2025)",
+      "date": "2025-10-11T11:00:00+00:00",
+      "venue": "Eskilstuna skyttearena Hugelsta",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Optics Minor",
+      "competitorId": 701499,
+      "competitorsInDivision": 9,
+      "stageCount": 6,
+      "avgHF": 6.6243763499999995,
+      "matchPct": null,
+      "totalA": 93,
+      "totalC": 20,
+      "totalD": 1,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 80.73450117653827,
+      "squadmateShooterIds": [
+        42674,
+        60244,
+        23465,
+        55576,
+        55649,
+        41540,
+        53780
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "24190",
+      "name": "Little Trouble in Big Sätra 2025",
+      "date": "2025-09-13T06:45:00+00:00",
+      "venue": "",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Production Optics",
+      "competitorId": 685419,
+      "competitorsInDivision": 73,
+      "stageCount": 8,
+      "avgHF": 3.5959497375000002,
+      "matchPct": 70.75782027823168,
+      "totalA": 101,
+      "totalC": 30,
+      "totalD": 3,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 1,
+      "consistencyIndex": 78.99046163408971,
+      "squadmateShooterIds": [
+        41022,
+        57067,
+        38881,
+        62590,
+        10763
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "24582",
+      "name": "DPK Sunstroke HG 2025",
+      "date": "2025-08-31T06:30:00+00:00",
+      "venue": "",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 692911,
+      "competitorsInDivision": 23,
+      "stageCount": 8,
+      "avgHF": 8.1335756375,
+      "matchPct": null,
+      "totalA": 130,
+      "totalC": 23,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 1,
+      "consistencyIndex": 81.95643746454175,
+      "squadmateShooterIds": [
+        58117,
+        36350,
+        36400,
+        60189,
+        36354,
+        47139,
+        43870
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "23126",
+      "name": "Bulletstorm 4 - SM Handgun 2025",
+      "date": "2025-08-21T05:00:00+00:00",
+      "venue": "Gräsmossens Skjutbana Ludvika",
+      "level": "l3",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Open Major",
+      "competitorId": 669092,
+      "competitorsInDivision": 33,
+      "stageCount": 16,
+      "avgHF": 4.847322875,
+      "matchPct": null,
+      "totalA": 198,
+      "totalC": 71,
+      "totalD": 12,
+      "totalMiss": 2,
+      "totalNoShoots": 1,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 72.48741419480244,
+      "squadmateShooterIds": [
+        40636,
+        41022,
+        16611,
+        49261,
+        49223,
+        19971,
+        43870,
+        35232,
+        37711
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "23419",
+      "name": "Swedish championship IPSC shotgun 2025",
+      "date": "2025-08-10T06:00:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "region": "SWE",
+      "discipline": "IPSC Shotgun",
+      "division": "Open Minor",
+      "competitorId": 659578,
+      "competitorsInDivision": 84,
+      "stageCount": 12,
+      "avgHF": 4.722953550000001,
+      "matchPct": null,
+      "totalA": 162,
+      "totalC": 3,
+      "totalD": 1,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 10,
+      "consistencyIndex": 67.4772432226334,
+      "squadmateShooterIds": [
+        32835,
+        19190,
+        41022,
+        26570,
+        27256,
+        47158,
+        13156,
+        49223
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "22542",
+      "name": "Beretta Gold Cup 2025 - Sweden",
+      "date": "2025-07-12T06:00:00+00:00",
+      "venue": "Spillepengen, Malmö, Sweden",
+      "level": "l3",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Open Major",
+      "competitorId": 636996,
+      "competitorsInDivision": 39,
+      "stageCount": 18,
+      "avgHF": 5.263271888888889,
+      "matchPct": null,
+      "totalA": 249,
+      "totalC": 100,
+      "totalD": 13,
+      "totalMiss": 2,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 1,
+      "consistencyIndex": 81.62253709751309,
+      "squadmateShooterIds": [
+        41022,
+        49261,
+        49223,
+        34072,
+        945
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "22548",
+      "name": "SDC 6 - Växjö",
+      "date": "2025-07-06T08:00:00+00:00",
+      "venue": "",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Open Major",
+      "competitorId": 669432,
+      "competitorsInDivision": 12,
+      "stageCount": 9,
+      "avgHF": 5.748891277777777,
+      "matchPct": null,
+      "totalA": 110,
+      "totalC": 47,
+      "totalD": 1,
+      "totalMiss": 1,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 73.89253929380895,
+      "squadmateShooterIds": [
+        474,
+        43870,
+        28981,
+        58613,
+        13651,
+        41289,
+        61400,
+        41477,
+        745,
+        55294,
+        653,
+        49261
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "23309",
+      "name": "Rodent Valley III",
+      "date": "2025-06-08T06:30:00+00:00",
+      "venue": "",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Open Major",
+      "competitorId": 659096,
+      "competitorsInDivision": 10,
+      "stageCount": 8,
+      "avgHF": 5.802605575,
+      "matchPct": null,
+      "totalA": 100,
+      "totalC": 39,
+      "totalD": 0,
+      "totalMiss": 1,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 85.86406590825426,
+      "squadmateShooterIds": [
+        23964,
+        56229,
+        41022,
+        49223,
+        49261,
+        39057
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "23893",
+      "name": "DPK HG Träningsmatch - Oskarshamn",
+      "date": "2025-05-11T11:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Open Major",
+      "competitorId": 662805,
+      "competitorsInDivision": 3,
+      "stageCount": 5,
+      "avgHF": 7.265006679999999,
+      "matchPct": null,
+      "totalA": 51,
+      "totalC": 36,
+      "totalD": 1,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 88.44162148030782,
+      "squadmateShooterIds": [
+        36400,
+        47158,
+        43870,
+        47139,
+        36354,
+        60197,
+        58117,
+        49261
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "22796",
+      "name": "Skepplanda Challenge 2025",
+      "date": "2025-04-26T07:00:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "region": "SWE",
+      "discipline": "IPSC Handgun & PCC",
+      "division": "Open Major",
+      "competitorId": 632357,
+      "competitorsInDivision": 20,
+      "stageCount": 12,
+      "avgHF": 5.666367991666667,
+      "matchPct": null,
+      "totalA": 145,
+      "totalC": 52,
+      "totalD": 10,
+      "totalMiss": 1,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 87.56295524405786,
+      "squadmateShooterIds": [
+        37711,
+        49541,
+        52402,
+        41022,
+        52428,
+        27022,
+        49194,
+        36858,
+        27777
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "22211",
+      "name": "Last Christmas 2024 rifle Kalmar",
+      "date": "2024-12-28T11:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Rifle",
+      "division": "Semi-Auto Open Minor",
+      "competitorId": 626257,
+      "competitorsInDivision": 14,
+      "stageCount": 4,
+      "avgHF": 3.449638575,
+      "matchPct": null,
+      "totalA": 62,
+      "totalC": 6,
+      "totalD": 0,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 1,
+      "consistencyIndex": 63.79159801556151,
+      "squadmateShooterIds": [
+        36400,
+        36350,
+        47158,
+        23636,
+        24670,
+        31564,
+        41022
+      ],
+      "squadAllSameClub": true
+    },
+    {
+      "ct": "22",
+      "matchId": "22210",
+      "name": "Last Christmas HG 2024 Kalmar",
+      "date": "2024-12-28T08:00:00+00:00",
+      "venue": "",
+      "level": "l1",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Production Optics",
+      "competitorId": 626254,
+      "competitorsInDivision": 20,
+      "stageCount": 4,
+      "avgHF": 4.662474725,
+      "matchPct": 94.7645005745946,
+      "totalA": 53,
+      "totalC": 14,
+      "totalD": 1,
+      "totalMiss": 0,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 92.5945189029106,
+      "squadmateShooterIds": [
+        46258,
+        485,
+        7285,
+        49423,
+        743,
+        31076,
+        39632,
+        41022,
+        49223
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "19727",
+      "name": "Höstfinalen IX",
+      "date": "2024-10-05T06:45:00+00:00",
+      "venue": "Nyköpings Pistolklubb",
+      "level": "l2",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Production Optics",
+      "competitorId": 612416,
+      "competitorsInDivision": 82,
+      "stageCount": 8,
+      "avgHF": 4.4972678375,
+      "matchPct": 71.15000431919778,
+      "totalA": 118,
+      "totalC": 28,
+      "totalD": 1,
+      "totalMiss": 1,
+      "totalNoShoots": 0,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 80.97453612947025,
+      "squadmateShooterIds": [
+        39058,
+        30930,
+        26323,
+        39705,
+        1607,
+        39057
+      ],
+      "squadAllSameClub": false
+    },
+    {
+      "ct": "22",
+      "matchId": "18369",
+      "name": "Malmö Handgun Championship 2024",
+      "date": "2024-06-29T06:30:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "region": "SWE",
+      "discipline": "IPSC Handgun",
+      "division": "Open Major",
+      "competitorId": 561693,
+      "competitorsInDivision": 43,
+      "stageCount": 18,
+      "avgHF": 5.005082233333334,
+      "matchPct": null,
+      "totalA": 255,
+      "totalC": 96,
+      "totalD": 10,
+      "totalMiss": 2,
+      "totalNoShoots": 1,
+      "totalProcedurals": 0,
+      "dq": false,
+      "perfectStages": 0,
+      "consistencyIndex": 76.70281312324661,
+      "squadmateShooterIds": [
+        41022,
+        22541,
+        1115,
+        19992,
+        14150,
+        1403,
+        43042,
+        35947,
+        3441,
+        1430,
+        49223,
+        49261,
+        41790
+      ],
+      "squadAllSameClub": false
+    }
+  ],
+  "stats": {
+    "totalStages": 185,
+    "dateRange": {
+      "from": "2024-06-29T06:30:00+00:00",
+      "to": "2026-05-02T07:00:00+00:00"
+    },
+    "overallAvgHF": 5.511988670270271,
+    "overallMatchPct": 78.89077505734134,
+    "aPercent": 77.09157286279282,
+    "cPercent": 20.657134164892,
+    "dPercent": 1.794949802251293,
+    "missPercent": 0.4563431700638881,
+    "consistencyCV": 0.2368653897368668,
+    "hfTrendSlope": 0.08731208958604839,
+    "avgPenaltyRate": 0.005413632226402098,
+    "avgConsistencyIndex": 77.8927723884045
+  },
+  "achievements": [
+    {
+      "definition": {
+        "id": "match-count",
+        "name": "Competitor",
+        "description": "Compete in Level II+ matches tracked on this app.",
+        "category": "milestone",
+        "icon": "trophy",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "First Match",
+            "threshold": 1,
+            "label": "1 match"
+          },
+          {
+            "level": 2,
+            "name": "Regular",
+            "threshold": 5,
+            "label": "5 matches"
+          },
+          {
+            "level": 3,
+            "name": "Veteran",
+            "threshold": 10,
+            "label": "10 matches"
+          },
+          {
+            "level": 4,
+            "name": "Dedicated",
+            "threshold": 25,
+            "label": "25 matches"
+          },
+          {
+            "level": 5,
+            "name": "Elite",
+            "threshold": 50,
+            "label": "50 matches"
+          },
+          {
+            "level": 6,
+            "name": "Legend",
+            "threshold": 100,
+            "label": "100 matches"
+          }
+        ]
+      },
+      "currentValue": 16,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 16
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 16
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 16
+        }
+      ],
+      "nextTier": {
+        "level": 4,
+        "name": "Dedicated",
+        "threshold": 25,
+        "label": "25 matches"
+      },
+      "progressToNext": 0.4
+    },
+    {
+      "definition": {
+        "id": "stage-count",
+        "name": "Stage Warrior",
+        "description": "Complete stages across Level II+ matches.",
+        "category": "milestone",
+        "icon": "swords",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Rookie",
+            "threshold": 10,
+            "label": "10 stages"
+          },
+          {
+            "level": 2,
+            "name": "Regular",
+            "threshold": 50,
+            "label": "50 stages"
+          },
+          {
+            "level": 3,
+            "name": "Seasoned",
+            "threshold": 100,
+            "label": "100 stages"
+          },
+          {
+            "level": 4,
+            "name": "Warrior",
+            "threshold": 250,
+            "label": "250 stages"
+          },
+          {
+            "level": 5,
+            "name": "Champion",
+            "threshold": 500,
+            "label": "500 stages"
+          }
+        ]
+      },
+      "currentValue": 153,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 151
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 151
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 151
+        }
+      ],
+      "nextTier": {
+        "level": 4,
+        "name": "Warrior",
+        "threshold": 250,
+        "label": "250 stages"
+      },
+      "progressToNext": 0.35333333333333333
+    },
+    {
+      "definition": {
+        "id": "championship",
+        "name": "Championship",
+        "description": "Compete in Level IV+ continental or world championships.",
+        "category": "milestone",
+        "icon": "award",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Continental Debut",
+            "threshold": 1,
+            "label": "1 championship"
+          },
+          {
+            "level": 2,
+            "name": "Championship Regular",
+            "threshold": 3,
+            "label": "3 championships"
+          },
+          {
+            "level": 3,
+            "name": "Championship Veteran",
+            "threshold": 5,
+            "label": "5 championships"
+          }
+        ]
+      },
+      "currentValue": 0,
+      "unlockedTiers": [],
+      "nextTier": {
+        "level": 1,
+        "name": "Continental Debut",
+        "threshold": 1,
+        "label": "1 championship"
+      },
+      "progressToNext": 0
+    },
+    {
+      "definition": {
+        "id": "world-shoot",
+        "name": "World Shoot",
+        "description": "Compete in the IPSC World Shoot.",
+        "category": "milestone",
+        "icon": "globe",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "World Shooter",
+            "threshold": 1,
+            "label": "1 World Shoot"
+          }
+        ]
+      },
+      "currentValue": 0,
+      "unlockedTiers": [],
+      "nextTier": {
+        "level": 1,
+        "name": "World Shooter",
+        "threshold": 1,
+        "label": "1 World Shoot"
+      },
+      "progressToNext": 0
+    },
+    {
+      "definition": {
+        "id": "sharpshooter",
+        "name": "Sharpshooter",
+        "description": "Achieve a high A-zone hit percentage across all matches (requires 10+ Level II matches).",
+        "category": "accuracy",
+        "icon": "crosshair",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Marksman",
+            "threshold": 60,
+            "label": "60% A-zone"
+          },
+          {
+            "level": 2,
+            "name": "Sharpshooter",
+            "threshold": 70,
+            "label": "70% A-zone"
+          },
+          {
+            "level": 3,
+            "name": "Expert",
+            "threshold": 80,
+            "label": "80% A-zone"
+          },
+          {
+            "level": 4,
+            "name": "Master",
+            "threshold": 85,
+            "label": "85% A-zone"
+          }
+        ]
+      },
+      "currentValue": 77.09157286279282,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 76.67692307692307
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 76.67692307692307
+        }
+      ],
+      "nextTier": {
+        "level": 3,
+        "name": "Expert",
+        "threshold": 80,
+        "label": "80% A-zone"
+      },
+      "progressToNext": 0.7091572862792817
+    },
+    {
+      "definition": {
+        "id": "perfect-stages",
+        "name": "Bullseye",
+        "description": "Shoot stages with all A-zone hits and zero penalties (no C/D hits, misses, no-shoots, or procedurals).",
+        "category": "accuracy",
+        "icon": "target",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "First Perfect",
+            "threshold": 1,
+            "label": "1 perfect stage"
+          },
+          {
+            "level": 2,
+            "name": "Sharp Eye",
+            "threshold": 5,
+            "label": "5 perfect stages"
+          },
+          {
+            "level": 3,
+            "name": "Precision",
+            "threshold": 10,
+            "label": "10 perfect stages"
+          },
+          {
+            "level": 4,
+            "name": "Flawless",
+            "threshold": 25,
+            "label": "25 perfect stages"
+          }
+        ]
+      },
+      "currentValue": 25,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 25
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 25
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 25
+        },
+        {
+          "level": 4,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 25
+        }
+      ],
+      "nextTier": null,
+      "progressToNext": 1
+    },
+    {
+      "definition": {
+        "id": "clean-match",
+        "name": "Clean Sheet",
+        "description": "Complete matches with zero misses, no-shoots, and procedurals.",
+        "category": "accuracy",
+        "icon": "shield-check",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "First Clean",
+            "threshold": 1,
+            "label": "1 clean match"
+          },
+          {
+            "level": 2,
+            "name": "Disciplined",
+            "threshold": 3,
+            "label": "3 clean matches"
+          },
+          {
+            "level": 3,
+            "name": "Composed",
+            "threshold": 5,
+            "label": "5 clean matches"
+          },
+          {
+            "level": 4,
+            "name": "Untouchable",
+            "threshold": 10,
+            "label": "10 clean matches"
+          }
+        ]
+      },
+      "currentValue": 9,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 8
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 8
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 8
+        }
+      ],
+      "nextTier": {
+        "level": 4,
+        "name": "Untouchable",
+        "threshold": 10,
+        "label": "10 clean matches"
+      },
+      "progressToNext": 0.8
+    },
+    {
+      "definition": {
+        "id": "dq-club",
+        "name": "DQ Club",
+        "description": "Been there, done that.",
+        "category": "milestone",
+        "icon": "ban",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Been there, done that",
+            "threshold": 1,
+            "label": "1 DQ"
+          }
+        ]
+      },
+      "currentValue": 0,
+      "unlockedTiers": [],
+      "nextTier": {
+        "level": 1,
+        "name": "Been there, done that",
+        "threshold": 1,
+        "label": "1 DQ"
+      },
+      "progressToNext": 0
+    },
+    {
+      "definition": {
+        "id": "globe-trotter",
+        "name": "Globe Trotter",
+        "description": "Compete in matches across different countries.",
+        "category": "variety",
+        "icon": "map-pin",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Explorer",
+            "threshold": 2,
+            "label": "2 countries"
+          },
+          {
+            "level": 2,
+            "name": "Traveler",
+            "threshold": 3,
+            "label": "3 countries"
+          },
+          {
+            "level": 3,
+            "name": "Globe Trotter",
+            "threshold": 5,
+            "label": "5 countries"
+          }
+        ]
+      },
+      "currentValue": 3,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 3
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 3
+        }
+      ],
+      "nextTier": {
+        "level": 3,
+        "name": "Globe Trotter",
+        "threshold": 5,
+        "label": "5 countries"
+      },
+      "progressToNext": 0
+    },
+    {
+      "definition": {
+        "id": "versatile",
+        "name": "Versatile",
+        "description": "Compete in multiple different divisions.",
+        "category": "variety",
+        "icon": "shuffle",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Dual Wielder",
+            "threshold": 2,
+            "label": "2 divisions"
+          },
+          {
+            "level": 2,
+            "name": "Multi-Divisional",
+            "threshold": 3,
+            "label": "3 divisions"
+          },
+          {
+            "level": 3,
+            "name": "Jack of All Trades",
+            "threshold": 5,
+            "label": "5 divisions"
+          }
+        ]
+      },
+      "currentValue": 7,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 7
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 7
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 7
+        }
+      ],
+      "nextTier": null,
+      "progressToNext": 1
+    },
+    {
+      "definition": {
+        "id": "social-shooter",
+        "name": "Social Shooter",
+        "description": "Share a squad with many different competitors across all your matches.",
+        "category": "variety",
+        "icon": "users",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Friendly",
+            "threshold": 10,
+            "label": "10 unique squadmates"
+          },
+          {
+            "level": 2,
+            "name": "Networker",
+            "threshold": 25,
+            "label": "25 unique squadmates"
+          },
+          {
+            "level": 3,
+            "name": "Well-Known",
+            "threshold": 50,
+            "label": "50 unique squadmates"
+          },
+          {
+            "level": 4,
+            "name": "Community Pillar",
+            "threshold": 100,
+            "label": "100 unique squadmates"
+          }
+        ]
+      },
+      "currentValue": 127,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 130
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 130
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 130
+        },
+        {
+          "level": 4,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 130
+        }
+      ],
+      "nextTier": null,
+      "progressToNext": 1
+    },
+    {
+      "definition": {
+        "id": "usual-suspects",
+        "name": "Usual Suspects",
+        "description": "Keep ending up in the same squad as the same competitor across different matches.",
+        "category": "variety",
+        "icon": "repeat-2",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Familiar Face",
+            "threshold": 2,
+            "label": "2 matches with same squadmate"
+          },
+          {
+            "level": 2,
+            "name": "Squad Regular",
+            "threshold": 3,
+            "label": "3 matches with same squadmate"
+          },
+          {
+            "level": 3,
+            "name": "Inseparable",
+            "threshold": 5,
+            "label": "5 matches with same squadmate"
+          }
+        ]
+      },
+      "currentValue": 14,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 14
+        },
+        {
+          "level": 2,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 14
+        },
+        {
+          "level": 3,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 14
+        }
+      ],
+      "nextTier": null,
+      "progressToNext": 1
+    },
+    {
+      "definition": {
+        "id": "fresh-faces",
+        "name": "Fresh Faces",
+        "description": "Compete in matches where every squadmate is someone you have never shared a squad with before.",
+        "category": "variety",
+        "icon": "sparkles",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "New Crowd",
+            "threshold": 2,
+            "label": "2 all-new squads"
+          },
+          {
+            "level": 2,
+            "name": "Always Exploring",
+            "threshold": 5,
+            "label": "5 all-new squads"
+          },
+          {
+            "level": 3,
+            "name": "True Nomad",
+            "threshold": 10,
+            "label": "10 all-new squads"
+          }
+        ]
+      },
+      "currentValue": 3,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 3
+        }
+      ],
+      "nextTier": {
+        "level": 2,
+        "name": "Always Exploring",
+        "threshold": 5,
+        "label": "5 all-new squads"
+      },
+      "progressToNext": 0.3333333333333333
+    },
+    {
+      "definition": {
+        "id": "band-of-brothers",
+        "name": "Band of Brothers",
+        "description": "Compete in matches where your entire squad is from the same club.",
+        "category": "variety",
+        "icon": "flag",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Club Outing",
+            "threshold": 2,
+            "label": "2 club-only squads"
+          },
+          {
+            "level": 2,
+            "name": "Team Players",
+            "threshold": 5,
+            "label": "5 club-only squads"
+          },
+          {
+            "level": 3,
+            "name": "Band of Brothers",
+            "threshold": 10,
+            "label": "10 club-only squads"
+          }
+        ]
+      },
+      "currentValue": 1,
+      "unlockedTiers": [],
+      "nextTier": {
+        "level": 1,
+        "name": "Club Outing",
+        "threshold": 2,
+        "label": "2 club-only squads"
+      },
+      "progressToNext": 0.5
+    },
+    {
+      "definition": {
+        "id": "traditionalist",
+        "name": "Swedish Regular",
+        "description": "Return to the same Swedish Level III+ competition year after year.",
+        "category": "milestone",
+        "icon": "calendar-days",
+        "tiers": [
+          {
+            "level": 1,
+            "name": "Returning",
+            "threshold": 2,
+            "label": "2 years at same event"
+          },
+          {
+            "level": 2,
+            "name": "Dedicated",
+            "threshold": 3,
+            "label": "3 years at same event"
+          },
+          {
+            "level": 3,
+            "name": "Legendary",
+            "threshold": 5,
+            "label": "5 years at same event"
+          }
+        ]
+      },
+      "currentValue": 2,
+      "unlockedTiers": [
+        {
+          "level": 1,
+          "unlockedAt": "2026-05-01T07:16:36.722Z",
+          "matchRef": null,
+          "value": 2
+        }
+      ],
+      "nextTier": {
+        "level": 2,
+        "name": "Dedicated",
+        "threshold": 3,
+        "label": "3 years at same event"
+      },
+      "progressToNext": 0
+    }
+  ],
+  "upcomingMatches": [
+    {
+      "ct": "22",
+      "matchId": "26195",
+      "name": "SDC 3 - Kullen/ÄPK",
+      "date": "2026-05-03T08:00:00+00:00",
+      "venue": "KullensPK",
+      "level": "l2",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 749433,
+      "registrationStarts": "2026-04-06T18:00:00+00:00",
+      "registrationCloses": "2026-05-03T06:00:00+00:00",
+      "isRegistrationPossible": true,
+      "squaddingStarts": "2026-04-20T18:00:00+00:00",
+      "squaddingCloses": null,
+      "isSquaddingPossible": true,
+      "isRegistered": true,
+      "isSquadded": true
+    },
+    {
+      "ct": "22",
+      "matchId": "26196",
+      "name": "SDC 4 - Växjö",
+      "date": "2026-05-10T08:00:00+00:00",
+      "venue": "Lövåsens skjutbanor Växjö",
+      "level": "l2",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 750597,
+      "registrationStarts": "2026-04-10T07:00:00+00:00",
+      "registrationCloses": "2026-05-08T06:00:00+00:00",
+      "isRegistrationPossible": true,
+      "squaddingStarts": "2026-04-17T07:00:00+00:00",
+      "squaddingCloses": "2026-05-03T17:00:00+00:00",
+      "isSquaddingPossible": true,
+      "isRegistered": true,
+      "isSquadded": true
+    },
+    {
+      "ct": "22",
+      "matchId": "26307",
+      "name": "Blacksmith Shotgun Open 2026",
+      "date": "2026-05-16T06:45:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 720379,
+      "registrationStarts": "2026-01-10T18:00:00+00:00",
+      "registrationCloses": null,
+      "isRegistrationPossible": true,
+      "squaddingStarts": null,
+      "squaddingCloses": null,
+      "isSquaddingPossible": true,
+      "isRegistered": true,
+      "isSquadded": true
+    },
+    {
+      "ct": "22",
+      "matchId": "26302",
+      "name": "Stockholm IPSC Open 2026",
+      "date": "2026-06-27T07:00:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 717611,
+      "registrationStarts": "2026-01-01T17:00:00+00:00",
+      "registrationCloses": "2026-06-23T21:59:00+00:00",
+      "isRegistrationPossible": true,
+      "squaddingStarts": "2026-01-01T16:58:00+00:00",
+      "squaddingCloses": null,
+      "isSquaddingPossible": true,
+      "isRegistered": true,
+      "isSquadded": true
+    },
+    {
+      "ct": "22",
+      "matchId": "26645",
+      "name": "MALMÖ - Beretta Gold Cup",
+      "date": "2026-07-11T06:00:00+00:00",
+      "venue": "Spillepengen",
+      "level": "l3",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 725464,
+      "registrationStarts": "2026-01-29T19:00:00+00:00",
+      "registrationCloses": "2026-07-10T06:00:00+00:00",
+      "isRegistrationPossible": true,
+      "squaddingStarts": "2026-06-09T17:00:00+00:00",
+      "squaddingCloses": "2026-07-08T17:00:00+00:00",
+      "isSquaddingPossible": false,
+      "isRegistered": true,
+      "isSquadded": false
+    },
+    {
+      "ct": "22",
+      "matchId": "25983",
+      "name": "RJPS GLO Phoenix Östersund",
+      "date": "2026-07-25T06:00:00+00:00",
+      "venue": "",
+      "level": "l3",
+      "division": "Pistol Caliber Carbine Optics Minor",
+      "competitorId": 732540,
+      "registrationStarts": "2026-02-14T15:00:00+00:00",
+      "registrationCloses": "2026-04-30T18:00:00+00:00",
+      "isRegistrationPossible": true,
+      "squaddingStarts": "2026-04-14T18:00:00+00:00",
+      "squaddingCloses": "2026-05-31T18:00:00+00:00",
+      "isSquaddingPossible": true,
+      "isRegistered": true,
+      "isSquadded": true
+    }
+  ]
+}
