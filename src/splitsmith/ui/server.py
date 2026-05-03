@@ -3472,6 +3472,58 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return JSONResponse(rec.model_dump(mode="json"))
 
+    @app.post("/api/lab/labels")
+    def lab_labels(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+        """Apply categorical labels to a fixture's audit JSON (issue #86).
+
+        Body shape::
+
+            {
+              "audit_path": "...stage-shots-foo-2026-stage4.json",
+              "labels": [
+                {"candidate_number": 7,  "reason": "cross_bay"},
+                {"candidate_number": 14, "reason": null},
+                {"candidate_number": 22, "subclass": "steel"}
+              ]
+            }
+
+        Patches in place with a ``.bak`` backup; returns counts of fields
+        actually changed. Drops the cached eval universe so the next
+        ``/api/lab/eval`` rebuilds it with the fresh labels.
+        """
+        audit_path = payload.get("audit_path")
+        labels_payload = payload.get("labels")
+        if not isinstance(audit_path, str) or not audit_path:
+            raise HTTPException(
+                status_code=400,
+                detail="payload must include 'audit_path' (string)",
+            )
+        if not isinstance(labels_payload, list):
+            raise HTTPException(
+                status_code=400,
+                detail="payload must include 'labels' (list)",
+            )
+        try:
+            target = Path(audit_path).expanduser().resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"fixture not found: {audit_path}",
+            ) from exc
+        if not target.is_file():
+            raise HTTPException(status_code=400, detail=f"not a file: {target}")
+        try:
+            labels = [lab_module.CandidateLabel.model_validate(item) for item in labels_payload]
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"invalid labels: {exc}") from exc
+        try:
+            counts = lab_module.apply_labels(target, labels)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _lab_universe_cache.pop("universe", None)
+        _lab_universe_cache.pop("last_run", None)
+        return JSONResponse({"path": str(target), "counts": counts})
+
     @app.post("/api/lab/save-config")
     def lab_save_config(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
         """Write a finished run's config + provenance to ``configs/<name>.yaml``.

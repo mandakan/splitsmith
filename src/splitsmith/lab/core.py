@@ -119,6 +119,23 @@ class EvalConfig(BaseModel):
         return EnsembleConfig(consensus=self.consensus, apriori_boost=self.apriori_boost)
 
 
+REASON_VALUES: tuple[str, ...] = (
+    "cross_bay",
+    "echo",
+    "wind",
+    "movement",
+    "steel_ring",
+    "speech",
+    "handling",
+    "agc_artifact",
+    "other",
+    "unknown",
+)
+SUBCLASS_VALUES: tuple[str, ...] = ("paper", "steel", "unknown")
+UNLABELED_REASON: str = "unlabeled"
+UNLABELED_SUBCLASS: str = "unlabeled"
+
+
 class EvalCandidate(BaseModel):
     """One candidate enriched with ground-truth label for diffing."""
 
@@ -140,6 +157,20 @@ class EvalCandidate(BaseModel):
     kept: bool
     truth: int = Field(description="1 if matched to a ground-truth shot within tolerance, else 0.")
     matched_shot_number: int | None = None
+    reason: str | None = Field(
+        default=None,
+        description=(
+            "Optional FP class for rejected candidates (issue #86). "
+            "One of REASON_VALUES; ``None`` when unlabeled."
+        ),
+    )
+    subclass: str | None = Field(
+        default=None,
+        description=(
+            "Optional positive subclass for kept candidates (issue #86). "
+            "One of SUBCLASS_VALUES; ``None`` when unlabeled."
+        ),
+    )
 
 
 class EvalFixtureMetrics(BaseModel):
@@ -155,6 +186,20 @@ class EvalFixtureMetrics(BaseModel):
     f1: float
     voter_recall: dict[str, float] = Field(
         description="Recall when only a single voter's vote is required (informational).",
+    )
+    fp_by_reason: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Surviving FPs grouped by ``reason`` label (issue #86). "
+            "Unlabeled FPs are counted under the ``unlabeled`` key."
+        ),
+    )
+    positives_by_subclass: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Kept TPs grouped by ``subclass`` label (issue #86). "
+            "Unlabeled positives are counted under ``unlabeled``."
+        ),
     )
 
 
@@ -200,6 +245,14 @@ class RunSummary(BaseModel):
     precision: float
     recall: float
     f1: float
+    fp_by_reason: dict[str, int] = Field(
+        default_factory=dict,
+        description="Corpus-wide FP counts by ``reason`` label (issue #86).",
+    )
+    positives_by_subclass: dict[str, int] = Field(
+        default_factory=dict,
+        description="Corpus-wide kept TP counts by ``subclass`` label (issue #86).",
+    )
 
 
 class EvalRun(BaseModel):
@@ -266,6 +319,21 @@ def _metrics(
             voter_recall[key] = sum(getattr(c, key) for c in truth_caps) / n_truth
     else:
         voter_recall = {"vote_a": 0.0, "vote_b": 0.0, "vote_c": 0.0, "vote_d": 0.0}
+
+    fp_by_reason: dict[str, int] = {}
+    for c in kept:
+        if c.truth == 1:
+            continue
+        key = c.reason or UNLABELED_REASON
+        fp_by_reason[key] = fp_by_reason.get(key, 0) + 1
+
+    positives_by_subclass: dict[str, int] = {}
+    for c in kept:
+        if c.truth != 1:
+            continue
+        key = c.subclass or UNLABELED_SUBCLASS
+        positives_by_subclass[key] = positives_by_subclass.get(key, 0) + 1
+
     return EvalFixtureMetrics(
         n_truth=n_truth,
         n_kept=n_kept,
@@ -276,6 +344,8 @@ def _metrics(
         recall=round(recall, 4),
         f1=round(f1, 4),
         voter_recall={k: round(v, 4) for k, v in voter_recall.items()},
+        fp_by_reason=fp_by_reason,
+        positives_by_subclass=positives_by_subclass,
     )
 
 
@@ -288,6 +358,15 @@ def _summary(fixtures: list[EvalFixture]) -> RunSummary:
     precision = tp / n_kept if n_kept else 0.0
     recall = tp / n_truth if n_truth else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+
+    fp_by_reason: dict[str, int] = {}
+    positives_by_subclass: dict[str, int] = {}
+    for f in fixtures:
+        for k, v in f.metrics.fp_by_reason.items():
+            fp_by_reason[k] = fp_by_reason.get(k, 0) + v
+        for k, v in f.metrics.positives_by_subclass.items():
+            positives_by_subclass[k] = positives_by_subclass.get(k, 0) + v
+
     return RunSummary(
         n_fixtures=len(fixtures),
         n_truth=n_truth,
@@ -298,7 +377,108 @@ def _summary(fixtures: list[EvalFixture]) -> RunSummary:
         precision=round(precision, 4),
         recall=round(recall, 4),
         f1=round(f1, 4),
+        fp_by_reason=fp_by_reason,
+        positives_by_subclass=positives_by_subclass,
     )
+
+
+def _time_key(t: float) -> float:
+    """Stable key for matching live candidates to stored audit entries.
+
+    Round to 3 decimals (1 ms): the audit JSON canonically rounds times to
+    4 decimals, so anything tighter than 1 ms is noise from float repr.
+    """
+    return round(float(t), 3)
+
+
+def _load_labels_from_audit(audit: dict[str, Any]) -> tuple[dict[float, str], dict[float, str]]:
+    """Extract ``reason`` (rejected) + ``subclass`` (kept) labels keyed by time."""
+    reason_by_time: dict[float, str] = {}
+    subclass_by_time: dict[float, str] = {}
+
+    pending = audit.get("_candidates_pending_audit") or {}
+    for c in pending.get("candidates", []):
+        t = c.get("time")
+        reason = c.get("reason")
+        if t is None or not isinstance(reason, str) or not reason:
+            continue
+        reason_by_time[_time_key(t)] = reason
+
+    for s in audit.get("shots", []):
+        t = s.get("time")
+        sub = s.get("subclass")
+        if t is None or not isinstance(sub, str) or not sub:
+            continue
+        subclass_by_time[_time_key(t)] = sub
+
+    return reason_by_time, subclass_by_time
+
+
+class CandidateLabel(BaseModel):
+    """One label patch to apply via :func:`apply_labels`."""
+
+    candidate_number: int
+    reason: str | None = Field(
+        default=None,
+        description="FP class for a rejected candidate; ``None`` clears any prior label.",
+    )
+    subclass: str | None = Field(
+        default=None,
+        description="Positive subclass for a kept candidate; ``None`` clears any prior label.",
+    )
+
+
+def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, int]:
+    """Patch ``reason`` / ``subclass`` fields on a fixture audit JSON in place.
+
+    Atomic: writes a ``.tmp`` then renames; existing JSON is rotated to
+    ``.bak`` (replacing any prior backup). Mirrors the pattern in
+    ``/api/fixture/audit`` PUT.
+
+    Returns counts of fields actually changed:
+    ``{reason_set, reason_cleared, subclass_set, subclass_cleared}``.
+    Unknown candidate_numbers are silently skipped so a partial UI save
+    against a stale fixture doesn't fail the whole batch.
+    """
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    pending = audit.setdefault("_candidates_pending_audit", {})
+    cands = pending.setdefault("candidates", [])
+    cand_by_number = {int(c.get("candidate_number", -1)): c for c in cands}
+    shots = audit.setdefault("shots", [])
+    shot_by_cand_number = {int(s.get("candidate_number", -1)): s for s in shots}
+
+    counts = {"reason_set": 0, "reason_cleared": 0, "subclass_set": 0, "subclass_cleared": 0}
+    for label in labels:
+        # reason -> rejected candidate entry
+        target = cand_by_number.get(label.candidate_number)
+        if target is not None and label.reason is not None:
+            if label.reason not in REASON_VALUES:
+                raise ValueError(f"unknown reason: {label.reason!r}")
+            target["reason"] = label.reason
+            counts["reason_set"] += 1
+        elif target is not None and label.reason is None and "reason" in target:
+            target.pop("reason", None)
+            counts["reason_cleared"] += 1
+
+        # subclass -> kept shot entry
+        shot = shot_by_cand_number.get(label.candidate_number)
+        if shot is not None and label.subclass is not None:
+            if label.subclass not in SUBCLASS_VALUES:
+                raise ValueError(f"unknown subclass: {label.subclass!r}")
+            shot["subclass"] = label.subclass
+            counts["subclass_set"] += 1
+        elif shot is not None and label.subclass is None and "subclass" in shot:
+            shot.pop("subclass", None)
+            counts["subclass_cleared"] += 1
+
+    tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
+    backup = audit_path.with_suffix(audit_path.suffix + ".bak")
+    tmp.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+    if backup.exists():
+        backup.unlink()
+    audit_path.replace(backup)
+    tmp.replace(audit_path)
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +528,7 @@ def run_eval(
         labels, matched, truth_times = _label_truth(
             cand_times, audit.get("shots", []), cfg.tolerance_ms
         )
+        reason_by_time, subclass_by_time = _load_labels_from_audit(audit)
         candidates = [
             EvalCandidate(
                 candidate_number=c.candidate_number,
@@ -368,6 +549,8 @@ def run_eval(
                 kept=c.kept,
                 truth=int(labels[i]),
                 matched_shot_number=matched[i],
+                reason=reason_by_time.get(_time_key(c.time)),
+                subclass=subclass_by_time.get(_time_key(c.time)),
             )
             for i, c in enumerate(result.candidates)
         ]

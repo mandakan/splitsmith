@@ -215,6 +215,37 @@ def save_config(
     sys.stdout.write(str(target) + "\n")
 
 
+@app.command("label")
+def label(
+    audit_json: Path = typer.Option(..., "--audit-json", help="Path to a fixture's audit JSON."),
+    candidate: int = typer.Option(..., "--candidate", help="candidate_number to label."),
+    reason: str | None = typer.Option(
+        None,
+        "--reason",
+        help="One of REASON_VALUES; clear with --clear-reason.",
+    ),
+    subclass: str | None = typer.Option(
+        None,
+        "--subclass",
+        help="One of SUBCLASS_VALUES (paper/steel/unknown); clear with --clear-subclass.",
+    ),
+    clear_reason: bool = typer.Option(False, "--clear-reason"),
+    clear_subclass: bool = typer.Option(False, "--clear-subclass"),
+    pretty: bool = typer.Option(True, "--pretty/--no-pretty"),
+) -> None:
+    """Patch one candidate's reason / subclass in a fixture audit JSON (issue #86)."""
+    payload = lab_module.CandidateLabel(
+        candidate_number=candidate,
+        reason=None if clear_reason else reason,
+        subclass=None if clear_subclass else subclass,
+    )
+    try:
+        counts = lab_module.apply_labels(audit_json.expanduser().resolve(), [payload])
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _emit({"path": str(audit_json), "counts": counts}, pretty=pretty)
+
+
 @app.command("load-config")
 def load_config(
     path: Path = typer.Argument(..., exists=True, readable=True),

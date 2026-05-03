@@ -1014,6 +1014,15 @@ export const api = {
   saveLabConfig: (payload: { name: string; note?: string; overwrite?: boolean }) =>
     request<{ path: string }>("/api/lab/save-config", { method: "POST", json: payload }),
 
+  applyLabLabels: (payload: {
+    audit_path: string;
+    labels: { candidate_number: number; reason?: string | null; subclass?: string | null }[];
+  }) =>
+    request<{ path: string; counts: Record<string, number> }>("/api/lab/labels", {
+      method: "POST",
+      json: payload,
+    }),
+
   rebuildLabCalibration: (payload: { target_recall?: number; tolerance_ms?: number; fixtures?: string[] } = {}) =>
     request<Job>("/api/lab/rebuild-calibration", { method: "POST", json: payload }),
 };
@@ -1062,7 +1071,26 @@ export interface LabEvalCandidate {
   kept: boolean;
   truth: number;
   matched_shot_number: number | null;
+  reason: string | null;
+  subclass: string | null;
 }
+
+export const LAB_REASONS = [
+  "cross_bay",
+  "echo",
+  "wind",
+  "movement",
+  "steel_ring",
+  "speech",
+  "handling",
+  "agc_artifact",
+  "other",
+  "unknown",
+] as const;
+export type LabReason = (typeof LAB_REASONS)[number];
+
+export const LAB_SUBCLASSES = ["paper", "steel", "unknown"] as const;
+export type LabSubclass = (typeof LAB_SUBCLASSES)[number];
 
 export interface LabEvalFixtureMetrics {
   n_truth: number;
@@ -1074,6 +1102,8 @@ export interface LabEvalFixtureMetrics {
   recall: number;
   f1: number;
   voter_recall: Record<string, number>;
+  fp_by_reason: Record<string, number>;
+  positives_by_subclass: Record<string, number>;
 }
 
 export interface LabEvalFixture {
@@ -1098,6 +1128,8 @@ export interface LabRunSummary {
   precision: number;
   recall: number;
   f1: number;
+  fp_by_reason: Record<string, number>;
+  positives_by_subclass: Record<string, number>;
 }
 
 export interface LabEvalUniverse {
