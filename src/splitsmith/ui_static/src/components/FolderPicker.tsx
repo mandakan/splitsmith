@@ -16,6 +16,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDownAZ,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
   ChevronRight,
   Clock,
   Cloud,
@@ -62,6 +65,12 @@ export function FolderPicker({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  // ``name`` keeps directories above videos in alphabetical order (the
+  // historical default). ``date-desc`` puts the most recent video at
+  // the top, which is what the cam-over-USB workflow wants -- you
+  // typically just shot the match, plug in, and want today's clips
+  // first. Toggling cycles name -> date-desc -> date-asc -> name.
+  const [sortMode, setSortMode] = useState<SortMode>("name");
 
   const wantMetadata = onSelectFiles !== undefined;
 
@@ -90,8 +99,15 @@ export function FolderPicker({
   }, []);
 
   const breadcrumb = useMemo(() => buildBreadcrumb(path), [path]);
-  const dirEntries = listing?.entries.filter((e) => e.kind === "dir") ?? [];
-  const videoEntries = listing?.entries.filter((e) => e.kind === "video") ?? [];
+  const dirEntries = useMemo(
+    () => sortEntries(listing?.entries.filter((e) => e.kind === "dir") ?? [], sortMode),
+    [listing, sortMode],
+  );
+  const videoEntries = useMemo(
+    () =>
+      sortEntries(listing?.entries.filter((e) => e.kind === "video") ?? [], sortMode),
+    [listing, sortMode],
+  );
   const videosHere = videoEntries.length;
   const multiFileMode = onSelectFiles !== undefined;
   const selectedCount = selectedFiles.size;
@@ -174,7 +190,9 @@ export function FolderPicker({
           ) : !listing ? null : dirEntries.length === 0 && videoEntries.length === 0 ? (
             <div className="p-4 text-sm text-muted-foreground">Empty folder.</div>
           ) : (
-            <ul className="max-h-80 divide-y divide-border overflow-y-auto">
+            <>
+              <SortHeader mode={sortMode} onChange={setSortMode} />
+              <ul className="max-h-80 divide-y divide-border overflow-y-auto">
               {dirEntries.map((entry) => {
                 const childPath = path ? joinPath(path, entry.name) : entry.name;
                 return (
@@ -233,6 +251,7 @@ export function FolderPicker({
                   })
                 : null}
             </ul>
+            </>
           )}
         </div>
       </div>
@@ -448,18 +467,87 @@ function ThumbnailFloat({ anchor, src, alt }: { anchor: DOMRect; src: string; al
   );
 }
 
+type SortMode = "name" | "date-desc" | "date-asc";
+
+/** Sort directory + video entries together. Directories without an
+ *  ``mtime`` fall back to name order so they don't bunch at the
+ *  bottom of a date sort. */
+function sortEntries<T extends { name: string; mtime: number | null }>(
+  entries: T[],
+  mode: SortMode,
+): T[] {
+  if (mode === "name") {
+    return [...entries].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+    );
+  }
+  const factor = mode === "date-desc" ? -1 : 1;
+  return [...entries].sort((a, b) => {
+    const am = a.mtime;
+    const bm = b.mtime;
+    if (am == null && bm == null) {
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    }
+    if (am == null) return 1; // entries without mtime sink to the end
+    if (bm == null) return -1;
+    return (am - bm) * factor;
+  });
+}
+
+function SortHeader({
+  mode,
+  onChange,
+}: {
+  mode: SortMode;
+  onChange: (next: SortMode) => void;
+}) {
+  // Click cycles name -> date-desc -> date-asc -> name. Two icons so
+  // the user can see at a glance which axis is active without a
+  // dropdown.
+  const cycle: Record<SortMode, SortMode> = {
+    name: "date-desc",
+    "date-desc": "date-asc",
+    "date-asc": "name",
+  };
+  const labels: Record<SortMode, string> = {
+    name: "Name",
+    "date-desc": "Date (newest)",
+    "date-asc": "Date (oldest)",
+  };
+  const icons: Record<SortMode, React.ReactNode> = {
+    name: <ArrowDownAZ className="size-3.5" />,
+    "date-desc": <ArrowDownNarrowWide className="size-3.5" />,
+    "date-asc": <ArrowUpNarrowWide className="size-3.5" />,
+  };
+  return (
+    <div className="flex items-center justify-end gap-2 border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
+      <span>Sort:</span>
+      <button
+        type="button"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
+        onClick={() => onChange(cycle[mode])}
+        title="Click to cycle: Name -> Date (newest) -> Date (oldest)"
+      >
+        {icons[mode]}
+        <span>{labels[mode]}</span>
+      </button>
+    </div>
+  );
+}
+
 function formatMtime(epochSeconds: number): string {
+  // Render in local-time ISO-8601 (``YYYY-MM-DD HH:MM``) so dates sort
+  // correctly as strings and don't read as gibberish for users with
+  // non-US locales (the previous ``toLocaleDateString`` flipped to
+  // ``DD/MM/YY`` or ``YY-MM-DD`` depending on system locale, which made
+  // the column harder to scan).
   const d = new Date(epochSeconds * 1000);
-  const date = d.toLocaleDateString(undefined, {
-    year: "2-digit",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  return `${date} ${time}`;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
 function formatDuration(seconds: number): string {
