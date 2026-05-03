@@ -376,9 +376,7 @@ def test_retention_protects_unacked_failures_from_succeeded_flood() -> None:
     for i in range(3):
         reg.submit(kind=f"ok-{i}", fn=lambda _h: None)
     assert _wait_until(
-        lambda: not any(
-            j.status in (JobStatus.PENDING, JobStatus.RUNNING) for j in reg.list()
-        )
+        lambda: not any(j.status in (JobStatus.PENDING, JobStatus.RUNNING) for j in reg.list())
     )
 
     surviving = {j.id for j in reg.list()}
