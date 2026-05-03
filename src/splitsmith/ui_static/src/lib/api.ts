@@ -63,6 +63,7 @@ export interface MatchProject {
   updated_at: string;
   competitor_name: string | null;
   scoreboard_match_id: string | null;
+  scoreboard_content_type: number | null;
   match_date: string | null;
   stages: StageEntry[];
   unassigned_videos: StageVideo[];
@@ -75,6 +76,75 @@ export interface MatchProject {
   thumbs_dir: string | null;
   trim_pre_buffer_seconds: number;
   trim_post_buffer_seconds: number;
+}
+
+/** GET /api/scoreboard/source response. ``mode === "local"`` means the
+ *  offline JSON path will serve every scoreboard request -- no network is
+ *  used. ``http_token_set`` reflects whether ``SPLITSMITH_SSI_TOKEN`` is
+ *  set on the server process; the SPA reads it to render a setup hint
+ *  before the user runs into a 401. */
+export interface ScoreboardSource {
+  mode: "local" | "online";
+  local_match_json_path: string | null;
+  http_token_set: boolean;
+}
+
+/** One row in the ``GET /api/scoreboard/search`` array (mirrors
+ *  ``splitsmith.ui.scoreboard.models.MatchRef``). */
+export interface ScoreboardMatchRef {
+  id: number;
+  content_type: number;
+  name: string;
+  venue: string | null;
+  date: string;
+  ends: string | null;
+  status: string;
+  region: string;
+  discipline: string;
+  level: string;
+  registration_status: string;
+  scoring_completed: number;
+}
+
+export interface ScoreboardAuthDetail {
+  code: "scoreboard_auth";
+  message: string;
+  env_var: string;
+  docs_url: string;
+}
+
+export interface ScoreboardRateLimitDetail {
+  code: "scoreboard_rate_limited";
+  message: string;
+  retry_after: number | null;
+}
+
+export interface ScoreboardOfflineDetail {
+  code: "scoreboard_offline";
+  message: string;
+}
+
+export type ScoreboardErrorDetail =
+  | ScoreboardAuthDetail
+  | ScoreboardRateLimitDetail
+  | ScoreboardOfflineDetail;
+
+/** Pull a typed scoreboard error out of an ApiError, or null if the body
+ *  doesn't match. The Ingest screen renders different banner copy for each
+ *  ``code`` per #50's error UX requirements. */
+export function asScoreboardError(err: unknown): ScoreboardErrorDetail | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object") return null;
+  const code = (body as { code?: unknown }).code;
+  if (
+    code === "scoreboard_auth" ||
+    code === "scoreboard_rate_limited" ||
+    code === "scoreboard_offline"
+  ) {
+    return body as ScoreboardErrorDetail;
+  }
+  return null;
 }
 
 export interface PlaceholderStagesRequest {
@@ -433,6 +503,40 @@ export const api = {
       method: "POST",
       json: { data, overwrite },
     }),
+
+  // SSI Scoreboard v1 wiring (#50). The UI calls these without picking the
+  // backend implementation -- the server resolves Local vs Http per request
+  // based on whether ``<project>/scoreboard/match.json`` exists.
+
+  getScoreboardSource: () => request<ScoreboardSource>("/api/scoreboard/source"),
+
+  /** Drop-and-populate: the SPA reads the file as text, parses JSON, and
+   *  posts it here. Backend writes to ``<project>/scoreboard/match.json``
+   *  and uses LocalJsonScoreboard so subsequent requests stay fully offline. */
+  uploadScoreboard: (data: unknown, overwrite = false) =>
+    request<MatchProject>("/api/scoreboard/upload", {
+      method: "POST",
+      json: { data, overwrite },
+    }),
+
+  /** Free-text match search. In offline mode this hits the dropped match
+   *  only; in online mode it goes to ``GET /api/v1/events?q=``. */
+  searchScoreboardMatches: (q: string) =>
+    request<ScoreboardMatchRef[]>(
+      `/api/scoreboard/search?q=${encodeURIComponent(q)}`,
+    ),
+
+  /** Cache-first full match fetch -> populate project. */
+  fetchScoreboardMatch: (
+    contentType: number,
+    matchId: number,
+    overwrite = false,
+  ) =>
+    request<MatchProject>("/api/scoreboard/fetch", {
+      method: "POST",
+      json: { content_type: contentType, match_id: matchId, overwrite },
+    }),
+
 
   createPlaceholderStages: (req: PlaceholderStagesRequest) =>
     request<MatchProject>("/api/project/placeholder-stages", {

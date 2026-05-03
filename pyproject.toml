@@ -20,6 +20,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "httpx>=0.28.0",
+    # Auto-loads <project>/.env / .env.local so SPLITSMITH_SSI_TOKEN works
+    # without the user having to ``export`` it before launching the UI.
+    "python-dotenv>=1.0.0",
     # Ensemble shot-detection runtime (issue #31). Heavy ML deps live in
     # the runtime path because the production audit UI needs voters
     # B (CLAP), C (GBDT), and D (PANN) to seed shots[] correctly.

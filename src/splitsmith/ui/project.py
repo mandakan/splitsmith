@@ -273,6 +273,12 @@ class MatchProject(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     competitor_name: str | None = None
     scoreboard_match_id: str | None = None
+    # SSI ``content_type`` tier for the linked match (matches the integer the
+    # ``ScoreboardClient`` Protocol expects). Populated when the project is
+    # bootstrapped via the SSI v1 path (drop-JSON or live fetch); ``None`` for
+    # legacy projects that were imported via the older ``examples/``-shaped
+    # scoreboard JSON.
+    scoreboard_content_type: int | None = None
     # Optional match date (the day the match was shot). Used as a hint for the
     # SSI Scoreboard suggestion flow and surfaced in the UI. Auto-filled from
     # the earliest video mtime when starting source-first; overwritten by
@@ -710,6 +716,86 @@ class MatchProject(BaseModel):
         # land back in unassigned_videos -- the user can reassign manually.
         for stage_number, videos in videos_by_stage.items():
             if stage_number in scoreboard_numbers:
+                continue
+            for v in videos:
+                v.role = "secondary"
+                self.unassigned_videos.append(v)
+
+    def populate_from_match_data(
+        self,
+        match_data: Any,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Populate ``stages`` (and metadata) from a parsed SSI v1 ``MatchData``.
+
+        Used by the offline drop-JSON path and the online HTTP path -- both
+        produce a ``MatchData`` that flows through here so the resulting
+        ``MatchProject`` shape is identical regardless of source (acceptance
+        criterion from issue #14).
+
+        Per-competitor stage scores are not part of ``MatchData`` (the v1 API
+        returns the match shell + competitor list only), so the new stages
+        are flagged ``placeholder=True`` with ``time_seconds=0.0`` /
+        ``scorecard_updated_at=None``. A subsequent legacy ``import_scoreboard``
+        with a per-competitor stages payload overlays the timing data while
+        preserving any video assignments by ``stage_number``.
+
+        Raises :class:`ScoreboardImportConflictError` when real (non-placeholder)
+        stages already exist and ``overwrite`` is ``False`` -- replacing them
+        would orphan video assignments, so the default is to refuse.
+        """
+        # Local import to avoid a module-level cycle (scoreboard package
+        # depends on the project layout for project-relative paths).
+        from splitsmith.ui.scoreboard.local import _parse_ssi_url
+        from splitsmith.ui.scoreboard.models import MatchData
+
+        if not isinstance(match_data, MatchData):
+            match_data = MatchData.model_validate(match_data)
+
+        real_stages = [s for s in self.stages if not s.placeholder]
+        if real_stages and not overwrite:
+            raise ScoreboardImportConflictError(
+                "project already has scoreboard-backed stages; pass "
+                "overwrite=True to replace (this orphans current video "
+                "assignments)"
+            )
+
+        self.name = match_data.name
+        ct, mid = _parse_ssi_url(match_data.ssi_url)
+        if mid is not None:
+            self.scoreboard_match_id = str(mid)
+        if ct is not None:
+            self.scoreboard_content_type = ct
+        if match_data.date:
+            try:
+                self.match_date = date.fromisoformat(match_data.date[:10])
+            except ValueError:
+                pass
+
+        videos_by_stage: dict[int, list[StageVideo]] = {}
+        if not real_stages:
+            for s in self.stages:
+                if s.videos:
+                    videos_by_stage[s.stage_number] = list(s.videos)
+
+        new_stages: list[StageEntry] = [
+            StageEntry(
+                stage_number=stage.stage_number,
+                stage_name=stage.name,
+                time_seconds=0.0,
+                scorecard_updated_at=None,
+                videos=videos_by_stage.get(stage.stage_number, []),
+                placeholder=True,
+            )
+            for stage in match_data.stages
+        ]
+        new_stages.sort(key=lambda s: s.stage_number)
+        self.stages = new_stages
+
+        keep_numbers = {s.stage_number for s in new_stages}
+        for stage_number, videos in videos_by_stage.items():
+            if stage_number in keep_numbers:
                 continue
             for v in videos:
                 v.role = "secondary"

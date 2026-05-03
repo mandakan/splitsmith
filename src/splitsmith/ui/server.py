@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -83,6 +84,18 @@ from .project import (
     StageVideo,
     VideoRole,
 )
+from .scoreboard import (
+    CachingScoreboardClient,
+    LocalJsonScoreboard,
+    MatchNotFound,
+    ScoreboardAuthError,
+    ScoreboardClient,
+    ScoreboardError,
+    ScoreboardRateLimited,
+    ScoreboardUpstreamError,
+    SsiHttpClient,
+)
+from .scoreboard.local import DEFAULT_MATCH_FILENAME, DEFAULT_SCOREBOARD_DIRNAME
 
 
 def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
@@ -249,6 +262,125 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _load_env_files(project_root: Path) -> list[Path]:
+    """Pick up ``.env.local`` then ``.env`` from the project root *and* the
+    cwd the user launched the server from.
+
+    ``SPLITSMITH_SSI_TOKEN`` (and any other ``SPLITSMITH_*`` env var) lives
+    in one of these files for typical setups; without this hook the token
+    only works if the user remembered to ``export`` it before launching
+    ``splitsmith ui``.
+
+    Search order (later files override earlier ones, but never an explicit
+    ``export`` -- the process env always wins via ``override=False``):
+
+    1. ``<project_root>/.env`` -- shared per-project defaults
+    2. ``<project_root>/.env.local`` -- per-machine secret, gitignored
+    3. ``<cwd>/.env``           -- repo / launch-dir shared default
+    4. ``<cwd>/.env.local``     -- repo / launch-dir per-machine secret
+
+    The cwd entries cover the common case where the user keeps the token
+    next to the splitsmith repo they ``uv run splitsmith ui`` from, while
+    the project-root entries cover per-match configuration. Duplicate paths
+    (when the user runs from inside the project directory) are loaded once.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return []
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    cwd = Path.cwd().resolve()
+    for base in (project_root.resolve(), cwd):
+        for name in (".env", ".env.local"):
+            candidate = (base / name).resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate.is_file():
+                candidates.append(candidate)
+
+    for path in candidates:
+        load_dotenv(path, override=False)
+    return candidates
+
+
+class _ScoreboardClientCtx:
+    """Context-manager wrapper so Local + HTTP-backed clients close cleanly.
+
+    The protocol doesn't require ``close()``, but the HTTP client owns an
+    ``httpx.Client`` we want to release per request. Local clients are a
+    no-op. The wrapper proxies the four protocol methods only -- callers
+    must not poke at internal types.
+    """
+
+    def __init__(
+        self,
+        inner: ScoreboardClient,
+        *,
+        owns_close: bool,
+        inner_http: SsiHttpClient | None = None,
+    ) -> None:
+        self._inner = inner
+        self._owns_close = owns_close
+        self._inner_http = inner_http
+
+    def __enter__(self) -> ScoreboardClient:
+        return self._inner
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._owns_close and self._inner_http is not None:
+            self._inner_http.close()
+
+
+def _validate_match_data(raw: dict[str, Any]):  # type: ignore[no-untyped-def]
+    """Parse a JSON dict as :class:`MatchData`. Raises ``ValueError`` on shape mismatch."""
+    from .scoreboard.models import MatchData
+
+    try:
+        return MatchData.model_validate(raw)
+    except Exception as exc:  # pydantic ValidationError or other
+        raise ValueError(f"dropped JSON is not a valid SSI v1 match payload: {exc}") from exc
+
+
+def _raise_scoreboard_http(exc: ScoreboardError) -> None:
+    """Translate a typed ``ScoreboardError`` into the right HTTP status.
+
+    Codes are stable so the SPA can match on ``detail.code`` regardless of
+    the human message. Banner copy lives client-side; we ship the message
+    + retry hint, not the rendered string.
+    """
+    if isinstance(exc, ScoreboardAuthError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "scoreboard_auth",
+                "message": str(exc),
+                "env_var": "SPLITSMITH_SSI_TOKEN",
+                "docs_url": "https://github.com/mandakan/ssi-scoreboard/blob/main/docs/api-v1.md",
+            },
+        )
+    if isinstance(exc, ScoreboardRateLimited):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "scoreboard_rate_limited",
+                "message": str(exc),
+                "retry_after": exc.retry_after,
+            },
+        )
+    if isinstance(exc, ScoreboardUpstreamError):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "scoreboard_offline",
+                "message": str(exc),
+            },
+        )
+    raise HTTPException(status_code=500, detail=str(exc))
+
+
 @dataclass
 class AppState:
     """Per-process state. One project root per server instance."""
@@ -296,6 +428,34 @@ class HealthResponse(BaseModel):
 
 class ScoreboardImportRequest(BaseModel):
     data: dict[str, Any]
+    overwrite: bool = False
+
+
+class ScoreboardUploadRequest(BaseModel):
+    """Body for POST /api/scoreboard/upload (#50).
+
+    The SPA reads the dropped file as text, parses it as JSON, and posts
+    the dict here. The backend writes it to ``<project>/scoreboard/match.json``
+    and uses :class:`LocalJsonScoreboard` to populate the project; the same
+    ``MatchData`` shape an online ``get_match`` would return.
+    """
+
+    data: dict[str, Any]
+    overwrite: bool = False
+
+
+class ScoreboardFetchRequest(BaseModel):
+    """Body for POST /api/scoreboard/fetch (#50).
+
+    Pulls a full match from the live scoreboard (cache-first via
+    :class:`CachingScoreboardClient`) and populates the project. When the
+    project already has a local ``scoreboard/match.json`` we still honour
+    the offline path -- the endpoint refuses with 409 so the user clears
+    the local file before falling back to the live source.
+    """
+
+    content_type: int
+    match_id: int
     overwrite: bool = False
 
 
@@ -463,7 +623,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     visible without restarting the server.
     """
     MatchProject.init(project_root, name=project_name)
-    state = AppState(project_root=project_root.resolve())
+    resolved_root = project_root.resolve()
+    state = AppState(project_root=resolved_root)
+    loaded_env = _load_env_files(resolved_root)
+    if loaded_env:
+        logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
 
     app = FastAPI(
         title="splitsmith UI",
@@ -474,6 +638,31 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     # ----------------------------------------------------------------------
     # API
     # ----------------------------------------------------------------------
+
+    def _local_match_path() -> Path:
+        """Resolve ``<project>/scoreboard/match.json`` (offline source path)."""
+        return state.project_root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
+
+    def _resolve_scoreboard_client() -> ScoreboardClient:
+        """Pick the concrete ``ScoreboardClient`` for this request.
+
+        Local JSON wins when present so the user can stay fully offline by
+        dropping a file. Otherwise we wrap the HTTP client in the project-
+        local cache so a second open of the same match is a cache hit. The
+        caller is responsible for ``close()`` -- both implementations are
+        context managers (Local is a no-op; HTTP closes the httpx Client).
+        """
+        local_path = _local_match_path()
+        if local_path.exists():
+            local = LocalJsonScoreboard(local_path)
+            return _ScoreboardClientCtx(local, owns_close=False)
+        try:
+            http = SsiHttpClient()
+        except ScoreboardAuthError as exc:
+            _raise_scoreboard_http(exc)
+        cache_dir = state.project_root / "scoreboard" / "cache"
+        cached = CachingScoreboardClient(http, cache_dir)
+        return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -511,6 +700,91 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    # ----------------------------------------------------------------------
+    # SSI Scoreboard v1 wiring (#50)
+    # ----------------------------------------------------------------------
+    #
+    # The UI consumes only the ``ScoreboardClient`` Protocol -- the resolver
+    # below picks the concrete implementation per request based on project
+    # state. Drop a ``<project>/scoreboard/match.json`` and every request
+    # transparently switches to the offline path; remove the file and the
+    # next request hits the live API. Errors are mapped to HTTP statuses
+    # the SPA can render as actionable banners (acceptance criterion).
+
+    @app.get("/api/scoreboard/source")
+    def scoreboard_source() -> JSONResponse:
+        """Report whether the offline JSON or the live API will serve requests.
+
+        The SPA renders a "loaded from local JSON, no network used" indicator
+        when ``mode == "local"`` so the user can verify the offline path
+        without watching dev tools.
+        """
+        local_path = _local_match_path()
+        local = local_path.exists()
+        http_ready = bool(os.environ.get("SPLITSMITH_SSI_TOKEN"))
+        return JSONResponse(
+            {
+                "mode": "local" if local else "online",
+                "local_match_json_path": str(local_path) if local else None,
+                "http_token_set": http_ready,
+            }
+        )
+
+    @app.post("/api/scoreboard/upload")
+    def scoreboard_upload(req: ScoreboardUploadRequest) -> JSONResponse:
+        """Accept a dropped SSI v1 ``match.json`` and populate the project.
+
+        Writes the JSON to ``<project>/scoreboard/match.json`` *first*, so
+        a subsequent reload still finds the offline source even if the
+        populate step throws. Validation errors leave the file in place so
+        the user can inspect it.
+        """
+        try:
+            match_data_obj = _validate_match_data(req.data)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        local_path = _local_match_path()
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(
+            json.dumps(req.data, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        project = state.load()
+        try:
+            project.populate_from_match_data(match_data_obj, overwrite=req.overwrite)
+        except ScoreboardImportConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.get("/api/scoreboard/search")
+    def scoreboard_search(q: str = Query("", min_length=0)) -> JSONResponse:
+        """Search the active scoreboard source for matches by free-text query."""
+        with _resolve_scoreboard_client() as client:
+            try:
+                refs = client.search_matches(q)
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        return JSONResponse([ref.model_dump(mode="json") for ref in refs])
+
+    @app.post("/api/scoreboard/fetch")
+    def scoreboard_fetch(req: ScoreboardFetchRequest) -> JSONResponse:
+        """Fetch a full match (cache-first) and populate the project."""
+        with _resolve_scoreboard_client() as client:
+            try:
+                match_data = client.get_match(req.content_type, req.match_id)
+            except MatchNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        project = state.load()
+        try:
+            project.populate_from_match_data(match_data, overwrite=req.overwrite)
+        except ScoreboardImportConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 
