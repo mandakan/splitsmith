@@ -20,6 +20,18 @@ export interface BeepCandidate {
   duration_ms: number;
 }
 
+/** Response from POST /api/stages/{n}/videos/{vid}/beep/snap. The user
+ *  placed a marker by ear; the server returns the rise-foot leading edge
+ *  of the strongest run inside a tight window so the SPA can offer the
+ *  refinement as Accept / Dismiss. */
+export interface BeepSnapResult {
+  snapped_time: number;
+  delta: number;
+  peak_amplitude: number;
+  score: number;
+  duration_ms: number;
+}
+
 export interface StageVideo {
   path: string;
   /** Stable URL-safe id derived from ``path``. Used by per-video API
@@ -772,6 +784,22 @@ export const api = {
     request<MatchProject>(
       `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/select`,
       { method: "POST", json: { time } },
+    ),
+
+  /** Snap a user-placed beep marker to the strongest tone in a tight
+   *  window around the hint. Stateless -- the caller decides whether to
+   *  accept the proposal as a manual override. 404 means "no run met
+   *  duration / amplitude in that window"; widen ``windowS`` or move
+   *  the marker. */
+  snapBeepForVideo: (
+    stageNumber: number,
+    videoId: string,
+    hintTime: number,
+    windowS: number = 0.5,
+  ) =>
+    request<BeepSnapResult>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
+      { method: "POST", json: { hint_time: hintTime, window_s: windowS } },
     ),
 
   /** Flip ``beep_reviewed`` on a single video (issue #71). Pure UI-state

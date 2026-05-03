@@ -21,19 +21,23 @@
  * visible in the preview).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Check,
   ChevronDown,
   ChevronRight,
+  Crosshair,
   Loader2,
+  Pause,
   Pencil,
   Play,
   RefreshCw,
   Sparkles,
   Trash2,
   Volume2,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +48,7 @@ import {
   api,
   asSourceUnreachable,
   type BeepCandidate,
+  type BeepSnapResult,
   type Job,
   type MatchProject,
   type PeaksResult,
@@ -236,15 +241,11 @@ export function BeepSection({
         {isPrimary ? (
           <BeepWaveformPicker
             stageNumber={stageNumber}
+            videoId={videoId}
             primaryBeepTime={video.beep_time}
             draftSourceTime={draftValid ? draftSourceTime : null}
             onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
-          />
-        ) : null}
-        {isPrimary ? (
-          <AudioVerifier
-            stageNumber={stageNumber}
-            suspectedTime={draftValid ? draftSourceTime : video.beep_time}
+            setError={setError}
           />
         ) : (
           <div className="text-xs text-muted-foreground">
@@ -403,36 +404,56 @@ export function BeepSection({
   );
 }
 
-/** Click-to-set waveform inside the manual-edit panel.
+/** Combined waveform + audio player + snap-to-beep, primary-only.
  *
- *  Primary-only: the waveform shows the project's audit clip (or full
- *  primary WAV when no trim is cached yet). Secondaries don't have a
- *  project-level waveform endpoint and they don't need one for beep
- *  alignment -- the beep is a loud sharp pulse the preview clip makes
- *  obvious.
+ *  Workflow:
+ *    1. User plays the audio (controls below the waveform). The playhead
+ *       on the canvas tracks the <audio> element's currentTime via rAF.
+ *    2. User clicks / drags the waveform to seek. Seeking moves the
+ *       playhead but does NOT touch the draft -- this is for listening,
+ *       not for committing a beep time.
+ *    3. "Set marker here" copies the playhead time (in source coords)
+ *       into the draft. A blue dashed marker appears at that position.
+ *    4. "Snap to beep" calls /beep/snap with the marker time + a tight
+ *       window. The server returns the rise-foot leading edge of the
+ *       strongest tone in that neighbourhood. The picker offers the
+ *       proposal as Accept (replace draft) / Dismiss (keep marker).
+ *    5. Zoom controls (in / out) feed pixelsPerSecond to the Waveform so
+ *       the user can see sub-frame detail near the beep.
  *
- *  The /audio + /peaks endpoints serve the **trimmed** audit clip when one
- *  exists (cut around the previously-detected beep) and the **full**
- *  primary WAV otherwise. Time on the waveform is therefore "local clip
- *  time", not source time. We translate using the offset
- *  ``primary.beep_time - peaks.beep_time``: in the trimmed case this is
- *  exactly the trim window's start; in the untrimmed case both sides are
- *  the same number so the offset is zero. */
+ *  Time conversion: /audio + /peaks serve clip-local time (the trimmed
+ *  audit clip when cached, the full primary WAV otherwise). The picker's
+ *  draft is in source time. ``offset = primary.beep_time - peaks.beep_time``
+ *  bridges the two -- zero when the WAV is full source, equal to the trim
+ *  start when it's a trimmed audit clip.
+ *
+ *  Secondary cameras don't have a project-level waveform endpoint and
+ *  fall back to the numeric input + preview clip in BeepSection. */
 function BeepWaveformPicker({
   stageNumber,
+  videoId,
   primaryBeepTime,
   draftSourceTime,
   onPick,
+  setError,
 }: {
   stageNumber: number;
+  videoId: string;
   primaryBeepTime: number | null;
   draftSourceTime: number | null;
   onPick: (sourceTime: number) => void;
+  setError: (msg: string | null) => void;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [localTime, setLocalTime] = useState<number>(0);
+  const [playing, setPlaying] = useState(false);
+  const [pxPerSec, setPxPerSec] = useState<number | null>(null);
+  const [snapping, setSnapping] = useState(false);
+  const [proposal, setProposal] = useState<BeepSnapResult | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -456,18 +477,122 @@ function BeepWaveformPicker({
     };
   }, [stageNumber]);
 
+  // Source-time <-> clip-time bridge. Zero when the WAV is the full
+  // primary; equal to the trim window's start when the audit clip is
+  // cached.
   const offset = useMemo(() => {
     if (primaryBeepTime == null || !peaks || peaks.beep_time == null) return 0;
     return primaryBeepTime - peaks.beep_time;
   }, [primaryBeepTime, peaks]);
 
-  useEffect(() => {
-    if (!peaks || draftSourceTime == null) return;
-    const local = draftSourceTime - offset;
-    if (local >= 0 && local <= peaks.duration) {
-      setLocalTime(local);
+  // The draft (in source coords) becomes a dashed marker on the
+  // waveform. Falls back to the auto-detected beep when no draft yet.
+  const markerLocal = useMemo(() => {
+    if (!peaks) return null;
+    if (draftSourceTime != null) {
+      const local = draftSourceTime - offset;
+      if (local >= 0 && local <= peaks.duration) return local;
+      return null;
     }
-  }, [draftSourceTime, peaks, offset]);
+    return peaks.beep_time;
+  }, [peaks, draftSourceTime, offset]);
+
+  // Drive the playhead from the <audio> element while playing. The
+  // browser fires `timeupdate` only ~4 Hz; rAF gives us ~60 Hz so the
+  // playhead doesn't visibly stutter against the static waveform.
+  useEffect(() => {
+    if (!playing) return;
+    const tick = () => {
+      const el = audioRef.current;
+      if (el) setLocalTime(el.currentTime);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [playing]);
+
+  const togglePlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play().catch(() => {
+        /* ignore autoplay restrictions; user can hit play in the controls */
+      });
+    } else {
+      el.pause();
+    }
+  }, []);
+
+  // Click / drag = seek audio AND set the marker. Marker and the
+  // numeric input both read from the draft state in the parent, so they
+  // stay in lock-step: dragging the waveform updates the input,
+  // typing into the input moves the dashed marker.
+  const handleScrub = useCallback(
+    (t: number) => {
+      setLocalTime(t);
+      const el = audioRef.current;
+      if (el) {
+        try {
+          el.currentTime = t;
+        } catch {
+          /* metadata not loaded yet */
+        }
+      }
+    },
+    [],
+  );
+
+  const handleScrubEnd = useCallback(() => {
+    if (!peaks) return;
+    const sourceTime = Math.max(0, localTime + offset);
+    setProposal(null);
+    onPick(sourceTime);
+  }, [peaks, localTime, offset, onPick]);
+
+  const requestSnap = useCallback(async () => {
+    if (draftSourceTime == null) return;
+    setSnapping(true);
+    setError(null);
+    try {
+      const result = await api.snapBeepForVideo(stageNumber, videoId, draftSourceTime, 1.5);
+      setProposal(result);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        setError(
+          "No beep candidate found within ±1.5s of the marker. Move the marker closer or set the time manually.",
+        );
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setSnapping(false);
+    }
+  }, [draftSourceTime, stageNumber, videoId, setError]);
+
+  const acceptProposal = useCallback(() => {
+    if (proposal == null) return;
+    onPick(proposal.snapped_time);
+    setProposal(null);
+  }, [proposal, onPick]);
+
+  const dismissProposal = useCallback(() => setProposal(null), []);
+
+  const zoomIn = useCallback(() => {
+    setPxPerSec((cur) => {
+      if (cur == null) return 240;
+      return Math.min(2000, cur * 2);
+    });
+  }, []);
+  const zoomOut = useCallback(() => {
+    setPxPerSec((cur) => {
+      if (cur == null) return null;
+      const next = cur / 2;
+      return next < 60 ? null : next;
+    });
+  }, []);
 
   if (loading) {
     return (
@@ -478,20 +603,44 @@ function BeepWaveformPicker({
     );
   }
   if (unavailable || !peaks) {
-    return null;
+    return (
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Volume2 className="size-3" />
+        Run "Detect beep" first to extract audio for the picker.
+      </div>
+    );
   }
-
-  const handleScrub = (t: number) => {
-    setLocalTime(t);
-  };
-  const handleScrubEnd = () => {
-    onPick(localTime + offset);
-  };
 
   return (
     <div className="space-y-1">
-      <div className="text-xs text-muted-foreground">
-        Drag the waveform to set the beep time (releases snap to source seconds)
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">
+          Click / drag the waveform to set the marker (input below
+          updates), then "Snap to beep"
+        </span>
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={zoomOut}
+            disabled={pxPerSec == null}
+            aria-label="Zoom out"
+            title="Zoom out"
+            className="size-7"
+          >
+            <ZoomOut className="size-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={zoomIn}
+            aria-label="Zoom in"
+            title="Zoom in"
+            className="size-7"
+          >
+            <ZoomIn className="size-3.5" />
+          </Button>
+        </div>
       </div>
       <Waveform
         peaks={peaks.peaks}
@@ -499,10 +648,90 @@ function BeepWaveformPicker({
         currentTime={localTime}
         onScrub={handleScrub}
         onScrubEnd={handleScrubEnd}
-        beepTime={peaks.beep_time}
+        beepTime={markerLocal}
+        pixelsPerSecond={pxPerSec}
         height={80}
         ariaLabel={`Beep editor waveform for stage ${stageNumber}`}
       />
+      <audio
+        ref={audioRef}
+        src={api.stageAudioUrl(stageNumber)}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        controls
+        className="w-full"
+      />
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={togglePlay}
+          title="Play / pause the audio"
+        >
+          {playing ? <Pause /> : <Play />}
+          {playing ? "Pause" : "Play"}
+        </Button>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={() => void requestSnap()}
+          disabled={draftSourceTime == null || snapping}
+          title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
+        >
+          {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
+          Snap to beep
+        </Button>
+      </div>
+      {proposal != null ? (
+        <SnapProposal
+          proposal={proposal}
+          onAccept={acceptProposal}
+          onDismiss={dismissProposal}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function SnapProposal({
+  proposal,
+  onAccept,
+  onDismiss,
+}: {
+  proposal: BeepSnapResult;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) {
+  const deltaMs = Math.round(proposal.delta * 1000);
+  const sign = deltaMs >= 0 ? "+" : "";
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
+      <Sparkles className="size-3" />
+      <span className="font-mono tabular-nums">
+        Suggested: {proposal.snapped_time.toFixed(3)}s
+      </span>
+      <span className="text-muted-foreground">
+        ({sign}
+        {deltaMs} ms)
+      </span>
+      <span
+        className="text-muted-foreground"
+        title={`Silence-preference score: ${proposal.score.toFixed(1)}. Run peak amplitude: ${proposal.peak_amplitude.toFixed(2)}. Run duration: ${Math.round(proposal.duration_ms)} ms.`}
+      >
+        peak {proposal.peak_amplitude.toFixed(2)} &middot;{" "}
+        {Math.round(proposal.duration_ms)} ms
+      </span>
+      <div className="ml-auto flex gap-1">
+        <Button size="sm" variant="default" onClick={onAccept}>
+          <Check />
+          Accept
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </div>
     </div>
   );
 }
@@ -768,77 +997,3 @@ function JobProgress({ job }: { job: Job }) {
   );
 }
 
-function AudioVerifier({
-  stageNumber,
-  suspectedTime,
-}: {
-  stageNumber: number;
-  suspectedTime: number | null;
-}) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [available, setAvailable] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(api.stageAudioUrl(stageNumber), { method: "HEAD" })
-      .then((r) => {
-        if (!cancelled) setAvailable(r.ok);
-      })
-      .catch(() => {
-        if (!cancelled) setAvailable(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [stageNumber]);
-
-  useEffect(() => {
-    const el = audioRef.current;
-    if (el && suspectedTime != null && Number.isFinite(suspectedTime)) {
-      const start = Math.max(0, suspectedTime - 0.5);
-      try {
-        el.currentTime = start;
-      } catch {
-        /* the metadata may not be loaded yet; the seek runs on load below */
-      }
-    }
-  }, [suspectedTime]);
-
-  if (available === null) {
-    return (
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Volume2 className="size-3" />
-        Loading audio...
-      </div>
-    );
-  }
-  if (!available) {
-    return (
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Volume2 className="size-3" />
-        Run "Detect beep" first to extract audio for verification.
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Play className="size-3" />
-        Verify by ear (jumps to ~0.5s before the beep)
-      </div>
-      <audio
-        ref={audioRef}
-        src={api.stageAudioUrl(stageNumber)}
-        controls
-        preload="metadata"
-        onLoadedMetadata={() => {
-          const el = audioRef.current;
-          if (el && suspectedTime != null && Number.isFinite(suspectedTime)) {
-            el.currentTime = Math.max(0, suspectedTime - 0.5);
-          }
-        }}
-        className="w-full"
-      />
-    </div>
-  );
-}
