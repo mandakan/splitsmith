@@ -667,11 +667,27 @@ class FsEntry(BaseModel):
     thumbnail_url: str | None = None
 
 
+class SuggestedStart(BaseModel):
+    """One sidebar bookmark in the FolderPicker.
+
+    Distinct from a flat string list so the SPA can group entries by
+    ``kind`` (recent / home / removable / network) and render the right
+    icon. ``label`` is what to show in the sidebar; ``path`` is the
+    absolute path to navigate to. Only ``kind="removable"`` and
+    ``"network"`` carry the platform-specific mount discovery output --
+    everything else is the user-stable bookmarks.
+    """
+
+    path: str
+    label: str
+    kind: Literal["recent", "home", "removable", "network"]
+
+
 class FsListing(BaseModel):
     path: str
     parent: str | None
     entries: list[FsEntry]
-    suggested_starts: list[str]  # bookmarks: home, ~/Movies, last_scanned_dir, etc.
+    suggested_starts: list[SuggestedStart]
 
 
 def create_app(*, project_root: Path, project_name: str) -> FastAPI:
@@ -845,15 +861,18 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             if results is not None:
                 merged = project.merge_stage_times(results)
                 project.selected_competitor_id = default_cid
-                # The legacy file format only carries shooterId on
-                # competitors when the auto-built CompetitorInfo also
-                # had it; pull from the resolved match if available.
-                shooter = next(
-                    (c.shooterId for c in scoreboard.match.competitors if c.id == default_cid),
+                # Resolve the picked competitor inside the parsed match.
+                # We persist shooter_id (for the global "this is me"
+                # identity) and competitor_name (so the SPA can show
+                # who's pinned without re-fetching MatchData on every
+                # render).
+                picked = next(
+                    (c for c in scoreboard.match.competitors if c.id == default_cid),
                     None,
                 )
-                if shooter is not None:
-                    project.selected_shooter_id = shooter
+                if picked is not None:
+                    project.selected_shooter_id = picked.shooterId
+                    project.competitor_name = picked.name
         project.save(state.project_root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
@@ -1005,7 +1024,11 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
                 match_data = client.get_match(ct, mid)
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
-        if not any(c.id == req.competitor_id for c in match_data.competitors):
+        picked = next(
+            (c for c in match_data.competitors if c.id == req.competitor_id),
+            None,
+        )
+        if picked is None:
             raise HTTPException(
                 status_code=404,
                 detail={
@@ -1019,6 +1042,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
 
         project.selected_shooter_id = req.shooter_id
         project.selected_competitor_id = req.competitor_id
+        # Persist the human-readable name so the SPA's collapsed
+        # scoreboard summary doesn't have to re-fetch MatchData just to
+        # render "pinned: Mathias Rinaldo" instead of an integer id.
+        project.competitor_name = picked.name
         project.save(state.project_root)
 
         merged = _fetch_and_merge_stage_times(project, ct, mid, req.competitor_id)
@@ -3034,26 +3061,212 @@ def _default_start(last_scanned_dir: str | None) -> Path:
     return home
 
 
-def _suggested_starts(last_scanned_dir: str | None) -> list[str]:
-    """Bookmarks the folder picker shows in a sidebar."""
-    home = Path.home()
-    candidates = []
+def _suggested_starts(last_scanned_dir: str | None) -> list[dict[str, str]]:
+    """Bookmarks the folder picker shows in a sidebar.
+
+    Three groups, in display order:
+
+    1. **Recent** -- the last folder the user scanned (if any). Surfaced
+       on top so the cam-over-USB flow ("plug in, scan, repeat") doesn't
+       require re-typing the path.
+    2. **Home** -- the user's home plus the conventional video folders
+       (~/Movies, ~/Videos, ~/Downloads, ~/Desktop). Cross-platform
+       sensible defaults.
+    3. **Removable & network** -- platform-specific mount discovery,
+       best-effort. Each entry is wrapped in a per-path 200ms timeout
+       so a stale network mount can't hang the picker open.
+    """
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+
+    def add(path: Path | str, label: str, kind: str) -> None:
+        p = str(Path(path))
+        if p in seen:
+            return
+        seen.add(p)
+        out.append({"path": p, "label": label, "kind": kind})
+
     if last_scanned_dir:
         p = Path(last_scanned_dir).expanduser()
-        if p.is_dir():
-            candidates.append(str(p))
-    for c in (home, home / "Movies", home / "Videos", home / "Downloads", home / "Desktop"):
-        if c.is_dir():
-            candidates.append(str(c))
-    # De-duplicate while preserving order.
-    seen: set[str] = set()
-    result = []
-    for c in candidates:
-        if c in seen:
+        if _is_dir_with_timeout(p):
+            add(p, p.name or str(p), "recent")
+
+    home = Path.home()
+    home_candidates = [
+        (home, "Home"),
+        (home / "Movies", "Movies"),
+        (home / "Videos", "Videos"),
+        (home / "Downloads", "Downloads"),
+        (home / "Desktop", "Desktop"),
+    ]
+    for path, label in home_candidates:
+        if _is_dir_with_timeout(path):
+            add(path, label, "home")
+
+    for path, label, kind in _discover_mounts():
+        add(path, label, kind)
+
+    return out
+
+
+def _is_dir_with_timeout(path: Path, *, timeout: float = 0.2) -> bool:
+    """``path.is_dir()`` with a wall-clock cap.
+
+    Stale network mounts can hang ``stat()`` indefinitely. Running the
+    check on a worker thread and bailing on timeout keeps the picker
+    responsive at the cost of a false negative on slow-but-alive shares
+    (the user can still type the path manually).
+    """
+    import concurrent.futures
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(path.is_dir)
+            return future.result(timeout=timeout)
+    except (concurrent.futures.TimeoutError, OSError):
+        return False
+
+
+def _discover_mounts() -> list[tuple[Path, str, str]]:
+    """Cross-platform best-effort discovery of mounted volumes.
+
+    Returns a list of ``(path, label, kind)`` tuples. Kind is
+    ``"network"`` for paths reported by the platform's mount table as a
+    network filesystem (cifs/nfs/smbfs/afpfs/fuse.sshfs); everything
+    else under a removable-mount root is ``"removable"``.
+
+    No external dependency: psutil would give cleaner fstype info but
+    pulling it in for this one feature isn't worth the deploy weight.
+    Stdlib reads of ``/proc/mounts`` (Linux) and the ``/Volumes``
+    directory (macOS) cover the cases users actually hit.
+    """
+    out: list[tuple[Path, str, str]] = []
+    if sys.platform == "darwin":
+        out.extend(_discover_macos_volumes())
+    elif sys.platform.startswith("linux"):
+        out.extend(_discover_linux_mounts())
+    elif sys.platform.startswith("win"):
+        out.extend(_discover_windows_drives())
+    return out
+
+
+def _discover_macos_volumes() -> list[tuple[Path, str, str]]:
+    volumes_root = Path("/Volumes")
+    if not _is_dir_with_timeout(volumes_root):
+        return []
+    try:
+        boot_inode = Path("/").stat().st_ino
+    except OSError:
+        boot_inode = None
+    network_fstypes = _macos_network_volumes()
+    out: list[tuple[Path, str, str]] = []
+    try:
+        for entry in sorted(volumes_root.iterdir()):
+            # Hidden mounts (e.g. ``/Volumes/.timemachine``) are
+            # platform internals the user never wants to scan; skip.
+            if entry.name.startswith("."):
+                continue
+            try:
+                # Skip the boot volume; ``/`` and ``/Volumes/Macintosh HD``
+                # share an inode, so we filter the duplicate.
+                if boot_inode is not None and entry.stat().st_ino == boot_inode:
+                    continue
+            except OSError:
+                continue
+            if not _is_dir_with_timeout(entry):
+                continue
+            kind = "network" if str(entry) in network_fstypes else "removable"
+            out.append((entry, entry.name, kind))
+    except OSError:
+        return out
+    return out
+
+
+def _macos_network_volumes() -> set[str]:
+    """Parse ``mount`` output to flag network-backed volumes under /Volumes.
+
+    macOS prints lines like ``//user@host/share on /Volumes/Share (smbfs, ...)``.
+    Best-effort: on parse failure return empty so everything in
+    ``/Volumes`` falls through to ``"removable"``.
+    """
+    try:
+        result = subprocess.run(["/sbin/mount"], capture_output=True, text=True, timeout=1.0)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if result.returncode != 0:
+        return set()
+    network_kinds = {"smbfs", "afpfs", "nfs", "webdav", "ftp", "fuse"}
+    out: set[str] = set()
+    for line in result.stdout.splitlines():
+        # ``<src> on <mountpoint> (<fstype>, ...)``
+        try:
+            on_split = line.split(" on ", 1)
+            if len(on_split) != 2:
+                continue
+            rest = on_split[1]
+            paren = rest.find(" (")
+            if paren < 0:
+                continue
+            mountpoint = rest[:paren]
+            attrs = rest[paren + 2 :].rstrip(")")
+            fstype = attrs.split(",", 1)[0].strip().lower()
+            if fstype in network_kinds:
+                out.add(mountpoint)
+        except (ValueError, IndexError):
             continue
-        seen.add(c)
-        result.append(c)
-    return result
+    return out
+
+
+def _discover_linux_mounts() -> list[tuple[Path, str, str]]:
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    roots: list[Path] = []
+    if user:
+        roots.append(Path(f"/media/{user}"))
+        roots.append(Path(f"/run/media/{user}"))
+    roots.extend([Path("/media"), Path("/mnt")])
+
+    network_fstypes = {"cifs", "nfs", "nfs4", "smbfs", "fuse.sshfs", "fuse.gvfsd-fuse"}
+    network_paths = _linux_network_mounts(network_fstypes)
+
+    out: list[tuple[Path, str, str]] = []
+    for root in roots:
+        if not _is_dir_with_timeout(root):
+            continue
+        try:
+            for entry in sorted(root.iterdir()):
+                if not _is_dir_with_timeout(entry):
+                    continue
+                kind = "network" if str(entry) in network_paths else "removable"
+                out.append((entry, entry.name, kind))
+        except OSError:
+            continue
+    return out
+
+
+def _linux_network_mounts(network_fstypes: set[str]) -> set[str]:
+    try:
+        with Path("/proc/mounts").open(encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return set()
+    out: set[str] = set()
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mountpoint, fstype = parts[1], parts[2]
+        if fstype in network_fstypes:
+            out.add(mountpoint)
+    return out
+
+
+def _discover_windows_drives() -> list[tuple[Path, str, str]]:
+    out: list[tuple[Path, str, str]] = []
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":  # skip C: (system)
+        path = Path(f"{letter}:\\")
+        if _is_dir_with_timeout(path):
+            out.append((path, f"{letter}:", "removable"))
+    return out
 
 
 def _video_metadata_for(

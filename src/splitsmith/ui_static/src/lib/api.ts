@@ -365,11 +365,20 @@ export interface RemoveVideoResponse {
   plan: RemovalPlan;
 }
 
+/** One sidebar bookmark in the FolderPicker. ``kind`` lets the SPA
+ *  group entries (Recent / Home / Removable & network) and pick the
+ *  right icon. Mirrors ``splitsmith.ui.server.SuggestedStart``. */
+export interface SuggestedStart {
+  path: string;
+  label: string;
+  kind: "recent" | "home" | "removable" | "network";
+}
+
 export interface FsListing {
   path: string;
   parent: string | null;
   entries: FsEntry[];
-  suggested_starts: string[];
+  suggested_starts: SuggestedStart[];
 }
 
 export interface PeaksResult {

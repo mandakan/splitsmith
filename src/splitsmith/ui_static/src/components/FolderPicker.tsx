@@ -16,17 +16,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDownAZ,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
   ChevronRight,
   Clock,
+  Cloud,
   Film,
   Folder,
   FolderOpen,
+  HardDrive,
   Home,
   Loader2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type FsEntry, type FsListing } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type FsEntry,
+  type FsListing,
+  type SuggestedStart,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface FolderPickerProps {
@@ -40,6 +51,14 @@ interface FolderPickerProps {
   onCancel?: () => void;
   /** Render mode: inline (e.g. inside a card) vs. compact. */
   mode?: "inline" | "compact";
+  /** Optional match window (epoch seconds, inclusive). Files whose
+   *  ``mtime`` falls inside this window are highlighted as likely
+   *  candidates so the user can spot them in a folder full of mixed
+   *  clips. Computed by the caller from the project's stage analysis;
+   *  null when no scoreboard times are loaded yet. The window already
+   *  includes whatever margin the caller wants (typically a couple of
+   *  hours on each side to cover warm-up + drive home with the cam). */
+  matchWindow?: { startEpoch: number; endEpoch: number } | null;
 }
 
 export function FolderPicker({
@@ -48,12 +67,19 @@ export function FolderPicker({
   onSelectFiles,
   onCancel,
   mode = "inline",
+  matchWindow = null,
 }: FolderPickerProps) {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [path, setPath] = useState<string | null>(initialPath ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  // ``name`` keeps directories above videos in alphabetical order (the
+  // historical default). ``date-desc`` puts the most recent video at
+  // the top, which is what the cam-over-USB workflow wants -- you
+  // typically just shot the match, plug in, and want today's clips
+  // first. Toggling cycles name -> date-desc -> date-asc -> name.
+  const [sortMode, setSortMode] = useState<SortMode>("name");
 
   const wantMetadata = onSelectFiles !== undefined;
 
@@ -82,8 +108,15 @@ export function FolderPicker({
   }, []);
 
   const breadcrumb = useMemo(() => buildBreadcrumb(path), [path]);
-  const dirEntries = listing?.entries.filter((e) => e.kind === "dir") ?? [];
-  const videoEntries = listing?.entries.filter((e) => e.kind === "video") ?? [];
+  const dirEntries = useMemo(
+    () => sortEntries(listing?.entries.filter((e) => e.kind === "dir") ?? [], sortMode),
+    [listing, sortMode],
+  );
+  const videoEntries = useMemo(
+    () =>
+      sortEntries(listing?.entries.filter((e) => e.kind === "video") ?? [], sortMode),
+    [listing, sortMode],
+  );
   const videosHere = videoEntries.length;
   const multiFileMode = onSelectFiles !== undefined;
   const selectedCount = selectedFiles.size;
@@ -100,6 +133,20 @@ export function FolderPicker({
   const selectAll = () => {
     setSelectedFiles(new Set(videoEntries.map((e) => e.name)));
   };
+
+  const selectInMatchWindow = () => {
+    setSelectedFiles(
+      new Set(
+        videoEntries
+          .filter((e) => isInMatchWindow(e.mtime, matchWindow))
+          .map((e) => e.name),
+      ),
+    );
+  };
+
+  const inWindowVideoCount = matchWindow
+    ? videoEntries.filter((e) => isInMatchWindow(e.mtime, matchWindow)).length
+    : 0;
 
   const confirmFiles = () => {
     if (!path || selectedCount === 0) return;
@@ -134,46 +181,56 @@ export function FolderPicker({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr]">
-        <aside className="flex flex-col gap-1 text-sm">
-          {(listing?.suggested_starts ?? []).slice(0, 6).map((s, i) => (
-            <button
-              key={s}
-              type="button"
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                path === s && "bg-accent text-accent-foreground",
-              )}
-              onClick={() => void load(s)}
-              disabled={busy}
-              title={s}
-            >
-              {i === 0 ? <Clock className="size-3.5" /> : <Home className="size-3.5" />}
-              <span className="truncate text-xs">{s.split("/").filter(Boolean).pop() || "/"}</span>
-            </button>
-          ))}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[200px_1fr]">
+        <aside className="flex flex-col gap-3 text-sm">
+          <SuggestedStartsSidebar
+            starts={listing?.suggested_starts ?? []}
+            currentPath={path}
+            disabled={busy}
+            onPick={(p) => void load(p)}
+          />
         </aside>
 
-        <div className="min-h-[12rem] rounded-md border border-border bg-background">
+        <div className="relative min-h-[12rem] rounded-md border border-border bg-background">
+          {/* When ``busy && listing`` (we're navigating into a slow
+              folder while an old listing is still on screen), overlay a
+              translucent spinner instead of swapping the whole panel.
+              Keeps the user oriented and signals that the next listing
+              is coming. The first-load spinner case below renders
+              directly when there's no listing yet. */}
+          {busy && listing ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/70 backdrop-blur-[1px]">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : null}
           {busy && !listing ? (
-            <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+            <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
+              <span>Reading folder...</span>
             </div>
           ) : error ? (
             <div className="p-4 text-sm text-destructive">{error}</div>
           ) : !listing ? null : dirEntries.length === 0 && videoEntries.length === 0 ? (
             <div className="p-4 text-sm text-muted-foreground">Empty folder.</div>
           ) : (
-            <ul className="max-h-80 divide-y divide-border overflow-y-auto">
+            <>
+              <SortHeader mode={sortMode} onChange={setSortMode} />
+              <ul className="max-h-80 divide-y divide-border overflow-y-auto">
               {dirEntries.map((entry) => {
                 const childPath = path ? joinPath(path, entry.name) : entry.name;
+                const inWindow = isInMatchWindow(entry.mtime, matchWindow);
                 return (
                   <li key={`d-${entry.name}`}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+                        inWindow &&
+                          "border-l-2 border-l-status-info bg-status-info/5",
+                      )}
                       onClick={() => void load(childPath)}
                       disabled={busy}
+                      title={inWindow ? "Modified during the match window" : undefined}
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <Folder className="size-4 shrink-0 text-muted-foreground" />
@@ -200,6 +257,7 @@ export function FolderPicker({
                         fullPath={fullPath}
                         checked={checked}
                         busy={busy}
+                        inMatchWindow={isInMatchWindow(entry.mtime, matchWindow)}
                         onToggle={() => toggleSelect(entry.name)}
                         onProbed={(duration, thumbnail_url) => {
                           // Patch the listing in-place so the row remembers
@@ -223,6 +281,7 @@ export function FolderPicker({
                   })
                 : null}
             </ul>
+            </>
           )}
         </div>
       </div>
@@ -245,6 +304,17 @@ export function FolderPicker({
               disabled={busy}
             >
               {selectedCount === videosHere ? "Clear selection" : "Select all"}
+            </button>
+          ) : null}
+          {multiFileMode && inWindowVideoCount > 0 ? (
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-status-info underline-offset-2 hover:underline"
+              onClick={selectInMatchWindow}
+              disabled={busy}
+              title="Select videos whose modified time falls inside the match window"
+            >
+              Select {inWindowVideoCount} in match window
             </button>
           ) : null}
         </div>
@@ -280,11 +350,73 @@ export function FolderPicker({
   );
 }
 
+/** Sidebar bookmarks, grouped by ``kind`` so the user can scan
+ *  recent / home / removable+network sections separately. The wire
+ *  shape carries one entry per bookmark; we group client-side to keep
+ *  the contract simple. */
+function SuggestedStartsSidebar({
+  starts,
+  currentPath,
+  disabled,
+  onPick,
+}: {
+  starts: SuggestedStart[];
+  currentPath: string | null;
+  disabled: boolean;
+  onPick: (path: string) => void;
+}) {
+  const groups: { title: string; kinds: SuggestedStart["kind"][]; }[] = [
+    { title: "Recent", kinds: ["recent"] },
+    { title: "Home", kinds: ["home"] },
+    { title: "Removable & network", kinds: ["removable", "network"] },
+  ];
+  return (
+    <>
+      {groups.map((g) => {
+        const items = starts.filter((s) => g.kinds.includes(s.kind));
+        if (items.length === 0) return null;
+        return (
+          <div key={g.title} className="space-y-1">
+            <div className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {g.title}
+            </div>
+            {items.map((s) => (
+              <button
+                key={s.path}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                  currentPath === s.path && "bg-accent text-accent-foreground",
+                )}
+                onClick={() => onPick(s.path)}
+                disabled={disabled}
+                title={s.path}
+              >
+                <SidebarIcon kind={s.kind} />
+                <span className="truncate text-xs">{s.label}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function SidebarIcon({ kind }: { kind: SuggestedStart["kind"] }) {
+  const className = "size-3.5 shrink-0";
+  if (kind === "recent") return <Clock className={className} />;
+  if (kind === "removable") return <HardDrive className={className} />;
+  if (kind === "network") return <Cloud className={className} />;
+  return <Home className={className} />;
+}
+
 function VideoRowMulti({
   entry,
   fullPath,
   checked,
   busy,
+  inMatchWindow,
   onToggle,
   onProbed,
 }: {
@@ -292,6 +424,7 @@ function VideoRowMulti({
   fullPath: string;
   checked: boolean;
   busy: boolean;
+  inMatchWindow: boolean;
   onToggle: () => void;
   onProbed: (duration: number | null, thumbnail_url: string | null) => void;
 }) {
@@ -324,9 +457,12 @@ function VideoRowMulti({
     >
       <label
         className={cn(
-          "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-accent/40",
+          "flex cursor-pointer items-center justify-between gap-2 border-l-2 border-l-transparent px-3 py-2 text-sm hover:bg-accent/40",
           checked && "bg-accent/30",
+          inMatchWindow && !checked && "border-l-status-info bg-status-info/5",
+          inMatchWindow && checked && "border-l-status-info",
         )}
+        title={inMatchWindow ? "Modified during the match window" : undefined}
       >
         <span className="flex min-w-0 items-center gap-2">
           <input
@@ -377,18 +513,95 @@ function ThumbnailFloat({ anchor, src, alt }: { anchor: DOMRect; src: string; al
   );
 }
 
+type SortMode = "name" | "date-desc" | "date-asc";
+
+/** Sort directory + video entries together. Directories without an
+ *  ``mtime`` fall back to name order so they don't bunch at the
+ *  bottom of a date sort. */
+function sortEntries<T extends { name: string; mtime: number | null }>(
+  entries: T[],
+  mode: SortMode,
+): T[] {
+  if (mode === "name") {
+    return [...entries].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+    );
+  }
+  const factor = mode === "date-desc" ? -1 : 1;
+  return [...entries].sort((a, b) => {
+    const am = a.mtime;
+    const bm = b.mtime;
+    if (am == null && bm == null) {
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    }
+    if (am == null) return 1; // entries without mtime sink to the end
+    if (bm == null) return -1;
+    return (am - bm) * factor;
+  });
+}
+
+function SortHeader({
+  mode,
+  onChange,
+}: {
+  mode: SortMode;
+  onChange: (next: SortMode) => void;
+}) {
+  // Click cycles name -> date-desc -> date-asc -> name. Two icons so
+  // the user can see at a glance which axis is active without a
+  // dropdown.
+  const cycle: Record<SortMode, SortMode> = {
+    name: "date-desc",
+    "date-desc": "date-asc",
+    "date-asc": "name",
+  };
+  const labels: Record<SortMode, string> = {
+    name: "Name",
+    "date-desc": "Date (newest)",
+    "date-asc": "Date (oldest)",
+  };
+  const icons: Record<SortMode, React.ReactNode> = {
+    name: <ArrowDownAZ className="size-3.5" />,
+    "date-desc": <ArrowDownNarrowWide className="size-3.5" />,
+    "date-asc": <ArrowUpNarrowWide className="size-3.5" />,
+  };
+  return (
+    <div className="flex items-center justify-end gap-2 border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
+      <span>Sort:</span>
+      <button
+        type="button"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
+        onClick={() => onChange(cycle[mode])}
+        title="Click to cycle: Name -> Date (newest) -> Date (oldest)"
+      >
+        {icons[mode]}
+        <span>{labels[mode]}</span>
+      </button>
+    </div>
+  );
+}
+
+function isInMatchWindow(
+  mtime: number | null | undefined,
+  win: { startEpoch: number; endEpoch: number } | null,
+): boolean {
+  if (!win || mtime == null) return false;
+  return mtime >= win.startEpoch && mtime <= win.endEpoch;
+}
+
 function formatMtime(epochSeconds: number): string {
+  // Render in local-time ISO-8601 (``YYYY-MM-DD HH:MM``) so dates sort
+  // correctly as strings and don't read as gibberish for users with
+  // non-US locales (the previous ``toLocaleDateString`` flipped to
+  // ``DD/MM/YY`` or ``YY-MM-DD`` depending on system locale, which made
+  // the column harder to scan).
   const d = new Date(epochSeconds * 1000);
-  const date = d.toLocaleDateString(undefined, {
-    year: "2-digit",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  return `${date} ${time}`;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
 function formatDuration(seconds: number): string {

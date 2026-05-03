@@ -12,7 +12,7 @@
  * bay-cam dropped in days later) without losing audit work.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -83,6 +83,13 @@ export function Ingest() {
     video: StageVideo;
     stage: StageEntry | null;
   } | null>(null);
+
+  // Match window for the FolderPicker highlight + "Select N in match
+  // window" affordance: union of every stage's analysis window, padded
+  // by ~2h on each side to cover warm-up and the drive home with the
+  // cam still rolling. ``null`` until a scoreboard with at least one
+  // scorecard time is loaded.
+  const matchWindow = useMemo(() => computeMatchWindow(analysis), [analysis]);
 
   const refreshAnalysis = useCallback(async () => {
     // Cheap GET that re-runs the heuristic over current project state. Fire
@@ -435,6 +442,7 @@ export function Ingest() {
           <StartFromVideosSection
             project={project}
             busy={busy}
+            matchWindow={matchWindow}
             onSubmit={handleStartFromVideos}
           />
         </div>
@@ -454,6 +462,7 @@ export function Ingest() {
       <ScanSection
         disabled={busy || !project || project.stages.length === 0}
         initialPath={project?.last_scanned_dir ?? null}
+        matchWindow={matchWindow}
         onScan={handleScan}
         onScanFiles={handleScanFiles}
       />
@@ -559,16 +568,29 @@ function ScoreboardSection({
     setLastComplete(ingestComplete);
   }, [ingestComplete, lastComplete]);
 
-  const description = realCount
-    ? `${realCount} stages loaded for ${project!.competitor_name ?? "the primary competitor"}.`
+  const stageSummary = realCount
+    ? `${realCount} stages loaded`
     : placeholderCount
-      ? `${placeholderCount} placeholder stages -- upload a real scoreboard to fill in names, competitor metadata, and timestamps.`
+      ? `${placeholderCount} placeholder stages -- upload a real scoreboard or pin yourself online to fill in stage times`
       : "No stages yet. Drop in an SSI Scoreboard JSON, or search the live scoreboard.";
   const dropLabel = realCount
     ? "Replace scoreboard JSON (warns first)"
     : placeholderCount
       ? "Upload scoreboard to overlay placeholders"
       : "Drop or pick an SSI Scoreboard JSON";
+
+  // Collapsed-state summary: lead with the human-readable identity
+  // (match name + competitor name) so the user can see who's pinned
+  // without expanding. Numeric ids stay tucked into a tooltip.
+  const matchTitle = project?.name && project.name !== "Untitled match" ? project.name : null;
+  const competitorLabel = project?.competitor_name ?? null;
+  const idsTooltip = project?.scoreboard_match_id
+    ? `match ${project.scoreboard_match_id}${
+        project.scoreboard_content_type != null
+          ? ` (ct ${project.scoreboard_content_type})`
+          : ""
+      }${project.selected_competitor_id != null ? ` · cid ${project.selected_competitor_id}` : ""}`
+    : undefined;
 
   return (
     <Card>
@@ -585,30 +607,31 @@ function ScoreboardSection({
             {expanded ? "Hide" : "Change"}
           </span>
         </CardTitle>
-        <CardDescription className="flex flex-wrap items-center gap-x-2">
-          <span>{description}</span>
-          {project?.scoreboard_match_id ? (
-            <span className="text-xs text-muted-foreground">
-              · match <code>{project.scoreboard_match_id}</code>
-              {project.scoreboard_content_type !== null &&
-              project.scoreboard_content_type !== undefined
-                ? ` (ct ${project.scoreboard_content_type})`
-                : null}
+        <CardDescription
+          className="flex flex-wrap items-center gap-x-2"
+          title={idsTooltip}
+        >
+          {matchTitle ? (
+            <span className="font-medium text-foreground">{matchTitle}</span>
+          ) : null}
+          {competitorLabel ? (
+            <span className="text-foreground">
+              · {competitorLabel}
             </span>
           ) : null}
+          <span className="text-muted-foreground">
+            {matchTitle || competitorLabel ? "· " : ""}
+            {stageSummary}
+          </span>
         </CardDescription>
       </CardHeader>
       {expanded ? (
+        // Order is intentional: source badge (status), then the primary
+        // happy-path inputs (live search, then shooter pinner once a
+        // match is loaded), then the offline drop-zone fallback last
+        // and compact since most users will go online.
         <CardContent className="space-y-4">
           {source ? <ScoreboardSourceBadge source={source} /> : null}
-
-          <FileDropZone
-            accept=".json,application/json"
-            label={dropLabel}
-            icon={<FileJson className="size-5" />}
-            disabled={busy}
-            onFile={onScoreboard}
-          />
 
           {!isLocal && onlineReady ? (
             <OnlineMatchSearch
@@ -627,6 +650,13 @@ function ScoreboardSection({
               onError={setScoreboardError}
             />
           ) : null}
+
+          <CompactFileDropZone
+            accept=".json,application/json"
+            label={dropLabel}
+            disabled={busy}
+            onFile={onScoreboard}
+          />
         </CardContent>
       ) : null}
     </Card>
@@ -1077,10 +1107,12 @@ function isSsiV1MatchData(data: unknown): boolean {
 function StartFromVideosSection({
   project,
   busy,
+  matchWindow,
   onSubmit,
 }: {
   project: MatchProject;
   busy: boolean;
+  matchWindow: { startEpoch: number; endEpoch: number } | null;
   onSubmit: (
     files: { path: string; mtime: number | null }[],
     stageCount: number,
@@ -1144,6 +1176,7 @@ function StartFromVideosSection({
         {picking ? (
           <FolderPicker
             initialPath={project.last_scanned_dir ?? null}
+            matchWindow={matchWindow}
             onSelect={() => {
               /* not used: this card always wants files, not a folder. */
             }}
@@ -1221,11 +1254,13 @@ function StartFromVideosSection({
 function ScanSection({
   disabled,
   initialPath,
+  matchWindow,
   onScan,
   onScanFiles,
 }: {
   disabled: boolean;
   initialPath: string | null;
+  matchWindow: { startEpoch: number; endEpoch: number } | null;
   onScan: (sourceDir: string) => void;
   onScanFiles: (sourcePaths: string[]) => void;
 }) {
@@ -1270,6 +1305,7 @@ function ScanSection({
         ) : (
           <FolderPicker
             initialPath={initialPath}
+            matchWindow={matchWindow}
             onSelect={(p) => {
               setOpen(false);
               onScan(p);
@@ -2549,16 +2585,21 @@ function StatusGlyph({ stage }: { stage: StageEntry }) {
   );
 }
 
-function FileDropZone({
+/** Compact, single-row drop zone used in the Scoreboard card.
+ *
+ *  The offline JSON path is the secondary option (most users will go
+ *  online), so it sits last in the card and reads as a one-line
+ *  affordance instead of the full-bleed marketing-style box. Same drag
+ *  + click semantics as ``FileDropZone``, just less screen real estate.
+ */
+function CompactFileDropZone({
   accept,
   label,
-  icon,
   disabled,
   onFile,
 }: {
   accept: string;
   label: string;
-  icon: React.ReactNode;
   disabled?: boolean;
   onFile: (f: File) => void;
 }) {
@@ -2566,8 +2607,8 @@ function FileDropZone({
   return (
     <label
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 px-4 py-6 text-sm transition-colors",
-        over && "border-ring bg-muted/40",
+        "group flex cursor-pointer items-center justify-between gap-3 rounded-md border border-dashed border-border bg-muted/10 px-3 py-2 text-xs transition-colors hover:bg-muted/20",
+        over && "border-ring bg-muted/30",
         disabled && "pointer-events-none opacity-50",
       )}
       onDragOver={(e) => {
@@ -2582,9 +2623,11 @@ function FileDropZone({
         if (file) onFile(file);
       }}
     >
-      {icon}
-      <span className="text-foreground">{label}</span>
-      <span className="text-xs text-muted-foreground">drag & drop, or click to browse</span>
+      <span className="flex items-center gap-2 text-muted-foreground">
+        <FileJson className="size-3.5 shrink-0" />
+        <span>{label}</span>
+      </span>
+      <span className="text-muted-foreground/70">drag &amp; drop or click</span>
       <input
         type="file"
         accept={accept}
@@ -2598,4 +2641,37 @@ function FileDropZone({
       />
     </label>
   );
+}
+
+
+/** Compute the union match window from per-stage analysis (epoch
+ *  seconds) for the FolderPicker highlight (#NN). Returns null when
+ *  no stage has a scorecard time yet -- the picker degrades to no
+ *  highlight, which is the right behaviour for placeholder-only
+ *  projects. The 2h padding on each side covers warm-up videos shot
+ *  before the first stage and clips recorded after the last scorecard
+ *  was typed (cool-down chatter, drive home with the cam rolling). */
+const MATCH_WINDOW_PADDING_SECONDS = 2 * 60 * 60;
+
+function computeMatchWindow(
+  analysis: MatchAnalysis | null,
+): { startEpoch: number; endEpoch: number } | null {
+  if (!analysis) return null;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const s of analysis.stages) {
+    if (s.lower) {
+      const t = new Date(s.lower).getTime() / 1000;
+      if (Number.isFinite(t) && t < lo) lo = t;
+    }
+    if (s.upper) {
+      const t = new Date(s.upper).getTime() / 1000;
+      if (Number.isFinite(t) && t > hi) hi = t;
+    }
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  return {
+    startEpoch: lo - MATCH_WINDOW_PADDING_SECONDS,
+    endEpoch: hi + MATCH_WINDOW_PADDING_SECONDS,
+  };
 }
