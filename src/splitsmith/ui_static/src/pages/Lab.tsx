@@ -930,7 +930,7 @@ function FixtureDetail({
           </Button>
           {stepThrough && (
             <span className="text-[11px] text-muted-foreground">
-              Click a candidate or use J/K. Snippet autoplays; press a label key to save and advance.
+              Click a candidate or use J/K. Audio loops automatically; press a label key to save and advance.
             </span>
           )}
         </div>
@@ -1535,7 +1535,6 @@ function StepThroughPanel({
   const [preMs, setPreMs] = useState(100);
   const [postMs, setPostMs] = useState(300);
   const [loop, setLoop] = useState(true);
-  const [precaching, setPrecaching] = useState(false);
 
   const ordered = useMemo(() => {
     let list = [...fixture.candidates];
@@ -1597,21 +1596,6 @@ function StepThroughPanel({
     ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
     : -1;
 
-  const onPrecache = useCallback(async () => {
-    setPrecaching(true);
-    try {
-      await api.precacheLabSnippets({
-        audit_path: fixture.audit_path,
-        pre_ms: preMs,
-        post_ms: postMs,
-      });
-    } catch (err) {
-      console.error("precache failed", err);
-    } finally {
-      setPrecaching(false);
-    }
-  }, [fixture.audit_path, preMs, postMs]);
-
   return (
     <div className="rounded border border-primary/40 bg-primary/5 p-3">
       <div className="mb-3 flex flex-wrap items-end gap-3 text-[11px]">
@@ -1672,10 +1656,6 @@ function StepThroughPanel({
           <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
           <Repeat className="size-3.5" /> Loop
         </label>
-        <Button variant="outline" size="sm" onClick={onPrecache} disabled={precaching}>
-          {precaching ? <Loader2 className="size-3 animate-spin" /> : null}
-          Pre-cache all
-        </Button>
         <span className="ml-auto text-muted-foreground">
           {idxInList + 1} / {ordered.length}
           {ordered.length === 0 && " (no candidates match filter)"}
@@ -1689,6 +1669,8 @@ function StepThroughPanel({
           loop={loop}
           preMs={preMs}
           postMs={postMs}
+          allCandidates={fixture.candidates}
+          truthTimes={fixture.truth_times}
         />
       ) : (
         <div className="rounded border border-dashed border-border/60 px-4 py-6 text-center text-xs text-muted-foreground">
@@ -1772,36 +1754,176 @@ function StepThroughPanel({
   );
 }
 
+// Visible context window in the zoomed waveform: candidate is centered;
+// the play window (pre/post) is highlighted within this view. If the
+// play window exceeds the context, the view widens to fit.
+const CONTEXT_HALF_MS = 750;
+
+let _sharedAudioCtx: AudioContext | null = null;
+function getAudioCtx(): AudioContext {
+  if (!_sharedAudioCtx) {
+    const Ctor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    _sharedAudioCtx = new Ctor();
+  }
+  return _sharedAudioCtx;
+}
+
+const _audioBufferCache = new Map<string, Promise<AudioBuffer>>();
+function loadAudioBuffer(url: string): Promise<AudioBuffer> {
+  let p = _audioBufferCache.get(url);
+  if (!p) {
+    const ctx = getAudioCtx();
+    p = fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`audio fetch failed: ${r.status}`);
+        return r.arrayBuffer();
+      })
+      .then((buf) => ctx.decodeAudioData(buf));
+    _audioBufferCache.set(url, p);
+    p.catch(() => _audioBufferCache.delete(url));
+  }
+  return p;
+}
+
+function useAudioBuffer(url: string): {
+  buffer: AudioBuffer | null;
+  loading: boolean;
+  error: string | null;
+} {
+  const [state, setState] = useState<{
+    buffer: AudioBuffer | null;
+    loading: boolean;
+    error: string | null;
+  }>({ buffer: null, loading: true, error: null });
+  useEffect(() => {
+    let alive = true;
+    setState({ buffer: null, loading: true, error: null });
+    loadAudioBuffer(url)
+      .then((buf) => {
+        if (alive) setState({ buffer: buf, loading: false, error: null });
+      })
+      .catch((err) => {
+        if (alive)
+          setState({
+            buffer: null,
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  return state;
+}
+
 function SnippetPlayer({
   fixture,
   candidate,
   loop,
   preMs,
   postMs,
+  allCandidates,
+  truthTimes,
 }: {
   fixture: LabEvalFixture;
   candidate: LabEvalFixture["candidates"][number];
   loop: boolean;
   preMs: number;
   postMs: number;
+  allCandidates: LabEvalFixture["candidates"];
+  truthTimes: number[];
 }) {
-  const url = api.labSnippetUrl(fixture.audit_path, candidate.candidate_number, {
-    pre_ms: preMs,
-    post_ms: postMs,
-  });
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Re-mount on candidate change so the snippet auto-loads + autoplays.
+  const url = api.fixtureAudioUrl(fixture.audit_path);
+  const { buffer, loading, error } = useAudioBuffer(url);
+
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+
+  const t = candidate.time;
+  const safePreMs = Math.max(0, preMs);
+  const safePostMs = Math.max(10, postMs);
+  const loopStart = Math.max(0, t - safePreMs / 1000);
+  const loopEnd = Math.min(
+    buffer ? buffer.duration : t + safePostMs / 1000,
+    t + safePostMs / 1000,
+  );
+
+  // Visible window: at least ±CONTEXT_HALF_MS around the candidate, but
+  // expand to enclose the play window if pre/post exceed the default.
+  const ctxStart = Math.max(
+    0,
+    Math.min(loopStart, t - CONTEXT_HALF_MS / 1000),
+  );
+  const ctxEnd = buffer
+    ? Math.min(buffer.duration, Math.max(loopEnd, t + CONTEXT_HALF_MS / 1000))
+    : Math.max(loopEnd, t + CONTEXT_HALF_MS / 1000);
+
+  // Recreate the source on candidate change. WebAudio nodes are
+  // single-use after stop(), so we always tear down + rebuild here.
   useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    el.load();
-    const tryPlay = () => {
-      el.play().catch(() => {
-        // Autoplay can be blocked until first user interaction; ignore.
+    if (!buffer) return;
+    const ctx = getAudioCtx();
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {
+        /* requires user gesture; SnippetPlayer mounts after the user
+           clicked "Step through", so this normally succeeds. */
       });
+    }
+    const gain = ctx.createGain();
+    gain.gain.value = 1.0;
+    gain.connect(ctx.destination);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.loopStart = loopStart;
+    src.loopEnd = loopEnd;
+    src.connect(gain);
+    src.start(0, loopStart);
+    sourceRef.current = src;
+    gainRef.current = gain;
+
+    return () => {
+      try {
+        src.stop();
+      } catch {
+        /* already stopped */
+      }
+      src.disconnect();
+      gain.disconnect();
+      if (sourceRef.current === src) sourceRef.current = null;
+      if (gainRef.current === gain) gainRef.current = null;
     };
-    tryPlay();
-  }, [url]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buffer, candidate.candidate_number]);
+
+  // Live-update the loop window when sliders move; no source restart.
+  useEffect(() => {
+    const src = sourceRef.current;
+    if (!src) return;
+    src.loopStart = loopStart;
+    src.loopEnd = loopEnd;
+    src.loop = loop;
+  }, [loopStart, loopEnd, loop]);
+
+  // Markers for the zoomed view: other candidates whose time falls in
+  // the visible context window, plus any audited truth shots.
+  const otherCandidates = useMemo(
+    () =>
+      allCandidates.filter(
+        (c) =>
+          c.candidate_number !== candidate.candidate_number &&
+          c.time >= ctxStart &&
+          c.time <= ctxEnd,
+      ),
+    [allCandidates, candidate.candidate_number, ctxStart, ctxEnd],
+  );
+  const truthInWindow = useMemo(
+    () => truthTimes.filter((tt) => tt >= ctxStart && tt <= ctxEnd),
+    [truthTimes, ctxStart, ctxEnd],
+  );
 
   const labelText =
     candidate.kept && candidate.truth === 1 ? candidate.subclass : candidate.reason;
@@ -1809,26 +1931,267 @@ function SnippetPlayer({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between text-xs">
-        <div>
+        <div className="flex items-center gap-2">
           <span className="font-mono">#{candidate.candidate_number}</span>
-          {" · "}
           <span className="text-muted-foreground">
             t={candidate.time.toFixed(3)}s · conf {candidate.confidence.toFixed(3)} · score{" "}
             {candidate.ensemble_score.toFixed(2)}
           </span>
+          <VoterChips candidate={candidate} />
         </div>
         <div className="flex items-center gap-2">
-          <span className={cn("rounded px-2 py-0.5 font-mono text-[10px]", outcomeColor(candidate))}>
+          <span
+            className={cn(
+              "rounded px-2 py-0.5 font-mono text-[10px]",
+              outcomeColor(candidate),
+            )}
+          >
             {outcomeLabel(candidate)}
           </span>
           {labelText && (
-            <span className="rounded bg-muted px-2 py-0.5 font-mono text-[10px]">
-              {labelText}
-            </span>
+            <span className="rounded bg-muted px-2 py-0.5 font-mono text-[10px]">{labelText}</span>
           )}
         </div>
       </div>
-      <audio ref={audioRef} src={url} controls loop={loop} className="w-full" preload="auto" />
+      {error ? (
+        <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Failed to load audio: {error}
+        </div>
+      ) : loading || !buffer ? (
+        <div className="flex h-[120px] items-center justify-center rounded border border-border/40 bg-muted/30 text-xs text-muted-foreground">
+          <Loader2 className="mr-2 size-4 animate-spin" /> loading audio buffer...
+        </div>
+      ) : (
+        <ZoomedWaveform
+          buffer={buffer}
+          windowStart={ctxStart}
+          windowEnd={ctxEnd}
+          playStart={loopStart}
+          playEnd={loopEnd}
+          candidateTime={t}
+          otherCandidates={otherCandidates}
+          truthTimes={truthInWindow}
+        />
+      )}
+      <div className="text-[10px] text-muted-foreground">
+        Visible window: {((ctxEnd - ctxStart) * 1000).toFixed(0)} ms · play window:{" "}
+        {(safePreMs + safePostMs).toFixed(0)} ms ({safePreMs.toFixed(0)} pre /{" "}
+        {safePostMs.toFixed(0)} post){loop ? " · looping" : ""}
+      </div>
+    </div>
+  );
+}
+
+function VoterChips({
+  candidate,
+}: {
+  candidate: LabEvalFixture["candidates"][number];
+}) {
+  const items: { key: string; label: string; on: boolean }[] = [
+    { key: "a", label: "A", on: candidate.vote_a === 1 },
+    { key: "b", label: "B", on: candidate.vote_b === 1 },
+    { key: "c", label: "C", on: candidate.vote_c === 1 },
+    { key: "d", label: "D", on: candidate.vote_d === 1 },
+  ];
+  return (
+    <div className="flex gap-0.5">
+      {items.map((it) => (
+        <span
+          key={it.key}
+          className={cn(
+            "rounded px-1 font-mono text-[9px]",
+            it.on
+              ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+              : "bg-muted text-muted-foreground",
+          )}
+          title={`Voter ${it.label}: ${it.on ? "yes" : "no"}`}
+        >
+          {it.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ZoomedWaveform({
+  buffer,
+  windowStart,
+  windowEnd,
+  playStart,
+  playEnd,
+  candidateTime,
+  otherCandidates,
+  truthTimes,
+  height = 120,
+}: {
+  buffer: AudioBuffer;
+  windowStart: number;
+  windowEnd: number;
+  playStart: number;
+  playEnd: number;
+  candidateTime: number;
+  otherCandidates: LabEvalFixture["candidates"];
+  truthTimes: number[];
+  height?: number;
+}) {
+  // Bin into 600 vertical strips; one peak per strip. Cheap to recompute
+  // on slider drag because the windowed sample range is tiny (~50k samples
+  // for a 1.5s window at 48kHz).
+  const BINS = 600;
+  const peaks = useMemo(() => {
+    const sr = buffer.sampleRate;
+    const startIdx = Math.max(0, Math.floor(windowStart * sr));
+    const endIdx = Math.min(buffer.length, Math.ceil(windowEnd * sr));
+    const ch = buffer.getChannelData(0);
+    const span = Math.max(1, endIdx - startIdx);
+    const out = new Float32Array(BINS);
+    for (let i = 0; i < BINS; i++) {
+      const s = startIdx + Math.floor((i * span) / BINS);
+      const e = Math.max(s + 1, startIdx + Math.floor(((i + 1) * span) / BINS));
+      let max = 0;
+      for (let j = s; j < Math.min(endIdx, e); j++) {
+        const v = Math.abs(ch[j]);
+        if (v > max) max = v;
+      }
+      out[i] = max;
+    }
+    return out;
+  }, [buffer, windowStart, windowEnd]);
+
+  const VIEW_W = 1000; // SVG view-box width; CSS scales to container
+  const span = windowEnd - windowStart;
+  const xFor = (t: number) => ((t - windowStart) / span) * VIEW_W;
+  const playX1 = xFor(playStart);
+  const playX2 = xFor(playEnd);
+
+  return (
+    <div className="rounded border border-border/60 bg-background">
+      <svg
+        viewBox={`0 0 ${VIEW_W} ${height}`}
+        preserveAspectRatio="none"
+        className="block w-full"
+        style={{ height }}
+      >
+        {/* Play-window highlight */}
+        <rect
+          x={playX1}
+          y={0}
+          width={Math.max(1, playX2 - playX1)}
+          height={height}
+          fill="var(--primary, #6366f1)"
+          fillOpacity={0.10}
+        />
+        {/* Play-window edges */}
+        <line
+          x1={playX1}
+          x2={playX1}
+          y1={0}
+          y2={height}
+          stroke="var(--primary, #6366f1)"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+          strokeOpacity={0.7}
+        />
+        <line
+          x1={playX2}
+          x2={playX2}
+          y1={0}
+          y2={height}
+          stroke="var(--primary, #6366f1)"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+          strokeOpacity={0.7}
+        />
+
+        {/* Peaks: vertical bars centered on midline */}
+        <g fill="currentColor" opacity={0.55}>
+          {Array.from(peaks).map((p, i) => {
+            const h = Math.max(0.5, p * (height * 0.85));
+            const cx = (i + 0.5) * (VIEW_W / BINS);
+            const w = Math.max(0.6, VIEW_W / BINS - 0.3);
+            return (
+              <rect
+                key={i}
+                x={cx - w / 2}
+                y={(height - h) / 2}
+                width={w}
+                height={h}
+              />
+            );
+          })}
+        </g>
+
+        {/* Truth shots in window */}
+        {truthTimes.map((tt, i) => (
+          <line
+            key={`tr-${i}`}
+            x1={xFor(tt)}
+            x2={xFor(tt)}
+            y1={0}
+            y2={height}
+            stroke="#22c55e"
+            strokeOpacity={0.6}
+            strokeWidth={1.5}
+          />
+        ))}
+
+        {/* Other candidates in window */}
+        {otherCandidates.map((c) => {
+          const cx = xFor(c.time);
+          const color = c.kept
+            ? c.truth === 1
+              ? "#22c55e"
+              : "#f97316"
+            : "#94a3b8";
+          return (
+            <g key={`oc-${c.candidate_number}`}>
+              <circle cx={cx} cy={height - 4} r={2.5} fill={color} fillOpacity={0.85} />
+              <line
+                x1={cx}
+                x2={cx}
+                y1={height - 12}
+                y2={height}
+                stroke={color}
+                strokeOpacity={0.45}
+                strokeWidth={1}
+              />
+            </g>
+          );
+        })}
+
+        {/* Candidate center */}
+        <line
+          x1={xFor(candidateTime)}
+          x2={xFor(candidateTime)}
+          y1={0}
+          y2={height}
+          stroke="var(--primary, #6366f1)"
+          strokeWidth={1.5}
+        />
+
+        {/* Time-axis labels at the visible-window edges */}
+        <text
+          x={4}
+          y={11}
+          fontSize={9}
+          fill="currentColor"
+          opacity={0.55}
+          fontFamily="ui-monospace, monospace"
+        >
+          {windowStart.toFixed(2)}s
+        </text>
+        <text
+          x={VIEW_W - 4}
+          y={11}
+          fontSize={9}
+          fill="currentColor"
+          opacity={0.55}
+          fontFamily="ui-monospace, monospace"
+          textAnchor="end"
+        >
+          {windowEnd.toFixed(2)}s
+        </text>
+      </svg>
     </div>
   );
 }

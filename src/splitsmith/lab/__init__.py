@@ -40,19 +40,8 @@ from .core import (
     save_config_yaml,
     save_run,
 )
-from .snippet import (
-    DEFAULT_POST_MS,
-    DEFAULT_PRE_MS,
-    extract_snippet,
-    precache_all,
-)
-from .snippet import (
-    invalidate_cache as invalidate_snippet_cache,
-)
 
 __all__ = [
-    "DEFAULT_POST_MS",
-    "DEFAULT_PRE_MS",
     "REASON_VALUES",
     "SUBCLASS_VALUES",
     "CandidateLabel",
@@ -66,11 +55,8 @@ __all__ = [
     "PromoteRequest",
     "RunSummary",
     "apply_labels",
-    "extract_snippet",
-    "invalidate_snippet_cache",
     "list_fixtures",
     "load_run",
-    "precache_all",
     "promote_stage_to_fixture",
     "rescore_universe",
     "run_eval",
