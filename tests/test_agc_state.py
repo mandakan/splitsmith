@@ -13,6 +13,7 @@ from splitsmith.ensemble.agc_state import (
     compute_agc_features,
     detect_loud_events,
 )
+from splitsmith.ensemble.features import _HAND_FEATURE_NAMES, HAND_FEATURE_DIM
 
 
 def _impulse(sr: int, n: int, indices: list[int], amp: float = 0.9) -> np.ndarray:
@@ -113,8 +114,6 @@ def test_peak_floor_ratio_tracks_local_quiet() -> None:
 
 def test_features_added_to_hand_feature_dim() -> None:
     """The ensemble's hand-feature vector now includes the three AGC features."""
-    from splitsmith.ensemble.features import HAND_FEATURE_DIM, _HAND_FEATURE_NAMES
-
     assert "agc_state" in _HAND_FEATURE_NAMES
     assert "time_since_last_loud_event" in _HAND_FEATURE_NAMES
     assert "peak_floor_ratio" in _HAND_FEATURE_NAMES
