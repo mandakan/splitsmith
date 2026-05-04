@@ -23,6 +23,7 @@ from ..ensemble.api import (
     EnsembleRuntime,
     detect_shots_ensemble,
 )
+from .snippet import invalidate_cache as invalidate_snippet_cache
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_RUNS_ROOT = Path("build/lab/runs")
@@ -448,6 +449,11 @@ def _sync_pending_candidates(
     prior_cands = pending.get("candidates") or []
     if _pending_in_sync(prior_cands, new_candidates):
         return
+
+    # Times changed -> any cached audio snippets keyed by the old times
+    # are now wrong for the candidates the UI displays. Drop them; they
+    # rebuild on demand from the current audit JSON.
+    invalidate_snippet_cache(audit_path)
     pending.setdefault(
         "_note",
         (

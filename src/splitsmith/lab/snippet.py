@@ -6,10 +6,13 @@ user's typing speed instead of waveform-scrubbing speed.
 
 Cache layout::
 
-    tests/fixtures/.cache/<slug>_snippets/cand<NNN>_pre<P>_post<Q>.wav
+    tests/fixtures/.cache/<slug>_snippets/t<MS>_pre<P>_post<Q>.wav
 
-The cache lives next to the existing CLAP / PANN feature caches; it is
-git-ignored and rebuilt on demand.
+Cached by candidate **time** (in milliseconds, 1ms resolution -- same
+key the rest of the lab uses for label persistence) rather than by
+candidate_number. Candidate numbers shift across detector re-runs;
+times are stable. Keying by time means the cache survives ensemble
+re-evaluations and is git-ignored, rebuilt on demand.
 """
 
 from __future__ import annotations
@@ -33,8 +36,17 @@ def _snippet_dir(audit_path: Path) -> Path:
     return cache_root / f"{audit_path.stem}{CACHE_SUBDIR_SUFFIX}"
 
 
-def _snippet_path(audit_path: Path, candidate_number: int, pre_ms: int, post_ms: int) -> Path:
-    return _snippet_dir(audit_path) / f"cand{candidate_number:03d}_pre{pre_ms}_post{post_ms}.wav"
+def _time_key_ms(t: float) -> int:
+    """Round candidate time to the same 1ms key the lab uses everywhere."""
+    return int(round(float(t) * 1000.0))
+
+
+def _snippet_path_for_time(
+    audit_path: Path, time_seconds: float, pre_ms: int, post_ms: int
+) -> Path:
+    return _snippet_dir(audit_path) / (
+        f"t{_time_key_ms(time_seconds):08d}_pre{pre_ms}_post{post_ms}.wav"
+    )
 
 
 def _candidate_time(audit_path: Path, candidate_number: int) -> float:
@@ -65,18 +77,18 @@ def extract_snippet(
 ) -> Path:
     """Materialise the snippet WAV for one candidate. Idempotent + cached.
 
-    ``audio_path`` defaults to the audit JSON's sibling WAV
-    (``audit_path.with_suffix(".wav")``); pass an override when the
-    fixture's audio lives elsewhere.
+    Cache key is the candidate's time (1ms resolution) so re-runs of
+    the detector that reshuffle ``candidate_number`` don't serve stale
+    audio. ``audio_path`` defaults to the audit JSON's sibling WAV.
     """
-    target = _snippet_path(audit_path, candidate_number, pre_ms, post_ms)
+    t = _candidate_time(audit_path, candidate_number)
+    target = _snippet_path_for_time(audit_path, t, pre_ms, post_ms)
     if target.exists():
         return target
 
     src = audio_path or audit_path.with_suffix(".wav")
     if not src.exists():
         raise FileNotFoundError(f"fixture audio not found: {src}")
-    t = _candidate_time(audit_path, candidate_number)
 
     audio, sr = sf.read(src, always_2d=False)
     if audio.ndim > 1:
@@ -131,7 +143,7 @@ def precache_all(
         t = float(c.get("time", -1.0))
         if cn < 0 or t < 0:
             continue
-        target = _snippet_path(audit_path, cn, pre_ms, post_ms)
+        target = _snippet_path_for_time(audit_path, t, pre_ms, post_ms)
         if not target.exists():
             idx = int(round(t * sr))
             start = max(0, idx - pre_n)
@@ -144,3 +156,21 @@ def precache_all(
         if progress is not None:
             progress(i + 1, total, cn)
     return total
+
+
+def invalidate_cache(audit_path: Path) -> int:
+    """Delete the entire snippet cache directory for a fixture.
+
+    Used by callers that mutate the candidate-time mapping (e.g. the lab
+    eval rewrites pending candidates after the detector reshuffles).
+    Returns the count of files removed.
+    """
+    cache_dir = _snippet_dir(audit_path)
+    if not cache_dir.is_dir():
+        return 0
+    removed = 0
+    for entry in cache_dir.iterdir():
+        if entry.is_file():
+            entry.unlink()
+            removed += 1
+    return removed

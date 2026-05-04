@@ -46,6 +46,9 @@ from .snippet import (
     extract_snippet,
     precache_all,
 )
+from .snippet import (
+    invalidate_cache as invalidate_snippet_cache,
+)
 
 __all__ = [
     "DEFAULT_POST_MS",
@@ -64,6 +67,7 @@ __all__ = [
     "RunSummary",
     "apply_labels",
     "extract_snippet",
+    "invalidate_snippet_cache",
     "list_fixtures",
     "load_run",
     "precache_all",
