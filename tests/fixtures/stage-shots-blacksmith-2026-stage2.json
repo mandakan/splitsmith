@@ -17,70 +17,80 @@
       "candidate_number": 5,
       "time": 2.3037,
       "ms_after_beep": 1804,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 2,
       "candidate_number": 8,
       "time": 3.0396,
       "ms_after_beep": 2540,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 3,
       "candidate_number": 12,
       "time": 4.4926,
       "ms_after_beep": 3993,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 4,
       "candidate_number": 13,
       "time": 4.7371,
       "ms_after_beep": 4237,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 5,
       "candidate_number": 42,
       "time": 9.8927,
       "ms_after_beep": 9393,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 44,
       "time": 10.2682,
       "ms_after_beep": 9768,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
       "candidate_number": 46,
       "time": 10.6329,
       "ms_after_beep": 10133,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
       "candidate_number": 49,
       "time": 10.9534,
       "ms_after_beep": 10453,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
       "candidate_number": 51,
       "time": 11.2645,
       "ms_after_beep": 10765,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 10,
       "candidate_number": 53,
       "time": 11.9021,
       "ms_after_beep": 11402,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 11,
@@ -94,7 +104,8 @@
       "candidate_number": 57,
       "time": 12.5969,
       "ms_after_beep": 12097,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 13,
@@ -568,15 +579,31 @@
       "7.355": "movement",
       "7.584": "movement",
       "7.705": "movement",
-      "7.906": "handling",
+      "7.906": "movement",
       "8.031": "movement",
-      "8.180": "cross_bay",
-      "8.490": "cross_bay",
+      "8.180": "movement",
+      "8.490": "movement",
       "8.715": "movement",
       "8.872": "movement",
       "9.040": "movement",
       "9.227": "movement",
-      "9.384": "wind"
+      "9.384": "wind",
+      "10.072": "echo",
+      "10.726": "echo",
+      "6.863": "movement",
+      "9.548": "movement",
+      "9.607": "movement",
+      "9.765": "movement",
+      "10.499": "echo",
+      "10.798": "echo",
+      "11.069": "echo",
+      "11.537": "echo",
+      "12.374": "echo",
+      "12.464": "echo",
+      "12.875": "echo",
+      "13.236": "echo",
+      "13.407": "echo",
+      "13.542": "cross_bay"
     }
   },
   "stage_rounds": {

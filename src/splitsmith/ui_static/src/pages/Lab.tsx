@@ -632,6 +632,12 @@ function FixtureTable({
                 <th className="px-4 py-2 text-left font-medium">Slug</th>
                 <th className="px-3 py-2 text-right font-medium">Truth</th>
                 <th className="px-3 py-2 text-right font-medium">Kept</th>
+                <th
+                  className="px-3 py-2 text-right font-medium"
+                  title="Labeled candidates / total -- rough labeling progress"
+                >
+                  Labels
+                </th>
                 <th className="px-3 py-2 text-right font-medium">P</th>
                 <th className="px-3 py-2 text-right font-medium">R</th>
                 <th className="px-3 py-2 text-right font-medium">F1</th>
@@ -664,6 +670,9 @@ function FixtureTable({
                     <td className="px-3 py-2 text-right font-mono text-xs">{rec.n_shots}</td>
                     <td className="px-3 py-2 text-right font-mono text-xs">
                       {m ? m.metrics.n_kept : "--"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">
+                      {m ? <LabelProgress fixture={m} /> : "--"}
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs">
                       {m ? fmtPct(m.metrics.precision) : "--"}
@@ -714,6 +723,22 @@ function FixtureTable({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Per-fixture labeling progress: count of candidates carrying any
+ *  ``reason`` or ``subclass`` over the total candidate universe.
+ *  Rough by design -- not every candidate is worth labeling, but the
+ *  ratio still ranks fixtures by how much labeling effort has gone in. */
+function LabelProgress({ fixture }: { fixture: LabEvalFixture }) {
+  const total = fixture.candidates.length;
+  const labeled = fixture.candidates.filter((c) => c.reason || c.subclass).length;
+  if (total === 0) return <>--</>;
+  const pct = Math.round((labeled / total) * 100);
+  return (
+    <span title={`${labeled} of ${total} candidates carry a label`}>
+      {labeled}/{total} ({pct}%)
+    </span>
   );
 }
 

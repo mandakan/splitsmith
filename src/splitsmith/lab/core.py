@@ -408,20 +408,23 @@ def _time_key(t: float) -> float:
     return round(float(t), 3)
 
 
-def _load_labels_from_audit(audit: dict[str, Any]) -> tuple[dict[float, str], dict[float, str]]:
-    """Extract ``reason`` (rejected) + ``subclass`` (kept) labels keyed by time.
+def _load_labels_from_audit(
+    audit: dict[str, Any],
+) -> tuple[dict[float, str], list[tuple[float, str]]]:
+    """Extract ``reason`` (rejected) + ``subclass`` (kept) labels.
 
     Reasons live in ``_candidates_pending_audit.labels_by_time`` -- a flat
-    ``{time_str: reason}`` map keyed by the candidate time rounded to 1 ms
-    (the same key the rest of the lab uses). The pending list itself is
-    immutable detector output, so labels survive ensemble re-runs that
-    reshuffle ``candidate_number``.
+    ``{time_str: reason}`` map keyed by candidate time rounded to 1 ms.
+    Lookup is exact: the candidate's own time is the key.
 
-    Subclasses live on ``shots[]`` entries because a subclass attaches to
-    a confirmed kept shot, which has its own stable time.
+    Subclasses live on ``shots[]`` entries -- each kept shot can carry
+    one. Returned as ``[(audit_time, subclass), ...]`` because the
+    audit shot time can differ from the matched candidate's detected
+    time by up to the matching tolerance (~75 ms). Callers do a
+    nearest-time lookup per candidate via :func:`_subclass_for_time`.
     """
     reason_by_time: dict[float, str] = {}
-    subclass_by_time: dict[float, str] = {}
+    subclass_entries: list[tuple[float, str]] = []
 
     pending = audit.get("_candidates_pending_audit") or {}
     raw_labels = pending.get("labels_by_time") if isinstance(pending, dict) else None
@@ -439,9 +442,26 @@ def _load_labels_from_audit(audit: dict[str, Any]) -> tuple[dict[float, str], di
         sub = s.get("subclass")
         if t is None or not isinstance(sub, str) or not sub:
             continue
-        subclass_by_time[_time_key(t)] = sub
+        subclass_entries.append((float(t), sub))
 
-    return reason_by_time, subclass_by_time
+    return reason_by_time, subclass_entries
+
+
+def _subclass_for_time(
+    candidate_time: float,
+    subclass_entries: list[tuple[float, str]],
+    *,
+    tolerance_ms: float = 75.0,
+) -> str | None:
+    """Nearest-time subclass lookup. Mirrors the ±75 ms matching tolerance
+    used elsewhere in the lab so a subclass attached to an audit shot
+    propagates onto whichever candidate the audit matched it to."""
+    best: tuple[float, str] | None = None
+    for t, sub in subclass_entries:
+        d_ms = abs(t - candidate_time) * 1000.0
+        if d_ms <= tolerance_ms and (best is None or d_ms < best[0]):
+            best = (d_ms, sub)
+    return best[1] if best is not None else None
 
 
 class CandidateLabel(BaseModel):
@@ -592,7 +612,7 @@ def run_eval(
         labels, matched, truth_times = _label_truth(
             cand_times, audit.get("shots", []), cfg.tolerance_ms
         )
-        reason_by_time, subclass_by_time = _load_labels_from_audit(audit)
+        reason_by_time, subclass_entries = _load_labels_from_audit(audit)
         candidates = [
             EvalCandidate(
                 candidate_number=c.candidate_number,
@@ -614,7 +634,7 @@ def run_eval(
                 truth=int(labels[i]),
                 matched_shot_number=matched[i],
                 reason=reason_by_time.get(_time_key(c.time)),
-                subclass=subclass_by_time.get(_time_key(c.time)),
+                subclass=_subclass_for_time(c.time, subclass_entries),
             )
             for i, c in enumerate(result.candidates)
         ]
@@ -671,13 +691,13 @@ def relabel_run(run: EvalRun) -> EvalRun:
         except (OSError, json.JSONDecodeError):
             new_fixtures.append(fix.model_copy(deep=True))
             continue
-        reason_by_time, subclass_by_time = _load_labels_from_audit(audit)
+        reason_by_time, subclass_entries = _load_labels_from_audit(audit)
 
         new_candidates = [
             c.model_copy(
                 update={
                     "reason": reason_by_time.get(_time_key(c.time)),
-                    "subclass": subclass_by_time.get(_time_key(c.time)),
+                    "subclass": _subclass_for_time(c.time, subclass_entries),
                 }
             )
             for c in fix.candidates
