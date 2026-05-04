@@ -40,7 +40,7 @@
   "n_calibration_candidates": 949,
   "n_calibration_positives": 225,
   "voter_c_feature_dim": 27,
-  "built_at": "2026-05-04T13:38:50.762160+00:00",
+  "built_at": "2026-05-04T14:08:10.185639+00:00",
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": []
 }
