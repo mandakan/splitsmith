@@ -53,8 +53,8 @@ def _stage_audio(
         if 0 <= s < n:
             e = min(e, n)
             envelope = np.exp(-np.linspace(0, 5, e - s)).astype(np.float32)
-            audio[s:e] += shot_amp * envelope * rng.choice([-1.0, 1.0], size=e - s).astype(
-                np.float32
+            audio[s:e] += (
+                shot_amp * envelope * rng.choice([-1.0, 1.0], size=e - s).astype(np.float32)
             )
     return audio
 
