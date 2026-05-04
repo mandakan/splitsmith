@@ -1006,8 +1006,11 @@ export const api = {
    *  eval/rescore in this server session, or 404 when none has run. */
   getLastLabRun: () => request<LabEvalRun>("/api/lab/last-run"),
 
+  /** Submit the eval and return the Job snapshot. The SPA polls via
+   *  {@link api.pollJob} and then fetches the result with
+   *  {@link api.getLastLabRun} once the job succeeds. */
   runLabEval: (payload: { slugs?: string[]; config?: Partial<LabEvalConfig>; persist?: boolean }) =>
-    request<LabEvalRun>("/api/lab/eval", { method: "POST", json: payload }),
+    request<Job>("/api/lab/eval", { method: "POST", json: payload }),
 
   rescoreLabUniverse: (config: Partial<LabEvalConfig>) =>
     request<LabEvalRun>("/api/lab/rescore", { method: "POST", json: { config } }),
@@ -1022,7 +1025,11 @@ export const api = {
     audit_path: string;
     labels: { candidate_number: number; reason?: string | null; subclass?: string | null }[];
   }) =>
-    request<{ path: string; counts: Record<string, number> }>("/api/lab/labels", {
+    request<{
+      path: string;
+      counts: Record<string, number>;
+      run: LabEvalRun | null;
+    }>("/api/lab/labels", {
       method: "POST",
       json: payload,
     }),

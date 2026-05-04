@@ -3408,23 +3408,46 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     def lab_eval(
         payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
     ) -> JSONResponse:
+        """Submit a lab-eval job. Returns a ``Job`` snapshot immediately;
+        the SPA polls ``/api/jobs/{id}`` and then fetches the result via
+        ``/api/lab/last-run`` once the job succeeds. Multi-second on the
+        12 fixtures, so doing this inline blocked the request and
+        deprived the JobsPanel of progress visibility.
+        """
         slugs = payload.get("slugs")
         cfg_payload = payload.get("config") or {}
         cfg = lab_module.EvalConfig.model_validate(cfg_payload)
-        runtime = _get_lab_runtime()
-        run = lab_module.run_eval(
-            runtime,
-            slugs=slugs if isinstance(slugs, list) else None,
-            config=cfg,
-        )
-        if payload.get("persist", True):
-            try:
-                lab_module.save_run(run)
-            except OSError as exc:
-                logger.warning("lab: save_run failed: %s", exc)
-        _lab_universe_cache["universe"] = run.universe
-        _lab_universe_cache["last_run"] = run
-        return JSONResponse(run.model_dump(mode="json"))
+        persist = bool(payload.get("persist", True))
+        wanted_slugs = slugs if isinstance(slugs, list) else None
+
+        def _run(handle: JobHandle) -> None:
+            handle.update(progress=0.0, message="Loading ensemble runtime...")
+            runtime = _get_lab_runtime()
+
+            def progress(i: int, total: int, slug: str) -> None:
+                handle.check_cancel()
+                handle.update(
+                    progress=i / total if total else 1.0,
+                    message=f"{slug} ({i}/{total})",
+                )
+
+            run = lab_module.run_eval(
+                runtime,
+                slugs=wanted_slugs,
+                config=cfg,
+                progress=progress,
+            )
+            if persist:
+                try:
+                    lab_module.save_run(run)
+                except OSError as exc:
+                    logger.warning("lab: save_run failed: %s", exc)
+            _lab_universe_cache["universe"] = run.universe
+            _lab_universe_cache["last_run"] = run
+            handle.update(progress=1.0, message=f"done ({len(run.universe.fixtures)} fixtures)")
+
+        job = state.jobs.submit(kind="lab_eval", fn=_run)
+        return JSONResponse(job.model_dump(mode="json"))
 
     @app.post("/api/lab/rescore")
     def lab_rescore(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
@@ -3502,8 +3525,10 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             }
 
         Patches in place with a ``.bak`` backup; returns counts of fields
-        actually changed. Drops the cached eval universe so the next
-        ``/api/lab/eval`` rebuilds it with the fresh labels.
+        changed plus a freshly relabeled ``run`` so the SPA can update
+        without firing a full ``/api/lab/eval``. ``run`` is ``None`` when
+        no cached run exists yet (the SPA falls back to a real eval in
+        that case).
         """
         audit_path = payload.get("audit_path")
         labels_payload = payload.get("labels")
@@ -3534,9 +3559,19 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
             counts = lab_module.apply_labels(target, labels)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        _lab_universe_cache.pop("universe", None)
-        _lab_universe_cache.pop("last_run", None)
-        return JSONResponse({"path": str(target), "counts": counts})
+
+        # Relabel the cached run in place (no model calls). Sub-100 ms,
+        # so the SPA can ditch its post-label runEval and use this.
+        cached_run = _lab_universe_cache.get("last_run")
+        run_payload: Any = None
+        if cached_run is not None:
+            relabeled = lab_module.relabel_run(cached_run)
+            _lab_universe_cache["last_run"] = relabeled
+            _lab_universe_cache["universe"] = relabeled.universe
+            run_payload = relabeled.model_dump(mode="json")
+        return JSONResponse(
+            {"path": str(target), "counts": counts, "run": run_payload},
+        )
 
     @app.post("/api/lab/save-config")
     def lab_save_config(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008

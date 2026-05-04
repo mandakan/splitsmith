@@ -27,9 +27,9 @@ import {
   Hammer,
   Headphones,
   Loader2,
+  Pause,
   Pencil,
   Play,
-  Repeat,
   RotateCcw,
   Save,
   Settings2,
@@ -102,7 +102,15 @@ export function Lab() {
     setEvalLoading(true);
     setError(null);
     try {
-      const result = await api.runLabEval({ config, persist: true });
+      const job = await api.runLabEval({ config, persist: true });
+      const finished = await api.pollJob(job.id, () => {
+        /* JobsPanel polls /api/jobs on its own interval and renders the
+           progress; we just need to await terminal status here. */
+      });
+      if (finished.status !== "succeeded") {
+        throw new Error(finished.error ?? `eval ${finished.status}`);
+      }
+      const result = await api.getLastLabRun();
       setRun(result);
     } catch (err) {
       setError(String(err));
@@ -197,7 +205,10 @@ export function Lab() {
         <FixtureDetail
           fixture={focused}
           onClose={() => navigate("/lab")}
-          onLabelChanged={runEval}
+          onLabelChanged={(updated) => {
+            if (updated) setRun(updated);
+            else runEval();
+          }}
         />
       ) : slug ? (
         <FixtureDetailLite
@@ -715,7 +726,7 @@ function FixtureDetail({
 }: {
   fixture: LabEvalFixture;
   onClose: () => void;
-  onLabelChanged: () => void;
+  onLabelChanged: (updated: LabEvalRun | null) => void;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [time, setTime] = useState(0);
@@ -740,11 +751,14 @@ function FixtureDetail({
     ) => {
       setSavingLabel(candidate_number);
       try {
-        await api.applyLabLabels({
+        const resp = await api.applyLabLabels({
           audit_path: fixture.audit_path,
           labels: [{ candidate_number, ...patch }],
         });
-        onLabelChanged();
+        // Server returns a freshly-relabeled run when a cached eval
+        // exists; otherwise it returns null and the parent triggers a
+        // full eval as a fallback.
+        onLabelChanged(resp.run);
       } catch (err) {
         console.error("label save failed", err);
       } finally {
@@ -930,7 +944,7 @@ function FixtureDetail({
           </Button>
           {stepThrough && (
             <span className="text-[11px] text-muted-foreground">
-              Click a candidate or use J/K. Audio loops automatically; press a label key to save and advance.
+              Click a candidate or use J/K. Audio auto-plays on each candidate; space toggles play/pause. Press a label key to save and advance.
             </span>
           )}
         </div>
@@ -1534,7 +1548,32 @@ function StepThroughPanel({
   const [sort, setSort] = useState<StepSort>("ensemble_score_desc");
   const [preMs, setPreMs] = useState(100);
   const [postMs, setPostMs] = useState(300);
-  const [loop, setLoop] = useState(true);
+  const [playing, setPlaying] = useState(true);
+
+  const togglePlay = useCallback(() => setPlaying((p) => !p), []);
+
+  // Auto-play whenever the candidate changes (resumes if user paused).
+  useEffect(() => {
+    setPlaying(true);
+  }, [selectedCn]);
+
+  // Spacebar toggles play/pause when not typing in an input.
+  useEffect(() => {
+    function isTyping(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false;
+      if (t.isContentEditable) return true;
+      return ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== " ") return;
+      if (isTyping(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      setPlaying((p) => !p);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const ordered = useMemo(() => {
     let list = [...fixture.candidates];
@@ -1603,7 +1642,10 @@ function StepThroughPanel({
           <span className="font-medium text-muted-foreground">Filter</span>
           <select
             value={filter}
-            onChange={(e) => setFilter(e.target.value as StepFilter)}
+            onChange={(e) => {
+              setFilter(e.target.value as StepFilter);
+              e.currentTarget.blur();
+            }}
             className="rounded border border-border bg-background px-1 py-0.5"
           >
             <option value="borderline">Borderline (1-3 votes, recommended)</option>
@@ -1617,7 +1659,10 @@ function StepThroughPanel({
           <span className="font-medium text-muted-foreground">Sort</span>
           <select
             value={sort}
-            onChange={(e) => setSort(e.target.value as StepSort)}
+            onChange={(e) => {
+              setSort(e.target.value as StepSort);
+              e.currentTarget.blur();
+            }}
             className="rounded border border-border bg-background px-1 py-0.5"
           >
             <option value="ensemble_score_desc">
@@ -1639,6 +1684,8 @@ function StepThroughPanel({
             step={10}
             value={preMs}
             onChange={(e) => setPreMs(Number(e.target.value))}
+            onPointerUp={(e) => e.currentTarget.blur()}
+            onKeyUp={(e) => e.currentTarget.blur()}
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -1650,11 +1697,9 @@ function StepThroughPanel({
             step={10}
             value={postMs}
             onChange={(e) => setPostMs(Number(e.target.value))}
+            onPointerUp={(e) => e.currentTarget.blur()}
+            onKeyUp={(e) => e.currentTarget.blur()}
           />
-        </label>
-        <label className="flex items-center gap-1">
-          <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
-          <Repeat className="size-3.5" /> Loop
         </label>
         <span className="ml-auto text-muted-foreground">
           {idxInList + 1} / {ordered.length}
@@ -1666,7 +1711,8 @@ function StepThroughPanel({
         <SnippetPlayer
           fixture={fixture}
           candidate={current}
-          loop={loop}
+          playing={playing}
+          onTogglePlay={togglePlay}
           preMs={preMs}
           postMs={postMs}
           allCandidates={fixture.candidates}
@@ -1822,7 +1868,8 @@ function useAudioBuffer(url: string): {
 function SnippetPlayer({
   fixture,
   candidate,
-  loop,
+  playing,
+  onTogglePlay,
   preMs,
   postMs,
   allCandidates,
@@ -1830,7 +1877,8 @@ function SnippetPlayer({
 }: {
   fixture: LabEvalFixture;
   candidate: LabEvalFixture["candidates"][number];
-  loop: boolean;
+  playing: boolean;
+  onTogglePlay: () => void;
   preMs: number;
   postMs: number;
   allCandidates: LabEvalFixture["candidates"];
@@ -1863,17 +1911,18 @@ function SnippetPlayer({
 
   // Recreate the source on candidate change. WebAudio nodes are
   // single-use after stop(), so we always tear down + rebuild here.
+  // The source always loops continuously; pause is implemented by
+  // ramping gain to 0 (avoids start/stop latency on toggle).
   useEffect(() => {
     if (!buffer) return;
     const ctx = getAudioCtx();
     if (ctx.state === "suspended") {
       ctx.resume().catch(() => {
-        /* requires user gesture; SnippetPlayer mounts after the user
-           clicked "Step through", so this normally succeeds. */
+        /* requires a user gesture -- the play button click counts. */
       });
     }
     const gain = ctx.createGain();
-    gain.gain.value = 1.0;
+    gain.gain.value = playing ? 1.0 : 0.0;
     gain.connect(ctx.destination);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
@@ -1905,8 +1954,18 @@ function SnippetPlayer({
     if (!src) return;
     src.loopStart = loopStart;
     src.loopEnd = loopEnd;
-    src.loop = loop;
-  }, [loopStart, loopEnd, loop]);
+  }, [loopStart, loopEnd]);
+
+  // Mute / unmute via gain ramp (no clicks on toggle).
+  useEffect(() => {
+    const gain = gainRef.current;
+    if (!gain) return;
+    const ctx = getAudioCtx();
+    const target = playing ? 1.0 : 0.0;
+    gain.gain.cancelScheduledValues(ctx.currentTime);
+    gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.015);
+  }, [playing]);
 
   // Markers for the zoomed view: other candidates whose time falls in
   // the visible context window, plus any audited truth shots.
@@ -1932,6 +1991,18 @@ function SnippetPlayer({
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              onTogglePlay();
+              e.currentTarget.blur();
+            }}
+            className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+            title={playing ? "Pause (space)" : "Play (space)"}
+            aria-label={playing ? "Pause" : "Play"}
+          >
+            {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+          </button>
           <span className="font-mono">#{candidate.candidate_number}</span>
           <span className="text-muted-foreground">
             t={candidate.time.toFixed(3)}s · conf {candidate.confidence.toFixed(3)} · score{" "}
@@ -1976,7 +2047,7 @@ function SnippetPlayer({
       <div className="text-[10px] text-muted-foreground">
         Visible window: {((ctxEnd - ctxStart) * 1000).toFixed(0)} ms · play window:{" "}
         {(safePreMs + safePostMs).toFixed(0)} ms ({safePreMs.toFixed(0)} pre /{" "}
-        {safePostMs.toFixed(0)} post){loop ? " · looping" : ""}
+        {safePostMs.toFixed(0)} post){playing ? " · looping" : " · paused"}
       </div>
     </div>
   );

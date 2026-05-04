@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -563,11 +564,14 @@ def run_eval(
     fixtures_root: Path | None = None,
     slugs: list[str] | None = None,
     config: EvalConfig | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> EvalRun:
     """Run the ensemble against fixtures and build a fresh ``EvalUniverse``.
 
     Caller passes a pre-loaded ``runtime`` so model weights are
     amortised across many calls (Lab UI loads once on first request).
+    ``progress(i, total, slug)`` (when provided) fires after each
+    fixture is processed -- shaped to feed JobHandle.update.
     """
     cfg = config or EvalConfig()
     cal = runtime.calibration
@@ -579,7 +583,8 @@ def run_eval(
 
     fixtures: list[EvalFixture] = []
     ec = cfg.to_ensemble_config()
-    for fix in catalog:
+    total = len(catalog)
+    for i, fix in enumerate(catalog):
         audit = json.loads(Path(fix.audit_path).read_text(encoding="utf-8"))
         audio, sr = load_audio(Path(fix.audio_path))
         beep_time = float(audit.get("beep_time", 0.0))
@@ -643,6 +648,8 @@ def run_eval(
                 audio_mtime=fix.audio_mtime,
             )
         )
+        if progress is not None:
+            progress(i + 1, total, fix.slug)
 
     universe = EvalUniverse(
         fixtures=fixtures,
@@ -659,6 +666,50 @@ def run_eval(
         universe=universe,
         config_hash=_hash_config(cfg),
         built_at=datetime.now(UTC).isoformat(),
+    )
+
+
+def relabel_run(run: EvalRun) -> EvalRun:
+    """Re-attach ``reason`` / ``subclass`` labels from disk to a cached run.
+
+    No model calls and no detector run: just re-reads each fixture's
+    audit JSON, re-keys ``reason`` / ``subclass`` entries by time, and
+    rebuilds per-fixture + summary breakdowns. Used by ``/api/lab/labels``
+    so a label save can return a fresh ``EvalRun`` to the SPA without
+    triggering a full eval (which is multi-second on 12 fixtures).
+    """
+    new_fixtures: list[EvalFixture] = []
+    for fix in run.universe.fixtures:
+        audit_path = Path(fix.audit_path)
+        try:
+            audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            new_fixtures.append(fix.model_copy(deep=True))
+            continue
+        reason_by_time, subclass_by_time = _load_labels_from_audit(audit)
+
+        new_candidates = [
+            c.model_copy(
+                update={
+                    "reason": reason_by_time.get(_time_key(c.time)),
+                    "subclass": subclass_by_time.get(_time_key(c.time)),
+                }
+            )
+            for c in fix.candidates
+        ]
+        metrics = _metrics(fix.truth_times, new_candidates)
+        new_fixtures.append(
+            fix.model_copy(update={"candidates": new_candidates, "metrics": metrics})
+        )
+
+    new_universe = run.universe.model_copy(update={"fixtures": new_fixtures})
+    summary = _summary(new_fixtures)
+    return run.model_copy(
+        update={
+            "universe": new_universe,
+            "summary": summary,
+            "built_at": datetime.now(UTC).isoformat(),
+        }
     )
 
 

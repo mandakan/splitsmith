@@ -329,7 +329,8 @@
         "time": 2.8121,
         "ms_after_beep": 2312,
         "peak_amplitude": 0.3817,
-        "confidence": 0.097
+        "confidence": 0.097,
+        "reason": "echo"
       },
       {
         "candidate_number": 8,
@@ -364,7 +365,8 @@
         "time": 4.3641,
         "ms_after_beep": 3864,
         "peak_amplitude": 0.1138,
-        "confidence": 0.04
+        "confidence": 0.04,
+        "reason": "wind"
       },
       {
         "candidate_number": 13,
@@ -406,7 +408,8 @@
         "time": 6.2106,
         "ms_after_beep": 5711,
         "peak_amplitude": 0.1457,
-        "confidence": 0.024
+        "confidence": 0.024,
+        "reason": "cross_bay"
       },
       {
         "candidate_number": 19,
@@ -659,7 +662,8 @@
         "time": 17.7583,
         "ms_after_beep": 17258,
         "peak_amplitude": 0.239,
-        "confidence": 0.19
+        "confidence": 0.19,
+        "reason": "cross_bay"
       },
       {
         "candidate_number": 55,
@@ -799,7 +803,8 @@
         "time": 26.4413,
         "ms_after_beep": 25941,
         "peak_amplitude": 0.2088,
-        "confidence": 0.112
+        "confidence": 0.112,
+        "reason": "wind"
       },
       {
         "candidate_number": 75,
@@ -1030,21 +1035,24 @@
         "time": 34.9643,
         "ms_after_beep": 34464,
         "peak_amplitude": 0.3945,
-        "confidence": 0.305
+        "confidence": 0.305,
+        "reason": "handling"
       },
       {
         "candidate_number": 108,
         "time": 35.1534,
         "ms_after_beep": 34653,
         "peak_amplitude": 0.2838,
-        "confidence": 0.223
+        "confidence": 0.223,
+        "reason": "handling"
       },
       {
         "candidate_number": 109,
         "time": 35.3424,
         "ms_after_beep": 34842,
         "peak_amplitude": 0.4341,
-        "confidence": 0.201
+        "confidence": 0.201,
+        "reason": "handling"
       },
       {
         "candidate_number": 110,
@@ -1065,7 +1073,8 @@
         "time": 36.224,
         "ms_after_beep": 35724,
         "peak_amplitude": 0.4534,
-        "confidence": 0.241
+        "confidence": 0.241,
+        "reason": "handling"
       },
       {
         "candidate_number": 113,
@@ -1079,7 +1088,8 @@
         "time": 36.5355,
         "ms_after_beep": 36035,
         "peak_amplitude": 0.025,
-        "confidence": 0.195
+        "confidence": 0.195,
+        "reason": "handling"
       },
       {
         "candidate_number": 115,
@@ -1100,14 +1110,16 @@
         "time": 37.2448,
         "ms_after_beep": 36745,
         "peak_amplitude": 0.0756,
-        "confidence": 0.282
+        "confidence": 0.282,
+        "reason": "handling"
       },
       {
         "candidate_number": 118,
         "time": 37.3426,
         "ms_after_beep": 36843,
         "peak_amplitude": 0.0338,
-        "confidence": 0.103
+        "confidence": 0.103,
+        "reason": "handling"
       },
       {
         "candidate_number": 119,
