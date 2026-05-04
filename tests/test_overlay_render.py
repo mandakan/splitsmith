@@ -94,6 +94,23 @@ def test_build_frame_states_sorts_unsorted_input() -> None:
     assert states[30].last_split == pytest.approx(0.5)
 
 
+def test_build_frame_states_running_total_freezes_after_last_shot() -> None:
+    # Two shots; clip continues for ~1s after the last shot. The timer
+    # should hold at last_shot - beep, not keep ticking.
+    states = overlay_render.build_frame_states(
+        shot_times_in_clip=[1.0, 1.5],
+        beep_time_in_clip=0.5,
+        fps=30.0,
+        duration_seconds=3.0,
+    )
+    final_total = 1.5 - 0.5
+    # Frame at t=1.5 (last shot fires here): freeze begins.
+    assert states[45].running_total == pytest.approx(final_total)
+    # Mid-tail and end-of-clip frames hold at the same value.
+    assert states[60].running_total == pytest.approx(final_total)
+    assert states[-1].running_total == pytest.approx(final_total)
+
+
 # --- _split_alpha -----------------------------------------------------------
 
 

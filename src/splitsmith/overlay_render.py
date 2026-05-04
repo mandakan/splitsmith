@@ -107,7 +107,14 @@ def build_frame_states(
                 last_split = shots_sorted[0] - beep_time_in_clip
             else:
                 last_split = shots_sorted[fired - 1] - shots_sorted[fired - 2]
-        running_total = max(0.0, t - beep_time_in_clip)
+        # Freeze the timer once the last shot has fired -- the running total
+        # is the stage time, not the clip duration. Pre-beep frames clamp at
+        # 0; everything between ticks; everything after the last shot holds
+        # at the final stage time.
+        if shot_count > 0 and fired == shot_count:
+            running_total = max(0.0, shots_sorted[-1] - beep_time_in_clip)
+        else:
+            running_total = max(0.0, t - beep_time_in_clip)
         states.append(
             FrameState(
                 time_seconds=t,
