@@ -1465,6 +1465,84 @@ def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypa
     assert body["duration"] == pytest.approx(1.0)
 
 
+def test_video_peaks_endpoint_serves_secondary_full_wav(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The per-video peaks endpoint resolves the secondary's own WAV
+    (``stage<N>_cam_<vid>.wav``) and returns the same payload shape as
+    the stage-level endpoint, so the SPA's waveform picker can take the
+    same code path for primary + secondary."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_secondary(tmp_path)
+    project_root = tmp_path / "match"
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    sec_wav = audio_dir / f"stage1_cam_{sec_id}.wav"
+    audio = np.zeros(48_000, dtype="float32")
+    audio[10_000:11_000] = 0.5
+    sf.write(sec_wav, audio, 48_000)
+
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_ensure_video(root, n, video, source, **kwargs):  # type: ignore[no-untyped-def]
+        return sec_wav
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure_video)
+
+    # Set a beep_time on the secondary so beep_time is reflected in the payload.
+    proj = client.post(
+        f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 0.42}
+    ).json()
+    assert next(v for v in proj["stages"][0]["videos"] if v["video_id"] == sec_id)[
+        "beep_time"
+    ] == pytest.approx(0.42)
+
+    resp = client.get(f"/api/stages/1/videos/{sec_id}/peaks?bins=64")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bins"] == 64
+    assert len(body["peaks"]) == 64
+    # No per-secondary trim exists -> trimmed=False, beep_time = source time.
+    assert body["trimmed"] is False
+    assert body["beep_time"] == pytest.approx(0.42)
+
+
+def test_video_audio_endpoint_serves_secondary_wav(tmp_path: Path, monkeypatch) -> None:
+    """The per-video audio endpoint returns the secondary's own WAV bytes."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    project_root = tmp_path / "match"
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    sec_wav = audio_dir / f"stage1_cam_{sec_id}.wav"
+    sec_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00" + b"\x00" * 16)
+
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_ensure_video(root, n, video, source, **kwargs):  # type: ignore[no-untyped-def]
+        return sec_wav
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure_video)
+
+    resp = client.get(f"/api/stages/1/videos/{sec_id}/audio")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "audio/wav"
+    assert resp.content.startswith(b"RIFF")
+
+
+def test_video_peaks_endpoint_404_for_unknown_video(tmp_path: Path) -> None:
+    """The per-video endpoint 404s when video_id isn't on the stage --
+    same shape as the per-video beep endpoints."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    resp = client.get("/api/stages/1/videos/deadbeef0000/peaks")
+    assert resp.status_code == 404
+
+
 def test_peaks_endpoint_falls_back_to_full_when_no_trim(tmp_path: Path, monkeypatch) -> None:
     """No trimmed file -> /peaks serves the full primary WAV. Response says
     trimmed=false so the SPA can hint that the user is on an untrimmed clip."""

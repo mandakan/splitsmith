@@ -932,6 +932,12 @@ export const api = {
 
   stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
 
+  /** Per-video WAV URL. Primary forwards to the legacy stage audio
+   *  endpoint (trimmed audit clip preferred); secondary serves the full
+   *  per-cam WAV so the picker has the whole clip to scrub. */
+  videoAudioUrl: (stageNumber: number, videoId: string) =>
+    `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/audio`,
+
   /** URL for a tiny MP4 around a beep timestamp (#27, #22). ``t`` is
    *  passed to the server (which centres the clip there) AND ms-rounded
    *  into the cache key, so each distinct ``t`` gets its own MP4. The
@@ -950,6 +956,13 @@ export const api = {
 
   getStagePeaks: (stageNumber: number, bins = 1200) =>
     request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),
+
+  /** Per-video peaks. Same payload shape as the stage endpoint so the
+   *  waveform picker takes the same code path for every role. */
+  getVideoPeaks: (stageNumber: number, videoId: string, bins = 1200) =>
+    request<PeaksResult>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`,
+    ),
 
   /** Returns the saved audit JSON for a stage, or null when none exists yet. */
   getStageAudit: async (stageNumber: number): Promise<StageAudit | null> => {

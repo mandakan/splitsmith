@@ -238,22 +238,14 @@ export function BeepSection({
             Cancel
           </Button>
         </div>
-        {isPrimary ? (
-          <BeepWaveformPicker
-            stageNumber={stageNumber}
-            videoId={videoId}
-            primaryBeepTime={video.beep_time}
-            draftSourceTime={draftValid ? draftSourceTime : null}
-            onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
-            setError={setError}
-          />
-        ) : (
-          <SecondaryScrubPicker
-            videoPath={video.path}
-            initialTime={draftValid ? draftSourceTime : video.beep_time ?? 0}
-            onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
-          />
-        )}
+        <BeepWaveformPicker
+          stageNumber={stageNumber}
+          videoId={videoId}
+          videoBeepTime={video.beep_time}
+          draftSourceTime={draftValid ? draftSourceTime : null}
+          onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
+          setError={setError}
+        />
       </div>
     );
   }
@@ -421,25 +413,29 @@ export function BeepSection({
  *    5. Zoom controls (in / out) feed pixelsPerSecond to the Waveform so
  *       the user can see sub-frame detail near the beep.
  *
- *  Time conversion: /audio + /peaks serve clip-local time (the trimmed
- *  audit clip when cached, the full primary WAV otherwise). The picker's
- *  draft is in source time. ``offset = primary.beep_time - peaks.beep_time``
- *  bridges the two -- zero when the WAV is full source, equal to the trim
- *  start when it's a trimmed audit clip.
+ *  Time conversion: /audio + /peaks serve clip-local time. For the
+ *  primary, this is the trimmed audit clip when cached (so peaks.beep_time
+ *  is the in-clip position) or the full primary WAV otherwise. For
+ *  secondaries it's always the full per-cam WAV (no per-secondary trim
+ *  exists). The picker's draft is in source time;
+ *  ``offset = videoBeepTime - peaks.beep_time`` bridges the two -- zero
+ *  when the WAV is full source, equal to the trim start when it's a
+ *  trimmed audit clip.
  *
- *  Secondary cameras don't have a project-level waveform endpoint and
- *  fall back to the numeric input + preview clip in BeepSection. */
+ *  Generic over role: peaks + audio come from per-video endpoints
+ *  (`/api/stages/{n}/videos/{vid}/...`) so primary and secondary use the
+ *  same component, the same controls, and the same snap-to-beep flow. */
 function BeepWaveformPicker({
   stageNumber,
   videoId,
-  primaryBeepTime,
+  videoBeepTime,
   draftSourceTime,
   onPick,
   setError,
 }: {
   stageNumber: number;
   videoId: string;
-  primaryBeepTime: number | null;
+  videoBeepTime: number | null;
   draftSourceTime: number | null;
   onPick: (sourceTime: number) => void;
   setError: (msg: string | null) => void;
@@ -460,7 +456,7 @@ function BeepWaveformPicker({
     setLoading(true);
     setUnavailable(false);
     api
-      .getStagePeaks(stageNumber)
+      .getVideoPeaks(stageNumber, videoId)
       .then((p) => {
         if (cancelled) return;
         setPeaks(p);
@@ -475,15 +471,15 @@ function BeepWaveformPicker({
     return () => {
       cancelled = true;
     };
-  }, [stageNumber]);
+  }, [stageNumber, videoId]);
 
   // Source-time <-> clip-time bridge. Zero when the WAV is the full
-  // primary; equal to the trim window's start when the audit clip is
-  // cached.
+  // source; equal to the trim window's start when an audit clip is
+  // cached for the primary.
   const offset = useMemo(() => {
-    if (primaryBeepTime == null || !peaks || peaks.beep_time == null) return 0;
-    return primaryBeepTime - peaks.beep_time;
-  }, [primaryBeepTime, peaks]);
+    if (videoBeepTime == null || !peaks || peaks.beep_time == null) return 0;
+    return videoBeepTime - peaks.beep_time;
+  }, [videoBeepTime, peaks]);
 
   // The draft (in source coords) becomes a dashed marker on the
   // waveform. Falls back to the auto-detected beep when no draft yet.
@@ -655,7 +651,7 @@ function BeepWaveformPicker({
       />
       <audio
         ref={audioRef}
-        src={api.stageAudioUrl(stageNumber)}
+        src={api.videoAudioUrl(stageNumber, videoId)}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -695,80 +691,6 @@ function BeepWaveformPicker({
   );
 }
 
-/** Inline video scrub + "use current time" picker for secondaries.
- *
- *  The primary gets a waveform picker because we already cache stage-level
- *  audio peaks for it; secondaries don't have that, but they DO have their
- *  own video stream. Letting the user scrub the secondary's actual footage
- *  and click "Use current time" is good enough to find the buzzer or
- *  first-shot moment by ear / eye, which is the core thing the manual
- *  override needs to support when in-stream beep detection fails (e.g.
- *  iPhone tripod cam where the buzzer isn't a sustained 2-5 kHz tone). */
-function SecondaryScrubPicker({
-  videoPath,
-  initialTime,
-  onPick,
-}: {
-  videoPath: string;
-  initialTime: number;
-  onPick: (sourceTime: number) => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  // Seek to the current draft time when the user reopens the editor or
-  // edits the numeric input -- the video should follow, so they can verify
-  // the time they typed lands on the right frame.
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-    if (!Number.isFinite(initialTime) || initialTime < 0) return;
-    if (Math.abs(el.currentTime - initialTime) < 0.05) return;
-    try {
-      el.currentTime = initialTime;
-    } catch {
-      // Some browsers throw if metadata isn't loaded yet; the
-      // loadedmetadata handler below will retry.
-    }
-  }, [initialTime]);
-
-  return (
-    <div className="space-y-2">
-      <video
-        ref={videoRef}
-        src={api.videoStreamUrl(videoPath)}
-        controls
-        preload="metadata"
-        className="block w-full max-h-[40vh] rounded bg-black"
-        onLoadedMetadata={(e) => {
-          if (Number.isFinite(initialTime) && initialTime >= 0) {
-            try {
-              e.currentTarget.currentTime = initialTime;
-            } catch {
-              // Source might not support seeking before first decode;
-              // ignored (the user can still scrub manually).
-            }
-          }
-        }}
-      />
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Button
-          size="sm"
-          variant="secondary"
-          type="button"
-          onClick={() => {
-            const el = videoRef.current;
-            if (!el) return;
-            onPick(el.currentTime);
-          }}
-        >
-          <Crosshair />
-          Use current time
-        </Button>
-        <span>Scrub to the buzzer (or first audible shot) and click to set the draft.</span>
-      </div>
-    </div>
-  );
-}
 
 function SnapProposal({
   proposal,
