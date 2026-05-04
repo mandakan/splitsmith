@@ -135,6 +135,7 @@ class EvalConfig(BaseModel):
 REASON_VALUES: tuple[str, ...] = (
     "cross_bay",
     "echo",
+    "barrel_echo",
     "wind",
     "movement",
     "steel_ring",

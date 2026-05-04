@@ -704,6 +704,7 @@ function FixtureTable({
 const REASON_SHORTCUTS: Record<string, string> = {
   x: "cross_bay",
   e: "echo",
+  b: "barrel_echo",
   w: "wind",
   m: "movement",
   s: "steel_ring",

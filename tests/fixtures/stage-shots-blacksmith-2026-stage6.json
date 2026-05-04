@@ -309,7 +309,19 @@
         "peak_amplitude": 0.1214,
         "confidence": 0.114
       }
-    ]
+    ],
+    "labels_by_time": {
+      "8.617": "cross_bay",
+      "10.001": "cross_bay",
+      "2.728": "cross_bay",
+      "2.847": "cross_bay",
+      "5.124": "barrel_echo",
+      "5.474": "barrel_echo",
+      "6.539": "barrel_echo",
+      "7.679": "barrel_echo",
+      "8.055": "barrel_echo",
+      "8.247": "barrel_echo"
+    }
   },
   "stage_rounds": {
     "paper": 6,

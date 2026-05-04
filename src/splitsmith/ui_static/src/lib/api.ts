@@ -1099,6 +1099,7 @@ export interface LabEvalCandidate {
 export const LAB_REASONS = [
   "cross_bay",
   "echo",
+  "barrel_echo",
   "wind",
   "movement",
   "steel_ring",
