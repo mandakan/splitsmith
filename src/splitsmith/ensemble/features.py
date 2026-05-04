@@ -72,7 +72,24 @@ _HAND_FEATURE_NAMES: tuple[str, ...] = (
     "agc_state",
     "time_since_last_loud_event",
     "peak_floor_ratio",
+    # Cross-bay discriminators (issue #108): close shots have a peaked
+    # 1-4 kHz spectrum and low spectral flatness; distant / muffled shots
+    # from neighbouring bays arrive flatter and lose the mid-band
+    # dominance. Together these two features account for ~6 % of the
+    # GBDT's split importance and halve the cross_bay+echo FP count in
+    # threshold-only eval (see PR's ablation table).
+    "spectral_flatness",
+    "spectral_peak_ratio",
 )
+
+# Onset window for spectral features (issue #108): 50 ms gives ~20 Hz
+# frequency resolution at 48 kHz, enough to separate the 0-500 Hz /
+# 1-4 kHz / 8+ kHz bands.
+_SPECTRAL_WINDOW_MS: float = 50.0
+_BAND_LOW_HI: float = 500.0
+_BAND_MID_LO: float = 1000.0
+_BAND_MID_HI: float = 4000.0
+_BAND_HIGH_LO: float = 8000.0
 
 HAND_FEATURE_DIM: int = len(_HAND_FEATURE_NAMES)
 VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1
@@ -121,6 +138,33 @@ def _smoothed_peak(seg: np.ndarray, win_ms: float, sr: int) -> float:
     return float(np.convolve(seg, k, mode="valid").max())
 
 
+def _spectral_flatness_and_peak_ratio(seg: np.ndarray, sr: int) -> tuple[float, float]:
+    """Spectral flatness + 1-4 kHz / (low + high) energy ratio over ``seg``.
+
+    Cross-bay shots arrive through air + obstacles: their spectra are
+    flatter and lose the 1-4 kHz dominance our close shots have. Both
+    numbers fall to 0 on empty or sub-FFT-sized segments so the loop
+    stays branchless.
+    """
+    if seg.size < 16:
+        return 0.0, 0.0
+    n = seg.size
+    window = np.hanning(n)
+    spec = np.abs(np.fft.rfft(seg.astype(np.float64) * window))
+    power = spec * spec
+    eps = 1e-12
+    geo = float(np.exp(np.mean(np.log(power + eps))))
+    arith = float(power.mean()) + eps
+    flatness = geo / arith
+
+    freqs = np.fft.rfftfreq(n, d=1.0 / sr)
+    low = power[freqs < _BAND_LOW_HI].sum()
+    mid = power[(freqs >= _BAND_MID_LO) & (freqs <= _BAND_MID_HI)].sum()
+    high = power[freqs > _BAND_HIGH_LO].sum()
+    peak_ratio = float(mid / (low + high + eps))
+    return flatness, peak_ratio
+
+
 def compute_hand_features(
     audio: np.ndarray,
     sample_rate: int,
@@ -143,6 +187,7 @@ def compute_hand_features(
     abs_audio = None  # lazy-built below if needed
 
     agc = compute_agc_features(audio, sample_rate, candidate_times, peak_amplitudes)
+    spectral_half = int(round(_SPECTRAL_WINDOW_MS * 1e-3 * sample_rate / 2.0))
 
     for k, t in enumerate(candidate_times):
         idx = int(round(float(t) * sample_rate))
@@ -206,6 +251,14 @@ def compute_hand_features(
         out[k, 11] = agc.agc_state[k]
         out[k, 12] = agc.time_since_last_loud_event[k]
         out[k, 13] = agc.peak_floor_ratio[k]
+
+        spec_lo = max(0, peak_local_idx - spectral_half)
+        spec_hi = min(n, peak_local_idx + spectral_half)
+        flatness, peak_ratio = _spectral_flatness_and_peak_ratio(
+            audio[spec_lo:spec_hi].astype(np.float64), sample_rate
+        )
+        out[k, 14] = flatness
+        out[k, 15] = peak_ratio
     return out
 
 
