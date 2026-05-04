@@ -1680,12 +1680,16 @@ function StepThroughPanel({
           <input
             type="range"
             min={0}
-            max={500}
+            max={2000}
             step={10}
             value={preMs}
             onChange={(e) => setPreMs(Number(e.target.value))}
             onPointerUp={(e) => e.currentTarget.blur()}
             onKeyUp={(e) => e.currentTarget.blur()}
+            // Mirror the slider so dragging left grows the pre-window
+            // (matches the play-window bracket that extends leftwards
+            // on the waveform below).
+            style={{ direction: "rtl" }}
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -1693,7 +1697,7 @@ function StepThroughPanel({
           <input
             type="range"
             min={50}
-            max={800}
+            max={2000}
             step={10}
             value={postMs}
             onChange={(e) => setPostMs(Number(e.target.value))}
@@ -1889,6 +1893,13 @@ function SnippetPlayer({
 
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
+  // Reference points for the playhead approximation: the AudioContext
+  // time at which the source last started, and the buffer offset it
+  // started at. Used to compute "where in the loop are we now?" without
+  // querying the source (WebAudio doesn't expose that).
+  const startedAtRef = useRef<number>(0);
+  const startOffsetRef = useRef<number>(0);
+  const [playhead, setPlayhead] = useState<number>(candidate.time);
 
   const t = candidate.time;
   const safePreMs = Math.max(0, preMs);
@@ -1933,6 +1944,8 @@ function SnippetPlayer({
     src.start(0, loopStart);
     sourceRef.current = src;
     gainRef.current = gain;
+    startedAtRef.current = ctx.currentTime;
+    startOffsetRef.current = loopStart;
 
     return () => {
       try {
@@ -1966,6 +1979,26 @@ function SnippetPlayer({
     gain.gain.setValueAtTime(gain.gain.value, ctx.currentTime);
     gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.015);
   }, [playing]);
+
+  // Playhead. WebAudio's AudioBufferSourceNode doesn't expose its
+  // internal position, so we approximate it from elapsed AudioContext
+  // time. After a slider drag the bracket moves but the underlying
+  // source phase stays continuous, so the line may briefly fall out
+  // of sync for one cycle -- it re-aligns on the next loop wrap.
+  useEffect(() => {
+    if (!buffer || !playing) return;
+    let raf = 0;
+    const tick = () => {
+      const ctx = getAudioCtx();
+      const span = Math.max(0.001, loopEnd - loopStart);
+      const elapsed = ctx.currentTime - startedAtRef.current;
+      const phase = ((elapsed % span) + span) % span;
+      setPlayhead(loopStart + phase);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [buffer, loopStart, loopEnd, playing]);
 
   // Markers for the zoomed view: other candidates whose time falls in
   // the visible context window, plus any audited truth shots.
@@ -2040,6 +2073,7 @@ function SnippetPlayer({
           playStart={loopStart}
           playEnd={loopEnd}
           candidateTime={t}
+          playhead={playing ? playhead : null}
           otherCandidates={otherCandidates}
           truthTimes={truthInWindow}
         />
@@ -2091,6 +2125,7 @@ function ZoomedWaveform({
   playStart,
   playEnd,
   candidateTime,
+  playhead,
   otherCandidates,
   truthTimes,
   height = 120,
@@ -2101,6 +2136,7 @@ function ZoomedWaveform({
   playStart: number;
   playEnd: number;
   candidateTime: number;
+  playhead: number | null;
   otherCandidates: LabEvalFixture["candidates"];
   truthTimes: number[];
   height?: number;
@@ -2239,6 +2275,22 @@ function ZoomedWaveform({
           stroke="var(--primary, #6366f1)"
           strokeWidth={1.5}
         />
+
+        {/* Playhead -- only shown while playing. Positioned in the
+            visible window if the loop falls inside it (almost always
+            true since the play window is enclosed by the visible
+            window). */}
+        {playhead != null && playhead >= windowStart && playhead <= windowEnd && (
+          <line
+            x1={xFor(playhead)}
+            x2={xFor(playhead)}
+            y1={0}
+            y2={height}
+            stroke="#ef4444"
+            strokeWidth={1.5}
+            strokeOpacity={0.85}
+          />
+        )}
 
         {/* Time-axis labels at the visible-window edges */}
         <text
