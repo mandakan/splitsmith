@@ -108,9 +108,7 @@ def test_run_ffmpeg_extract_builds_mono_48k_command(tmp_path: Path) -> None:
     src.write_bytes(b"")
     dst = tmp_path / "out.wav"
     runner = _RecordingRunner()
-    extractor.run_ffmpeg_extract(
-        src, dst, start=12.0, duration=30.0, overwrite=True, runner=runner
-    )
+    extractor.run_ffmpeg_extract(src, dst, start=12.0, duration=30.0, overwrite=True, runner=runner)
     cmd = runner.calls[0]
     # -ss before -i for fast seek, mono 48k PCM.
     ss_idx = cmd.index("-ss")
@@ -124,7 +122,9 @@ def test_run_ffmpeg_extract_builds_mono_48k_command(tmp_path: Path) -> None:
     assert "-y" in cmd  # overwrite=True
 
 
-def test_extract_one_writes_sidecar_with_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_extract_one_writes_sidecar_with_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fixtures_dir = tmp_path / "fixtures"
     full_dir = fixtures_dir / "full"
     fixtures_dir.mkdir()
