@@ -1,17 +1,25 @@
 import { Crosshair, FileBarChart, FlaskConical, FolderInput, Home, Palette } from "lucide-react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof Home;
+  end?: boolean;
+}
+const BASE_NAV: NavItem[] = [
   { to: "/", label: "Overview", icon: Home, end: true },
   { to: "/ingest", label: "Ingest", icon: FolderInput },
   { to: "/audit", label: "Audit", icon: Crosshair },
   { to: "/export", label: "Export", icon: FileBarChart },
-  { to: "/lab", label: "Lab", icon: FlaskConical },
 ];
+const LAB_NAV: NavItem = { to: "/lab", label: "Lab", icon: FlaskConical };
 
 export function AppShell() {
   const { pathname } = useLocation();
@@ -20,6 +28,26 @@ export function AppShell() {
   // Hide the sidebar entirely so the screen reads as a single-purpose
   // tool instead of "audit screen with broken navigation".
   const fixtureMode = pathname.startsWith("/review");
+
+  // Server-side feature flags. ``lab`` defaults off and is opt-in via
+  // ``splitsmith ui --lab``; if the call fails we just don't show the
+  // Lab nav, which is the correct behaviour for an end-user install.
+  const [labEnabled, setLabEnabled] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api
+      .getServerFeatures()
+      .then((f) => {
+        if (alive) setLabEnabled(Boolean(f.lab));
+      })
+      .catch(() => {
+        if (alive) setLabEnabled(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const nav = labEnabled ? [...BASE_NAV, LAB_NAV] : BASE_NAV;
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -30,7 +58,7 @@ export function AppShell() {
             splitsmith
           </div>
           <nav className="flex flex-1 flex-col gap-0.5 p-2">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
+            {nav.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
                 to={to}

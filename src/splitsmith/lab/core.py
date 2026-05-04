@@ -393,17 +393,30 @@ def _time_key(t: float) -> float:
 
 
 def _load_labels_from_audit(audit: dict[str, Any]) -> tuple[dict[float, str], dict[float, str]]:
-    """Extract ``reason`` (rejected) + ``subclass`` (kept) labels keyed by time."""
+    """Extract ``reason`` (rejected) + ``subclass`` (kept) labels keyed by time.
+
+    Reasons live in ``_candidates_pending_audit.labels_by_time`` -- a flat
+    ``{time_str: reason}`` map keyed by the candidate time rounded to 1 ms
+    (the same key the rest of the lab uses). The pending list itself is
+    immutable detector output, so labels survive ensemble re-runs that
+    reshuffle ``candidate_number``.
+
+    Subclasses live on ``shots[]`` entries because a subclass attaches to
+    a confirmed kept shot, which has its own stable time.
+    """
     reason_by_time: dict[float, str] = {}
     subclass_by_time: dict[float, str] = {}
 
     pending = audit.get("_candidates_pending_audit") or {}
-    for c in pending.get("candidates", []):
-        t = c.get("time")
-        reason = c.get("reason")
-        if t is None or not isinstance(reason, str) or not reason:
-            continue
-        reason_by_time[_time_key(t)] = reason
+    raw_labels = pending.get("labels_by_time") if isinstance(pending, dict) else None
+    if isinstance(raw_labels, dict):
+        for k, v in raw_labels.items():
+            try:
+                t = float(k)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(v, str) and v:
+                reason_by_time[_time_key(t)] = v
 
     for s in audit.get("shots", []):
         t = s.get("time")
@@ -415,81 +428,18 @@ def _load_labels_from_audit(audit: dict[str, Any]) -> tuple[dict[float, str], di
     return reason_by_time, subclass_by_time
 
 
-def _sync_pending_candidates(
-    audit_path: Path,
-    audit: dict[str, Any],
-    result: Any,
-) -> None:
-    """Rewrite ``_candidates_pending_audit`` to match the current ensemble run.
-
-    Existing ``reason`` labels are preserved by time-matching (rounded to
-    the same 1ms key used everywhere else in the lab). This keeps
-    ``apply_labels`` -- which looks up by ``candidate_number`` -- pointed
-    at the live universe instead of a stale snapshot from a previous
-    detector run. Atomic write (``.tmp`` -> rename, with ``.bak`` rotated)
-    mirrors :func:`apply_labels`.
-    """
-    reason_by_time, _ = _load_labels_from_audit(audit)
-
-    new_candidates: list[dict[str, Any]] = []
-    for c in result.candidates:
-        entry: dict[str, Any] = {
-            "candidate_number": c.candidate_number,
-            "time": c.time,
-            "ms_after_beep": int(c.ms_after_beep),
-            "peak_amplitude": c.peak_amplitude,
-            "confidence": c.confidence,
-        }
-        prior = reason_by_time.get(_time_key(c.time))
-        if prior:
-            entry["reason"] = prior
-        new_candidates.append(entry)
-
-    pending = audit.setdefault("_candidates_pending_audit", {})
-    prior_cands = pending.get("candidates") or []
-    if _pending_in_sync(prior_cands, new_candidates):
-        return
-    pending.setdefault(
-        "_note",
-        (
-            "4-voter ensemble (issue #31). Rewritten by the lab eval to "
-            "stay in sync with the current detector run; ``reason`` "
-            "labels are preserved by time-match."
-        ),
-    )
-    pending["candidates"] = new_candidates
-    if hasattr(result, "consensus"):
-        pending["consensus"] = result.consensus
-    if hasattr(result, "expected_rounds"):
-        pending["expected_rounds"] = result.expected_rounds
-
-    tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
-    backup = audit_path.with_suffix(audit_path.suffix + ".bak")
-    tmp.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
-    if backup.exists():
-        backup.unlink()
-    audit_path.replace(backup)
-    tmp.replace(audit_path)
-
-
-def _pending_in_sync(prior: list[dict[str, Any]], current: list[dict[str, Any]]) -> bool:
-    """Cheap equality check on (candidate_number, time, reason) tuples."""
-    if len(prior) != len(current):
-        return False
-    for p, c in zip(prior, current, strict=True):
-        if p.get("candidate_number") != c.get("candidate_number"):
-            return False
-        if _time_key(p.get("time", 0.0)) != _time_key(c.get("time", 0.0)):
-            return False
-        if p.get("reason") != c.get("reason"):
-            return False
-    return True
-
-
 class CandidateLabel(BaseModel):
-    """One label patch to apply via :func:`apply_labels`."""
+    """One label patch to apply via :func:`apply_labels`.
+
+    ``time`` is the source of truth for *where* the label attaches.
+    ``candidate_number`` is informational (kept for client logging) but
+    not used to look up storage -- that prevented labels from surviving
+    detector reshuffles. Reasons key off ``time`` directly; subclasses
+    look up the matching ``shots[]`` entry by time as well.
+    """
 
     candidate_number: int
+    time: float = Field(description="Candidate time in seconds (1 ms resolution).")
     reason: str | None = Field(
         default=None,
         description="FP class for a rejected candidate; ``None`` clears any prior label.",
@@ -501,39 +451,43 @@ class CandidateLabel(BaseModel):
 
 
 def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, int]:
-    """Patch ``reason`` / ``subclass`` fields on a fixture audit JSON in place.
+    """Patch the audit JSON's labels in place.
 
-    Atomic: writes a ``.tmp`` then renames; existing JSON is rotated to
-    ``.bak`` (replacing any prior backup). Mirrors the pattern in
-    ``/api/fixture/audit`` PUT.
-
-    Returns counts of fields actually changed:
-    ``{reason_set, reason_cleared, subclass_set, subclass_cleared}``.
-    Unknown candidate_numbers are silently skipped so a partial UI save
-    against a stale fixture doesn't fail the whole batch.
+    Reasons are written to ``_candidates_pending_audit.labels_by_time``
+    (a flat ``{time_str: reason}`` map keyed by 1 ms time). Subclasses
+    are attached to the matching ``shots[]`` entry by time-proximity.
+    The pending candidates list itself is treated as immutable detector
+    output -- never rewritten -- so audit invariants stay intact across
+    ensemble re-runs. Atomic write via ``.tmp`` + ``.bak`` rotation.
     """
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     pending = audit.setdefault("_candidates_pending_audit", {})
-    cands = pending.setdefault("candidates", [])
-    cand_by_number = {int(c.get("candidate_number", -1)): c for c in cands}
+    if not isinstance(pending, dict):
+        pending = {}
+        audit["_candidates_pending_audit"] = pending
+    labels_by_time: dict[str, str] = pending.setdefault("labels_by_time", {})
+    if not isinstance(labels_by_time, dict):
+        labels_by_time = {}
+        pending["labels_by_time"] = labels_by_time
     shots = audit.setdefault("shots", [])
-    shot_by_cand_number = {int(s.get("candidate_number", -1)): s for s in shots}
 
     counts = {"reason_set": 0, "reason_cleared": 0, "subclass_set": 0, "subclass_cleared": 0}
     for label in labels:
-        # reason -> rejected candidate entry
-        target = cand_by_number.get(label.candidate_number)
-        if target is not None and label.reason is not None:
+        time_key = f"{round(float(label.time), 3):.3f}"
+
+        if label.reason is not None:
             if label.reason not in REASON_VALUES:
                 raise ValueError(f"unknown reason: {label.reason!r}")
-            target["reason"] = label.reason
+            if labels_by_time.get(time_key) != label.reason:
+                labels_by_time[time_key] = label.reason
             counts["reason_set"] += 1
-        elif target is not None and label.reason is None and "reason" in target:
-            target.pop("reason", None)
+        elif time_key in labels_by_time:
+            labels_by_time.pop(time_key, None)
             counts["reason_cleared"] += 1
 
-        # subclass -> kept shot entry
-        shot = shot_by_cand_number.get(label.candidate_number)
+        # Subclass attaches to a kept shot at this time. Find the closest
+        # shot within 75 ms (matches the lab's labeling tolerance).
+        shot = _find_shot_at_time(shots, float(label.time), tolerance_ms=75.0)
         if shot is not None and label.subclass is not None:
             if label.subclass not in SUBCLASS_VALUES:
                 raise ValueError(f"unknown subclass: {label.subclass!r}")
@@ -551,6 +505,24 @@ def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, in
     audit_path.replace(backup)
     tmp.replace(audit_path)
     return counts
+
+
+def _find_shot_at_time(
+    shots: list[dict[str, Any]],
+    t: float,
+    *,
+    tolerance_ms: float,
+) -> dict[str, Any] | None:
+    """Return the ``shots[]`` entry whose ``time`` is closest to ``t`` within tolerance."""
+    best: tuple[float, dict[str, Any]] | None = None
+    for s in shots:
+        st = s.get("time")
+        if st is None:
+            continue
+        d_ms = abs(float(st) - t) * 1000.0
+        if d_ms <= tolerance_ms and (best is None or d_ms < best[0]):
+            best = (d_ms, s)
+    return best[1] if best is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -600,10 +572,6 @@ def run_eval(
             expected_rounds=expected,
             ensemble_config=ec,
         )
-        # Refresh the audit's pending-candidates snapshot so apply_labels
-        # (which looks up by candidate_number) lands on the live universe.
-        # Preserves existing reason labels by time-matching.
-        _sync_pending_candidates(Path(fix.audit_path), audit, result)
         cand_times = np.array([c.time for c in result.candidates], dtype=np.float64)
         labels, matched, truth_times = _label_truth(
             cand_times, audit.get("shots", []), cfg.tolerance_ms

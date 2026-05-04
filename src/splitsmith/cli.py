@@ -261,6 +261,15 @@ def ui(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(5174, "--port"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Skip auto-opening browser."),
+    lab: bool = typer.Option(
+        False,
+        "--lab",
+        help=(
+            "Expose the Algorithm Lab page (fixture eval + labeling). "
+            "Hidden by default since it's a developer tool that loads "
+            "heavy CLAP/PANN models on first use."
+        ),
+    ),
 ) -> None:
     """Start the production UI server (issue #11/#12).
 
@@ -277,6 +286,8 @@ def ui(
     url = f"http://{host}:{port}/"
     console.print(f"[green]splitsmith UI[/]: [bold]{url}[/]   (Ctrl+C to stop)")
     console.print(f"  project: {project}")
+    if lab:
+        console.print("  [cyan]Algorithm Lab[/] enabled")
 
     if not no_browser:
         import webbrowser
@@ -284,7 +295,13 @@ def ui(
         webbrowser.open(url)
 
     try:
-        serve(project_root=project, project_name=name, host=host, port=port)
+        serve(
+            project_root=project,
+            project_name=name,
+            host=host,
+            port=port,
+            lab_enabled=lab,
+        )
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
 

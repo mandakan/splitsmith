@@ -315,7 +315,7 @@ function FixtureDetailLite({
                 key={`gt-${i}`}
                 time={t}
                 duration={peaks.duration}
-                color="var(--success, #22c55e)"
+                color={LAB_PALETTE.tp}
                 label={`shot ${i + 1}`}
               />
             ))}
@@ -749,11 +749,19 @@ function FixtureDetail({
       candidate_number: number,
       patch: { reason?: string | null; subclass?: string | null },
     ) => {
+      // Time is the storage key, so we look it up from the live
+      // candidate list before sending. Falls back to candidate_number-
+      // only if the candidate has been removed mid-flight (rare).
+      const cand = fixture.candidates.find((c) => c.candidate_number === candidate_number);
+      if (!cand) {
+        console.warn("label save: candidate", candidate_number, "not found");
+        return;
+      }
       setSavingLabel(candidate_number);
       try {
         const resp = await api.applyLabLabels({
           audit_path: fixture.audit_path,
-          labels: [{ candidate_number, ...patch }],
+          labels: [{ candidate_number, time: cand.time, ...patch }],
         });
         // Server returns a freshly-relabeled run when a cached eval
         // exists; otherwise it returns null and the parent triggers a
@@ -765,7 +773,7 @@ function FixtureDetail({
         setSavingLabel(null);
       }
     },
-    [fixture.audit_path, onLabelChanged],
+    [fixture.audit_path, fixture.candidates, onLabelChanged],
   );
 
   // Step-through can register a "what's the next candidate after this
@@ -900,7 +908,7 @@ function FixtureDetail({
                   key={`p-${c.candidate_number}`}
                   time={c.time}
                   duration={peaks.duration}
-                  color={c.truth === 1 ? "var(--success, #22c55e)" : "#f97316"}
+                  color={c.truth === 1 ? LAB_PALETTE.tp : LAB_PALETTE.fp}
                   label={c.truth === 1 ? "TP" : "FP"}
                 />
               ))}
@@ -910,7 +918,7 @@ function FixtureDetail({
                 key={`fn-${i}`}
                 time={t}
                 duration={peaks.duration}
-                color="#ef4444"
+                color={LAB_PALETTE.fn}
                 label="FN"
                 top
               />
@@ -1635,6 +1643,13 @@ function StepThroughPanel({
     ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
     : -1;
 
+  // Move to the next candidate in the active filter+sort. Used by the
+  // label buttons so clicking a button advances like a keypress does.
+  const advanceFromCurrent = useCallback(() => {
+    if (idxInList < 0 || idxInList >= ordered.length - 1) return;
+    onSelect(ordered[idxInList + 1].candidate_number);
+  }, [idxInList, ordered, onSelect]);
+
   return (
     <div className="rounded border border-primary/40 bg-primary/5 p-3">
       <div className="mb-3 flex flex-wrap items-end gap-3 text-[11px]">
@@ -1777,11 +1792,15 @@ function StepThroughPanel({
             <button
               key={label}
               type="button"
-              onClick={() =>
-                current.kept && current.truth === 1
-                  ? onLabel(current.candidate_number, { subclass: label })
-                  : onLabel(current.candidate_number, { reason: label })
-              }
+              onClick={(e) => {
+                if (current.kept && current.truth === 1) {
+                  onLabel(current.candidate_number, { subclass: label });
+                } else {
+                  onLabel(current.candidate_number, { reason: label });
+                }
+                advanceFromCurrent();
+                e.currentTarget.blur();
+              }}
               className="rounded border border-border/60 bg-background px-2 py-0.5 hover:bg-accent"
             >
               {label}
@@ -1789,11 +1808,14 @@ function StepThroughPanel({
           ))}
           <button
             type="button"
-            onClick={() =>
-              current.kept && current.truth === 1
-                ? onLabel(current.candidate_number, { subclass: null })
-                : onLabel(current.candidate_number, { reason: null })
-            }
+            onClick={(e) => {
+              if (current.kept && current.truth === 1) {
+                onLabel(current.candidate_number, { subclass: null });
+              } else {
+                onLabel(current.candidate_number, { reason: null });
+              }
+              e.currentTarget.blur();
+            }}
             className="rounded border border-border/60 bg-background px-2 py-0.5 text-muted-foreground hover:bg-accent"
           >
             clear
@@ -2000,8 +2022,13 @@ function SnippetPlayer({
     return () => cancelAnimationFrame(raf);
   }, [buffer, loopStart, loopEnd, playing]);
 
-  // Markers for the zoomed view: other candidates whose time falls in
-  // the visible context window, plus any audited truth shots.
+  // Markers for the zoomed view. We show every audited truth in the
+  // window so the user can see where their audit landed relative to
+  // the detected candidate -- the two often differ by a few ms (the
+  // detector marks the rise foot, which can land in a small precursor
+  // bump just before the loud transient). Matched truths render dashed
+  // and translucent so they don't fight the candidate line; unmatched
+  // truths (FNs) stay solid red.
   const otherCandidates = useMemo(
     () =>
       allCandidates.filter(
@@ -2012,10 +2039,17 @@ function SnippetPlayer({
       ),
     [allCandidates, candidate.candidate_number, ctxStart, ctxEnd],
   );
-  const truthInWindow = useMemo(
-    () => truthTimes.filter((tt) => tt >= ctxStart && tt <= ctxEnd),
-    [truthTimes, ctxStart, ctxEnd],
-  );
+  const truthsInWindow = useMemo(() => {
+    const tolMs = 75; // matches lab _label_truth tolerance
+    return truthTimes
+      .filter((tt) => tt >= ctxStart && tt <= ctxEnd)
+      .map((tt) => ({
+        time: tt,
+        matched: allCandidates.some(
+          (c) => c.kept && c.truth === 1 && Math.abs(c.time - tt) * 1000 <= tolMs,
+        ),
+      }));
+  }, [truthTimes, allCandidates, ctxStart, ctxEnd]);
 
   const labelText =
     candidate.kept && candidate.truth === 1 ? candidate.subclass : candidate.reason;
@@ -2073,9 +2107,10 @@ function SnippetPlayer({
           playStart={loopStart}
           playEnd={loopEnd}
           candidateTime={t}
+          candidateColor={candidateLineColor(candidate)}
           playhead={playing ? playhead : null}
           otherCandidates={otherCandidates}
-          truthTimes={truthInWindow}
+          truths={truthsInWindow}
         />
       )}
       <div className="text-[10px] text-muted-foreground">
@@ -2118,6 +2153,32 @@ function VoterChips({
   );
 }
 
+// Centralized lab outcome palette. Uses the project's Okabe-Ito-derived
+// design tokens (defined in styles/index.css) so the same TP/FP/FN
+// colours are used everywhere and the palette stays color-blind safe.
+const LAB_PALETTE = {
+  tp: "var(--split-good)", // Okabe-Ito bluish green
+  fp: "var(--split-slow)", // Okabe-Ito vermillion
+  fn: "var(--destructive)", // shadcn destructive
+  rejected: "var(--marker-rejected)", // neutral gray
+  candidatePrimary: "var(--marker-detected)", // Okabe-Ito blue
+  playhead: "var(--waveform-playhead)", // Okabe-Ito vermillion
+  playWindow: "var(--primary)", // shadcn primary (theme-tracking)
+} as const;
+
+function candidateLineColor(c: LabEvalFixture["candidates"][number]): string {
+  if (c.kept && c.truth === 1) return LAB_PALETTE.tp;
+  if (c.kept && c.truth === 0) return LAB_PALETTE.fp;
+  if (!c.kept && c.truth === 1) return LAB_PALETTE.fn;
+  return LAB_PALETTE.candidatePrimary;
+}
+
+function otherCandidateColor(c: LabEvalFixture["candidates"][number]): string {
+  if (c.kept && c.truth === 1) return LAB_PALETTE.tp;
+  if (c.kept && c.truth === 0) return LAB_PALETTE.fp;
+  return LAB_PALETTE.rejected;
+}
+
 function ZoomedWaveform({
   buffer,
   windowStart,
@@ -2125,9 +2186,10 @@ function ZoomedWaveform({
   playStart,
   playEnd,
   candidateTime,
+  candidateColor,
   playhead,
   otherCandidates,
-  truthTimes,
+  truths,
   height = 120,
 }: {
   buffer: AudioBuffer;
@@ -2136,9 +2198,10 @@ function ZoomedWaveform({
   playStart: number;
   playEnd: number;
   candidateTime: number;
+  candidateColor: string;
   playhead: number | null;
   otherCandidates: LabEvalFixture["candidates"];
-  truthTimes: number[];
+  truths: { time: number; matched: boolean }[];
   height?: number;
 }) {
   // Bin into 600 vertical strips; one peak per strip. Cheap to recompute
@@ -2179,22 +2242,21 @@ function ZoomedWaveform({
         className="block w-full"
         style={{ height }}
       >
-        {/* Play-window highlight */}
+        {/* Play-window highlight + edges (theme primary). */}
         <rect
           x={playX1}
           y={0}
           width={Math.max(1, playX2 - playX1)}
           height={height}
-          fill="var(--primary, #6366f1)"
-          fillOpacity={0.10}
+          fill={LAB_PALETTE.playWindow}
+          fillOpacity={0.1}
         />
-        {/* Play-window edges */}
         <line
           x1={playX1}
           x2={playX1}
           y1={0}
           y2={height}
-          stroke="var(--primary, #6366f1)"
+          stroke={LAB_PALETTE.playWindow}
           strokeWidth={1}
           strokeDasharray="3 3"
           strokeOpacity={0.7}
@@ -2204,7 +2266,7 @@ function ZoomedWaveform({
           x2={playX2}
           y1={0}
           y2={height}
-          stroke="var(--primary, #6366f1)"
+          stroke={LAB_PALETTE.playWindow}
           strokeWidth={1}
           strokeDasharray="3 3"
           strokeOpacity={0.7}
@@ -2228,28 +2290,29 @@ function ZoomedWaveform({
           })}
         </g>
 
-        {/* Truth shots in window */}
-        {truthTimes.map((tt, i) => (
+        {/* Truth shots in window. Matched truths (kept TP candidate
+            within tolerance) render dashed + faint; unmatched truths
+            (FNs) render solid + bright. Both colours come from the
+            CB-safe LAB_PALETTE. */}
+        {truths.map(({ time: tt, matched }, i) => (
           <line
             key={`tr-${i}`}
             x1={xFor(tt)}
             x2={xFor(tt)}
             y1={0}
             y2={height}
-            stroke="#22c55e"
-            strokeOpacity={0.6}
-            strokeWidth={1.5}
+            stroke={matched ? LAB_PALETTE.tp : LAB_PALETTE.fn}
+            strokeOpacity={matched ? 0.55 : 0.85}
+            strokeWidth={matched ? 1 : 1.5}
+            strokeDasharray={matched ? "4 3" : undefined}
           />
         ))}
 
-        {/* Other candidates in window */}
+        {/* Other candidates in window. Outcome-coloured dots so the
+            visual encoding is consistent with the candidate line. */}
         {otherCandidates.map((c) => {
           const cx = xFor(c.time);
-          const color = c.kept
-            ? c.truth === 1
-              ? "#22c55e"
-              : "#f97316"
-            : "#94a3b8";
+          const color = otherCandidateColor(c);
           return (
             <g key={`oc-${c.candidate_number}`}>
               <circle cx={cx} cy={height - 4} r={2.5} fill={color} fillOpacity={0.85} />
@@ -2266,14 +2329,14 @@ function ZoomedWaveform({
           );
         })}
 
-        {/* Candidate center */}
+        {/* Candidate center -- coloured by outcome */}
         <line
           x1={xFor(candidateTime)}
           x2={xFor(candidateTime)}
           y1={0}
           y2={height}
-          stroke="var(--primary, #6366f1)"
-          strokeWidth={1.5}
+          stroke={candidateColor}
+          strokeWidth={2}
         />
 
         {/* Playhead -- only shown while playing. Positioned in the
@@ -2286,7 +2349,7 @@ function ZoomedWaveform({
             x2={xFor(playhead)}
             y1={0}
             y2={height}
-            stroke="#ef4444"
+            stroke={LAB_PALETTE.playhead}
             strokeWidth={1.5}
             strokeOpacity={0.85}
           />

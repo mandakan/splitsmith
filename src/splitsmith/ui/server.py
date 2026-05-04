@@ -765,13 +765,22 @@ class FsListing(BaseModel):
     suggested_starts: list[SuggestedStart]
 
 
-def create_app(*, project_root: Path, project_name: str) -> FastAPI:
+def create_app(
+    *,
+    project_root: Path,
+    project_name: str,
+    lab_enabled: bool = False,
+) -> FastAPI:
     """Create the FastAPI app bound to a single match project on disk.
 
     The project is initialized on first call (idempotent), then the app keeps
     the root path and re-loads on every request that needs it. We avoid
     caching the model in memory so external edits to ``project.json`` are
     visible without restarting the server.
+
+    ``lab_enabled`` gates the ``/api/lab/*`` routes (and the SPA reads
+    ``/api/server/features`` on mount to know whether to show the Lab
+    nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
     """
     MatchProject.init(project_root, name=project_name)
     resolved_root = project_root.resolve()
@@ -3366,6 +3375,17 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
         user_config.clear_scoreboard_identity()
         return JSONResponse({"ok": True})
 
+    @app.get("/api/server/features")
+    def server_features() -> JSONResponse:
+        """Surface server-side feature flags to the SPA on first load.
+
+        Today: ``lab`` (the developer-facing Algorithm Lab page; off by
+        default, opt-in via ``splitsmith ui --lab``). The SPA hides the
+        Lab nav entry when this is False so end users don't trip into
+        a multi-second model-loading workflow they didn't ask for.
+        """
+        return JSONResponse({"lab": lab_enabled})
+
     # ----------------------------------------------------------------------
     # Lab: fixture management + ensemble eval + tuning
     # ----------------------------------------------------------------------
@@ -3373,289 +3393,297 @@ def create_app(*, project_root: Path, project_name: str) -> FastAPI:
     # End-user-visible only via the /lab route in the SPA. Heavy CLAP/PANN
     # runtime is loaded once on first /api/lab/eval call and cached on the
     # FastAPI app instance so subsequent eval / rescore calls amortise it.
+    # The whole block is gated on ``lab_enabled`` so end-user installs
+    # don't expose the developer-only routes (or carry the import cost).
 
-    from .. import lab as lab_module
+    def _setup_lab() -> None:
+        from .. import lab as lab_module
 
-    _lab_runtime_cache: dict[str, Any] = {}
-    _lab_universe_cache: dict[str, Any] = {}  # session: most recent run
+        _lab_runtime_cache: dict[str, Any] = {}
+        _lab_universe_cache: dict[str, Any] = {}  # session: most recent run
 
-    def _get_lab_runtime() -> Any:
-        rt = _lab_runtime_cache.get("runtime")
-        if rt is None:
-            rt = ensemble_module.api.load_ensemble_runtime()
-            _lab_runtime_cache["runtime"] = rt
-        return rt
+        def _get_lab_runtime() -> Any:
+            rt = _lab_runtime_cache.get("runtime")
+            if rt is None:
+                rt = ensemble_module.api.load_ensemble_runtime()
+                _lab_runtime_cache["runtime"] = rt
+            return rt
 
-    @app.get("/api/lab/fixtures")
-    def lab_fixtures() -> JSONResponse:
-        return JSONResponse([r.model_dump(mode="json") for r in lab_module.list_fixtures()])
+        @app.get("/api/lab/fixtures")
+        def lab_fixtures() -> JSONResponse:
+            return JSONResponse([r.model_dump(mode="json") for r in lab_module.list_fixtures()])
 
-    @app.get("/api/lab/last-run")
-    def lab_last_run() -> JSONResponse:
-        """Return the most recent eval/rescore in this server session.
+        @app.get("/api/lab/last-run")
+        def lab_last_run() -> JSONResponse:
+            """Return the most recent eval/rescore in this server session.
 
-        Lets the SPA hydrate after a navigation away from /lab so
-        clicking around doesn't wipe the eval state. 404 when no eval
-        has been run yet (or when /api/lab/labels invalidated the
-        cache).
-        """
-        last_run = _lab_universe_cache.get("last_run")
-        if last_run is None:
-            raise HTTPException(status_code=404, detail="no eval has been run yet")
-        return JSONResponse(last_run.model_dump(mode="json"))
+            Lets the SPA hydrate after a navigation away from /lab so
+            clicking around doesn't wipe the eval state. 404 when no eval
+            has been run yet (or when /api/lab/labels invalidated the
+            cache).
+            """
+            last_run = _lab_universe_cache.get("last_run")
+            if last_run is None:
+                raise HTTPException(status_code=404, detail="no eval has been run yet")
+            return JSONResponse(last_run.model_dump(mode="json"))
 
-    @app.post("/api/lab/eval")
-    def lab_eval(
-        payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
-    ) -> JSONResponse:
-        """Submit a lab-eval job. Returns a ``Job`` snapshot immediately;
-        the SPA polls ``/api/jobs/{id}`` and then fetches the result via
-        ``/api/lab/last-run`` once the job succeeds. Multi-second on the
-        12 fixtures, so doing this inline blocked the request and
-        deprived the JobsPanel of progress visibility.
-        """
-        slugs = payload.get("slugs")
-        cfg_payload = payload.get("config") or {}
-        cfg = lab_module.EvalConfig.model_validate(cfg_payload)
-        persist = bool(payload.get("persist", True))
-        wanted_slugs = slugs if isinstance(slugs, list) else None
+        @app.post("/api/lab/eval")
+        def lab_eval(
+            payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
+        ) -> JSONResponse:
+            """Submit a lab-eval job. Returns a ``Job`` snapshot immediately;
+            the SPA polls ``/api/jobs/{id}`` and then fetches the result via
+            ``/api/lab/last-run`` once the job succeeds. Multi-second on the
+            12 fixtures, so doing this inline blocked the request and
+            deprived the JobsPanel of progress visibility.
+            """
+            slugs = payload.get("slugs")
+            cfg_payload = payload.get("config") or {}
+            cfg = lab_module.EvalConfig.model_validate(cfg_payload)
+            persist = bool(payload.get("persist", True))
+            wanted_slugs = slugs if isinstance(slugs, list) else None
 
-        def _run(handle: JobHandle) -> None:
-            handle.update(progress=0.0, message="Loading ensemble runtime...")
-            runtime = _get_lab_runtime()
+            def _run(handle: JobHandle) -> None:
+                handle.update(progress=0.0, message="Loading ensemble runtime...")
+                runtime = _get_lab_runtime()
 
-            def progress(i: int, total: int, slug: str) -> None:
-                handle.check_cancel()
-                handle.update(
-                    progress=i / total if total else 1.0,
-                    message=f"{slug} ({i}/{total})",
+                def progress(i: int, total: int, slug: str) -> None:
+                    handle.check_cancel()
+                    handle.update(
+                        progress=i / total if total else 1.0,
+                        message=f"{slug} ({i}/{total})",
+                    )
+
+                run = lab_module.run_eval(
+                    runtime,
+                    slugs=wanted_slugs,
+                    config=cfg,
+                    progress=progress,
                 )
+                if persist:
+                    try:
+                        lab_module.save_run(run)
+                    except OSError as exc:
+                        logger.warning("lab: save_run failed: %s", exc)
+                _lab_universe_cache["universe"] = run.universe
+                _lab_universe_cache["last_run"] = run
+                handle.update(progress=1.0, message=f"done ({len(run.universe.fixtures)} fixtures)")
 
-            run = lab_module.run_eval(
-                runtime,
-                slugs=wanted_slugs,
-                config=cfg,
-                progress=progress,
-            )
-            if persist:
-                try:
-                    lab_module.save_run(run)
-                except OSError as exc:
-                    logger.warning("lab: save_run failed: %s", exc)
+            job = state.jobs.submit(kind="lab_eval", fn=_run)
+            return JSONResponse(job.model_dump(mode="json"))
+
+        @app.post("/api/lab/rescore")
+        def lab_rescore(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+            cfg = lab_module.EvalConfig.model_validate(payload.get("config") or {})
+            universe = _lab_universe_cache.get("universe")
+            if universe is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="no cached eval universe; call /api/lab/eval first",
+                )
+            run = lab_module.rescore_universe(universe, cfg)
             _lab_universe_cache["universe"] = run.universe
             _lab_universe_cache["last_run"] = run
-            handle.update(progress=1.0, message=f"done ({len(run.universe.fixtures)} fixtures)")
+            return JSONResponse(run.model_dump(mode="json"))
 
-        job = state.jobs.submit(kind="lab_eval", fn=_run)
-        return JSONResponse(job.model_dump(mode="json"))
-
-    @app.post("/api/lab/rescore")
-    def lab_rescore(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        cfg = lab_module.EvalConfig.model_validate(payload.get("config") or {})
-        universe = _lab_universe_cache.get("universe")
-        if universe is None:
-            raise HTTPException(
-                status_code=409,
-                detail="no cached eval universe; call /api/lab/eval first",
-            )
-        run = lab_module.rescore_universe(universe, cfg)
-        _lab_universe_cache["universe"] = run.universe
-        _lab_universe_cache["last_run"] = run
-        return JSONResponse(run.model_dump(mode="json"))
-
-    @app.post("/api/lab/promote")
-    def lab_promote(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        stage_n = payload.get("stage_number")
-        slug = payload.get("slug")
-        overwrite = bool(payload.get("overwrite", False))
-        if not isinstance(stage_n, int) or not isinstance(slug, str) or not slug:
-            raise HTTPException(
-                status_code=400,
-                detail="payload must include integer 'stage_number' and string 'slug'",
-            )
-        project = state.load()
-        try:
-            stg = project.stage(stage_n)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_json = project.audit_path(state.project_root) / f"stage{stage_n}.json"
-        try:
-            audit_audio = _resolve_audit_audio(project, stage_n)
-        except HTTPException:
-            raise
-        audit_wav = audit_audio.audio_path
-        if not audit_json.exists() or not audit_wav.exists():
-            raise HTTPException(
-                status_code=409,
-                detail="stage has no audit JSON / WAV; run shot-detect first",
-            )
-        try:
-            rec = lab_module.promote_stage_to_fixture(
-                lab_module.PromoteRequest(
-                    audit_json_path=audit_json,
-                    audit_wav_path=audit_wav,
-                    fixture_slug=slug,
-                    overwrite=overwrite,
-                    extra_metadata={
-                        "project_root": str(state.project_root),
-                        "stage_number": stage_n,
-                        "stage_name": getattr(stg, "name", None),
-                    },
+        @app.post("/api/lab/promote")
+        def lab_promote(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+            stage_n = payload.get("stage_number")
+            slug = payload.get("slug")
+            overwrite = bool(payload.get("overwrite", False))
+            if not isinstance(stage_n, int) or not isinstance(slug, str) or not slug:
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload must include integer 'stage_number' and string 'slug'",
                 )
-            )
-        except FileExistsError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return JSONResponse(rec.model_dump(mode="json"))
-
-    @app.post("/api/lab/labels")
-    def lab_labels(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        """Apply categorical labels to a fixture's audit JSON (issue #86).
-
-        Body shape::
-
-            {
-              "audit_path": "...stage-shots-foo-2026-stage4.json",
-              "labels": [
-                {"candidate_number": 7,  "reason": "cross_bay"},
-                {"candidate_number": 14, "reason": null},
-                {"candidate_number": 22, "subclass": "steel"}
-              ]
-            }
-
-        Patches in place with a ``.bak`` backup; returns counts of fields
-        changed plus a freshly relabeled ``run`` so the SPA can update
-        without firing a full ``/api/lab/eval``. ``run`` is ``None`` when
-        no cached run exists yet (the SPA falls back to a real eval in
-        that case).
-        """
-        audit_path = payload.get("audit_path")
-        labels_payload = payload.get("labels")
-        if not isinstance(audit_path, str) or not audit_path:
-            raise HTTPException(
-                status_code=400,
-                detail="payload must include 'audit_path' (string)",
-            )
-        if not isinstance(labels_payload, list):
-            raise HTTPException(
-                status_code=400,
-                detail="payload must include 'labels' (list)",
-            )
-        try:
-            target = Path(audit_path).expanduser().resolve(strict=True)
-        except (FileNotFoundError, OSError) as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=f"fixture not found: {audit_path}",
-            ) from exc
-        if not target.is_file():
-            raise HTTPException(status_code=400, detail=f"not a file: {target}")
-        try:
-            labels = [lab_module.CandidateLabel.model_validate(item) for item in labels_payload]
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"invalid labels: {exc}") from exc
-        try:
-            counts = lab_module.apply_labels(target, labels)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        # Relabel the cached run in place (no model calls). Sub-100 ms,
-        # so the SPA can ditch its post-label runEval and use this.
-        cached_run = _lab_universe_cache.get("last_run")
-        run_payload: Any = None
-        if cached_run is not None:
-            relabeled = lab_module.relabel_run(cached_run)
-            _lab_universe_cache["last_run"] = relabeled
-            _lab_universe_cache["universe"] = relabeled.universe
-            run_payload = relabeled.model_dump(mode="json")
-        return JSONResponse(
-            {"path": str(target), "counts": counts, "run": run_payload},
-        )
-
-    @app.post("/api/lab/save-config")
-    def lab_save_config(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        """Write a finished run's config + provenance to ``configs/<name>.yaml``.
-
-        Body: ``{name, note?, overwrite?}``. The active universe (the
-        most recent eval/rescore) provides the run; if no eval has run
-        in this server session we 409 so the user can't accidentally
-        save an empty config.
-        """
-        name = payload.get("name")
-        note = payload.get("note")
-        overwrite = bool(payload.get("overwrite", False))
-        if not isinstance(name, str) or not name.strip():
-            raise HTTPException(status_code=400, detail="payload must include non-empty 'name'")
-        universe = _lab_universe_cache.get("universe")
-        if universe is None:
-            raise HTTPException(
-                status_code=409,
-                detail="no cached eval universe; run /api/lab/eval first",
-            )
-        last_run = _lab_universe_cache.get("last_run")
-        if last_run is None:
-            raise HTTPException(
-                status_code=409,
-                detail="no cached run; rescore or run eval first",
-            )
-        try:
-            target = lab_module.save_config_yaml(
-                run=last_run,
-                name=name,
-                note=note if isinstance(note, str) else None,
-                overwrite=overwrite,
-            )
-        except FileExistsError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return JSONResponse({"path": str(target)})
-
-    @app.post("/api/lab/rebuild-calibration")
-    def lab_rebuild_calibration(
-        payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
-    ) -> JSONResponse:
-        """Submit a job that re-runs ``scripts/build_ensemble_artifacts.py``.
-
-        Long-running (model-bound), so it goes through the JobRegistry
-        and the SPA polls /api/jobs/{id} like any other job. After it
-        completes the next /api/lab/eval call will pick up the new
-        thresholds because the cached EnsembleRuntime is invalidated.
-        """
-        target_recall = float(payload.get("target_recall", 0.95))
-        tolerance_ms = float(payload.get("tolerance_ms", 75.0))
-        fixtures = payload.get("fixtures")
-        if fixtures is not None and not isinstance(fixtures, list):
-            raise HTTPException(
-                status_code=400,
-                detail="'fixtures' must be a list of slugs or omitted",
-            )
-
-        def _run(handle: JobHandle) -> None:
-            # Import here to avoid pulling sklearn at server startup.
-            scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
-            sys.path.insert(0, str(scripts_dir))
+            project = state.load()
             try:
-                import build_ensemble_artifacts as build_mod  # type: ignore[import-not-found]
-            finally:
-                sys.path.pop(0)
+                stg = project.stage(stage_n)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            audit_json = project.audit_path(state.project_root) / f"stage{stage_n}.json"
+            try:
+                audit_audio = _resolve_audit_audio(project, stage_n)
+            except HTTPException:
+                raise
+            audit_wav = audit_audio.audio_path
+            if not audit_json.exists() or not audit_wav.exists():
+                raise HTTPException(
+                    status_code=409,
+                    detail="stage has no audit JSON / WAV; run shot-detect first",
+                )
+            try:
+                rec = lab_module.promote_stage_to_fixture(
+                    lab_module.PromoteRequest(
+                        audit_json_path=audit_json,
+                        audit_wav_path=audit_wav,
+                        fixture_slug=slug,
+                        overwrite=overwrite,
+                        extra_metadata={
+                            "project_root": str(state.project_root),
+                            "stage_number": stage_n,
+                            "stage_name": getattr(stg, "name", None),
+                        },
+                    )
+                )
+            except FileExistsError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            return JSONResponse(rec.model_dump(mode="json"))
 
-            def log(msg: str) -> None:
-                handle.check_cancel()
-                handle.update(message=msg)
+        @app.post("/api/lab/labels")
+        def lab_labels(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+            """Apply categorical labels to a fixture's audit JSON (issue #86).
 
-            build_mod.build_artifacts(
-                fixtures=fixtures if fixtures else None,
-                target_recall=target_recall,
-                tolerance_ms=tolerance_ms,
-                log=log,
+            Body shape::
+
+                {
+                  "audit_path": "...stage-shots-foo-2026-stage4.json",
+                  "labels": [
+                    {"candidate_number": 7,  "time": 2.812, "reason": "cross_bay"},
+                    {"candidate_number": 14, "time": 4.364, "reason": null},
+                    {"candidate_number": 22, "time": 5.220, "subclass": "steel"}
+                  ]
+                }
+
+            ``time`` is the storage key (1 ms resolution) and is required:
+            ``candidate_number`` shifts across detector reshuffles, time
+            does not. Patches in place with a ``.bak`` backup; returns counts
+            changed plus a freshly relabeled ``run`` so the SPA can update
+            without firing a full ``/api/lab/eval``. ``run`` is ``None`` when
+            no cached run exists yet (the SPA falls back to a real eval in
+            that case).
+            """
+            audit_path = payload.get("audit_path")
+            labels_payload = payload.get("labels")
+            if not isinstance(audit_path, str) or not audit_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload must include 'audit_path' (string)",
+                )
+            if not isinstance(labels_payload, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail="payload must include 'labels' (list)",
+                )
+            try:
+                target = Path(audit_path).expanduser().resolve(strict=True)
+            except (FileNotFoundError, OSError) as exc:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"fixture not found: {audit_path}",
+                ) from exc
+            if not target.is_file():
+                raise HTTPException(status_code=400, detail=f"not a file: {target}")
+            try:
+                labels = [lab_module.CandidateLabel.model_validate(item) for item in labels_payload]
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"invalid labels: {exc}") from exc
+            try:
+                counts = lab_module.apply_labels(target, labels)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            # Relabel the cached run in place (no model calls). Sub-100 ms,
+            # so the SPA can ditch its post-label runEval and use this.
+            cached_run = _lab_universe_cache.get("last_run")
+            run_payload: Any = None
+            if cached_run is not None:
+                relabeled = lab_module.relabel_run(cached_run)
+                _lab_universe_cache["last_run"] = relabeled
+                _lab_universe_cache["universe"] = relabeled.universe
+                run_payload = relabeled.model_dump(mode="json")
+            return JSONResponse(
+                {"path": str(target), "counts": counts, "run": run_payload},
             )
-            # Drop the cached runtime so the next eval reloads the new
-            # calibration JSON + GBDT model.
-            _lab_runtime_cache.pop("runtime", None)
-            handle.update(progress=1.0, message="calibration rebuilt")
 
-        job = state.jobs.submit(kind="rebuild_calibration", fn=_run)
-        return JSONResponse(job.model_dump(mode="json"))
+        @app.post("/api/lab/save-config")
+        def lab_save_config(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+            """Write a finished run's config + provenance to ``configs/<name>.yaml``.
+
+            Body: ``{name, note?, overwrite?}``. The active universe (the
+            most recent eval/rescore) provides the run; if no eval has run
+            in this server session we 409 so the user can't accidentally
+            save an empty config.
+            """
+            name = payload.get("name")
+            note = payload.get("note")
+            overwrite = bool(payload.get("overwrite", False))
+            if not isinstance(name, str) or not name.strip():
+                raise HTTPException(status_code=400, detail="payload must include non-empty 'name'")
+            universe = _lab_universe_cache.get("universe")
+            if universe is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="no cached eval universe; run /api/lab/eval first",
+                )
+            last_run = _lab_universe_cache.get("last_run")
+            if last_run is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="no cached run; rescore or run eval first",
+                )
+            try:
+                target = lab_module.save_config_yaml(
+                    run=last_run,
+                    name=name,
+                    note=note if isinstance(note, str) else None,
+                    overwrite=overwrite,
+                )
+            except FileExistsError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            return JSONResponse({"path": str(target)})
+
+        @app.post("/api/lab/rebuild-calibration")
+        def lab_rebuild_calibration(
+            payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
+        ) -> JSONResponse:
+            """Submit a job that re-runs ``scripts/build_ensemble_artifacts.py``.
+
+            Long-running (model-bound), so it goes through the JobRegistry
+            and the SPA polls /api/jobs/{id} like any other job. After it
+            completes the next /api/lab/eval call will pick up the new
+            thresholds because the cached EnsembleRuntime is invalidated.
+            """
+            target_recall = float(payload.get("target_recall", 0.95))
+            tolerance_ms = float(payload.get("tolerance_ms", 75.0))
+            fixtures = payload.get("fixtures")
+            if fixtures is not None and not isinstance(fixtures, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail="'fixtures' must be a list of slugs or omitted",
+                )
+
+            def _run(handle: JobHandle) -> None:
+                # Import here to avoid pulling sklearn at server startup.
+                scripts_dir = Path(__file__).resolve().parents[3] / "scripts"
+                sys.path.insert(0, str(scripts_dir))
+                try:
+                    import build_ensemble_artifacts as build_mod  # type: ignore[import-not-found]
+                finally:
+                    sys.path.pop(0)
+
+                def log(msg: str) -> None:
+                    handle.check_cancel()
+                    handle.update(message=msg)
+
+                build_mod.build_artifacts(
+                    fixtures=fixtures if fixtures else None,
+                    target_recall=target_recall,
+                    tolerance_ms=tolerance_ms,
+                    log=log,
+                )
+                # Drop the cached runtime so the next eval reloads the new
+                # calibration JSON + GBDT model.
+                _lab_runtime_cache.pop("runtime", None)
+                handle.update(progress=1.0, message="calibration rebuilt")
+
+            job = state.jobs.submit(kind="rebuild_calibration", fn=_run)
+            return JSONResponse(job.model_dump(mode="json"))
+
+    if lab_enabled:
+        _setup_lab()
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)
@@ -4076,6 +4104,7 @@ def serve(
     host: str = "127.0.0.1",
     port: int = 5174,
     reload: bool = False,
+    lab_enabled: bool = False,
 ) -> None:
     """Boot uvicorn synchronously. Used by the ``splitsmith ui`` CLI command.
 
@@ -4097,7 +4126,11 @@ def serve(
         # convenience that we can wire properly when we have a real config.
         logger.warning("reload=True is not supported yet; running without reload")
 
-    app = create_app(project_root=project_root, project_name=project_name)
+    app = create_app(
+        project_root=project_root,
+        project_name=project_name,
+        lab_enabled=lab_enabled,
+    )
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = _JobAwareServer(config, app)
     server.run()

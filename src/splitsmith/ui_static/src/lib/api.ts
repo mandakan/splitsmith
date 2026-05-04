@@ -844,6 +844,11 @@ export const api = {
     return request<Job>(`/api/stages/${stageNumber}/shot-detect${qs}`, { method: "POST" });
   },
 
+  /** Server-side feature flags (fetched once on app mount). Today this
+   *  surfaces the ``lab`` flag so the SPA can hide the Lab nav entry
+   *  unless ``splitsmith ui --lab`` was passed. */
+  getServerFeatures: () => request<{ lab: boolean }>("/api/server/features"),
+
   listJobs: () => request<Job[]>("/api/jobs"),
   getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),
 
@@ -1023,7 +1028,12 @@ export const api = {
 
   applyLabLabels: (payload: {
     audit_path: string;
-    labels: { candidate_number: number; reason?: string | null; subclass?: string | null }[];
+    labels: {
+      candidate_number: number;
+      time: number;
+      reason?: string | null;
+      subclass?: string | null;
+    }[];
   }) =>
     request<{
       path: string;
