@@ -4055,9 +4055,7 @@ def test_unbound_project_endpoints_return_409_no_project(tmp_path: Path) -> None
     assert detail["code"] == "no_project"
 
 
-def test_bind_recent_project_switches_in_memory(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_bind_recent_project_switches_in_memory(tmp_path: Path, _user_config_home: Path) -> None:
     """The picker POSTs to /bind to switch the active project without a
     server restart. Subsequent /api/health reflects the new binding and
     the recent-projects list bumps the entry to the top.
@@ -4089,9 +4087,7 @@ def test_bind_recent_project_switches_in_memory(
     assert recent[0].name == "Alpha"
 
 
-def test_bind_recent_project_404_when_path_missing(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_bind_recent_project_404_when_path_missing(tmp_path: Path, _user_config_home: Path) -> None:
     app = create_app()
     client = TestClient(app)
     resp = client.post(
@@ -4102,9 +4098,7 @@ def test_bind_recent_project_404_when_path_missing(
     assert resp.json()["detail"]["code"] == "project_path_missing"
 
 
-def test_unbind_returns_to_unbound_state(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_unbind_returns_to_unbound_state(tmp_path: Path, _user_config_home: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)
 
