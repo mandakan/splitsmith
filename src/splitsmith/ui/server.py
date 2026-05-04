@@ -75,7 +75,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import beep_detect, report, user_config, video_probe
+from .. import beep_detect, cross_align, report, user_config, video_probe
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
@@ -1450,6 +1450,76 @@ def create_app(
             )
         return project, stage, video
 
+    # Cross-cam alignment is accepted only when the peak-to-runner-up ratio
+    # of the cross-correlation clears this threshold. 1.0 means the
+    # landmark wasn't distinctive (envelope is flat or the secondary
+    # doesn't actually overlap with the primary). 1.5 was chosen because
+    # synthetic same-stage pairs return ~6 while same-mic non-overlapping
+    # iPhone clips return ~1.0-1.1; a 50% margin keeps the false-accept
+    # rate near zero on the short envelope vectors at 200 Hz.
+    _align_confidence_floor = 1.5
+
+    def _try_align_secondary_to_primary(
+        proj: MatchProject,
+        stage: StageEntry,
+        video: StageVideo,
+        handle: JobHandle,
+    ) -> cross_align.CrossAlignResult | None:
+        """Attempt cross-correlation alignment of ``video`` against the stage's
+        primary. Returns the result when confidence clears the floor; ``None``
+        when alignment isn't possible (no primary, no primary beep_time, audio
+        not cached, correlation too weak).
+
+        Run only on the secondary soft-fail path -- when in-stream beep
+        detection has already raised ``BeepNotFoundError``. Cheap (envelope
+        cross-correlation at 200 Hz; sub-second on a 60 s clip), but not free,
+        so we skip it on the primary path entirely.
+        """
+        primary = stage.primary()
+        if primary is None or primary.beep_time is None:
+            return None
+        primary_audio_path = audio_helpers.primary_audio_path(
+            state.project_root, stage.stage_number, project=proj
+        )
+        secondary_audio_path = audio_helpers.video_audio_path(
+            state.project_root, stage.stage_number, video, project=proj
+        )
+        if not primary_audio_path.exists() or not secondary_audio_path.exists():
+            # Either side missing means the user hasn't run beep-detect on
+            # the primary yet, or the secondary's own audio extract failed
+            # before we even got here. Both are dealt with by the existing
+            # soft-fail UX -- alignment can be retried later.
+            return None
+        try:
+            primary_audio, primary_sr = beep_detect.load_audio(primary_audio_path)
+            secondary_audio, secondary_sr = beep_detect.load_audio(secondary_audio_path)
+            handle.update(progress=0.45, message="Aligning to primary...")
+            result = cross_align.align_secondary_to_primary(
+                primary_audio,
+                primary_sr,
+                primary.beep_time,
+                secondary_audio,
+                secondary_sr,
+            )
+        except cross_align.CrossAlignError as exc:
+            logger.info(
+                "cross-align skipped for stage %d video %s: %s",
+                stage.stage_number,
+                video.video_id,
+                exc,
+            )
+            return None
+        if result.confidence < _align_confidence_floor:
+            logger.info(
+                "cross-align rejected for stage %d video %s: conf %.2f < %.2f",
+                stage.stage_number,
+                video.video_id,
+                result.confidence,
+                _align_confidence_floor,
+            )
+            return None
+        return result
+
     def _run_detect_beep_for_video(handle: JobHandle, stage_number: int, video_id: str) -> None:
         """Worker: detect ``video``'s beep, then auto-chain trim.
 
@@ -1473,27 +1543,84 @@ def create_app(
             progress=0.15,
             message=f"Extracting audio + detecting beep ({role_label})...",
         )
-        beep = audio_helpers.detect_video_beep(
-            state.project_root,
-            stage_number,
-            video,
-            source,
-            project=proj,
-        )
-        handle.update(progress=0.55, message="Saving beep...")
-        video.beep_time = beep.time
-        video.beep_source = "auto"
-        video.beep_peak_amplitude = beep.peak_amplitude
-        video.beep_duration_ms = beep.duration_ms
-        video.beep_candidates = list(beep.candidates)
-        video.processed["beep"] = True
-        # Auto-detected beeps need explicit user review (#71). Reset
-        # the flag here so a re-detect on a previously reviewed video
-        # invalidates the prior approval.
-        video.beep_reviewed = False
+        try:
+            beep = audio_helpers.detect_video_beep(
+                state.project_root,
+                stage_number,
+                video,
+                source,
+                project=proj,
+            )
+        except beep_detect.BeepNotFoundError as exc:
+            # Primary failure is fatal -- the entire downstream pipeline
+            # (trim window, shot timeline) hangs off the primary beep.
+            # Surfacing as a job error gets the user looking at the audio
+            # right away rather than silently falling through to a wrong
+            # alignment. Secondary failure is soft-handled below: many
+            # non-headcam cameras (iPhone tripod, RO position, AGC'd) just
+            # don't capture a sustained 2-5 kHz tone, and aborting the
+            # import on every one of them is the worse UX.
+            if video.role == "primary":
+                raise
+            logger.info(
+                "no beep on secondary stage %d video %s: %s",
+                stage_number,
+                video.video_id,
+                exc,
+            )
+            # Cross-correlation fallback: when the primary already has a
+            # beep, try aligning the secondary's audio against the
+            # primary's landmark window. Same buzzer + first shots in the
+            # same room means the loudness envelopes line up modulo a
+            # constant time offset, even when the secondary's mic missed
+            # the sustained 2-5 kHz tone the in-stream detector wants.
+            aligned = _try_align_secondary_to_primary(
+                proj, stg, video, handle
+            )
+            video.beep_peak_amplitude = None
+            video.beep_duration_ms = None
+            video.beep_candidates = []
+            video.beep_reviewed = False
+            video.processed["beep"] = True
+            if aligned is not None:
+                handle.update(
+                    progress=0.55,
+                    message=f"Aligned to primary (conf {aligned.confidence:.1f})",
+                )
+                video.beep_time = aligned.secondary_beep_time
+                video.beep_source = "aligned"
+                video.beep_alignment_confidence = aligned.confidence
+                video.beep_auto_detect_failed = False
+                # Treat as "we have a usable beep_time": fall through to
+                # the trim block below.
+                beep = aligned
+            else:
+                handle.update(
+                    progress=0.55, message="No beep detected; align manually"
+                )
+                video.beep_time = None
+                video.beep_source = "auto"
+                video.beep_alignment_confidence = None
+                video.beep_auto_detect_failed = True
+                video.processed["trim"] = False
+                beep = None
+        else:
+            handle.update(progress=0.55, message="Saving beep...")
+            video.beep_time = beep.time
+            video.beep_source = "auto"
+            video.beep_peak_amplitude = beep.peak_amplitude
+            video.beep_duration_ms = beep.duration_ms
+            video.beep_candidates = list(beep.candidates)
+            video.beep_auto_detect_failed = False
+            video.beep_alignment_confidence = None
+            video.processed["beep"] = True
+            # Auto-detected beeps need explicit user review (#71). Reset
+            # the flag here so a re-detect on a previously reviewed video
+            # invalidates the prior approval.
+            video.beep_reviewed = False
 
         trimmed_ok = False
-        if stg.time_seconds > 0:
+        if beep is not None and stg.time_seconds > 0:
             handle.check_cancel()
             handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
             try:
@@ -1539,6 +1666,8 @@ def create_app(
             v_fresh.beep_duration_ms = video.beep_duration_ms
             v_fresh.beep_candidates = list(video.beep_candidates)
             v_fresh.beep_reviewed = video.beep_reviewed
+            v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
+            v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
             v_fresh.processed["beep"] = True
             if trimmed_ok:
                 v_fresh.processed["trim"] = True
@@ -2123,6 +2252,8 @@ def create_app(
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
             video.beep_candidates = []
+            video.beep_auto_detect_failed = False
+            video.beep_alignment_confidence = None
             video.processed["beep"] = False
             video.processed["trim"] = False
             video.beep_reviewed = False
@@ -2134,6 +2265,8 @@ def create_app(
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
             video.beep_candidates = []
+            video.beep_auto_detect_failed = False
+            video.beep_alignment_confidence = None
             video.processed["beep"] = True
             video.processed["trim"] = False
             # Manual beep entry implies the user looked at the
@@ -2203,6 +2336,8 @@ def create_app(
         video.beep_source = "auto"
         video.beep_peak_amplitude = chosen.peak_amplitude
         video.beep_duration_ms = chosen.duration_ms
+        video.beep_auto_detect_failed = False
+        video.beep_alignment_confidence = None
         video.processed["beep"] = True
         video.processed["trim"] = False
         # Switching candidate is a fresh claim about which moment is
