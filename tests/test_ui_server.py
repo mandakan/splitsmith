@@ -3401,7 +3401,6 @@ def test_secondary_in_stream_success_runs_cross_align_sanity_check(
     client, _ = _seed_project_with_secondary(tmp_path)
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
-    from splitsmith.ui import audio as audio_helpers
 
     _stub_detect(monkeypatch, beep_time=4.0)
     primary_id = _video_id_for(client, 1, "primary")
@@ -3457,7 +3456,6 @@ def test_secondary_in_stream_disagreement_flagged_not_overridden(
     client, _ = _seed_project_with_secondary(tmp_path)
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
-    from splitsmith.ui import audio as audio_helpers
 
     _stub_detect(monkeypatch, beep_time=4.0)
     primary_id = _video_id_for(client, 1, "primary")

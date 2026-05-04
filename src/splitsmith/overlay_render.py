@@ -31,7 +31,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
@@ -107,7 +107,14 @@ def build_frame_states(
                 last_split = shots_sorted[0] - beep_time_in_clip
             else:
                 last_split = shots_sorted[fired - 1] - shots_sorted[fired - 2]
-        running_total = max(0.0, t - beep_time_in_clip)
+        # Freeze the timer once the last shot has fired -- the running total
+        # is the stage time, not the clip duration. Pre-beep frames clamp at
+        # 0; everything between ticks; everything after the last shot holds
+        # at the final stage time.
+        if shot_count > 0 and fired == shot_count:
+            running_total = max(0.0, shots_sorted[-1] - beep_time_in_clip)
+        else:
+            running_total = max(0.0, t - beep_time_in_clip)
         states.append(
             FrameState(
                 time_seconds=t,
@@ -144,8 +151,12 @@ class DefaultTemplate(Template):
         width: int,
         height: int,
         font_path: Path | None = None,
+        font_name: str | None = None,
         split_hold_seconds: float = 1.0,
         split_fade_seconds: float = 0.3,
+        stroke_width_px: int | None = None,
+        shadow_blur_px: int | None = None,
+        shadow_offset_px: int | None = None,
     ) -> None:
         self.width = width
         self.height = height
@@ -153,28 +164,35 @@ class DefaultTemplate(Template):
         self.split_fade_seconds = split_fade_seconds
         big = max(48, height // 14)
         try:
-            self.font_big = _load_font(font_path, big)
+            self.font_big = _load_font(font_path, big, font_name=font_name)
         except OSError as exc:
             raise OverlayRenderError(f"failed to load font: {exc}") from exc
         self.pad = max(24, height // 36)
+        # Legibility defaults scale with the type size so 1080p / 4K stay
+        # consistent. Stroke at ~6% of the cap-height reads as crisp without
+        # turning the glyphs into blobs; shadow blur slightly larger than
+        # offset gives a soft halo rather than a hard duplicate.
+        self.stroke_width_px = stroke_width_px if stroke_width_px is not None else max(2, big // 18)
+        self.shadow_offset_px = (
+            shadow_offset_px if shadow_offset_px is not None else max(2, big // 24)
+        )
+        self.shadow_blur_px = shadow_blur_px if shadow_blur_px is not None else max(3, big // 12)
 
     def draw_frame(self, canvas: Image.Image, state: FrameState) -> None:
         d = ImageDraw.Draw(canvas)
 
         if state.shot_count > 0:
             shot_text = f"{state.shots_fired}/{state.shot_count}"
-            _draw_text_with_shadow(
-                d, (self.pad, self.pad), shot_text, self.font_big, (255, 255, 255, 255)
-            )
+            self._draw(canvas, d, (self.pad, self.pad), shot_text, (255, 255, 255, 255))
 
         total_text = _format_running_total(state.running_total)
         bbox = d.textbbox((0, 0), total_text, font=self.font_big)
         tw = bbox[2] - bbox[0]
-        _draw_text_with_shadow(
+        self._draw(
+            canvas,
             d,
             (self.width - tw - self.pad, self.pad),
             total_text,
-            self.font_big,
             (255, 255, 255, 255),
         )
 
@@ -188,7 +206,27 @@ class DefaultTemplate(Template):
                 th = bbox[3] - bbox[1]
                 x = (self.width - tw) // 2
                 y = self.height - th - self.pad * 2
-                _draw_text_with_shadow(d, (x, y), split_text, self.font_big, (255, 220, 80, alpha))
+                self._draw(canvas, d, (x, y), split_text, (255, 220, 80, alpha))
+
+    def _draw(
+        self,
+        canvas: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        xy: tuple[int, int],
+        text: str,
+        fill: tuple[int, int, int, int],
+    ) -> None:
+        _draw_text_with_shadow(
+            draw,
+            canvas,
+            xy,
+            text,
+            self.font_big,
+            fill,
+            stroke_width=self.stroke_width_px,
+            shadow_offset=self.shadow_offset_px,
+            shadow_blur=self.shadow_blur_px,
+        )
 
 
 def _split_alpha(since_shot: float, hold: float, fade: float) -> int:
@@ -213,6 +251,37 @@ def _format_running_total(seconds: float) -> str:
     return f"{m:d}:{s:05.2f}"
 
 
+# Named font presets the user can select without hunting for a path.
+# Order inside each tuple is preferred-first (bold variants beat regular for
+# legibility against busy backgrounds). Unknown / missing files fall through
+# to the generic fallback list below.
+_FONT_PRESETS: dict[str, tuple[str, ...]] = {
+    "menlo": ("/System/Library/Fonts/Menlo.ttc",),
+    "monaco": ("/System/Library/Fonts/Monaco.ttf",),
+    "sf-mono": (
+        "/System/Library/Fonts/SFNSMono.ttf",
+        "/Library/Fonts/SF-Mono-Bold.otf",
+        "/Library/Fonts/SF-Mono-Regular.otf",
+    ),
+    "sf-pro": (
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/SFNSDisplay.ttf",
+    ),
+    "helvetica": ("/System/Library/Fonts/Helvetica.ttc",),
+    "dejavu-mono": (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ),
+    "consolas": (
+        "C:/Windows/Fonts/consolab.ttf",
+        "C:/Windows/Fonts/consola.ttf",
+    ),
+    "courier": (
+        "C:/Windows/Fonts/courbd.ttf",
+        "C:/Windows/Fonts/cour.ttf",
+    ),
+}
+
 _FONT_FALLBACKS: tuple[str, ...] = (
     "/System/Library/Fonts/Menlo.ttc",
     "/System/Library/Fonts/Monaco.ttf",
@@ -227,9 +296,33 @@ _FONT_FALLBACKS: tuple[str, ...] = (
 )
 
 
-def _load_font(font_path: Path | None, size: int) -> ImageFont.ImageFont:
+def available_font_names() -> tuple[str, ...]:
+    """Preset font names accepted by :func:`_load_font` / template kwargs.
+    Exposed so a future template config UI can offer a real picker."""
+    return tuple(_FONT_PRESETS.keys())
+
+
+def _load_font(
+    font_path: Path | None,
+    size: int,
+    *,
+    font_name: str | None = None,
+) -> ImageFont.ImageFont:
     if font_path is not None:
         return ImageFont.truetype(str(font_path), size=size)
+    if font_name is not None:
+        key = font_name.lower()
+        if key not in _FONT_PRESETS:
+            raise OverlayRenderError(
+                f"unknown font_name {font_name!r}; "
+                f"available: {', '.join(available_font_names())}"
+            )
+        for candidate in _FONT_PRESETS[key]:
+            p = Path(candidate)
+            if p.exists():
+                return ImageFont.truetype(str(p), size=size)
+        # Named preset asked for but no file found -- fall through to the
+        # generic discovery list rather than crashing the export.
     for candidate in _FONT_FALLBACKS:
         p = Path(candidate)
         if p.exists():
@@ -239,18 +332,59 @@ def _load_font(font_path: Path | None, size: int) -> ImageFont.ImageFont:
 
 def _draw_text_with_shadow(
     draw: ImageDraw.ImageDraw,
+    canvas: Image.Image,
     xy: tuple[int, int],
     text: str,
     font: ImageFont.ImageFont,
     fill: tuple[int, int, int, int],
+    *,
+    stroke_width: int = 2,
+    shadow_offset: int = 3,
+    shadow_blur: int = 6,
 ) -> None:
-    """1-px black shadow under coloured text so the overlay stays legible
-    over bright backgrounds. The shadow's alpha tracks the foreground so
-    fades stay clean."""
+    """Stroke + soft drop shadow so text reads on bright/busy backgrounds.
+
+    The shadow is rendered into a tight per-text scratch layer (textbbox
+    plus padding for the blur kernel) and composited onto ``canvas`` --
+    cheaper than a full-frame blur and identical visually. The foreground
+    glyph is then drawn with a crisp black stroke. Shadow alpha tracks
+    the foreground alpha so the last-split fade stays clean.
+    """
     x, y = xy
-    shadow_alpha = max(0, fill[3] - 64)
-    draw.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, shadow_alpha))
-    draw.text(xy, text, font=font, fill=fill)
+    fg_alpha = fill[3]
+    if fg_alpha <= 0:
+        return
+    shadow_alpha = int(fg_alpha * 0.65)
+
+    if shadow_alpha > 0:
+        bbox = draw.textbbox(xy, text, font=font, stroke_width=stroke_width)
+        pad = max(1, shadow_blur * 2 + shadow_offset + stroke_width)
+        sx0, sy0 = bbox[0] - pad, bbox[1] - pad
+        sx1, sy1 = bbox[2] + pad, bbox[3] + pad
+        sw, sh = sx1 - sx0, sy1 - sy0
+        if sw > 0 and sh > 0:
+            shadow_img = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(shadow_img)
+            sd.text(
+                (x - sx0 + shadow_offset, y - sy0 + shadow_offset),
+                text,
+                font=font,
+                fill=(0, 0, 0, shadow_alpha),
+                stroke_width=stroke_width,
+                stroke_fill=(0, 0, 0, shadow_alpha),
+            )
+            if shadow_blur > 0:
+                shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(shadow_blur))
+            canvas.alpha_composite(shadow_img, (sx0, sy0))
+
+    draw.text(
+        xy,
+        text,
+        font=font,
+        fill=fill,
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, fg_alpha),
+    )
 
 
 def _shot_times_from_audit(audit_data: dict, *, beep_offset_seconds: float) -> list[float]:
@@ -280,6 +414,8 @@ def render_overlay(
     output_path: Path,
     beep_offset_seconds: float,
     template: Template | None = None,
+    font_name: str | None = None,
+    font_path: Path | None = None,
     ffmpeg_binary: str = "ffmpeg",
     probe: VideoMetadata | None = None,
 ) -> Path:
@@ -295,6 +431,10 @@ def render_overlay(
         Audit ``ms_after_beep`` is converted to clip-local time as
         ``beep_offset + ms_after_beep / 1000``.
     ``template``: defaults to :class:`DefaultTemplate` sized to the probe.
+    ``font_name`` / ``font_path``: passed to the default template when
+        ``template`` isn't supplied. ``font_name`` accepts a preset from
+        :func:`available_font_names`; ``font_path`` is an explicit override.
+        Ignored when the caller passes a fully-built ``template``.
     ``probe``: optional pre-computed metadata. When given, ``ffprobe`` is
         skipped -- useful from tests and to share one probe across the
         export's other steps.
@@ -322,7 +462,9 @@ def render_overlay(
     duration_seconds = probe.duration_seconds
 
     if template is None:
-        template = DefaultTemplate(width=width, height=height)
+        template = DefaultTemplate(
+            width=width, height=height, font_path=font_path, font_name=font_name
+        )
 
     states = build_frame_states(
         shot_times_in_clip=shot_times,

@@ -1686,16 +1686,16 @@ def create_app(
             # Surface the cross-correlation confidence whenever we got one,
             # even if we don't promote the suggestion. Lets the UI tell the
             # difference between "never tried" and "tried, sub-floor result".
-            video.beep_alignment_confidence = (
-                aligned.confidence if aligned is not None else None
-            )
+            video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
             # Delta is only meaningful when both in-stream AND cross-align
             # produced timestamps. In-stream failed here, so wipe it.
             video.beep_alignment_delta_ms = None
             if aligned is not None and aligned.confidence >= _align_confidence_floor:
                 handle.update(
                     progress=0.55,
-                    message=f"Aligned to primary (conf {aligned.confidence:.2f}); verify on waveform",
+                    message=(
+                        f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"
+                    ),
                 )
                 video.beep_time = aligned.secondary_beep_time
                 video.beep_source = "aligned"
@@ -1749,9 +1749,7 @@ def create_app(
                 check = _try_align_secondary_to_primary(proj, stg, video, handle)
                 if check is not None and check.confidence >= _align_confidence_floor:
                     video.beep_alignment_confidence = check.confidence
-                    video.beep_alignment_delta_ms = (
-                        beep.time - check.secondary_beep_time
-                    ) * 1000.0
+                    video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
 
         trimmed_ok = False
         if beep is not None and stg.time_seconds > 0:
