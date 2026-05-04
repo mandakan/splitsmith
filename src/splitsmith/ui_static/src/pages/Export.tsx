@@ -12,7 +12,7 @@
  * to the splits CSV on the next Generate.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertCircle,
@@ -26,6 +26,7 @@ import {
   Loader2,
   PlayCircle,
   RefreshCw,
+  Video,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,7 @@ import {
   type ExportOverview,
   type Job,
   type MatchProject,
+  type SecondaryExportStatus,
   type StageAudit,
   type StageExportStatus,
 } from "@/lib/api";
@@ -255,6 +257,36 @@ function StageActions({
   // Overlay (issue #45) defaults off: render is slower than the other
   // writers and most users only want it once per stage.
   const [overlay, setOverlay] = useState(false);
+  // Per-cam include/exclude (issue #54). Default-on when the cam is
+  // shippable (has a beep + source reachable); resyncs whenever the row
+  // refreshes from the overview so flipping a cam's role / detecting its
+  // beep doesn't leave stale state behind.
+  const eligibleCamIds = useMemo(
+    () =>
+      row.secondaries
+        .filter((s) => s.has_beep && s.source_reachable)
+        .map((s) => s.video_id),
+    [row.secondaries],
+  );
+  const [selectedCams, setSelectedCams] = useState<Set<string>>(
+    () => new Set(eligibleCamIds),
+  );
+  useEffect(() => {
+    setSelectedCams((prev) => {
+      const next = new Set<string>();
+      const eligible = new Set(eligibleCamIds);
+      for (const id of prev) {
+        if (eligible.has(id)) next.add(id);
+      }
+      for (const id of eligibleCamIds) {
+        // Newly eligible cams (e.g. user just confirmed the beep) opt in
+        // by default; the user can untick before clicking Generate.
+        if (!prev.has(id) && !next.has(id)) next.add(id);
+      }
+      return next;
+    });
+  }, [eligibleCamIds]);
+
   const [job, setJob] = useState<Job | null>(null);
 
   const sourceUnreachable = row.has_primary && row.source_reachable === false;
@@ -297,12 +329,19 @@ function StageActions({
   const generate = async () => {
     onError(null);
     try {
+      // Forward the per-cam allowlist only when the stage actually has
+      // secondaries -- on a single-cam stage we let the server keep its
+      // legacy "all eligible cams" default rather than sending an empty
+      // list that would explicitly suppress nothing.
       const submitted = await api.exportStage(row.stage_number, {
         write_trim: trim,
         write_csv: csv,
         write_fcpxml: fcpxml,
         write_report: reportFlag,
         write_overlay: overlay,
+        ...(row.secondaries.length > 0
+          ? { secondary_video_ids: Array.from(selectedCams) }
+          : {}),
       });
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
@@ -448,6 +487,21 @@ function StageActions({
         </Button>
       </div>
 
+      <SecondariesPanel
+        secondaries={row.secondaries}
+        selected={selectedCams}
+        onToggle={(id, checked) =>
+          setSelectedCams((prev) => {
+            const next = new Set(prev);
+            if (checked) next.add(id);
+            else next.delete(id);
+            return next;
+          })
+        }
+        disabled={busy}
+        onReveal={reveal}
+      />
+
       <FileLinks row={row} onReveal={reveal} />
 
       {job ? (
@@ -462,6 +516,102 @@ function StageActions({
           <span className="text-muted-foreground">{job.message ?? job.status}</span>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function SecondariesPanel({
+  secondaries,
+  selected,
+  onToggle,
+  disabled,
+  onReveal,
+}: {
+  secondaries: SecondaryExportStatus[];
+  selected: Set<string>;
+  onToggle: (videoId: string, checked: boolean) => void;
+  disabled: boolean;
+  onReveal: (path: string | null) => void;
+}) {
+  if (secondaries.length === 0) return null;
+  const eligibleCount = secondaries.filter(
+    (s) => s.has_beep && s.source_reachable,
+  ).length;
+  const selectedCount = secondaries.filter(
+    (s) => s.has_beep && s.source_reachable && selected.has(s.video_id),
+  ).length;
+  return (
+    <div className="space-y-1 rounded-md border border-border/60 bg-muted/10 p-2 text-xs">
+      <div className="flex items-center gap-2 px-1 pb-1 text-muted-foreground">
+        <Video className="size-3.5" />
+        <span className="font-medium">
+          Secondary cams ({selectedCount} of {eligibleCount} selected)
+        </span>
+        <span className="text-[11px]">
+          -- each ships its own lossless trim and rides the multi-cam FCPXML
+          on lanes V1, V2, ...
+        </span>
+      </div>
+      {secondaries.map((s) => {
+        const eligible = s.has_beep && s.source_reachable;
+        const checked = selected.has(s.video_id);
+        const reason = !s.source_reachable
+          ? "Source unreachable -- reconnect external storage"
+          : !s.has_beep
+            ? "No beep yet -- detect or set the beep on the ingest screen"
+            : null;
+        return (
+          <div
+            key={s.video_id}
+            className={cn(
+              "flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/40 bg-background/40 px-2 py-1",
+              !eligible && "opacity-60",
+            )}
+          >
+            <label className="flex min-w-0 items-center gap-2">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={eligible && checked}
+                disabled={disabled || !eligible}
+                onChange={(e) => onToggle(s.video_id, e.target.checked)}
+                title={reason ?? "Include this cam in the next export"}
+              />
+              <span className="truncate font-mono">{s.label}</span>
+              {!s.has_beep ? (
+                <Badge variant="statusNotStarted" className="shrink-0">
+                  No beep
+                </Badge>
+              ) : !s.beep_reviewed ? (
+                <Badge variant="statusInProgress" className="shrink-0">
+                  Beep unreviewed
+                </Badge>
+              ) : null}
+              {!s.source_reachable ? (
+                <Badge variant="statusWarning" className="shrink-0 gap-1">
+                  <AlertCircle className="size-3" /> Source missing
+                </Badge>
+              ) : null}
+              {s.trim_present ? (
+                <Badge variant="statusComplete" className="shrink-0">
+                  Trim ready
+                </Badge>
+              ) : null}
+            </label>
+            {s.trim_path ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2"
+                onClick={() => onReveal(s.trim_path)}
+                title="Reveal the per-cam trim in the OS file manager"
+              >
+                <FolderOpen className="size-3.5" />
+              </Button>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

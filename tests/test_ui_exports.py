@@ -473,3 +473,139 @@ def test_export_overview_status(tmp_path: Path) -> None:
     # ``raw/a.mp4`` doesn't exist on disk, mirroring the "USB unplugged"
     # case the SPA badges with "Source missing".
     assert row.source_reachable is False
+    # Single-cam stage -- secondaries roster is empty.
+    assert row.secondaries == []
+
+
+def test_export_overview_surfaces_secondaries(tmp_path: Path) -> None:
+    """Every secondary on the stage shows up in ``StageExportStatus.secondaries``,
+    flagged with beep / source / trim state so the SPA can render the multi-cam
+    panel without having to cross-reference the project + filesystem itself."""
+    from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages.append(
+        StageEntry(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        )
+    )
+    # Primary present + processed so we land in the multi-cam-ready state.
+    primary_src = root / "raw" / "a.mp4"
+    primary_src.parent.mkdir(parents=True, exist_ok=True)
+    primary_src.write_bytes(b"")
+    project.stages[0].videos.extend(
+        [
+            StageVideo(
+                path=Path("raw/a.mp4"),
+                role="primary",
+                beep_time=1.0,
+                beep_reviewed=True,
+                processed={"beep": True, "shot_detect": True, "trim": True},
+            ),
+            # Eligible: beep + reachable source + a stale trim from a prior run.
+            StageVideo(
+                path=Path("raw/cam_ready.mp4"),
+                role="secondary",
+                beep_time=2.0,
+                beep_reviewed=True,
+            ),
+            # Beep set but unreviewed -- still eligible to ship; SPA flags it.
+            StageVideo(
+                path=Path("raw/cam_unreviewed.mp4"),
+                role="secondary",
+                beep_time=3.0,
+                beep_reviewed=False,
+            ),
+            # Source missing (no file on disk) -- ineligible.
+            StageVideo(
+                path=Path("raw/cam_missing.mp4"),
+                role="secondary",
+                beep_time=4.0,
+            ),
+            # No beep yet -- ineligible until the user runs detect / sets one.
+            StageVideo(
+                path=Path("raw/cam_no_beep.mp4"),
+                role="secondary",
+            ),
+            # Ignored videos must not leak into the secondaries roster.
+            StageVideo(path=Path("raw/cam_ignored.mp4"), role="ignored"),
+        ]
+    )
+    # Materialise the two cams whose sources should resolve, plus a stale
+    # per-cam trim for the "ready" one so we can prove ``trim_present`` /
+    # ``trim_path`` flow through.
+    (root / "raw" / "cam_ready.mp4").write_bytes(b"")
+    (root / "raw" / "cam_unreviewed.mp4").write_bytes(b"")
+    cam_ready_id = project.stages[0].videos[1].video_id
+    base = "stage1_stage-1-h1"
+    stale_trim = root / "exports" / f"{base}_cam_{cam_ready_id}_trimmed.mp4"
+    stale_trim.parent.mkdir(parents=True, exist_ok=True)
+    stale_trim.write_bytes(b"stale")
+
+    audit = root / "audit" / "stage1.json"
+    audit.write_text(
+        json.dumps(
+            _audit_payload(
+                shots=[
+                    {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
+                ]
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    overview = project.export_overview(root)
+    row = overview[0]
+    by_path = {s.path.name: s for s in row.secondaries}
+    # Ignored videos are filtered; the four secondaries each get an entry.
+    assert set(by_path) == {
+        "cam_ready.mp4",
+        "cam_unreviewed.mp4",
+        "cam_missing.mp4",
+        "cam_no_beep.mp4",
+    }
+
+    ready = by_path["cam_ready.mp4"]
+    assert ready.has_beep and ready.source_reachable
+    assert ready.beep_reviewed is True
+    assert ready.trim_present and ready.trim_path == stale_trim
+
+    unreviewed = by_path["cam_unreviewed.mp4"]
+    assert unreviewed.has_beep and unreviewed.source_reachable
+    assert unreviewed.beep_reviewed is False
+    assert unreviewed.trim_present is False and unreviewed.trim_path is None
+
+    missing = by_path["cam_missing.mp4"]
+    assert missing.has_beep and missing.source_reachable is False
+
+    nobeep = by_path["cam_no_beep.mp4"]
+    assert nobeep.has_beep is False
+
+    # The stale per-cam trim alone is enough to flip ``has_exports`` true,
+    # since the SPA's "Exported" badge should reflect any export artefact
+    # on disk -- not just primary outputs.
+    assert row.has_exports is True
+    assert row.last_export_at is not None
+
+
+def test_export_stage_request_accepts_secondary_video_ids() -> None:
+    """``ExportStageRequest`` round-trips the new allowlist field. ``None``
+    keeps the legacy "include every cam with a beep" default; an empty list
+    forces zero secondaries; a populated list narrows to the named cams."""
+    from splitsmith.ui.server import ExportStageRequest
+
+    default = ExportStageRequest()
+    assert default.secondary_video_ids is None
+
+    explicit_none = ExportStageRequest.model_validate({"secondary_video_ids": None})
+    assert explicit_none.secondary_video_ids is None
+
+    empty = ExportStageRequest.model_validate({"secondary_video_ids": []})
+    assert empty.secondary_video_ids == []
+
+    subset = ExportStageRequest.model_validate({"secondary_video_ids": ["aaa", "bbb"]})
+    assert subset.secondary_video_ids == ["aaa", "bbb"]

@@ -189,6 +189,31 @@ class RemovalPlan(BaseModel):
     audit_reset: bool = False  # caller-facing flag: did we wipe stage audit?
 
 
+class SecondaryExportStatus(BaseModel):
+    """Per-secondary-cam export status surfaced on the Analysis & Export
+    overview (issue #54).
+
+    Each entry maps a secondary :class:`StageVideo` on the stage to (a) its
+    eligibility to ride the multi-cam FCPXML (needs a beep + a reachable
+    source) and (b) the lossless trim that the last Generate produced for
+    it. The SPA renders one checkbox row per entry so the user can include
+    or exclude individual cams from the next export.
+    """
+
+    video_id: str
+    path: Path
+    label: str
+    has_beep: bool
+    beep_reviewed: bool
+    source_reachable: bool
+    # ``stage<N>_<slug>_cam_<video_id>_trimmed.mp4`` under ``exports/``,
+    # populated only when the file is actually present on disk; ``None``
+    # before the user runs Generate (or when the cam was excluded last
+    # time). The SPA uses this to drive the per-cam Reveal button.
+    trim_path: Path | None
+    trim_present: bool
+
+
 class StageExportStatus(BaseModel):
     """Per-stage audit + export status for the Analysis & Export overview.
 
@@ -236,6 +261,11 @@ class StageExportStatus(BaseModel):
     # so the user knows Generate will degrade (CSV/report only) without
     # having to click first. ``None`` when the stage has no primary.
     source_reachable: bool | None = None
+    # Multi-cam roster (issue #54). One entry per secondary :class:`StageVideo`
+    # on the stage (``role == "secondary"``), regardless of beep / source
+    # state -- the SPA renders disabled rows for cams that can't ship and
+    # explains why. Empty when the stage is single-cam.
+    secondaries: list[SecondaryExportStatus] = Field(default_factory=list)
 
 
 class StageMatchWindow(BaseModel):
@@ -497,8 +527,23 @@ class MatchProject(BaseModel):
             report_exists = report_p.exists()
             trim_exists = lossless_trim_p.exists()
             overlay_exists = overlay_p.exists()
+            # Per-cam lossless trims (issue #54) live next to the primary's
+            # trim under the same base; surface them to ``has_exports`` /
+            # ``last_export_at`` so a stage that's only had its secondaries
+            # generated still reads as exported.
+            sec_trim_paths = [
+                exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4"
+                for sv in stage.videos
+                if sv.role == "secondary"
+            ]
+            sec_trim_existing = [p for p in sec_trim_paths if p.exists()]
             has_exports = (
-                csv_exists or fcpxml_exists or report_exists or trim_exists or overlay_exists
+                csv_exists
+                or fcpxml_exists
+                or report_exists
+                or trim_exists
+                or overlay_exists
+                or bool(sec_trim_existing)
             )
             last_export_at: datetime | None = None
             if has_exports:
@@ -507,6 +552,7 @@ class MatchProject(BaseModel):
                     for p in (csv_p, fcpxml_p, report_p, lossless_trim_p, overlay_p)
                     if p.exists()
                 ]
+                mtimes.extend(p.stat().st_mtime for p in sec_trim_existing)
                 if mtimes:
                     last_export_at = datetime.fromtimestamp(max(mtimes), tz=UTC)
 
@@ -530,6 +576,30 @@ class MatchProject(BaseModel):
                 except OSError:
                     source_reachable = False
 
+            secondaries_status: list[SecondaryExportStatus] = []
+            for sv in stage.videos:
+                if sv.role != "secondary":
+                    continue
+                sec_trim = exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4"
+                sec_trim_exists = sec_trim.exists()
+                try:
+                    sec_src = self.resolve_video_path(root, sv.path)
+                    sec_reachable = sec_src.exists()
+                except OSError:
+                    sec_reachable = False
+                secondaries_status.append(
+                    SecondaryExportStatus(
+                        video_id=sv.video_id,
+                        path=sv.path,
+                        label=sv.path.name,
+                        has_beep=sv.beep_time is not None,
+                        beep_reviewed=sv.beep_reviewed,
+                        source_reachable=sec_reachable,
+                        trim_path=sec_trim if sec_trim_exists else None,
+                        trim_present=sec_trim_exists,
+                    )
+                )
+
             out.append(
                 StageExportStatus(
                     stage_number=stage.stage_number,
@@ -550,6 +620,7 @@ class MatchProject(BaseModel):
                     last_export_at=last_export_at,
                     ready_to_export=ready_to_export,
                     source_reachable=source_reachable,
+                    secondaries=secondaries_status,
                 )
             )
         return out

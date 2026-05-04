@@ -319,6 +319,25 @@ export interface MatchAnalysis {
   videos: VideoMatchAnalysisEntry[];
 }
 
+/** Per-secondary cam status surfaced on the Analysis & Export overview
+ *  (issue #54). Mirrors ``splitsmith.ui.project.SecondaryExportStatus``;
+ *  the Export page renders one checkbox row per entry so the user can
+ *  include / exclude individual cams from the next Generate. */
+export interface SecondaryExportStatus {
+  video_id: string;
+  path: string;
+  /** Display label (defaults to the basename of ``path``). */
+  label: string;
+  has_beep: boolean;
+  beep_reviewed: boolean;
+  source_reachable: boolean;
+  /** Path to the per-cam lossless trim under ``exports/`` -- only set
+   *  when the file is on disk. ``null`` before the user runs Generate
+   *  (or when the cam was excluded last time). */
+  trim_path: string | null;
+  trim_present: boolean;
+}
+
 /** Per-stage status row for the Analysis & Export overview (#17).
  *  Mirrors splitsmith.ui.project.StageExportStatus. The SPA renders one
  *  card per row; ``ready_to_export`` decides whether Generate is enabled.
@@ -349,6 +368,10 @@ export interface StageExportStatus {
   last_export_at: string | null;
   ready_to_export: boolean;
   source_reachable: boolean | null;
+  /** Multi-cam roster (issue #54). One entry per secondary on the stage,
+   *  including cams without a beep / unreachable cams (the SPA renders
+   *  those as disabled rows). Empty when the stage is single-cam. */
+  secondaries: SecondaryExportStatus[];
 }
 
 export interface ExportOverview {
@@ -363,6 +386,11 @@ export interface ExportStageRequestPayload {
   /** Render the per-frame PIL + ffmpeg overlay MOV (issue #45). Defaults
    *  off because it's the slowest writer; opt in per stage. */
   write_overlay?: boolean;
+  /** Allowlist of secondary ``video_id``s to include in the multi-cam
+   *  FCPXML / per-cam trims (issue #54). Omit (or pass ``null``) to keep
+   *  the legacy "every secondary with a beep" default; pass ``[]`` to
+   *  exclude all secondaries; pass a list to ship only the named cams. */
+  secondary_video_ids?: string[] | null;
 }
 
 export interface ExportStageResult {
@@ -970,6 +998,12 @@ export const api = {
         write_fcpxml: opts.write_fcpxml ?? true,
         write_report: opts.write_report ?? true,
         write_overlay: opts.write_overlay ?? false,
+        // ``undefined`` => omit (server picks the legacy "all cams with a
+        // beep" default); ``null`` / ``[]`` are forwarded as-is so the
+        // caller can explicitly exclude all secondaries.
+        ...(opts.secondary_video_ids !== undefined
+          ? { secondary_video_ids: opts.secondary_video_ids }
+          : {}),
       },
     }),
 
