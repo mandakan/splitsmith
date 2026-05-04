@@ -129,7 +129,7 @@ Open a single-page browser UI for reviewing detected shots against the fixture's
 
 ```bash
 uv run splitsmith review \
-    --fixture tests/fixtures/stage-shots-tallmilan-stage2.json \
+    --fixture tests/fixtures/stage-shots-tallmilan-2026-stage2.json \
     --video   VID_20260426_162417_00_048.mp4
 ```
 
@@ -154,8 +154,8 @@ When you create a new test fixture from a video, the helper script writes a cand
 
 ```bash
 uv run splitsmith audit-apply \
-    --candidates tests/fixtures/stage-shots-blacksmith-h5-candidates.csv \
-    --fixture    tests/fixtures/stage-shots-blacksmith-h5.json
+    --candidates tests/fixtures/stage-shots-blacksmith-2026-stage7-candidates.csv \
+    --fixture    tests/fixtures/stage-shots-blacksmith-2026-stage7.json
 ```
 
 The fixture's `shots[]` array is rewritten in place; the `_candidates_pending_audit` block is preserved so you can re-audit if you change your mind.

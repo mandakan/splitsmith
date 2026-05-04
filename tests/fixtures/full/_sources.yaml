@@ -26,11 +26,11 @@ fixtures:
   stage-shots-blacksmith-2026-stage5: VID_20260412_102637_00_035.mp4
   stage-shots-blacksmith-2026-stage6: VID_20260412_105215_00_036.mp4
   stage-shots-blacksmith-2026-stage8: VID_20260412_125853_00_039.mp4
-  stage-shots-blacksmith-h5: VID_20260412_112131_00_038.mp4
+  stage-shots-blacksmith-2026-stage7: VID_20260412_112131_00_038.mp4
   stage-shots-tallmilan-2026-stage5: VID_20260426_141808_00_043.mp4
   stage-shots-tallmilan-2026-stage6: VID_20260426_145548_00_044.mp4
-  stage-shots-tallmilan-stage2: VID_20260426_162417_00_048.mp4
-  stage-shots-tallmilan-stage7: VID_20260426_152210_00_045.mp4
+  stage-shots-tallmilan-2026-stage2: VID_20260426_162417_00_048.mp4
+  stage-shots-tallmilan-2026-stage7: VID_20260426_152210_00_045.mp4
 
 # Override entries take precedence over ``video_dir`` + ``fixtures`` lookup.
 overrides:
