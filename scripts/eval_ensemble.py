@@ -44,6 +44,7 @@ import numpy as np
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble.features import compute_hand_features
+from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
 DEFAULT_FIXTURES = [
@@ -242,8 +243,11 @@ def main() -> None:
         cand_times_arr = np.array([s.time_absolute for s in all_shots], dtype=np.float64)
         confs_arr = np.array([s.confidence for s in all_shots], dtype=np.float64)
         peaks_arr = np.array([s.peak_amplitude for s in all_shots], dtype=np.float64)
+        tta_arr = compute_tta_agreement(
+            audio, sr, truth["beep_time"], truth["stage_time_seconds"], cand_times_arr
+        )
         feats_matrix = compute_hand_features(
-            audio, sr, cand_times_arr, truth["beep_time"], confs_arr, peaks_arr
+            audio, sr, cand_times_arr, truth["beep_time"], confs_arr, peaks_arr, tta_arr
         )
         for i, shot in enumerate(all_shots):
             universe.append(

@@ -80,6 +80,12 @@ _HAND_FEATURE_NAMES: tuple[str, ...] = (
     # threshold-only eval (see PR's ablation table).
     "spectral_flatness",
     "spectral_peak_ratio",
+    # Test-time augmentation (issue #92): how many of 4 detector perturbations
+    # (+/-2 dB amplitude, +/-5 ms time shift) plus the original produced a
+    # candidate within 15 ms of this candidate's time. Range: 1.0 .. 5.0.
+    # Real shots are robust to small perturbations; FPs barely clearing the
+    # smoothed-envelope threshold drop out under one or more.
+    "tta_agreement",
 )
 
 # Onset window for spectral features (issue #108): 50 ms gives ~20 Hz
@@ -172,12 +178,18 @@ def compute_hand_features(
     beep_time: float,
     confidences: np.ndarray,
     peak_amplitudes: np.ndarray,
+    tta_agreement: np.ndarray,
 ) -> np.ndarray:
     """Per-candidate hand-crafted feature matrix, shape ``(N, HAND_FEATURE_DIM)``.
 
     Mirrors the feature set the calibration script trains voter C on; any
     drift here desyncs the GBDT and silently degrades precision. If you
     add or reorder features, rebuild artifacts.
+
+    ``tta_agreement`` is the per-candidate output of
+    ``splitsmith.ensemble.tta.compute_tta_agreement`` (range 1..5). Required
+    rather than defaulted so a calling site can't silently feed zeros into a
+    GBDT that was trained against real agreement counts.
     """
     n = audio.size
     sorted_t = np.sort(candidate_times)
@@ -259,6 +271,7 @@ def compute_hand_features(
         )
         out[k, 14] = flatness
         out[k, 15] = peak_ratio
+        out[k, 16] = float(tta_agreement[k])
     return out
 
 

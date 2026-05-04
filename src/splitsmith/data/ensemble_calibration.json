@@ -1,7 +1,7 @@
 {
   "voter_a_floor": 0.01847127532497797,
   "voter_b_threshold": 0.14829593896865845,
-  "voter_c_threshold": 0.13037651391646657,
+  "voter_c_threshold": 0.12029789753438905,
   "voter_d_threshold": 0.0012177228927612305,
   "voter_c_target_recall": 0.95,
   "tolerance_ms": 75.0,
@@ -39,8 +39,8 @@
   ],
   "n_calibration_candidates": 949,
   "n_calibration_positives": 225,
-  "voter_c_feature_dim": 27,
-  "built_at": "2026-05-04T14:08:10.185639+00:00",
+  "voter_c_feature_dim": 28,
+  "built_at": "2026-05-04T15:41:27.842343+00:00",
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": []
 }
