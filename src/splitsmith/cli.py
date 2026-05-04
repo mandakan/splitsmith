@@ -434,6 +434,10 @@ def audit_prep(
         "source": (
             f"{video.name} stage {stage_number} '{stage_name}' " "(audio extracted at 48 kHz mono)"
         ),
+        # Structured absolute path to the source video. Lets the
+        # Lab UI's Re-label button hop straight to /review with the
+        # video bound, instead of needing the CLI ``--video`` flag.
+        "source_video": str(Path(video).resolve()),
         "stage_number": stage_number,
         "stage_name": stage_name,
         "fixture_window_in_source": [round(fix_lo, 4), round(fix_hi, 4)],

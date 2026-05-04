@@ -70,6 +70,15 @@ const DEFAULT_CONFIG: LabEvalConfig = {
   voter_d_threshold_override: null,
 };
 
+/** Build the /review URL for a fixture, threading the source video
+ *  through when available so the review page boots with the video
+ *  bound (no separate ``splitsmith review --video ...`` invocation). */
+function reviewUrl(auditPath: string, sourceVideo: string | null | undefined): string {
+  let url = `/review?fixture=${encodeURIComponent(auditPath)}`;
+  if (sourceVideo) url += `&video=${encodeURIComponent(sourceVideo)}`;
+  return url;
+}
+
 export function Lab() {
   const navigate = useNavigate();
   const { slug } = useParams<{ slug?: string }>();
@@ -281,7 +290,7 @@ function FixtureDetailLite({
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
             <Link
-              to={`/review?fixture=${encodeURIComponent(record.audit_path)}`}
+              to={reviewUrl(record.audit_path, record.source_video)}
               title="Open in the review editor"
             >
               <Pencil className="size-3.5" />
@@ -676,7 +685,7 @@ function FixtureTable({
                     <td className="px-2 py-2 text-muted-foreground">
                       <div className="flex items-center justify-end gap-1">
                         <Link
-                          to={`/review?fixture=${encodeURIComponent(rec.audit_path)}`}
+                          to={reviewUrl(rec.audit_path, rec.source_video)}
                           onClick={(e) => e.stopPropagation()}
                           className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                           title="Re-label this fixture in the review editor"
@@ -887,7 +896,7 @@ function FixtureDetail({
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
             <Link
-              to={`/review?fixture=${encodeURIComponent(fixture.audit_path)}`}
+              to={reviewUrl(fixture.audit_path, fixture.source_video)}
               title="Open this fixture in the review editor (re-label shots, edit beep, save in place)"
             >
               <Pencil className="size-3.5" />

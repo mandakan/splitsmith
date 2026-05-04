@@ -1058,6 +1058,7 @@ export interface LabFixtureRecord {
   stage_time_seconds: number | null;
   beep_time: number | null;
   source: string | null;
+  source_video: string | null;
   audit_mtime: number;
   audio_mtime: number | null;
 }
@@ -1132,6 +1133,7 @@ export interface LabEvalFixture {
   slug: string;
   audit_path: string;
   audio_path: string;
+  source_video: string | null;
   expected_rounds: number | null;
   candidates: LabEvalCandidate[];
   truth_times: number[];

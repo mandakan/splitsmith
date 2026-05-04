@@ -47,6 +47,7 @@ class FixtureRecord(BaseModel):
     stage_time_seconds: float | None = None
     beep_time: float | None = None
     source: str | None = None
+    source_video: str | None = None
     audit_mtime: float
     audio_mtime: float | None = None
 
@@ -86,6 +87,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 stage_time_seconds=payload.get("stage_time_seconds"),
                 beep_time=payload.get("beep_time"),
                 source=payload.get("source"),
+                source_video=payload.get("source_video"),
                 audit_mtime=json_path.stat().st_mtime,
                 audio_mtime=wav.stat().st_mtime if wav.exists() else None,
             )
@@ -228,6 +230,7 @@ class EvalFixture(BaseModel):
     slug: str
     audit_path: str
     audio_path: str
+    source_video: str | None = None
     expected_rounds: int | None = None
     candidates: list[EvalCandidate]
     truth_times: list[float]
@@ -621,6 +624,7 @@ def run_eval(
                 slug=fix.slug,
                 audit_path=fix.audit_path,
                 audio_path=fix.audio_path,
+                source_video=fix.source_video,
                 expected_rounds=fix.expected_rounds,
                 candidates=candidates,
                 truth_times=truth_times,
