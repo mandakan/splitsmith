@@ -827,10 +827,17 @@ function FixtureDetail({
         if (next != null) setSelectedCn(next);
       };
 
+      // Truth-positive candidates (whether the consensus kept them or
+      // not) take a subclass label; non-truth candidates take a reason.
+      // Treating FN candidates as positives lets you mark a rejected
+      // truth shot with paper / steel / barrel directly, which is the
+      // training signal for recovering missed shots.
+      const isPositive = c.truth === 1;
+
       // Clear: 0 or Backspace.
       if (e.key === "0" || e.key === "Backspace") {
         e.preventDefault();
-        if (c.kept && c.truth === 1) {
+        if (isPositive) {
           handleLabel(c.candidate_number, { subclass: null });
         } else {
           handleLabel(c.candidate_number, { reason: null });
@@ -840,7 +847,7 @@ function FixtureDetail({
       }
 
       const key = e.key.toLowerCase();
-      if (c.kept && c.truth === 1) {
+      if (isPositive) {
         const sub = SUBCLASS_SHORTCUTS[key];
         if (sub) {
           e.preventDefault();
@@ -1598,7 +1605,7 @@ function StepThroughPanel({
       list = list.filter((c) => c.kept && c.truth === 0);
     } else if (filter === "unlabeled_only") {
       list = list.filter((c) => {
-        if (c.kept && c.truth === 1) return c.subclass == null;
+        if (c.truth === 1) return c.subclass == null;
         return c.reason == null;
       });
     }
@@ -1752,7 +1759,7 @@ function StepThroughPanel({
             {ordered.map((c) => {
               const sel = c.candidate_number === selectedCn;
               const saving = savingLabel === c.candidate_number;
-              const label = c.kept && c.truth === 1 ? c.subclass : c.reason;
+              const label = c.truth === 1 ? c.subclass : c.reason;
               return (
                 <tr
                   key={c.candidate_number}
@@ -1790,12 +1797,12 @@ function StepThroughPanel({
 
       {current && (
         <div className="mt-3 flex flex-wrap gap-1 text-[10px]">
-          {(current.kept && current.truth === 1 ? LAB_SUBCLASSES : LAB_REASONS).map((label) => (
+          {(current.truth === 1 ? LAB_SUBCLASSES : LAB_REASONS).map((label) => (
             <button
               key={label}
               type="button"
               onClick={(e) => {
-                if (current.kept && current.truth === 1) {
+                if (current.truth === 1) {
                   onLabel(current.candidate_number, { subclass: label });
                 } else {
                   onLabel(current.candidate_number, { reason: label });
@@ -1811,7 +1818,7 @@ function StepThroughPanel({
           <button
             type="button"
             onClick={(e) => {
-              if (current.kept && current.truth === 1) {
+              if (current.truth === 1) {
                 onLabel(current.candidate_number, { subclass: null });
               } else {
                 onLabel(current.candidate_number, { reason: null });
@@ -2054,7 +2061,7 @@ function SnippetPlayer({
   }, [truthTimes, allCandidates, ctxStart, ctxEnd]);
 
   const labelText =
-    candidate.kept && candidate.truth === 1 ? candidate.subclass : candidate.reason;
+    candidate.truth === 1 ? candidate.subclass : candidate.reason;
 
   return (
     <div className="flex flex-col gap-2">

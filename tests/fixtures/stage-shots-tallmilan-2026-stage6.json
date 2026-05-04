@@ -505,7 +505,29 @@
         "peak_amplitude": 0.0535,
         "confidence": 0.058
       }
-    ]
+    ],
+    "labels_by_time": {
+      "5.613": "movement",
+      "5.746": "movement",
+      "16.616": "cross_bay",
+      "1.171": "wind",
+      "1.446": "handling",
+      "1.582": "handling",
+      "2.398": "wind",
+      "2.591": "movement",
+      "3.491": "cross_bay",
+      "3.597": "cross_bay",
+      "3.742": "cross_bay",
+      "3.937": "movement",
+      "4.175": "movement",
+      "4.365": "movement",
+      "4.824": "movement",
+      "6.437": "movement",
+      "6.662": "steel_ring",
+      "6.756": "steel_ring",
+      "7.679": "steel_ring",
+      "8.086": "other"
+    }
   },
   "stage_rounds": {
     "paper": 4,
