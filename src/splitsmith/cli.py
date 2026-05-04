@@ -245,10 +245,13 @@ def review(
 
 @app.command()
 def ui(
-    project: Path = typer.Option(
-        ...,
+    project: Path | None = typer.Option(
+        None,
         "--project",
-        help="Match-project root directory. Created (with subdirs) if missing.",
+        help=(
+            "Match-project root directory. Created (with subdirs) if missing. "
+            "Omit to boot the picker; pass --last to reopen the most recent."
+        ),
     ),
     project_name: str | None = typer.Option(
         None,
@@ -257,6 +260,11 @@ def ui(
             "Display name for the match. Defaults to the project directory's "
             "basename. Ignored if the project already has a name on disk."
         ),
+    ),
+    last: bool = typer.Option(
+        False,
+        "--last",
+        help="Open the most-recently-opened project. Errors if the recent list is empty.",
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(5174, "--port"),
@@ -276,16 +284,33 @@ def ui(
     The UI is a localhost SPA driven by a FastAPI backend that orchestrates
     the existing engine modules unchanged. State persists to disk under
     ``--project`` so closing the browser and re-running resumes where you
-    left off.
+    left off. With no ``--project`` (and no ``--last``), the server boots
+    "unbound" -- the SPA renders a picker drawn from
+    ``~/.splitsmith/projects.json`` and binds in-memory once the user picks.
     """
+    from . import user_config
     from .ui.server import serve
 
-    project = project.expanduser().resolve()
-    name = project_name or project.name or "match"
+    if last:
+        if project is not None:
+            raise typer.BadParameter("--last and --project are mutually exclusive")
+        recents = user_config.get_recent_projects()
+        if not recents:
+            raise typer.BadParameter("no recent projects to reopen; run with --project")
+        project = Path(recents[0].path)
+
+    resolved: Path | None = None
+    name: str | None = None
+    if project is not None:
+        resolved = project.expanduser().resolve()
+        name = project_name or resolved.name or "match"
 
     url = f"http://{host}:{port}/"
     console.print(f"[green]splitsmith UI[/]: [bold]{url}[/]   (Ctrl+C to stop)")
-    console.print(f"  project: {project}")
+    if resolved is not None:
+        console.print(f"  project: {resolved}")
+    else:
+        console.print("  project: [dim]none -- showing picker[/]")
     if lab:
         console.print("  [cyan]Algorithm Lab[/] enabled")
 
@@ -296,7 +321,7 @@ def ui(
 
     try:
         serve(
-            project_root=project,
+            project_root=resolved,
             project_name=name,
             host=host,
             port=port,

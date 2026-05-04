@@ -4031,6 +4031,90 @@ def test_forget_recent_project_endpoint(tmp_path: Path, _user_config_home: Path)
     assert [p["name"] for p in body["projects"]] == ["Beta"]
 
 
+def test_unbound_create_app_health_reports_unbound() -> None:
+    """`splitsmith ui` with no --project boots unbound; /api/health
+    reports it so the SPA can route to the picker."""
+    app = create_app()
+    client = TestClient(app)
+
+    body = client.get("/api/health").json()
+    assert body["bound"] is False
+    assert body["project_name"] is None
+    assert body["project_root"] is None
+
+
+def test_unbound_project_endpoints_return_409_no_project(tmp_path: Path) -> None:
+    """Every project-bound route returns the structured 409 the SPA
+    listens for to redirect to the picker."""
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/project")
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["code"] == "no_project"
+
+
+def test_bind_recent_project_switches_in_memory(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """The picker POSTs to /bind to switch the active project without a
+    server restart. Subsequent /api/health reflects the new binding and
+    the recent-projects list bumps the entry to the top.
+    """
+    from splitsmith import user_config
+
+    alpha = tmp_path / "alpha"
+    create_app(project_root=alpha, project_name="Alpha")
+    # Now boot unbound and bind via the endpoint.
+    app = create_app()
+    client = TestClient(app)
+
+    assert client.get("/api/health").json()["bound"] is False
+
+    resp = client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(alpha.resolve())},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["bound"] is True
+    assert body["project_name"] == "Alpha"
+
+    # Subsequent project endpoints now work.
+    assert client.get("/api/project").status_code == 200
+
+    # Recent-projects list bumped Alpha to the top.
+    recent = user_config.get_recent_projects()
+    assert recent[0].name == "Alpha"
+
+
+def test_bind_recent_project_404_when_path_missing(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    app = create_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(tmp_path / "does-not-exist")},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "project_path_missing"
+
+
+def test_unbind_returns_to_unbound_state(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    assert client.get("/api/health").json()["bound"] is True
+    resp = client.post("/api/user/recent-projects/unbind")
+    assert resp.status_code == 200
+    assert resp.json()["bound"] is False
+    assert client.get("/api/project").status_code == 409
+
+
 def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)
