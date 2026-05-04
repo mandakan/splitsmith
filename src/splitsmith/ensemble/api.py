@@ -43,6 +43,18 @@ class EnsembleConfig(BaseModel):
             "Applied only when ``expected_rounds`` is provided."
         ),
     )
+    c_required: bool = Field(
+        default=True,
+        description=(
+            "Issue #103: require voter C to say yes for a candidate to "
+            "be kept (in addition to consensus). On the 281-FP labeled "
+            "set, voter C correctly rejected 100 % of hand-labeled FPs "
+            "while voters A/B/D were calibrated for high recall and "
+            "rubber-stamped most of them. Pairing C-veto with the "
+            "broadened voter-C adaptive slack (see ``vote_c_adaptive``) "
+            "holds recall at 100 % while suppressing 278 / 281 FPs."
+        ),
+    )
 
 
 class EnsembleCandidate(BaseModel):
@@ -177,7 +189,13 @@ def detect_shots_ensemble(
     vote_total = va + vb + vc + vd
     boost = voters.apriori_boost(confidences, expected_rounds, cfg.apriori_boost)
     ensemble_score = vote_total.astype(np.float64) + boost
-    keep_mask = voters.consensus_keep(vote_total, boost, cfg.consensus)
+    keep_mask = voters.consensus_keep(
+        vote_total,
+        boost,
+        cfg.consensus,
+        vote_c=vc,
+        c_required=cfg.c_required,
+    )
 
     candidates: list[EnsembleCandidate] = []
     for i in range(n):

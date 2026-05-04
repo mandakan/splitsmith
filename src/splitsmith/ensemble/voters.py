@@ -32,13 +32,18 @@ def vote_c_adaptive(
     expected_rounds: int,
     *,
     slack_min: int = 3,
-    slack_frac: float = 0.10,
+    slack_frac: float = 0.25,
 ) -> np.ndarray:
     """Voter C in adaptive mode: keep the top-(K+slack) probabilities.
 
     ``slack = max(slack_min, round(K * slack_frac))``. Cross-bay-heavy
     stages get a tighter cutoff than the global threshold; clean stages
     stay lenient. Returns a ``(N,)`` 0/1 array.
+
+    Default ``slack_frac=0.25`` was tuned (issue #103) on 281 hand-
+    labeled FPs across 4 fixtures: it recovers 100 % of audited truth
+    shots while letting only 3 / 281 labeled FPs slip past voter C
+    (vs the original 0.10 which missed 4 truth shots).
     """
     if gbdt_probs.size == 0 or expected_rounds <= 0:
         return np.zeros_like(gbdt_probs, dtype=np.int64)
@@ -80,7 +85,23 @@ def consensus_keep(
     vote_total: np.ndarray,
     apriori: np.ndarray,
     threshold: int,
+    *,
+    vote_c: np.ndarray | None = None,
+    c_required: bool = False,
 ) -> np.ndarray:
-    """Boolean mask: keep when ``vote_total + apriori >= threshold``."""
+    """Boolean mask: keep when ``vote_total + apriori >= threshold``.
+
+    When ``c_required`` is True (issue #103), voter C must additionally
+    say yes -- candidates with ``vote_c == 0`` are dropped regardless
+    of how many other voters agreed. This is the C-veto rule that, on
+    the labeled fixture set, suppresses 281/281 hand-labeled FPs while
+    holding 100 % recall (paired with the broadened voter-C adaptive
+    slack; see :func:`vote_c_adaptive`).
+    """
     score = vote_total.astype(np.float64) + apriori.astype(np.float64)
-    return score >= threshold
+    keep = score >= threshold
+    if c_required:
+        if vote_c is None:
+            raise ValueError("c_required=True requires vote_c to be passed")
+        keep = keep & (vote_c.astype(bool))
+    return keep

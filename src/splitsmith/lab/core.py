@@ -103,6 +103,14 @@ class EvalConfig(BaseModel):
 
     consensus: int = Field(default=3, ge=1, le=5)
     apriori_boost: float = Field(default=1.0, ge=0.0)
+    c_required: bool = Field(
+        default=True,
+        description=(
+            "Issue #103 C-veto: voter C must say yes for a candidate "
+            "to be kept. Default on; turn off to compare with the old "
+            "3-of-4 consensus."
+        ),
+    )
     tolerance_ms: float = Field(default=75.0, gt=0.0)
     use_expected_rounds: bool = Field(
         default=True,
@@ -117,7 +125,11 @@ class EvalConfig(BaseModel):
     voter_d_threshold_override: float | None = None
 
     def to_ensemble_config(self) -> EnsembleConfig:
-        return EnsembleConfig(consensus=self.consensus, apriori_boost=self.apriori_boost)
+        return EnsembleConfig(
+            consensus=self.consensus,
+            apriori_boost=self.apriori_boost,
+            c_required=self.c_required,
+        )
 
 
 REASON_VALUES: tuple[str, ...] = (
@@ -726,7 +738,9 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
 
         expected = fix.expected_rounds if config.use_expected_rounds else None
         if expected and expected > 0:
-            slack = max(3, int(expected * 0.10 + 0.5))
+            # Mirrors the broadened slack defaults in
+            # ``ensemble.voters.vote_c_adaptive`` (issue #103).
+            slack = max(3, int(expected * 0.25 + 0.5))
             target = expected + slack
             if target >= score_c.size:
                 vote_c = np.ones_like(score_c, dtype=np.int64)
@@ -743,6 +757,8 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
         vote_total = vote_a + vote_b + vote_c + vote_d
         ensemble_score = vote_total.astype(np.float64) + boost
         kept_mask = ensemble_score >= config.consensus
+        if config.c_required:
+            kept_mask = kept_mask & vote_c.astype(bool)
 
         new_cands: list[EvalCandidate] = []
         for i, c in enumerate(fix.candidates):
