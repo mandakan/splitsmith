@@ -250,7 +250,7 @@ def _ensure_ui_built() -> None:
     npm = shutil.which("npm")
     if npm is None:
         logger.warning(
-            "ui_static/dist appears stale but npm is not on PATH; " "serving whatever is in dist/"
+            "ui_static/dist appears stale but npm is not on PATH; serving whatever is in dist/"
         )
         return
 
@@ -681,6 +681,14 @@ class ExportStageRequest(BaseModel):
     # slower than the other writers. The Analysis & Export checkbox
     # opts-in per stage.
     write_overlay: bool = False
+    # Multi-cam selection (issue #54). Allowlist of secondary
+    # ``video_id``s to ride the FCPXML / get their own lossless trim. The
+    # default ``None`` means "include every secondary with a beep" -- the
+    # legacy behaviour. An empty list excludes all secondaries; a non-empty
+    # list ships only the named cams (silently dropping any id not on the
+    # stage). Cams without a beep are still skipped regardless of selection
+    # since they can't be sync-aligned.
+    secondary_video_ids: list[str] | None = None
 
 
 class RevealRequest(BaseModel):
@@ -1273,7 +1281,9 @@ def create_app(
         for entry in candidates:
             try:
                 video = project.register_video(
-                    entry, state.project_root, link_mode=req.link_mode  # type: ignore[arg-type]
+                    entry,
+                    state.project_root,
+                    link_mode=req.link_mode,  # type: ignore[arg-type]
                 )
             except (FileNotFoundError, ValueError) as exc:
                 skipped.append(f"{entry.name}: {exc}")
@@ -3217,12 +3227,19 @@ def create_app(
         # alongside the primary so a single Generate click produces the
         # complete multi-cam timeline. Cams without a beep yet -- e.g.
         # registered but ingest didn't finish -- are silently skipped; the
-        # SPA's ingest screen flags those rows separately.
+        # SPA's ingest screen flags those rows separately. The Export page
+        # may also pass ``secondary_video_ids`` to restrict the roster to a
+        # subset (None = include every cam with a beep, the legacy default).
+        allowed_ids: set[str] | None = (
+            set(req.secondary_video_ids) if req.secondary_video_ids is not None else None
+        )
         secondaries: list[export_helpers.SecondaryExport] = []
         for sv in stg.videos:
             if sv.role != "secondary":
                 continue
             if sv.beep_time is None:
+                continue
+            if allowed_ids is not None and sv.video_id not in allowed_ids:
                 continue
             sec_source = proj.resolve_video_path(state.project_root, sv.path)
             secondaries.append(
@@ -4218,7 +4235,7 @@ def _print_active_jobs(app: FastAPI) -> None:
             bits.append(f"{round(j.progress * 100)}%")
         print(f"  - {' / '.join(bits)}", file=sys.stderr, flush=True)
     print(
-        "Press Ctrl-C again to force quit (in-flight ffmpeg / detection " "will be killed).",
+        "Press Ctrl-C again to force quit (in-flight ffmpeg / detection will be killed).",
         file=sys.stderr,
         flush=True,
     )
