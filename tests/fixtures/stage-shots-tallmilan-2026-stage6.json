@@ -66,7 +66,8 @@
       "candidate_number": 34,
       "time": 10.622,
       "ms_after_beep": 10122,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
@@ -94,7 +95,8 @@
       "candidate_number": 48,
       "time": 15.21,
       "ms_after_beep": 14710,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 13,
@@ -538,7 +540,8 @@
       "6.354": "cross_bay",
       "11.850": "movement",
       "12.416": "wind",
-      "12.042": "wind"
+      "12.042": "wind",
+      "12.212": "wind"
     }
   },
   "stage_rounds": {
