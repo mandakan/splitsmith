@@ -149,6 +149,65 @@ def test_default_template_draws_n_over_m_and_running_total() -> None:
     assert canvas.getextrema()[3][1] > 0  # alpha channel max > 0
 
 
+def test_default_template_renders_stroke_and_blurred_shadow() -> None:
+    """Stroke + soft drop shadow widen the painted region beyond a bare
+    text render (more non-transparent pixels) and leave dark pixels around
+    the white glyphs (the stroke). Both checks fail under the old 1px
+    shadow + no-stroke renderer."""
+    state = overlay_render.FrameState(
+        time_seconds=2.0,
+        beep_time_in_clip=0.5,
+        shot_count=5,
+        shots_fired=2,
+        last_split=0.21,
+        last_shot_time_in_clip=1.5,
+        running_total=1.5,
+    )
+    enhanced = overlay_render.DefaultTemplate(width=640, height=360)
+    bare = overlay_render.DefaultTemplate(
+        width=640,
+        height=360,
+        stroke_width_px=0,
+        shadow_blur_px=0,
+        shadow_offset_px=0,
+    )
+    canvas_enhanced = Image.new("RGBA", (640, 360), (0, 0, 0, 0))
+    canvas_bare = Image.new("RGBA", (640, 360), (0, 0, 0, 0))
+    enhanced.draw_frame(canvas_enhanced, state)
+    bare.draw_frame(canvas_bare, state)
+
+    def nonzero_alpha_count(img: Image.Image) -> int:
+        return sum(1 for px in img.getchannel("A").tobytes() if px > 0)
+
+    def dark_outline_count(img: Image.Image) -> int:
+        # Opaque-ish pixel that is mostly black -> stroke around the glyph.
+        alpha = img.getchannel("A").tobytes()
+        red = img.getchannel("R").tobytes()
+        return sum(1 for a, r in zip(alpha, red, strict=True) if a > 200 and r < 64)
+
+    assert nonzero_alpha_count(canvas_enhanced) > nonzero_alpha_count(canvas_bare) * 1.5
+    assert dark_outline_count(canvas_enhanced) > 100
+
+
+def test_load_font_unknown_name_raises() -> None:
+    with pytest.raises(overlay_render.OverlayRenderError):
+        overlay_render._load_font(None, 24, font_name="not-a-real-font")
+
+
+def test_load_font_known_name_falls_back_when_missing(tmp_path: Path) -> None:
+    """A named preset whose files don't exist on this machine must still
+    produce a usable font (generic fallback or PIL default), not crash."""
+    font = overlay_render._load_font(None, 24, font_name="dejavu-mono")
+    assert font is not None
+
+
+def test_available_font_names_includes_known_presets() -> None:
+    names = overlay_render.available_font_names()
+    assert "menlo" in names
+    assert "sf-mono" in names
+    assert "dejavu-mono" in names
+
+
 def test_default_template_skips_split_after_fade() -> None:
     """Long after the last shot, the split label fades to zero. The N/M
     and total are still drawn, but the split region is empty."""
