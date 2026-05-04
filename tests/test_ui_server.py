@@ -2973,6 +2973,40 @@ def test_fs_probe_endpoint_runs_on_demand(tmp_path: Path) -> None:
     assert body["thumbnail_url"].startswith("/api/thumbnails/")
 
 
+def test_fs_probe_resolves_project_relative_paths(tmp_path: Path) -> None:
+    # StageVideo.path is stored project-relative (e.g. "raw/foo.mp4"); the
+    # probe endpoint must resolve it via the project root, not process CWD.
+    root = tmp_path / "match"
+    raw_dir = root / "raw"
+    raw_dir.mkdir(parents=True)
+    clip = raw_dir / "clip.mp4"
+    clip.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return ProbeResult(duration=4.0)
+
+    def _fake_thumb(source: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        from splitsmith.video_probe import source_cache_key
+
+        dest = cache_dir / f"{source_cache_key(source)}.jpg"
+        dest.write_bytes(b"\xff")
+        return dest
+
+    with (
+        patch("splitsmith.ui.server.video_probe.probe", side_effect=_fake_probe),
+        patch("splitsmith.ui.server.thumbnail_helpers.ensure", side_effect=_fake_thumb),
+    ):
+        resp = client.get("/api/fs/probe?path=raw/clip.mp4")
+
+    assert resp.status_code == 200
+    assert resp.json()["duration"] == 4.0
+
+
 def test_thumbnail_endpoint_serves_cached(tmp_path: Path) -> None:
     root = tmp_path / "match"
     app = create_app(project_root=root, project_name="x")

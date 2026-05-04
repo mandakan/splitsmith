@@ -3121,7 +3121,11 @@ def create_app(
         surfaces resolution/codec/size so the unassigned-tray rows can show
         enough metadata for the user to identify which clip is which.
         """
-        target = Path(path).expanduser()
+        project = state.load()
+        # StageVideo.path is project-relative for default projects, so resolve
+        # via the project root rather than process CWD before strict-resolving.
+        raw_target = Path(path).expanduser()
+        target = project.resolve_video_path(state.project_root, raw_target)
         try:
             target = target.resolve(strict=True)
         except (FileNotFoundError, OSError) as exc:
@@ -3131,7 +3135,6 @@ def create_app(
         if target.suffix.lower() not in VIDEO_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"not a video: {target}")
 
-        project = state.load()
         probes_dir = project.probes_path(state.project_root)
         thumbs_dir = project.thumbs_path(state.project_root)
         duration, thumbnail_url = _video_metadata_for(

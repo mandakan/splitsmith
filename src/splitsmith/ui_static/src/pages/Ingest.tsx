@@ -1586,8 +1586,6 @@ function UnassignedSection({
   // assigned to a stage; dragging within the tray is a no-op.
   const canAccept = dragging !== null && dragging.stage !== null;
 
-  if (project.unassigned_videos.length === 0 && !canAccept) return null;
-
   // Build a quick lookup so each card can pull its own match-analysis entry
   // without re-scanning the array per render.
   const analysisByPath = useMemo(() => {
@@ -1595,6 +1593,8 @@ function UnassignedSection({
     for (const e of analysis?.videos ?? []) out.set(e.path, e);
     return out;
   }, [analysis]);
+
+  if (project.unassigned_videos.length === 0 && !canAccept) return null;
 
   return (
     <Card
@@ -1715,6 +1715,7 @@ function UnassignedVideoCard({
       stage={null}
       setDragging={setDragging}
       className="rounded-md border border-border bg-muted/40 p-3"
+      hoverPreview={false}
     >
       <div className="flex flex-col gap-3 sm:flex-row">
         {/* Inline video with the cached JPG as poster -- click the native
@@ -2225,12 +2226,17 @@ function DraggableVideoRow({
   setDragging,
   className,
   children,
+  hoverPreview = true,
 }: {
   video: StageVideo;
   stage: StageEntry | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   className?: string;
   children: React.ReactNode;
+  // Disable the floating thumbnail popover when the row already renders an
+  // inline preview (e.g. the unassigned tray's <video> element); the popover
+  // would otherwise cover the play button.
+  hoverPreview?: boolean;
 }) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [thumb, setThumb] = useState<string | null>(null);
@@ -2269,6 +2275,7 @@ function DraggableVideoRow({
         setDragging(null);
       }}
       onMouseEnter={() => {
+        if (!hoverPreview) return;
         if (dragInFlight) return;
         setRect(ref.current?.getBoundingClientRect() ?? null);
         void ensureProbe();
@@ -2277,7 +2284,7 @@ function DraggableVideoRow({
       className={cn("cursor-grab active:cursor-grabbing", className)}
     >
       {children}
-      {rect && thumb && !dragInFlight ? (
+      {hoverPreview && rect && thumb && !dragInFlight ? (
         <ThumbnailFloat anchor={rect} src={thumb} alt={video.path} />
       ) : null}
     </div>
