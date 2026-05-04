@@ -24,23 +24,23 @@
     "a metallic clang from a steel target falling"
   ],
   "calibration_fixtures": [
-    "stage-shots",
-    "stage-shots-blacksmith-h5",
+    "stage-shots-tallmilan-2026-stage3",
+    "stage-shots-blacksmith-2026-stage7",
     "stage-shots-blacksmith-2026-stage1",
     "stage-shots-blacksmith-2026-stage2",
     "stage-shots-blacksmith-2026-stage3",
     "stage-shots-blacksmith-2026-stage5",
     "stage-shots-blacksmith-2026-stage6",
     "stage-shots-blacksmith-2026-stage8",
-    "stage-shots-tallmilan-stage2",
-    "stage-shots-tallmilan-stage7",
+    "stage-shots-tallmilan-2026-stage2",
+    "stage-shots-tallmilan-2026-stage7",
     "stage-shots-tallmilan-2026-stage5",
     "stage-shots-tallmilan-2026-stage6"
   ],
   "n_calibration_candidates": 949,
   "n_calibration_positives": 225,
   "voter_c_feature_dim": 28,
-  "built_at": "2026-05-04T15:41:27.842343+00:00",
+  "built_at": "2026-05-04T16:43:54.791028+00:00",
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": []
 }

@@ -13,17 +13,24 @@ from splitsmith.config import ShotDetectConfig
 from splitsmith.shot_detect import _hf_lf_ratio, detect_shots
 
 
-def _load_fixture(fixtures_dir: Path, stem: str = "stage-shots") -> tuple[np.ndarray, int, dict]:
+def _load_fixture(
+    fixtures_dir: Path,
+    stem: str = "stage-shots-tallmilan-2026-stage3",
+) -> tuple[np.ndarray, int, dict]:
     audio, sr = load_audio(fixtures_dir / f"{stem}.wav")
     truth = json.loads((fixtures_dir / f"{stem}.json").read_text())
     return audio, sr, truth
 
 
 _AUDITED_FIXTURES = [
-    "stage-shots",  # Tallmilan 2026 Stage 3, 15 shots
-    "stage-shots-blacksmith-h5",  # Blacksmith Handgun Open 2026 Stage 7, 24 shots (4 manual)
-    "stage-shots-tallmilan-stage2",  # Tallmilan 2026 Stage 2, 12 shots (2 manual)
-    "stage-shots-tallmilan-stage7",  # Tallmilan 2026 Stage 7, 20 shots (10 manual; windy)
+    # Tallmilan 2026 Stage 3, 15 shots
+    "stage-shots-tallmilan-2026-stage3",
+    # Blacksmith Handgun Open 2026 Stage 7, 24 shots (4 manual)
+    "stage-shots-blacksmith-2026-stage7",
+    # Tallmilan 2026 Stage 2, 12 shots (2 manual)
+    "stage-shots-tallmilan-2026-stage2",
+    # Tallmilan 2026 Stage 7, 20 shots (10 manual; windy)
+    "stage-shots-tallmilan-2026-stage7",
 ]
 
 
@@ -260,7 +267,7 @@ def test_detect_shots_recall_fallback_cwt_idempotent_on_calm_audio(fixtures_dir:
     """On Stage 3 (calm, no librosa misses) the CWT recall fallback must add
     zero candidates -- the suspicious-gap trigger should not fire on a stage
     where pass 1 already covers everything at typical inter-shot pacing."""
-    audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots")
+    audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots-tallmilan-2026-stage3")
     base = detect_shots(
         audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig()
     )
@@ -281,7 +288,7 @@ def test_detect_shots_recall_fallback_recovers_known_miss(fixtures_dir: Path) ->
     """On Stage 7 (windy), the CWT recall fallback must place a candidate
     within 75 ms of the known librosa miss at t=6.6399s, while leaving all
     pass-1 candidates intact."""
-    audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots-tallmilan-stage7")
+    audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots-tallmilan-2026-stage7")
     base = detect_shots(
         audio, sr, truth["beep_time"], truth["stage_time_seconds"], ShotDetectConfig()
     )
