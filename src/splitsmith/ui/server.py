@@ -2899,7 +2899,9 @@ def create_app(
 
         Used by the SPA when a picker row came back with null fields (the
         list-time budget was exhausted, or ``probe=true`` wasn't passed).
-        Cached results are returned without re-running the binaries.
+        Cached results are returned without re-running the binaries. Also
+        surfaces resolution/codec/size so the unassigned-tray rows can show
+        enough metadata for the user to identify which clip is which.
         """
         target = Path(path).expanduser()
         try:
@@ -2921,7 +2923,22 @@ def create_app(
             allow_new=True,
             duration_for_thumb=None,
         )
-        return JSONResponse({"duration": duration, "thumbnail_url": thumbnail_url})
+        cached_probe = video_probe.cached(target, probes_dir)
+        size_bytes: int | None = None
+        try:
+            size_bytes = target.stat().st_size
+        except OSError:
+            size_bytes = None
+        return JSONResponse(
+            {
+                "duration": duration,
+                "thumbnail_url": thumbnail_url,
+                "width": cached_probe.width if cached_probe is not None else None,
+                "height": cached_probe.height if cached_probe is not None else None,
+                "codec": cached_probe.codec if cached_probe is not None else None,
+                "size_bytes": size_bytes,
+            }
+        )
 
     @app.get("/api/thumbnails/{cache_key}.jpg", include_in_schema=False)
     def serve_thumbnail(cache_key: str) -> FileResponse:
