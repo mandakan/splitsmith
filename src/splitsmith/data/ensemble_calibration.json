@@ -1,7 +1,7 @@
 {
   "voter_a_floor": 0.01847127532497797,
   "voter_b_threshold": 0.14829593896865845,
-  "voter_c_threshold": 0.0508658616151976,
+  "voter_c_threshold": 0.055625024996262463,
   "voter_d_threshold": 0.0012177228927612305,
   "voter_c_target_recall": 0.95,
   "tolerance_ms": 75.0,
@@ -38,11 +38,11 @@
     "stage-shots-tallmilan-2026-stage6"
   ],
   "n_calibration_candidates": 949,
-  "n_calibration_positives": 226,
-  "n_hand_labeled_fps": 458,
+  "n_calibration_positives": 225,
+  "n_hand_labeled_fps": 724,
   "labeled_fp_weight": 2.0,
   "voter_c_feature_dim": 25,
-  "built_at": "2026-05-04T11:44:10.146880+00:00",
+  "built_at": "2026-05-04T12:51:28.702024+00:00",
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": []
 }
