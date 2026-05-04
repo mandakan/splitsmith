@@ -107,25 +107,35 @@ export function Lab() {
       });
   }, []);
 
-  const runEval = useCallback(async () => {
-    setEvalLoading(true);
-    setError(null);
-    try {
-      const job = await api.runLabEval({ config, persist: true });
-      const finished = await api.pollJob(job.id, () => {
-        /* JobsPanel polls /api/jobs on its own interval and renders the
-           progress; we just need to await terminal status here. */
-      });
-      if (finished.status !== "succeeded") {
-        throw new Error(finished.error ?? `eval ${finished.status}`);
+  // Coalesce concurrent runEval calls. Without this, each label-save
+  // fallback (when the server cache is cold) submits its own job ->
+  // 12-15 labels -> 12-15 eval jobs.
+  const inFlightEvalRef = useRef<Promise<void> | null>(null);
+  const runEval = useCallback(async (): Promise<void> => {
+    if (inFlightEvalRef.current) return inFlightEvalRef.current;
+    const p = (async () => {
+      setEvalLoading(true);
+      setError(null);
+      try {
+        const job = await api.runLabEval({ config, persist: true });
+        const finished = await api.pollJob(job.id, () => {
+          /* JobsPanel polls /api/jobs on its own interval and renders the
+             progress; we just need to await terminal status here. */
+        });
+        if (finished.status !== "succeeded") {
+          throw new Error(finished.error ?? `eval ${finished.status}`);
+        }
+        const result = await api.getLastLabRun();
+        setRun(result);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setEvalLoading(false);
+        inFlightEvalRef.current = null;
       }
-      const result = await api.getLastLabRun();
-      setRun(result);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setEvalLoading(false);
-    }
+    })();
+    inFlightEvalRef.current = p;
+    return p;
   }, [config]);
 
   // Live rescore: when the user moves a slider, hit /api/lab/rescore. Skip

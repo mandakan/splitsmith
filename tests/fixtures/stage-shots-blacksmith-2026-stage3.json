@@ -17,70 +17,80 @@
       "candidate_number": 4,
       "time": 2.5271,
       "ms_after_beep": 2027,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 2,
       "candidate_number": 5,
       "time": 2.9253,
       "ms_after_beep": 2425,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 3,
       "candidate_number": 9,
       "time": 4.4931,
       "ms_after_beep": 3993,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 4,
       "candidate_number": 11,
       "time": 5.1313,
       "ms_after_beep": 4631,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 5,
       "candidate_number": 21,
       "time": 7.5983,
       "ms_after_beep": 7098,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 6,
       "candidate_number": 23,
       "time": 8.3021,
       "ms_after_beep": 7802,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 7,
       "candidate_number": 24,
       "time": 8.8145,
       "ms_after_beep": 8315,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
       "candidate_number": 28,
       "time": 10.0587,
       "ms_after_beep": 9559,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
       "candidate_number": 33,
       "time": 11.734,
       "ms_after_beep": 11234,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 10,
       "candidate_number": 34,
       "time": 12.3644,
       "ms_after_beep": 11864,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 11,
@@ -338,7 +348,34 @@
         "peak_amplitude": 0.186,
         "confidence": 0.09
       }
-    ]
+    ],
+    "labels_by_time": {
+      "4.635": "echo",
+      "10.914": "cross_bay",
+      "3.381": "cross_bay",
+      "3.669": "cross_bay",
+      "3.930": "cross_bay",
+      "5.603": "echo",
+      "5.881": "steel_ring",
+      "5.977": "steel_ring",
+      "6.897": "movement",
+      "7.019": "movement",
+      "7.358": "cross_bay",
+      "9.332": "cross_bay",
+      "9.464": "cross_bay",
+      "9.984": "cross_bay",
+      "10.827": "cross_bay",
+      "11.191": "cross_bay",
+      "1.697": "steel_ring",
+      "1.826": "steel_ring",
+      "6.342": "wind",
+      "6.550": "movement",
+      "1.260": "handling",
+      "5.247": "echo",
+      "8.187": "cross_bay",
+      "11.451": "cross_bay",
+      "12.698": "cross_bay"
+    }
   },
   "stage_rounds": {
     "paper": 4,
