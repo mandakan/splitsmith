@@ -1,0 +1,37 @@
+# Source-video map for wide-window fixture audio extraction (issue #87).
+#
+# scripts/extract_full_fixture_audio.py reads this file to locate the original
+# .mp4 for each audited fixture. The wide-window WAVs it writes here under
+# tests/fixtures/full/ feed scripts/mine_negatives.py, which harvests
+# pre-beep / post-stage hard negatives from regions outside the audited
+# stage window. Those WAVs are gitignored; only this YAML is checked in.
+#
+# Usage:
+#   1. Set ``video_dir`` to the absolute path of the directory holding the
+#      source .mp4 files (typically the user's USB drive).
+#   2. Add a per-fixture ``overrides`` entry only when a video lives outside
+#      ``video_dir`` (e.g. the in-repo legacy ``stage_sample.mp4``).
+#   3. Run ``uv run python scripts/extract_full_fixture_audio.py``.
+#
+# Mapping below is seeded from each audit JSON's ``source`` field. Edit
+# basenames here when re-recording (audit JSONs are the source of truth for
+# the per-fixture ``fixture_window_in_source`` mapping).
+
+video_dir: /Volumes/GO 3S/DCIM/Camera01
+
+fixtures:
+  stage-shots-blacksmith-2026-stage1: VID_20260412_132733_00_040.mp4
+  stage-shots-blacksmith-2026-stage2: VID_20260412_140158_00_041.mp4
+  stage-shots-blacksmith-2026-stage3: VID_20260412_091752_00_034.mp4
+  stage-shots-blacksmith-2026-stage5: VID_20260412_102637_00_035.mp4
+  stage-shots-blacksmith-2026-stage6: VID_20260412_105215_00_036.mp4
+  stage-shots-blacksmith-2026-stage8: VID_20260412_125853_00_039.mp4
+  stage-shots-blacksmith-h5: VID_20260412_112131_00_038.mp4
+  stage-shots-tallmilan-2026-stage5: VID_20260426_141808_00_043.mp4
+  stage-shots-tallmilan-2026-stage6: VID_20260426_145548_00_044.mp4
+  stage-shots-tallmilan-stage2: VID_20260426_162417_00_048.mp4
+  stage-shots-tallmilan-stage7: VID_20260426_152210_00_045.mp4
+
+# Override entries take precedence over ``video_dir`` + ``fixtures`` lookup.
+overrides:
+  stage-shots: tests/fixtures/stage_sample.mp4  # in-repo legacy fixture

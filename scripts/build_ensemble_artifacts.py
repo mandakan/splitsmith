@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -60,8 +61,16 @@ DEFAULT_FIXTURES = [
     "stage-shots-tallmilan-2026-stage6",
 ]
 FIXTURES_DIR = Path("tests/fixtures")
+FULL_DIR = FIXTURES_DIR / "full"
 CACHE_DIR = FIXTURES_DIR / ".cache"
+MINED_NEGATIVES_PATH = CACHE_DIR / "_mined_negatives.npz"
 DATA_DIR = Path("src/splitsmith/data")
+
+# Cap mined negatives per fixture relative to that fixture's positive count,
+# sampled by descending Voter A confidence so the hardest survivors win.
+# Keeps the GBDT's class balance bounded and gives more signal per training row.
+DEFAULT_NEG_CAP_RATIO: float = 5.0
+_TIME_MATCH_TOL_S: float = 1e-3  # full-cache rows are produced from the same WAV
 
 
 def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[int]:
@@ -173,6 +182,147 @@ def _x_from(universe: list[dict]) -> np.ndarray:
     )
 
 
+def _load_mined_negatives(
+    n_pos_by_fixture: dict[str, int],
+    *,
+    cap_ratio: float,
+    log: Callable[[str], None],
+) -> tuple[list[dict], dict]:
+    """Materialise mined-negative training rows aligned to full-mode caches.
+
+    Returns ``(rows, provenance)``. ``rows`` use the same shape as
+    ``_build_universe`` items so they can be appended to the Voter C training
+    set. Each fixture's contribution is capped at ``cap_ratio * n_positives``
+    by descending Voter A confidence (the hardest survivors). Voter A/B/D
+    thresholds are NOT recomputed -- those stay calibrated on positives only.
+
+    Quietly returns no rows when the mined-negatives file or the full-mode
+    feature caches are missing, so the script remains a drop-in replacement
+    for installs that haven't run the issue #87 mining pipeline yet.
+    """
+    if not MINED_NEGATIVES_PATH.exists():
+        log("No mined-negatives cache; Voter C trains on stage-window negatives only.")
+        return [], {"n_mined_negatives_used": 0, "mining_source_fixtures": []}
+
+    mined = np.load(MINED_NEGATIVES_PATH, allow_pickle=True)
+    fixtures = mined["fixture"]
+    times = mined["time_in_full"].astype(np.float64)
+    confidences = mined["confidence"].astype(np.float64)
+    peaks = mined["peak_amplitude"].astype(np.float64)
+    region_tags = mined["region_tag"]
+
+    by_fixture: dict[str, list[int]] = {}
+    for i, fix in enumerate(fixtures):
+        by_fixture.setdefault(str(fix), []).append(i)
+
+    rows: list[dict] = []
+    used_fixtures: list[str] = []
+    skipped: list[str] = []
+    for fix, indices in by_fixture.items():
+        sidecar_path = FULL_DIR / f"{fix}_full.json"
+        wav_path = FULL_DIR / f"{fix}_full.wav"
+        clap_path = CACHE_DIR / f"{fix}_clap_full.npz"
+        pann_path = CACHE_DIR / f"{fix}_pann_full.npz"
+        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path, pann_path)):
+            skipped.append(fix)
+            continue
+
+        n_pos = n_pos_by_fixture.get(fix, 0)
+        if n_pos == 0:
+            skipped.append(fix)
+            continue
+        cap = max(1, int(round(cap_ratio * n_pos)))
+        # Hardest survivors first: descending Voter A confidence.
+        ordered = sorted(indices, key=lambda i: -confidences[i])[:cap]
+
+        sidecar = json.loads(sidecar_path.read_text())
+        audit = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        beep_in_full = (
+            float(audit["fixture_window_in_source"][0])
+            + float(audit["beep_time"])
+            - float(sidecar["full_window_in_source"][0])
+        )
+
+        clap = np.load(clap_path, allow_pickle=True)
+        pann = np.load(pann_path)
+        clap_times = clap["times"].astype(np.float64)
+        if clap_times.shape != pann["gunshot_prob"].shape:
+            raise SystemExit(
+                f"{fix}: full CLAP and PANN caches disagree on candidate count "
+                f"({clap_times.shape[0]} vs {pann['gunshot_prob'].shape[0]}); "
+                "rebuild both with --full --force."
+            )
+        prompts_in_cache = [str(p) for p in clap["prompts"].tolist()]
+        if tuple(prompts_in_cache) != feat.CLAP_PROMPTS:
+            raise SystemExit(
+                f"{fix}: full CLAP cache prompt order mismatch with package "
+                "CLAP_PROMPTS; rebuild with extract_clap_features.py --full --force."
+            )
+        sims = clap["text_sims"]
+        clap_diffs = feat.clap_diff_from_similarities(sims)
+        gunshot_probs = pann["gunshot_prob"]
+
+        # Map mined times -> full-cache row indices. Same WAV + same config in
+        # mine_negatives and the --full extractors, so an exact (or sub-ms)
+        # match always exists; absence is a cache-staleness bug worth raising.
+        kept_cache_idx: list[int] = []
+        kept_mined_idx: list[int] = []
+        for mi in ordered:
+            t = times[mi]
+            j = int(np.argmin(np.abs(clap_times - t)))
+            if abs(clap_times[j] - t) > _TIME_MATCH_TOL_S:
+                raise SystemExit(
+                    f"{fix}: mined-negative time {t:.4f}s has no match in "
+                    f"full CLAP cache (closest {clap_times[j]:.4f}s, "
+                    f"delta {abs(clap_times[j] - t)*1e3:.2f}ms). Rebuild full "
+                    "caches with --full --force after re-running mine_negatives.py."
+                )
+            kept_cache_idx.append(j)
+            kept_mined_idx.append(mi)
+
+        if not kept_cache_idx:
+            continue
+
+        audio, sr = load_audio(wav_path)
+        cand_t = np.array(times[kept_mined_idx], dtype=np.float64)
+        cand_conf = np.array(confidences[kept_mined_idx], dtype=np.float64)
+        cand_peak = np.array(peaks[kept_mined_idx], dtype=np.float64)
+        hand = feat.compute_hand_features(audio, sr, cand_t, beep_in_full, cand_conf, cand_peak)
+
+        for k, ci in enumerate(kept_cache_idx):
+            rows.append(
+                {
+                    "fixture": fix,
+                    "label": 0,
+                    "confidence": float(cand_conf[k]),
+                    "clap_diff": float(clap_diffs[ci]),
+                    "gunshot_prob": float(gunshot_probs[ci]),
+                    "hand_feats": hand[k].tolist(),
+                    "clap_sims": [float(x) for x in sims[ci]],
+                    "region_tag": str(region_tags[kept_mined_idx[k]]),
+                    "mined": True,
+                }
+            )
+        used_fixtures.append(fix)
+        log(
+            f"  mined {fix}: kept {len(kept_cache_idx)} of {len(indices)} "
+            f"(cap {cap} = {cap_ratio:g}x {n_pos} positives)"
+        )
+
+    if skipped:
+        log(
+            "  skipped mined fixtures (missing full cache or no positives): "
+            + ", ".join(sorted(skipped))
+        )
+
+    provenance = {
+        "n_mined_negatives_used": len(rows),
+        "mining_source_fixtures": sorted(used_fixtures),
+        "mining_cap_ratio": cap_ratio,
+    }
+    return rows, provenance
+
+
 def _train_voter_c(universe: list[dict], target_recall: float):
     """Fit GBDT; pick threshold from 5-fold CV predictions on the same set."""
     X = _x_from(universe)
@@ -214,6 +364,8 @@ def build_artifacts(
     *,
     target_recall: float = 0.95,
     tolerance_ms: float = 75.0,
+    mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
+    use_mined_negatives: bool = True,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -231,10 +383,28 @@ def build_artifacts(
         f"Universe: {n_total} candidates, {n_pos} positives "
         f"(across {len({c['fixture'] for c in universe})} fixtures)"
     )
+
+    n_pos_by_fixture = Counter(c["fixture"] for c in universe if c["label"] == 1)
+    if use_mined_negatives:
+        mined_rows, mining_provenance = _load_mined_negatives(
+            n_pos_by_fixture, cap_ratio=mining_cap_ratio, log=log
+        )
+    else:
+        mined_rows, mining_provenance = [], {
+            "n_mined_negatives_used": 0,
+            "mining_source_fixtures": [],
+        }
+    voter_c_universe = universe + mined_rows
+    if mined_rows:
+        log(
+            f"Voter C training set: {len(universe)} stage-window + "
+            f"{len(mined_rows)} mined negatives = {len(voter_c_universe)} rows."
+        )
+
     voter_a = _voter_a_floor(universe)
     voter_b = _voter_b_threshold(universe)
     voter_d = _voter_d_threshold(universe)
-    clf, voter_c = _train_voter_c(universe, target_recall=target_recall)
+    clf, voter_c = _train_voter_c(voter_c_universe, target_recall=target_recall)
     log(f"Voter A floor (lowest positive confidence): {voter_a:.4f}")
     log(f"Voter B threshold (lowest positive CLAP diff): {voter_b:.4f}")
     log(f"Voter C threshold (GBDT, target recall {target_recall*100:.0f} %): {voter_c:.4f}")
@@ -258,6 +428,7 @@ def build_artifacts(
         "n_calibration_positives": int(n_pos),
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
+        **mining_provenance,
     }
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
     joblib.dump(clf, model_path)
@@ -271,11 +442,25 @@ def main() -> None:
     p.add_argument("--fixture", action="append", help="Calibration fixture stem (repeatable).")
     p.add_argument("--target-recall", type=float, default=0.95)
     p.add_argument("--tolerance-ms", type=float, default=75.0)
+    p.add_argument(
+        "--mining-cap-ratio",
+        type=float,
+        default=DEFAULT_NEG_CAP_RATIO,
+        help="Per-fixture cap on mined negatives, as a multiple of that fixture's "
+        "positive count. Hardest survivors (highest Voter A confidence) win.",
+    )
+    p.add_argument(
+        "--no-mining",
+        action="store_true",
+        help="Ignore tests/fixtures/.cache/_mined_negatives.npz even if present.",
+    )
     args = p.parse_args()
     build_artifacts(
         fixtures=args.fixture or None,
         target_recall=args.target_recall,
         tolerance_ms=args.tolerance_ms,
+        mining_cap_ratio=args.mining_cap_ratio,
+        use_mined_negatives=not args.no_mining,
     )
 
 

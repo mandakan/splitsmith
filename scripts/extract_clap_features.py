@@ -92,16 +92,40 @@ def _slice_window(audio: np.ndarray, sr: int, t: float, win_s: float) -> np.ndar
     return chunk[:target_len]
 
 
-def extract_for_fixture(name: str, *, force: bool, model, processor) -> None:
-    cache_path = CACHE_DIR / f"{name}_clap.npz"
+FULL_DIR = FIXTURES_DIR / "full"
+
+
+def _resolve_audio_paths(name: str, *, full: bool) -> tuple[Path, Path, float, float]:
+    """Mirror of extract_audio_embeddings._resolve_audio_paths."""
+    if full:
+        wav_path = FULL_DIR / f"{name}_full.wav"
+        cache_path = CACHE_DIR / f"{name}_clap_full.npz"
+        from wave import open as wave_open
+
+        with wave_open(str(wav_path), "rb") as w:
+            duration = w.getnframes() / w.getframerate()
+        return wav_path, cache_path, 0.0, duration
+    truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text())
+    return (
+        FIXTURES_DIR / f"{name}.wav",
+        CACHE_DIR / f"{name}_clap.npz",
+        float(truth["beep_time"]),
+        float(truth["stage_time_seconds"]),
+    )
+
+
+def extract_for_fixture(name: str, *, force: bool, model, processor, full: bool = False) -> None:
+    wav_path, cache_path, beep_time, stage_time = _resolve_audio_paths(name, full=full)
     if cache_path.exists() and not force:
         print(f"  {name}: cached -> {cache_path}")
         return
+    if not wav_path.exists():
+        print(f"  {name}: WAV missing at {wav_path}, skipping")
+        return
 
-    truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text())
-    audio, sr = load_audio(FIXTURES_DIR / f"{name}.wav")
+    audio, sr = load_audio(wav_path)
     config = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
-    shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], config)
+    shots = detect_shots(audio, sr, beep_time, stage_time, config)
     if not shots:
         print(f"  {name}: no candidates, skipping")
         return
@@ -159,6 +183,15 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--fixture", action="append")
     p.add_argument("--force", action="store_true")
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help=(
+            "Read tests/fixtures/full/{name}_full.wav (wide-window audio) and "
+            "write a parallel *_clap_full.npz cache. Used by mine_negatives.py "
+            "+ the ensemble build script for issue #87 hard-negative mining."
+        ),
+    )
     args = p.parse_args()
 
     # Lazy heavy imports; transformers and torch are dev-only.
@@ -173,8 +206,11 @@ def main() -> None:
     fixtures = args.fixture or DEFAULT_FIXTURES
     print("\nExtracting CLAP features:")
     for f in fixtures:
-        extract_for_fixture(f, force=args.force, model=model, processor=processor)
-    print("\nDone. Cached to tests/fixtures/.cache/*_clap.npz")
+        extract_for_fixture(
+            f, force=args.force, model=model, processor=processor, full=args.full
+        )
+    suffix = "_clap_full" if args.full else "_clap"
+    print(f"\nDone. Cached to tests/fixtures/.cache/*{suffix}.npz")
     print(f"\nPrompts (in column order):")
     for i, prompt in enumerate(PROMPTS):
         flag = "[shot]" if prompt in PROMPTS_SHOT else "[not] "
