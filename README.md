@@ -28,13 +28,18 @@ Outputs (per stage):
   - macOS: `brew install ffmpeg`
   - Linux: `apt install ffmpeg` (or your distro equivalent)
   - Windows: `winget install --id=Gyan.FFmpeg -e` (or scoop/chocolatey)
+- Node.js 20+ + `pnpm` (needed to build the `ui` / `lab` / `review` SPA when running from source)
+  - macOS: `brew install node && npm install -g pnpm`
+  - Linux: `apt install nodejs npm && sudo npm install -g pnpm` (or use nvm for a current Node)
+  - Windows: `winget install -e --id OpenJS.NodeJS.LTS`, then **open a new PowerShell** so the PATH update takes effect and run `npm install -g pnpm`
 
 ## Install
 
 ```bash
 git clone https://github.com/mandakan/splitsmith.git
 cd splitsmith
-uv sync
+uv sync                                                       # Python deps
+(cd src/splitsmith/ui_static && pnpm install && pnpm build)   # SPA assets, served by the UI subcommand
 ```
 
 Verify install:
@@ -97,12 +102,11 @@ uv run splitsmith ui --project ~/matches/tallmilan-2026
 
 Opens `http://127.0.0.1:5174/` in your default browser. Sub 1 (#12) ships the foundation: app shell, project model, three-screen navigation, design system at `/_design`. The actual ingest / audit / export screens land in #13, #15, #17.
 
-For frontend development:
+For active SPA development with hot reload (the install / build is already
+covered by the [Install](#install) section above):
 
 ```bash
 cd src/splitsmith/ui_static
-pnpm install
-pnpm build           # produces dist/ which the FastAPI backend serves
 pnpm dev             # Vite dev server on :5173, proxies /api to backend on :5174
 ```
 
