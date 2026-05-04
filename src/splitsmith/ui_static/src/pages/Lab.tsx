@@ -1498,8 +1498,19 @@ function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) 
   );
 }
 
-type StepFilter = "rejected_only" | "fps_only" | "unlabeled_only" | "all";
-type StepSort = "ensemble_score_asc" | "chronological" | "confidence_asc";
+type StepFilter =
+  | "borderline"
+  | "rejected_only"
+  | "fps_only"
+  | "unlabeled_only"
+  | "all";
+type StepSort =
+  | "ensemble_score_desc"
+  | "ensemble_score_asc"
+  | "vote_total_desc"
+  | "confidence_desc"
+  | "confidence_asc"
+  | "chronological";
 
 function StepThroughPanel({
   fixture,
@@ -1519,8 +1530,8 @@ function StepThroughPanel({
     patch: { reason?: string | null; subclass?: string | null },
   ) => void;
 }) {
-  const [filter, setFilter] = useState<StepFilter>("rejected_only");
-  const [sort, setSort] = useState<StepSort>("ensemble_score_asc");
+  const [filter, setFilter] = useState<StepFilter>("borderline");
+  const [sort, setSort] = useState<StepSort>("ensemble_score_desc");
   const [preMs, setPreMs] = useState(100);
   const [postMs, setPostMs] = useState(300);
   const [loop, setLoop] = useState(true);
@@ -1528,7 +1539,12 @@ function StepThroughPanel({
 
   const ordered = useMemo(() => {
     let list = [...fixture.candidates];
-    if (filter === "rejected_only") {
+    if (filter === "borderline") {
+      // Disagreement set: at least one voter disagrees with the consensus.
+      // vote_total in {1, 2, 3} -- excludes 0 (all-reject) and 4 (all-accept).
+      // These are the highest-value candidates to label for voter C training.
+      list = list.filter((c) => c.vote_total >= 1 && c.vote_total <= 3);
+    } else if (filter === "rejected_only") {
       list = list.filter((c) => !c.kept);
     } else if (filter === "fps_only") {
       list = list.filter((c) => c.kept && c.truth === 0);
@@ -1539,7 +1555,13 @@ function StepThroughPanel({
       });
     }
     list.sort((a, b) => {
+      if (sort === "ensemble_score_desc") return b.ensemble_score - a.ensemble_score;
       if (sort === "ensemble_score_asc") return a.ensemble_score - b.ensemble_score;
+      if (sort === "vote_total_desc") {
+        if (b.vote_total !== a.vote_total) return b.vote_total - a.vote_total;
+        return b.ensemble_score - a.ensemble_score;
+      }
+      if (sort === "confidence_desc") return b.confidence - a.confidence;
       if (sort === "confidence_asc") return a.confidence - b.confidence;
       return a.time - b.time;
     });
@@ -1600,7 +1622,8 @@ function StepThroughPanel({
             onChange={(e) => setFilter(e.target.value as StepFilter)}
             className="rounded border border-border bg-background px-1 py-0.5"
           >
-            <option value="rejected_only">Rejected only (recommended)</option>
+            <option value="borderline">Borderline (1-3 votes, recommended)</option>
+            <option value="rejected_only">Rejected only</option>
             <option value="fps_only">FPs only (kept negatives)</option>
             <option value="unlabeled_only">Unlabeled only</option>
             <option value="all">All candidates</option>
@@ -1613,8 +1636,13 @@ function StepThroughPanel({
             onChange={(e) => setSort(e.target.value as StepSort)}
             className="rounded border border-border bg-background px-1 py-0.5"
           >
-            <option value="ensemble_score_asc">Ensemble score asc (borderline first)</option>
-            <option value="confidence_asc">Confidence asc</option>
+            <option value="ensemble_score_desc">
+              Ensemble score desc (near-consensus first)
+            </option>
+            <option value="ensemble_score_asc">Ensemble score asc (least-voted first)</option>
+            <option value="vote_total_desc">Vote total desc (most voters agree first)</option>
+            <option value="confidence_desc">Confidence desc (loudest first)</option>
+            <option value="confidence_asc">Confidence asc (quietest first)</option>
             <option value="chronological">Chronological</option>
           </select>
         </label>

@@ -414,6 +414,77 @@ def _load_labels_from_audit(audit: dict[str, Any]) -> tuple[dict[float, str], di
     return reason_by_time, subclass_by_time
 
 
+def _sync_pending_candidates(
+    audit_path: Path,
+    audit: dict[str, Any],
+    result: Any,
+) -> None:
+    """Rewrite ``_candidates_pending_audit`` to match the current ensemble run.
+
+    Existing ``reason`` labels are preserved by time-matching (rounded to
+    the same 1ms key used everywhere else in the lab). This keeps
+    ``apply_labels`` -- which looks up by ``candidate_number`` -- pointed
+    at the live universe instead of a stale snapshot from a previous
+    detector run. Atomic write (``.tmp`` -> rename, with ``.bak`` rotated)
+    mirrors :func:`apply_labels`.
+    """
+    reason_by_time, _ = _load_labels_from_audit(audit)
+
+    new_candidates: list[dict[str, Any]] = []
+    for c in result.candidates:
+        entry: dict[str, Any] = {
+            "candidate_number": c.candidate_number,
+            "time": c.time,
+            "ms_after_beep": int(c.ms_after_beep),
+            "peak_amplitude": c.peak_amplitude,
+            "confidence": c.confidence,
+        }
+        prior = reason_by_time.get(_time_key(c.time))
+        if prior:
+            entry["reason"] = prior
+        new_candidates.append(entry)
+
+    pending = audit.setdefault("_candidates_pending_audit", {})
+    prior_cands = pending.get("candidates") or []
+    if _pending_in_sync(prior_cands, new_candidates):
+        return
+    pending.setdefault(
+        "_note",
+        (
+            "4-voter ensemble (issue #31). Rewritten by the lab eval to "
+            "stay in sync with the current detector run; ``reason`` "
+            "labels are preserved by time-match."
+        ),
+    )
+    pending["candidates"] = new_candidates
+    if hasattr(result, "consensus"):
+        pending["consensus"] = result.consensus
+    if hasattr(result, "expected_rounds"):
+        pending["expected_rounds"] = result.expected_rounds
+
+    tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
+    backup = audit_path.with_suffix(audit_path.suffix + ".bak")
+    tmp.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+    if backup.exists():
+        backup.unlink()
+    audit_path.replace(backup)
+    tmp.replace(audit_path)
+
+
+def _pending_in_sync(prior: list[dict[str, Any]], current: list[dict[str, Any]]) -> bool:
+    """Cheap equality check on (candidate_number, time, reason) tuples."""
+    if len(prior) != len(current):
+        return False
+    for p, c in zip(prior, current, strict=True):
+        if p.get("candidate_number") != c.get("candidate_number"):
+            return False
+        if _time_key(p.get("time", 0.0)) != _time_key(c.get("time", 0.0)):
+            return False
+        if p.get("reason") != c.get("reason"):
+            return False
+    return True
+
+
 class CandidateLabel(BaseModel):
     """One label patch to apply via :func:`apply_labels`."""
 
@@ -524,6 +595,10 @@ def run_eval(
             expected_rounds=expected,
             ensemble_config=ec,
         )
+        # Refresh the audit's pending-candidates snapshot so apply_labels
+        # (which looks up by candidate_number) lands on the live universe.
+        # Preserves existing reason labels by time-matching.
+        _sync_pending_candidates(Path(fix.audit_path), audit, result)
         cand_times = np.array([c.time for c in result.candidates], dtype=np.float64)
         labels, matched, truth_times = _label_truth(
             cand_times, audit.get("shots", []), cfg.tolerance_ms
