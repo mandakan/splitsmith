@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -3061,6 +3062,201 @@ def test_per_video_detect_beep_runs_on_secondary(tmp_path: Path, monkeypatch) ->
     assert secondary["beep_time"] == pytest.approx(7.250)
     assert secondary["beep_source"] == "auto"
     assert secondary["processed"]["beep"] is True
+
+
+def test_secondary_beep_not_found_soft_fails(tmp_path: Path, monkeypatch) -> None:
+    """BeepNotFoundError on a secondary completes the job successfully and
+    flags ``beep_auto_detect_failed=True`` so the SPA can render a manual-
+    align prompt instead of a job-failed toast.
+
+    Many non-headcam cameras (iPhone tripod, RO position, AGC'd) just
+    don't capture a sustained 2-5 kHz tone. Aborting the import on every
+    one of those is the bad UX we're avoiding here.
+    """
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise bd.BeepNotFoundError("no candidate")
+
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    resp = client.post(f"/api/stages/1/videos/{sec_id}/detect-beep")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    proj = client.get("/api/project").json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] is None
+    assert secondary["beep_source"] == "auto"
+    assert secondary["beep_auto_detect_failed"] is True
+    assert secondary["beep_candidates"] == []
+    assert secondary["processed"]["beep"] is True
+    assert secondary["processed"]["trim"] is False
+
+
+def test_primary_beep_not_found_still_fails_job(tmp_path: Path, monkeypatch) -> None:
+    """Primary failure stays loud: the whole pipeline hangs off the primary's
+    beep_time, so silently completing would mask a real problem."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise bd.BeepNotFoundError("no candidate")
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "failed"
+    assert "no candidate" in final["error"]
+
+
+def test_secondary_falls_back_to_cross_align(tmp_path: Path, monkeypatch) -> None:
+    """When in-stream beep detection fails on a secondary, the worker should
+    fall back to ``cross_align`` and -- if confidence clears the floor --
+    set ``beep_source='aligned'`` with ``beep_time`` pulled from the
+    cross-correlation result. This is the path that recovers iPhone /
+    tripod-cam imports where the buzzer wasn't picked up cleanly."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith import cross_align as ca
+    from splitsmith.ui import audio as audio_helpers
+
+    # Prime the primary with a beep so the alignment branch has something
+    # to project onto.
+    _stub_detect(monkeypatch, beep_time=4.0)
+    primary_id = _video_id_for(client, 1, "primary")
+    _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{primary_id}/detect-beep").json()["id"],
+    )
+
+    # Make the secondary's beep detection raise + the audio paths "exist"
+    # + the aligner return a high-confidence result. We don't touch real
+    # ffmpeg / soundfile -- the helper inside _try_align_secondary_to_primary
+    # gates on file existence, so we patch that gate too.
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise bd.BeepNotFoundError("no candidate")
+
+    def fake_load(_path):  # type: ignore[no-untyped-def]
+        return np.zeros(48000, dtype=np.float32), 48000
+
+    def fake_align(*a, **kw):  # type: ignore[no-untyped-def]
+        return ca.CrossAlignResult(
+            secondary_beep_time=7.250,
+            confidence=4.2,
+            peak_correlation=0.85,
+            lag_seconds=3.25,
+        )
+
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+    monkeypatch.setattr(bd, "load_audio", fake_load)
+    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    # Pretend both audio caches are on disk so the helper proceeds past
+    # its existence guard.
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    final = _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()["id"],
+    )
+    assert final["status"] == "succeeded", final
+
+    proj = client.get("/api/project").json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] == pytest.approx(7.250)
+    assert secondary["beep_source"] == "aligned"
+    assert secondary["beep_alignment_confidence"] == pytest.approx(4.2)
+    assert secondary["beep_auto_detect_failed"] is False
+    assert secondary["processed"]["beep"] is True
+
+
+def test_secondary_low_confidence_alignment_stays_soft_failed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A cross-align result below the confidence floor must not be promoted
+    to ``beep_source='aligned'`` -- the secondary stays in the
+    soft-failed state so the user gets the manual-align prompt instead
+    of a wrong auto-set timestamp."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith import cross_align as ca
+    from splitsmith.ui import audio as audio_helpers
+
+    _stub_detect(monkeypatch, beep_time=4.0)
+    primary_id = _video_id_for(client, 1, "primary")
+    _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{primary_id}/detect-beep").json()["id"],
+    )
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise bd.BeepNotFoundError("no candidate")
+
+    def fake_load(_path):  # type: ignore[no-untyped-def]
+        return np.zeros(48000, dtype=np.float32), 48000
+
+    def fake_align(*a, **kw):  # type: ignore[no-untyped-def]
+        return ca.CrossAlignResult(
+            secondary_beep_time=7.250,
+            confidence=1.05,  # below floor 1.5
+            peak_correlation=0.42,
+            lag_seconds=3.25,
+        )
+
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+    monkeypatch.setattr(bd, "load_audio", fake_load)
+    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    final = _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()["id"],
+    )
+    assert final["status"] == "succeeded"
+
+    proj = client.get("/api/project").json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] is None
+    assert secondary["beep_source"] == "auto"
+    assert secondary["beep_auto_detect_failed"] is True
+    assert secondary["beep_alignment_confidence"] is None
+
+
+def test_secondary_soft_fail_clears_on_manual_override(tmp_path: Path, monkeypatch) -> None:
+    """Manual beep override clears ``beep_auto_detect_failed`` so the
+    "align manually" prompt disappears once the user does so."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise bd.BeepNotFoundError("no candidate")
+
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+    sec_id = _video_id_for(client, 1, "secondary")
+    final = _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()["id"],
+    )
+    assert final["status"] == "succeeded"
+
+    proj = client.post(
+        f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 2.5}
+    ).json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] == pytest.approx(2.5)
+    assert secondary["beep_source"] == "manual"
+    assert secondary["beep_auto_detect_failed"] is False
 
 
 def test_per_video_detect_beep_dedupes_per_video(tmp_path: Path, monkeypatch) -> None:

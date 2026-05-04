@@ -90,9 +90,11 @@ class StageVideo(BaseModel):
     beep_time: float | None = None
     # Provenance for ``beep_time``: who set it. ``None`` = not yet detected;
     # ``"auto"`` = beep_detect.detect_beep() result; ``"manual"`` = user override
-    # via the ingest screen. Manual overrides survive subsequent auto-detect
+    # via the ingest screen; ``"aligned"`` = secondary inferred via
+    # cross-correlation against the primary's audio when in-stream beep
+    # detection failed. Manual overrides survive subsequent auto-detect
     # attempts unless the user explicitly forces re-detection (issue #22).
-    beep_source: Literal["auto", "manual"] | None = None
+    beep_source: Literal["auto", "manual", "aligned"] | None = None
     # Has the user explicitly listened to the detected beep and confirmed
     # it's correct (issue #71)? Auto-detected beeps default to ``False`` --
     # the SPA renders a "review" pill on the ingest screen until the user
@@ -106,6 +108,18 @@ class StageVideo(BaseModel):
     # surfaced in the UI to help the user judge auto-detection confidence.
     beep_peak_amplitude: float | None = None
     beep_duration_ms: float | None = None
+    # Auto-detection ran and produced no candidate (e.g. iPhone secondary cam
+    # where the buzzer wasn't audible / sustained, or recording started after
+    # the beep). Distinct from "never detected" (``beep_source is None`` and
+    # this False) so the SPA can surface "align manually" instead of an error
+    # toast for secondaries. Cleared whenever ``beep_time`` is set or wiped.
+    beep_auto_detect_failed: bool = False
+    # Diagnostic confidence from ``cross_align.align_secondary_to_primary``
+    # when ``beep_source == "aligned"``. Peak-to-runner-up ratio of the
+    # cross-correlation against the primary's landmark audio; >= 1.5 is the
+    # accept threshold. Surfaced so the SPA can flag low-confidence
+    # alignments for the user to double-check before marking reviewed.
+    beep_alignment_confidence: float | None = None
     # Ranked alternative candidates from the most recent auto-detection run
     # (silence-preference score, descending). The production UI offers these
     # as one-click alternatives to the auto-winner so the user rarely has to
@@ -1062,6 +1076,8 @@ class MatchProject(BaseModel):
         new_primary.beep_duration_ms = None
         new_primary.beep_candidates = []
         new_primary.beep_reviewed = False
+        new_primary.beep_auto_detect_failed = False
+        new_primary.beep_alignment_confidence = None
 
         if backup_audit:
             audit_file = self.audit_path(root) / f"stage{stage_number}.json"
@@ -1166,6 +1182,8 @@ class MatchProject(BaseModel):
                     v.beep_duration_ms = None
                     v.beep_candidates = []
                     v.beep_reviewed = False
+                    v.beep_auto_detect_failed = False
+                    v.beep_alignment_confidence = None
 
         return RemovalPlan(
             video_path=video.path,
