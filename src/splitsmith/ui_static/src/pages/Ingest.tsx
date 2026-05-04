@@ -21,6 +21,7 @@ import {
   Crosshair,
   FileJson,
   FolderInput,
+  FolderOpen,
   HardDrive,
   Monitor,
   PlayCircle,
@@ -1586,8 +1587,6 @@ function UnassignedSection({
   // assigned to a stage; dragging within the tray is a no-op.
   const canAccept = dragging !== null && dragging.stage !== null;
 
-  if (project.unassigned_videos.length === 0 && !canAccept) return null;
-
   // Build a quick lookup so each card can pull its own match-analysis entry
   // without re-scanning the array per render.
   const analysisByPath = useMemo(() => {
@@ -1595,6 +1594,8 @@ function UnassignedSection({
     for (const e of analysis?.videos ?? []) out.set(e.path, e);
     return out;
   }, [analysis]);
+
+  if (project.unassigned_videos.length === 0 && !canAccept) return null;
 
   return (
     <Card
@@ -1715,6 +1716,7 @@ function UnassignedVideoCard({
       stage={null}
       setDragging={setDragging}
       className="rounded-md border border-border bg-muted/40 p-3"
+      hoverPreview={false}
     >
       <div className="flex flex-col gap-3 sm:flex-row">
         {/* Inline video with the cached JPG as poster -- click the native
@@ -1848,6 +1850,19 @@ function UnassignedVideoCard({
             <Button
               size="sm"
               variant="ghost"
+              onClick={() => {
+                void api.revealVideo(video.path).catch(() => {
+                  /* best effort */
+                });
+              }}
+              title="Reveal the source file in the OS file manager"
+              aria-label={`Reveal ${video.path} in file manager`}
+            >
+              <FolderOpen className="size-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={busy}
               onClick={() => onRemove(video, null)}
               title="Remove from project"
@@ -1937,12 +1952,12 @@ function StagesSection({
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
-      {/* Cards carry a beep section + stage-move dropdown + multiple
-          video previews; squeezing them into 3 columns at the xl
-          breakpoint (1280px viewport, ~992px content width after the
-          240px sidebar) clipped controls. Push 2-col to lg and 3-col
-          to 2xl so each card has room to breathe. */}
-      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      {/* Each stage card now embeds inline thumbnail-as-poster <video>
+          players for the primary + each secondary plus role action
+          buttons; that needs ~700px of horizontal room before things
+          start clipping. Stay single-column up to 2xl, two-column only
+          above (typically 1536px+ viewports). */}
+      <div className="grid gap-3 2xl:grid-cols-2">
         {project.stages.map((s) => (
           <StageCard
             key={s.stage_number}
@@ -2080,11 +2095,12 @@ function StageCard({
           <p className="text-sm text-muted-foreground">No videos assigned.</p>
         ) : null}
         {primary ? (
-          <>
+          <div className="space-y-2 rounded-md border border-border bg-muted/10 p-2">
             <VideoRow
               video={primary}
               stage={stage}
               setDragging={setDragging}
+              bare
               badge={
                 <Badge
                   variant={hasConflict ? "statusWarning" : "statusInProgress"}
@@ -2108,20 +2124,25 @@ function StageCard({
             <BeepSection
               stageNumber={stage.stage_number}
               video={primary}
+              bare
               busy={busy}
               setBusy={setBusy}
               setError={setError}
               onProjectUpdate={onProjectUpdate}
             />
-          </>
+          </div>
         ) : null}
-        {secondaries.map((v) => (
-          <div key={v.path} className="space-y-2">
+        {secondaries.map((v, idx) => (
+          <div
+            key={v.path}
+            className="space-y-2 rounded-md border border-border bg-muted/10 p-2"
+          >
             <VideoRow
               video={v}
               stage={stage}
               setDragging={setDragging}
-              badge={<Badge variant="secondary">Secondary</Badge>}
+              bare
+              badge={<Badge variant="secondary">Secondary {idx + 1}</Badge>}
               actions={
                 <RoleActions
                   video={v}
@@ -2137,6 +2158,7 @@ function StageCard({
             <BeepSection
               stageNumber={stage.stage_number}
               video={v}
+              bare
               busy={busy}
               setBusy={setBusy}
               setError={setError}
@@ -2150,6 +2172,7 @@ function StageCard({
             video={v}
             stage={stage}
             setDragging={setDragging}
+            inlinePlayer={false}
             badge={
               <Badge variant="outline" className="gap-1 opacity-70">
                 <XCircle className="size-3" /> Ignored
@@ -2179,36 +2202,93 @@ function VideoRow({
   setDragging,
   badge,
   actions,
+  inlinePlayer = true,
+  bare = false,
 }: {
   video: StageVideo;
   stage: StageEntry | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   badge: React.ReactNode;
   actions: React.ReactNode;
+  // Render an inline thumbnail-as-poster <video> on the row. Disabled for
+  // ignored videos because the row is collapsed visual-noise by design.
+  inlinePlayer?: boolean;
+  // Drop the row's own border/background when nested inside a video panel
+  // so the panel is the single visual frame for "this video + its beep".
+  bare?: boolean;
 }) {
+  const [meta, setMeta] = useState<FsProbeResponse | null>(null);
+
+  useEffect(() => {
+    if (!inlinePlayer) return;
+    let cancelled = false;
+    api
+      .probeFile(video.path)
+      .then((r) => {
+        if (!cancelled) setMeta(r);
+      })
+      .catch(() => {
+        // Best effort; the <video> element still renders without a poster.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [video.path, inlinePlayer]);
+
+  const reveal = async () => {
+    try {
+      await api.revealVideo(video.path);
+    } catch {
+      // Best effort; don't block the user on a Finder hiccup.
+    }
+  };
+
   return (
     <DraggableVideoRow
       video={video}
       stage={stage}
       setDragging={setDragging}
-      className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5"
+      className={cn(
+        !bare && "rounded-md border border-border/60 bg-muted/20 px-2 py-1.5",
+      )}
+      hoverPreview={false}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          {badge}
-          <span className="truncate font-mono" title={video.path}>
-            {video.path.split("/").pop()}
-          </span>
-          {video.processed.beep ? (
-            <span
-              className="text-muted-foreground"
-              title={`beep at ${video.beep_time?.toFixed(3) ?? "?"}s`}
-            >
-              <CheckCircle2 className="size-3.5" />
+      <div className="flex flex-wrap items-center gap-2">
+        {inlinePlayer ? (
+          <div className="relative w-32 shrink-0 overflow-hidden rounded bg-black/40 aspect-video">
+            <video
+              src={api.videoStreamUrl(video.path)}
+              poster={meta?.thumbnail_url ?? undefined}
+              controls
+              preload="metadata"
+              className="h-full w-full"
+              // Stop drag events bubbling so the user can scrub without
+              // accidentally dragging the row.
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 text-xs">
+            {badge}
+            <span className="truncate font-mono" title={video.path}>
+              {video.path.split("/").pop()}
             </span>
-          ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void reveal()}
+              title="Reveal the source file in the OS file manager"
+              aria-label={`Reveal ${video.path} in file manager`}
+            >
+              <FolderOpen className="size-3.5" />
+            </Button>
+            {actions}
+          </div>
         </div>
-        <div className="flex gap-1">{actions}</div>
       </div>
     </DraggableVideoRow>
   );
@@ -2225,12 +2305,17 @@ function DraggableVideoRow({
   setDragging,
   className,
   children,
+  hoverPreview = true,
 }: {
   video: StageVideo;
   stage: StageEntry | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   className?: string;
   children: React.ReactNode;
+  // Disable the floating thumbnail popover when the row already renders an
+  // inline preview (e.g. the unassigned tray's <video> element); the popover
+  // would otherwise cover the play button.
+  hoverPreview?: boolean;
 }) {
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [thumb, setThumb] = useState<string | null>(null);
@@ -2269,6 +2354,7 @@ function DraggableVideoRow({
         setDragging(null);
       }}
       onMouseEnter={() => {
+        if (!hoverPreview) return;
         if (dragInFlight) return;
         setRect(ref.current?.getBoundingClientRect() ?? null);
         void ensureProbe();
@@ -2277,7 +2363,7 @@ function DraggableVideoRow({
       className={cn("cursor-grab active:cursor-grabbing", className)}
     >
       {children}
-      {rect && thumb && !dragInFlight ? (
+      {hoverPreview && rect && thumb && !dragInFlight ? (
         <ThumbnailFloat anchor={rect} src={thumb} alt={video.path} />
       ) : null}
     </div>
@@ -2670,7 +2756,7 @@ function RoleActions({
       {allStages.length > 1 ? (
         <select
           aria-label="Move to a different stage"
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          className="h-8 max-w-[8rem] truncate rounded-md border border-input bg-background px-2 text-xs"
           disabled={busy}
           value=""
           onChange={(e) => {
@@ -2821,16 +2907,50 @@ function StatusGlyph({ stage }: { stage: StageEntry }) {
       </Badge>
     );
   }
-  if (stage.videos.find((v) => v.role === "primary")) {
+  const primary = stage.videos.find((v) => v.role === "primary");
+  if (!primary) {
     return (
-      <Badge variant="statusComplete" className="gap-1">
-        <CheckCircle2 className="size-3" /> Ready
+      <Badge variant="statusWarning" className="gap-1">
+        ▲ No primary
+      </Badge>
+    );
+  }
+  if (primary.beep_time == null) {
+    return (
+      <Badge variant="statusInProgress" className="gap-1">
+        ○ Detect beep
+      </Badge>
+    );
+  }
+  if (!primary.beep_reviewed) {
+    return (
+      <Badge variant="statusWarning" className="gap-1">
+        ▲ Beep review
+      </Badge>
+    );
+  }
+  // Primary is locked in -- secondaries are nice-to-have for multi-cam
+  // sync but the stage is auditable + exportable on the primary alone.
+  const pendingSecondaries = stage.videos.filter(
+    (v) => v.role === "secondary" && (v.beep_time == null || !v.beep_reviewed),
+  ).length;
+  if (pendingSecondaries > 0) {
+    return (
+      <Badge
+        variant="statusComplete"
+        className="gap-1"
+        title={`Ready to audit. ${pendingSecondaries} secondary cam${
+          pendingSecondaries === 1 ? "" : "s"
+        } still need beep alignment to sync with the primary timeline.`}
+      >
+        <CheckCircle2 className="size-3" /> Ready · {pendingSecondaries} cam
+        pending
       </Badge>
     );
   }
   return (
-    <Badge variant="statusWarning" className="gap-1">
-      ▲ No primary
+    <Badge variant="statusComplete" className="gap-1">
+      <CheckCircle2 className="size-3" /> Ready
     </Badge>
   );
 }

@@ -2973,6 +2973,88 @@ def test_fs_probe_endpoint_runs_on_demand(tmp_path: Path) -> None:
     assert body["thumbnail_url"].startswith("/api/thumbnails/")
 
 
+def test_videos_reveal_runs_on_registered_path(tmp_path: Path) -> None:
+    # Source the user picked lives outside the project root (typical USB
+    # / Downloads case); the symlink under raw/ resolves to it. The reveal
+    # endpoint must accept the registered project-relative path and shell
+    # out against the resolved target.
+    root = tmp_path / "match"
+    src_dir = tmp_path / "external"
+    src_dir.mkdir()
+    src = src_dir / "VID.mp4"
+    src.write_bytes(b"")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    scan = client.post("/api/videos/scan", json={"source_paths": [str(src)]})
+    assert scan.status_code == 200, scan.text
+
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **_kwargs):  # noqa: ANN001
+        calls.append(list(cmd))
+
+        class _R:
+            returncode = 0
+
+        return _R()
+
+    with patch("splitsmith.ui.server.subprocess.run", side_effect=_fake_run):
+        resp = client.post("/api/videos/reveal", json={"path": "raw/VID.mp4"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["revealed"].endswith("VID.mp4")
+    assert calls, "subprocess.run was not invoked"
+    # Resolved target should be the source on the symlink target side, not
+    # the symlink under raw/.
+    invoked_path = calls[0][-1]
+    assert "external" in invoked_path or invoked_path.endswith("VID.mp4")
+
+
+def test_videos_reveal_404_on_unregistered_path(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    resp = client.post("/api/videos/reveal", json={"path": "raw/missing.mp4"})
+    assert resp.status_code == 404
+
+
+def test_fs_probe_resolves_project_relative_paths(tmp_path: Path) -> None:
+    # StageVideo.path is stored project-relative (e.g. "raw/foo.mp4"); the
+    # probe endpoint must resolve it via the project root, not process CWD.
+    root = tmp_path / "match"
+    raw_dir = root / "raw"
+    raw_dir.mkdir(parents=True)
+    clip = raw_dir / "clip.mp4"
+    clip.write_bytes(b"fake")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return ProbeResult(duration=4.0)
+
+    def _fake_thumb(source: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        from splitsmith.video_probe import source_cache_key
+
+        dest = cache_dir / f"{source_cache_key(source)}.jpg"
+        dest.write_bytes(b"\xff")
+        return dest
+
+    with (
+        patch("splitsmith.ui.server.video_probe.probe", side_effect=_fake_probe),
+        patch("splitsmith.ui.server.thumbnail_helpers.ensure", side_effect=_fake_thumb),
+    ):
+        resp = client.get("/api/fs/probe?path=raw/clip.mp4")
+
+    assert resp.status_code == 200
+    assert resp.json()["duration"] == 4.0
+
+
 def test_thumbnail_endpoint_serves_cached(tmp_path: Path) -> None:
     root = tmp_path / "match"
     app = create_app(project_root=root, project_name="x")

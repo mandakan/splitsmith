@@ -1029,6 +1029,17 @@ export const api = {
       json: { path },
     }),
 
+  /** Reveal a registered project video by following its symlink to the
+   *  original source location (USB / Downloads / wherever the user picked
+   *  it from). Use this for the per-video "open containing folder" button
+   *  -- ``revealFile`` would refuse because the resolved target lives
+   *  outside the project root. */
+  revealVideo: (videoPath: string) =>
+    request<{ revealed: string }>("/api/videos/reveal", {
+      method: "POST",
+      json: { path: videoPath },
+    }),
+
   // -----------------------------------------------------------------------
   // Fixture mode (closes #19): the /review SPA route reads + writes a single
   // audit fixture (JSON + sibling WAV + optional video) without project

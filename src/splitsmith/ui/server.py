@@ -3121,7 +3121,11 @@ def create_app(
         surfaces resolution/codec/size so the unassigned-tray rows can show
         enough metadata for the user to identify which clip is which.
         """
-        target = Path(path).expanduser()
+        project = state.load()
+        # StageVideo.path is project-relative for default projects, so resolve
+        # via the project root rather than process CWD before strict-resolving.
+        raw_target = Path(path).expanduser()
+        target = project.resolve_video_path(state.project_root, raw_target)
         try:
             target = target.resolve(strict=True)
         except (FileNotFoundError, OSError) as exc:
@@ -3131,7 +3135,6 @@ def create_app(
         if target.suffix.lower() not in VIDEO_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"not a video: {target}")
 
-        project = state.load()
         probes_dir = project.probes_path(state.project_root)
         thumbs_dir = project.thumbs_path(state.project_root)
         duration, thumbnail_url = _video_metadata_for(
@@ -3542,6 +3545,42 @@ def create_app(
             else:
                 # xdg-open doesn't support file selection; opening the parent
                 # is the closest cross-distro behaviour.
+                parent = resolved.parent if resolved.is_file() else resolved
+                subprocess.run(["xdg-open", str(parent)], check=False)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"failed to launch file manager: {exc}"
+            ) from exc
+        return JSONResponse({"revealed": str(resolved)})
+
+    @app.post("/api/videos/reveal")
+    def reveal_video(req: RevealRequest) -> JSONResponse:
+        """Reveal a registered project video in the OS file manager.
+
+        The generic ``/api/files/reveal`` requires the resolved path to be
+        inside the project root, which excludes registered videos whose
+        symlinks under ``raw/`` point at the original on USB / external
+        storage. This endpoint looks the path up in project state and
+        reveals the symlink target -- the user already consented by
+        registering the source via the picker, so revealing the original
+        location is the natural action for "open containing folder".
+        """
+        project = state.load()
+        located = project.find_video(Path(req.path))
+        if located is None:
+            raise HTTPException(status_code=404, detail=f"video not registered: {req.path}")
+        _, video = located
+        target = project.resolve_video_path(state.project_root, Path(str(video.path)))
+        try:
+            resolved = target.resolve(strict=True)
+        except (OSError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=f"not found: {target}") from exc
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", "-R", str(resolved)], check=False)
+            elif sys.platform.startswith("win"):
+                subprocess.run(["explorer", f"/select,{resolved}"], check=False)
+            else:
                 parent = resolved.parent if resolved.is_file() else resolved
                 subprocess.run(["xdg-open", str(parent)], check=False)
         except OSError as exc:
