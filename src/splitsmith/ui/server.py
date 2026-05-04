@@ -3648,6 +3648,7 @@ def create_app(
             """
             target_recall = float(payload.get("target_recall", 0.95))
             tolerance_ms = float(payload.get("tolerance_ms", 75.0))
+            labeled_weight = float(payload.get("labeled_weight", 2.0))
             fixtures = payload.get("fixtures")
             if fixtures is not None and not isinstance(fixtures, list):
                 raise HTTPException(
@@ -3672,6 +3673,7 @@ def create_app(
                     fixtures=fixtures if fixtures else None,
                     target_recall=target_recall,
                     tolerance_ms=tolerance_ms,
+                    labeled_weight=labeled_weight,
                     log=log,
                 )
                 # Drop the cached runtime so the next eval reloads the new

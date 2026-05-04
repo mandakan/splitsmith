@@ -92,6 +92,46 @@ def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[
     return labels
 
 
+def _load_audit_reason_map(audit: dict) -> list[tuple[float, str]]:
+    """Extract ``(time, reason)`` pairs from the fixture's labels_by_time.
+
+    Mirrors ``splitsmith.lab.core._load_labels_from_audit`` -- reasons
+    are stored keyed by candidate time at 1 ms resolution. Returned as
+    a list (rather than dict) so callers can do nearest-time matching
+    when the candidate's onset doesn't land exactly on the stored key.
+    """
+    pending = audit.get("_candidates_pending_audit") or {}
+    raw = pending.get("labels_by_time") if isinstance(pending, dict) else None
+    if not isinstance(raw, dict):
+        return []
+    out: list[tuple[float, str]] = []
+    for k, v in raw.items():
+        if not isinstance(v, str) or not v:
+            continue
+        try:
+            out.append((float(k), v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _reason_at_time(
+    candidate_time: float,
+    entries: list[tuple[float, str]],
+    *,
+    tolerance_ms: float = 75.0,
+) -> str | None:
+    """Nearest-time reason lookup within tolerance. Same convention as
+    the lab's subclass lookup -- audit times can drift up to 75 ms from
+    the candidate's detected time."""
+    best: tuple[float, str] | None = None
+    for t, r in entries:
+        d_ms = abs(t - candidate_time) * 1000.0
+        if d_ms <= tolerance_ms and (best is None or d_ms < best[0]):
+            best = (d_ms, r)
+    return best[1] if best is not None else None
+
+
 def _build_universe(fixtures: list[str], tolerance_ms: float):
     """Per-fixture: detect at max recall, label, slot CLAP+PANN signals."""
     universe = []
@@ -118,6 +158,10 @@ def _build_universe(fixtures: list[str], tolerance_ms: float):
             continue
         cand_t = [s.time_absolute for s in shots]
         labels = _label(cand_t, truth.get("shots", []), tolerance_ms)
+        # Hand-labeled FP reasons (issue #103 follow-up): a row with
+        # ``reason`` set is a confirmed-by-human negative we want voter C
+        # to learn from preferentially via sample_weight.
+        reason_entries = _load_audit_reason_map(truth)
 
         clap = np.load(clap_path, allow_pickle=True)
         if clap["audio_emb"].shape[0] != len(shots):
@@ -145,6 +189,9 @@ def _build_universe(fixtures: list[str], tolerance_ms: float):
         )
 
         for i, shot in enumerate(shots):
+            row_reason = (
+                _reason_at_time(shot.time_absolute, reason_entries) if labels[i] == 0 else None
+            )
             universe.append(
                 {
                     "fixture": fix,
@@ -154,6 +201,7 @@ def _build_universe(fixtures: list[str], tolerance_ms: float):
                     "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": hand[i].tolist(),
                     "clap_sims": [float(x) for x in sims[i]],
+                    "reason": row_reason,
                 }
             )
     return universe
@@ -323,10 +371,34 @@ def _load_mined_negatives(
     return rows, provenance
 
 
-def _train_voter_c(universe: list[dict], target_recall: float):
-    """Fit GBDT; pick threshold from 5-fold CV predictions on the same set."""
+def _sample_weights(universe: list[dict], labeled_weight: float) -> np.ndarray:
+    """Per-row training weight.
+
+    Rows the user has hand-labeled with a ``reason`` (i.e. confirmed-FPs:
+    cross_bay / echo / movement / wind / handling / barrel_echo / ...)
+    get the ``labeled_weight`` multiplier. Everything else stays at 1.0.
+
+    Equivalent to row duplication for tree-based GBDTs but cheaper.
+    """
+    weights = np.ones(len(universe), dtype=np.float64)
+    for i, c in enumerate(universe):
+        if c.get("reason"):
+            weights[i] = labeled_weight
+    return weights
+
+
+def _train_voter_c(universe: list[dict], target_recall: float, labeled_weight: float):
+    """Fit GBDT; pick threshold from 5-fold CV predictions on the same set.
+
+    ``labeled_weight`` upweights rows whose ``reason`` field is set --
+    i.e., user-confirmed false positives on the labeled fixtures. With
+    1.0 the training is uniform; values >1 push the GBDT to learn the
+    hand-labeled FP patterns more aggressively without changing class
+    balance globally.
+    """
     X = _x_from(universe)
     y = np.array([c["label"] for c in universe], dtype=np.int64)
+    w = _sample_weights(universe, labeled_weight)
     if y.sum() < 5:
         raise SystemExit(
             f"need at least 5 positives for 5-fold CV; got {int(y.sum())}. "
@@ -339,7 +411,7 @@ def _train_voter_c(universe: list[dict], target_recall: float):
         f = GradientBoostingClassifier(
             n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
         )
-        f.fit(X[tr], y[tr])
+        f.fit(X[tr], y[tr], sample_weight=w[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
     n_pos = int(y.sum())
@@ -355,7 +427,7 @@ def _train_voter_c(universe: list[dict], target_recall: float):
     clf = GradientBoostingClassifier(
         n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
     )
-    clf.fit(X, y)
+    clf.fit(X, y, sample_weight=w)
     return clf, threshold
 
 
@@ -366,6 +438,7 @@ def build_artifacts(
     tolerance_ms: float = 75.0,
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
     use_mined_negatives: bool = True,
+    labeled_weight: float = 2.0,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -404,7 +477,15 @@ def build_artifacts(
     voter_a = _voter_a_floor(universe)
     voter_b = _voter_b_threshold(universe)
     voter_d = _voter_d_threshold(universe)
-    clf, voter_c = _train_voter_c(voter_c_universe, target_recall=target_recall)
+    n_labeled = sum(1 for c in voter_c_universe if c.get("reason"))
+    if n_labeled and labeled_weight != 1.0:
+        log(
+            f"Class-aware GBDT: {n_labeled} hand-labeled FP rows "
+            f"upweighted by {labeled_weight:.1f}x"
+        )
+    clf, voter_c = _train_voter_c(
+        voter_c_universe, target_recall=target_recall, labeled_weight=labeled_weight
+    )
     log(f"Voter A floor (lowest positive confidence): {voter_a:.4f}")
     log(f"Voter B threshold (lowest positive CLAP diff): {voter_b:.4f}")
     log(f"Voter C threshold (GBDT, target recall {target_recall*100:.0f} %): {voter_c:.4f}")
@@ -426,6 +507,8 @@ def build_artifacts(
         "calibration_fixtures": [f for f in fixtures if any(c["fixture"] == f for c in universe)],
         "n_calibration_candidates": n_total,
         "n_calibration_positives": int(n_pos),
+        "n_hand_labeled_fps": int(n_labeled),
+        "labeled_fp_weight": labeled_weight,
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         **mining_provenance,
@@ -454,6 +537,14 @@ def main() -> None:
         action="store_true",
         help="Ignore tests/fixtures/.cache/_mined_negatives.npz even if present.",
     )
+    p.add_argument(
+        "--labeled-weight",
+        type=float,
+        default=2.0,
+        help="Sample-weight multiplier for hand-labeled FP rows (rows whose audit "
+        "JSON carries a ``reason`` for the candidate's time). 1.0 = uniform; >1 "
+        "trains voter C harder against the user's known-painful FP classes.",
+    )
     args = p.parse_args()
     build_artifacts(
         fixtures=args.fixture or None,
@@ -461,6 +552,7 @@ def main() -> None:
         tolerance_ms=args.tolerance_ms,
         mining_cap_ratio=args.mining_cap_ratio,
         use_mined_negatives=not args.no_mining,
+        labeled_weight=args.labeled_weight,
     )
 
 
