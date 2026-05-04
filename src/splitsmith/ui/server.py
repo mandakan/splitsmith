@@ -1554,14 +1554,19 @@ def create_app(
             )
         return project, stage, video
 
-    # Cross-cam alignment is accepted only when the peak-to-runner-up ratio
-    # of the cross-correlation clears this threshold. 1.0 means the
-    # landmark wasn't distinctive (envelope is flat or the secondary
-    # doesn't actually overlap with the primary). 1.5 was chosen because
-    # synthetic same-stage pairs return ~6 while same-mic non-overlapping
-    # iPhone clips return ~1.0-1.1; a 50% margin keeps the false-accept
-    # rate near zero on the short envelope vectors at 200 Hz.
-    _align_confidence_floor = 1.5
+    # Cross-cam alignment is accepted as a *suggestion* (beep_source="aligned",
+    # beep_reviewed=False so the SPA forces the user to verify on the waveform
+    # picker) when the peak-to-runner-up ratio of the cross-correlation clears
+    # this threshold. 1.0 means the landmark wasn't distinctive at all.
+    # Empirically calibrated on tallmilan-2026 secondaries: same-stage pairs
+    # where in-stream detection independently succeeded land at 1.23-1.34, and
+    # plausible alignments on the in-stream-failed pairs land at 1.15-1.31.
+    # Same-mic non-overlapping clips sit at ~1.00. 1.10 leaves a slim margin
+    # over the floor while still surfacing real alignments. False positives
+    # are caught by the user in the picker before "Mark reviewed"; false
+    # negatives mean the user starts from the auto-detect-failed state and
+    # places the marker by hand, which is the same UX as before this change.
+    _align_confidence_floor = 1.10
 
     def _try_align_secondary_to_primary(
         proj: MatchProject,
@@ -1570,9 +1575,12 @@ def create_app(
         handle: JobHandle,
     ) -> cross_align.CrossAlignResult | None:
         """Attempt cross-correlation alignment of ``video`` against the stage's
-        primary. Returns the result when confidence clears the floor; ``None``
-        when alignment isn't possible (no primary, no primary beep_time, audio
-        not cached, correlation too weak).
+        primary. Returns the raw result whenever cross-correlation could be
+        computed (so the caller can save ``confidence`` as a diagnostic even
+        below the auto-accept floor); returns ``None`` only when alignment
+        isn't possible at all (no primary, no primary beep_time, audio not
+        cached, landmark window too narrow). Threshold comparison happens at
+        the call site so a low-confidence result can still inform the UI.
 
         Run only on the secondary soft-fail path -- when in-stream beep
         detection has already raised ``BeepNotFoundError``. Cheap (envelope
@@ -1611,15 +1619,6 @@ def create_app(
                 stage.stage_number,
                 video.video_id,
                 exc,
-            )
-            return None
-        if result.confidence < _align_confidence_floor:
-            logger.info(
-                "cross-align rejected for stage %d video %s: conf %.2f < %.2f",
-                stage.stage_number,
-                video.video_id,
-                result.confidence,
-                _align_confidence_floor,
             )
             return None
         return result
@@ -1684,23 +1683,38 @@ def create_app(
             video.beep_candidates = []
             video.beep_reviewed = False
             video.processed["beep"] = True
-            if aligned is not None:
+            # Surface the cross-correlation confidence whenever we got one,
+            # even if we don't promote the suggestion. Lets the UI tell the
+            # difference between "never tried" and "tried, sub-floor result".
+            video.beep_alignment_confidence = (
+                aligned.confidence if aligned is not None else None
+            )
+            # Delta is only meaningful when both in-stream AND cross-align
+            # produced timestamps. In-stream failed here, so wipe it.
+            video.beep_alignment_delta_ms = None
+            if aligned is not None and aligned.confidence >= _align_confidence_floor:
                 handle.update(
                     progress=0.55,
-                    message=f"Aligned to primary (conf {aligned.confidence:.1f})",
+                    message=f"Aligned to primary (conf {aligned.confidence:.2f}); verify on waveform",
                 )
                 video.beep_time = aligned.secondary_beep_time
                 video.beep_source = "aligned"
-                video.beep_alignment_confidence = aligned.confidence
                 video.beep_auto_detect_failed = False
                 # Treat as "we have a usable beep_time": fall through to
                 # the trim block below.
                 beep = aligned
             else:
-                handle.update(progress=0.55, message="No beep detected; align manually")
+                if aligned is not None:
+                    logger.info(
+                        "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
+                        stage_number,
+                        video.video_id,
+                        aligned.confidence,
+                        _align_confidence_floor,
+                    )
+                handle.update(progress=0.55, message="No beep detected; pick on waveform")
                 video.beep_time = None
                 video.beep_source = "auto"
-                video.beep_alignment_confidence = None
                 video.beep_auto_detect_failed = True
                 video.processed["trim"] = False
                 beep = None
@@ -1713,11 +1727,31 @@ def create_app(
             video.beep_candidates = list(beep.candidates)
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
+            video.beep_alignment_delta_ms = None
             video.processed["beep"] = True
             # Auto-detected beeps need explicit user review (#71). Reset
             # the flag here so a re-detect on a previously reviewed video
             # invalidates the prior approval.
             video.beep_reviewed = False
+            # Sanity check: when in-stream succeeded on a secondary, ALSO
+            # run cross-correlation against the primary. If the two
+            # methods disagree by more than ~250 ms it usually means the
+            # in-stream detector locked onto something that wasn't the
+            # buzzer (a steel-strike that resembles a tone, an early
+            # range-officer command, etc.). The delta is surfaced in the
+            # SPA so the user can compare both candidates on the
+            # waveform before marking reviewed. Never overrides the
+            # in-stream result -- in-stream has frequency-domain
+            # information cross-align doesn't, so when they agree we
+            # trust the in-stream answer; when they disagree we let the
+            # user decide.
+            if video.role != "primary":
+                check = _try_align_secondary_to_primary(proj, stg, video, handle)
+                if check is not None and check.confidence >= _align_confidence_floor:
+                    video.beep_alignment_confidence = check.confidence
+                    video.beep_alignment_delta_ms = (
+                        beep.time - check.secondary_beep_time
+                    ) * 1000.0
 
         trimmed_ok = False
         if beep is not None and stg.time_seconds > 0:
@@ -1768,6 +1802,7 @@ def create_app(
             v_fresh.beep_reviewed = video.beep_reviewed
             v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
             v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
+            v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
             v_fresh.processed["beep"] = True
             if trimmed_ok:
                 v_fresh.processed["trim"] = True
@@ -2354,6 +2389,7 @@ def create_app(
             video.beep_candidates = []
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
+            video.beep_alignment_delta_ms = None
             video.processed["beep"] = False
             video.processed["trim"] = False
             video.beep_reviewed = False
@@ -2367,6 +2403,7 @@ def create_app(
             video.beep_candidates = []
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
+            video.beep_alignment_delta_ms = None
             video.processed["beep"] = True
             video.processed["trim"] = False
             # Manual beep entry implies the user looked at the
@@ -2438,6 +2475,7 @@ def create_app(
         video.beep_duration_ms = chosen.duration_ms
         video.beep_auto_detect_failed = False
         video.beep_alignment_confidence = None
+        video.beep_alignment_delta_ms = None
         video.processed["beep"] = True
         video.processed["trim"] = False
         # Switching candidate is a fresh claim about which moment is

@@ -3339,7 +3339,9 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
     """A cross-align result below the confidence floor must not be promoted
     to ``beep_source='aligned'`` -- the secondary stays in the
     soft-failed state so the user gets the manual-align prompt instead
-    of a wrong auto-set timestamp."""
+    of a wrong auto-set timestamp. The confidence is still saved as a
+    diagnostic so the SPA can render "tried, sub-floor" distinctly from
+    "never tried"."""
     client, _ = _seed_project_with_secondary(tmp_path)
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
@@ -3361,7 +3363,7 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
     def fake_align(*a, **kw):  # type: ignore[no-untyped-def]
         return ca.CrossAlignResult(
             secondary_beep_time=7.250,
-            confidence=1.05,  # below floor 1.5
+            confidence=1.05,  # below floor 1.10
             peak_correlation=0.42,
             lag_seconds=3.25,
         )
@@ -3383,7 +3385,119 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
     assert secondary["beep_time"] is None
     assert secondary["beep_source"] == "auto"
     assert secondary["beep_auto_detect_failed"] is True
-    assert secondary["beep_alignment_confidence"] is None
+    # Even on rejection the confidence is preserved -- the SPA needs it to
+    # render "tried, conf 1.05" distinctly from "never tried".
+    assert secondary["beep_alignment_confidence"] == pytest.approx(1.05)
+
+
+def test_secondary_in_stream_success_runs_cross_align_sanity_check(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When in-stream beep_detect succeeds on a secondary, cross-correlation
+    still runs as a sanity check. When the two methods agree (small delta),
+    the in-stream result wins, ``beep_source`` stays ``"auto"``, but the
+    confidence + delta are surfaced as diagnostics so the SPA can tell
+    "we double-checked" from "we never tried"."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith import cross_align as ca
+    from splitsmith.ui import audio as audio_helpers
+
+    _stub_detect(monkeypatch, beep_time=4.0)
+    primary_id = _video_id_for(client, 1, "primary")
+    _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{primary_id}/detect-beep").json()["id"],
+    )
+
+    # Secondary in-stream succeeds at 7.250 s; cross-align lands within
+    # 15 ms. The fake_load + Path.exists patches let _try_align run on
+    # synthetic audio without touching real WAVs.
+    _stub_detect(monkeypatch, beep_time=7.250)
+
+    def fake_load(_path):  # type: ignore[no-untyped-def]
+        return np.zeros(48000, dtype=np.float32), 48000
+
+    def fake_align(*a, **kw):  # type: ignore[no-untyped-def]
+        return ca.CrossAlignResult(
+            secondary_beep_time=7.265,
+            confidence=1.30,
+            peak_correlation=0.65,
+            lag_seconds=3.265,
+        )
+
+    monkeypatch.setattr(bd, "load_audio", fake_load)
+    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    final = _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()["id"],
+    )
+    assert final["status"] == "succeeded"
+
+    proj = client.get("/api/project").json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    assert secondary["beep_time"] == pytest.approx(7.250)
+    assert secondary["beep_source"] == "auto"
+    assert secondary["beep_alignment_confidence"] == pytest.approx(1.30)
+    # delta = in_stream - cross_align = 7.250 - 7.265 = -15 ms
+    assert secondary["beep_alignment_delta_ms"] == pytest.approx(-15.0)
+
+
+def test_secondary_in_stream_disagreement_flagged_not_overridden(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When in-stream and cross-align disagree by hundreds of ms (typical
+    of a steel-strike mistaken for the buzzer), the in-stream result is
+    KEPT as ``beep_time`` -- in-stream has frequency-domain info
+    cross-align doesn't, so we don't auto-override. The delta is
+    surfaced so the SPA can show the user a "use cross-align?" prompt."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_detect as bd
+    from splitsmith import cross_align as ca
+    from splitsmith.ui import audio as audio_helpers
+
+    _stub_detect(monkeypatch, beep_time=4.0)
+    primary_id = _video_id_for(client, 1, "primary")
+    _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{primary_id}/detect-beep").json()["id"],
+    )
+
+    _stub_detect(monkeypatch, beep_time=10.000)
+
+    def fake_load(_path):  # type: ignore[no-untyped-def]
+        return np.zeros(48000, dtype=np.float32), 48000
+
+    def fake_align(*a, **kw):  # type: ignore[no-untyped-def]
+        return ca.CrossAlignResult(
+            secondary_beep_time=7.500,
+            confidence=1.40,
+            peak_correlation=0.70,
+            lag_seconds=3.500,
+        )
+
+    monkeypatch.setattr(bd, "load_audio", fake_load)
+    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+
+    sec_id = _video_id_for(client, 1, "secondary")
+    final = _wait_for_job(
+        client,
+        client.post(f"/api/stages/1/videos/{sec_id}/detect-beep").json()["id"],
+    )
+    assert final["status"] == "succeeded"
+
+    proj = client.get("/api/project").json()
+    secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+    # In-stream wins -- not overridden.
+    assert secondary["beep_time"] == pytest.approx(10.000)
+    assert secondary["beep_source"] == "auto"
+    # 2.5 s disagreement, surfaced for the SPA banner.
+    assert secondary["beep_alignment_confidence"] == pytest.approx(1.40)
+    assert secondary["beep_alignment_delta_ms"] == pytest.approx(2500.0)
 
 
 def test_secondary_soft_fail_clears_on_manual_override(tmp_path: Path, monkeypatch) -> None:

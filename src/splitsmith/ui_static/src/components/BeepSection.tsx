@@ -264,6 +264,19 @@ export function BeepSection({
   }
 
   if (!video.beep_time) {
+    // Distinguish "never tried" from "tried both detectors and got nothing".
+    // The latter is the secondary soft-fail (#112): in-stream beep_detect
+    // raised + cross-correlation either errored or fell below the
+    // auto-accept floor. Surfacing it tells the user "automatic alignment
+    // gave up; place the marker yourself" instead of letting them re-click
+    // Detect beep and watch it fail again.
+    const failed = video.beep_auto_detect_failed;
+    const conf = video.beep_alignment_confidence;
+    const failedHint = failed
+      ? conf != null
+        ? `Auto-detect + cross-align failed (conf ${conf.toFixed(2)}). Pick the beep on the waveform.`
+        : "Auto-detect failed and the camera doesn't overlap enough with the primary to align. Pick the beep on the waveform."
+      : null;
     return (
       <div
         className={cn(
@@ -271,26 +284,48 @@ export function BeepSection({
           !bare && "rounded-md border border-border/60 bg-muted/20",
         )}
       >
-        <Badge variant="statusNotStarted" className="gap-1">
-          ○ No beep yet
+        <Badge variant={failed ? "statusWarning" : "statusNotStarted"} className="gap-1">
+          {failed ? "! Auto-detect failed" : "○ No beep yet"}
         </Badge>
         {jobStatus ? (
           <JobProgress job={jobStatus} />
         ) : (
           <span className="text-muted-foreground">
-            {isPrimary
-              ? "Audit screen needs this. Run detection or set manually."
-              : "Needed to sync this camera to the primary timeline."}
+            {failedHint ??
+              (isPrimary
+                ? "Audit screen needs this. Run detection or set manually."
+                : "Needed to sync this camera to the primary timeline.")}
           </span>
         )}
         <div className="ml-auto flex gap-1">
-          <Button size="sm" variant="default" onClick={() => detect(false)} disabled={busy}>
-            <RefreshCw />
-            Detect beep
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
-            <Pencil />
-            Set manually
+          {failed ? (
+            <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={busy}>
+              <Pencil />
+              Pick on waveform
+            </Button>
+          ) : (
+            <Button size="sm" variant="default" onClick={() => detect(false)} disabled={busy}>
+              <RefreshCw />
+              Detect beep
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={failed ? () => detect(false) : () => setEditing(true)}
+            disabled={busy}
+          >
+            {failed ? (
+              <>
+                <RefreshCw />
+                Retry detect
+              </>
+            ) : (
+              <>
+                <Pencil />
+                Set manually
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -298,21 +333,41 @@ export function BeepSection({
   }
 
   const isManual = video.beep_source === "manual";
+  const isAligned = video.beep_source === "aligned";
   const reviewed = video.beep_reviewed;
   // Three-state pill (#71): manual entry counts as reviewed
-  // automatically; auto-detect leaves the user a yellow "review" pill
-  // until they confirm. Pure visual nudge -- pipeline doesn't gate on
-  // it.
+  // automatically; auto-detect and cross-aligned suggestions leave the
+  // user a yellow "review" pill until they confirm. Pure visual nudge --
+  // pipeline doesn't gate on it.
   const pillVariant = reviewed
     ? "statusComplete"
     : isManual
       ? "statusComplete"
       : "statusWarning";
+  const sourceLabel = isManual ? "user" : isAligned ? "aligned" : "auto";
   const pillLabel = reviewed
-    ? `beep · ${isManual ? "user" : "auto"} · reviewed`
+    ? `beep · ${sourceLabel} · reviewed`
     : isManual
       ? "beep · user"
-      : "beep · review";
+      : isAligned
+        ? "beep · aligned · verify"
+        : "beep · review";
+  const conf = video.beep_alignment_confidence;
+  const pillTitle =
+    isAligned && conf != null
+      ? `Cross-correlation alignment to primary (conf ${conf.toFixed(2)}). Verify on the waveform before marking reviewed.`
+      : undefined;
+  // Sanity-check disagreement: in-stream succeeded on a secondary AND
+  // cross-correlation also produced a high-confidence answer that
+  // disagrees with it by more than 250 ms. The most common cause is the
+  // in-stream detector mistaking a steel hit / RO command for the
+  // buzzer. Flagged as a yellow strip with the cross-align suggestion
+  // so the user can compare both candidates on the waveform.
+  const deltaMs = video.beep_alignment_delta_ms;
+  const disagreement =
+    !isManual && deltaMs != null && Math.abs(deltaMs) > 250;
+  const crossAlignSuggestion =
+    disagreement && video.beep_time != null ? video.beep_time - deltaMs / 1000 : null;
 
   const markReviewed = async () => {
     setBusy(true);
@@ -377,7 +432,7 @@ export function BeepSection({
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={pillVariant} className="gap-1">
+        <Badge variant={pillVariant} className="gap-1" title={pillTitle}>
           <Check className="size-3" />
           {pillLabel}
         </Badge>
@@ -441,6 +496,31 @@ export function BeepSection({
           ) : null}
         </div>
       </div>
+      {disagreement && crossAlignSuggestion != null ? (
+        <AlignmentDisagreement
+          inStreamTime={video.beep_time!}
+          crossAlignTime={crossAlignSuggestion}
+          deltaMs={deltaMs!}
+          confidence={conf}
+          onUseCrossAlign={async () => {
+            setBusy(true);
+            try {
+              const updated = await api.overrideBeepForVideo(
+                stageNumber,
+                videoId,
+                crossAlignSuggestion,
+              );
+              onProjectUpdate(updated);
+              setError(null);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          busy={busy}
+        />
+      ) : null}
       <BeepCandidates
         stageNumber={stageNumber}
         videoId={videoId}
@@ -1029,6 +1109,63 @@ function BeepPreview({
           Looks wrong? Refine in audit
         </Link>
       ) : null}
+    </div>
+  );
+}
+
+/** Sanity-check banner: in-stream beep_detect succeeded but cross-correlation
+ *  alignment to the primary lands somewhere different by > 250 ms. The most
+ *  common cause is the in-stream detector locking onto a steel hit or other
+ *  loud transient that tone-matches the buzzer's bandpassed envelope. The
+ *  cross-correlation sees the broader loudness shape (silence -> loud ->
+ *  pause -> shots) and is harder to fool by a single tone. We don't auto-
+ *  override -- in-stream has frequency-domain information cross-align
+ *  doesn't -- but we offer the user a one-click swap. */
+function AlignmentDisagreement({
+  inStreamTime,
+  crossAlignTime,
+  deltaMs,
+  confidence,
+  onUseCrossAlign,
+  busy,
+}: {
+  inStreamTime: number;
+  crossAlignTime: number;
+  deltaMs: number;
+  confidence: number | null;
+  onUseCrossAlign: () => void | Promise<void>;
+  busy: boolean;
+}) {
+  const sign = deltaMs >= 0 ? "+" : "";
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-xs">
+      <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
+      <span>
+        In-stream and cross-align disagree by{" "}
+        <span className="font-mono tabular-nums">
+          {sign}
+          {Math.round(deltaMs)} ms
+        </span>
+        . Could be a steel-strike mistaken for the buzzer.
+      </span>
+      <span
+        className="text-muted-foreground"
+        title={`In-stream: ${inStreamTime.toFixed(3)}s. Cross-align: ${crossAlignTime.toFixed(3)}s${
+          confidence != null ? ` (conf ${confidence.toFixed(2)})` : ""
+        }.`}
+      >
+        in-stream <span className="font-mono tabular-nums">{inStreamTime.toFixed(3)}s</span> ·
+        cross-align <span className="font-mono tabular-nums">{crossAlignTime.toFixed(3)}s</span>
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void onUseCrossAlign()}
+        disabled={busy}
+        className="ml-auto"
+      >
+        Use cross-align
+      </Button>
     </div>
   );
 }
