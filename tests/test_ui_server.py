@@ -1465,9 +1465,7 @@ def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypa
     assert body["duration"] == pytest.approx(1.0)
 
 
-def test_video_peaks_endpoint_serves_secondary_full_wav(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_video_peaks_endpoint_serves_secondary_full_wav(tmp_path: Path, monkeypatch) -> None:
     """The per-video peaks endpoint resolves the secondary's own WAV
     (``stage<N>_cam_<vid>.wav``) and returns the same payload shape as
     the stage-level endpoint, so the SPA's waveform picker can take the
@@ -1494,9 +1492,7 @@ def test_video_peaks_endpoint_serves_secondary_full_wav(
     monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure_video)
 
     # Set a beep_time on the secondary so beep_time is reflected in the payload.
-    proj = client.post(
-        f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 0.42}
-    ).json()
+    proj = client.post(f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 0.42}).json()
     assert next(v for v in proj["stages"][0]["videos"] if v["video_id"] == sec_id)[
         "beep_time"
     ] == pytest.approx(0.42)
