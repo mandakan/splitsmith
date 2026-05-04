@@ -17,105 +17,120 @@
       "candidate_number": 9,
       "time": 5.134,
       "ms_after_beep": 4634,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 2,
       "candidate_number": 11,
       "time": 5.7531,
       "ms_after_beep": 5253,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 3,
       "candidate_number": 20,
       "time": 9.5978,
       "ms_after_beep": 9098,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 4,
       "candidate_number": 22,
       "time": 10.2555,
       "ms_after_beep": 9756,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 5,
       "candidate_number": 24,
       "time": 10.5473,
       "ms_after_beep": 10047,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 49,
       "time": 15.9127,
       "ms_after_beep": 15413,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
       "candidate_number": 51,
       "time": 16.5065,
       "ms_after_beep": 16006,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
       "candidate_number": 52,
       "time": 17.2535,
       "ms_after_beep": 16754,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
       "candidate_number": 58,
       "time": 18.6379,
       "ms_after_beep": 18138,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 10,
       "candidate_number": 60,
       "time": 19.2576,
       "ms_after_beep": 18758,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 11,
       "candidate_number": 69,
       "time": 22.8155,
       "ms_after_beep": 22316,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 12,
       "candidate_number": 71,
       "time": 23.2194,
       "ms_after_beep": 22719,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 13,
       "candidate_number": 73,
       "time": 23.7178,
       "ms_after_beep": 23218,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 14,
       "candidate_number": 75,
       "time": 24.3966,
       "ms_after_beep": 23897,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 15,
       "candidate_number": 76,
       "time": 24.9882,
       "ms_after_beep": 24488,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     }
   ],
   "_candidates_pending_audit": {
@@ -660,7 +675,86 @@
         "peak_amplitude": 0.0689,
         "confidence": 0.18
       }
-    ]
+    ],
+    "labels_by_time": {
+      "1.147": "steel_ring",
+      "1.387": "movement",
+      "1.674": "cross_bay",
+      "2.625": "cross_bay",
+      "3.457": "cross_bay",
+      "3.554": "cross_bay",
+      "4.002": "cross_bay",
+      "4.685": "movement",
+      "5.313": "echo",
+      "6.229": "cross_bay",
+      "6.355": "cross_bay",
+      "6.442": "cross_bay",
+      "6.698": "movement",
+      "9.736": "echo",
+      "10.396": "echo",
+      "10.687": "echo",
+      "11.507": "movement",
+      "14.015": "movement",
+      "14.139": "movement",
+      "14.461": "movement",
+      "14.568": "movement",
+      "14.779": "movement",
+      "14.913": "movement",
+      "15.034": "movement",
+      "15.335": "cross_bay",
+      "15.451": "cross_bay",
+      "16.376": "handling",
+      "16.877": "echo",
+      "17.052": "cross_bay",
+      "17.876": "movement",
+      "18.088": "cross_bay",
+      "18.211": "cross_bay",
+      "18.408": "cross_bay",
+      "18.509": "cross_bay",
+      "19.084": "movement",
+      "19.346": "echo",
+      "19.484": "echo",
+      "19.608": "wind",
+      "19.678": "wind",
+      "19.779": "wind",
+      "20.033": "wind",
+      "20.349": "movement",
+      "22.334": "movement",
+      "22.950": "echo",
+      "23.357": "echo",
+      "23.884": "echo",
+      "25.905": "handling",
+      "2.502": "movement",
+      "6.806": "movement",
+      "7.068": "movement",
+      "7.342": "movement",
+      "7.463": "movement",
+      "7.561": "movement",
+      "7.768": "movement",
+      "8.018": "movement",
+      "8.183": "movement",
+      "8.266": "movement",
+      "8.457": "movement",
+      "11.706": "movement",
+      "11.849": "movement",
+      "11.987": "cross_bay",
+      "12.165": "cross_bay",
+      "12.350": "movement",
+      "12.489": "movement",
+      "13.073": "movement",
+      "13.365": "movement",
+      "13.525": "movement",
+      "13.600": "movement",
+      "14.229": "handling",
+      "21.589": "movement",
+      "9.027": "movement",
+      "12.795": "movement",
+      "13.870": "movement",
+      "20.843": "movement",
+      "20.960": "movement",
+      "21.113": "wind",
+      "21.232": "wind"
+    }
   },
   "audit_notes": [
     "Lots of cross-talk from neighboring bays in this recording -- many low-amplitude transients in the candidate set come from other shooters. Useful negative-training material."

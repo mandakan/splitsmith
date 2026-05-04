@@ -17,139 +17,159 @@
       "candidate_number": 10,
       "time": 3.1763,
       "ms_after_beep": 2676,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 2,
       "candidate_number": 14,
       "time": 4.2516,
       "ms_after_beep": 3752,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 3,
       "candidate_number": 16,
       "time": 4.7811,
       "ms_after_beep": 4281,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 4,
       "candidate_number": 18,
       "time": 5.1971,
       "ms_after_beep": 4697,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 5,
       "candidate_number": 20,
       "time": 5.9417,
       "ms_after_beep": 5442,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 22,
       "time": 6.4023,
       "ms_after_beep": 5902,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
       "time": 6.6399,
       "ms_after_beep": 6140,
-      "source": "manual"
+      "source": "manual",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
       "candidate_number": 26,
       "time": 7.6562,
       "ms_after_beep": 7156,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
       "candidate_number": 28,
       "time": 8.1262,
       "ms_after_beep": 7626,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 10,
       "candidate_number": 30,
       "time": 8.974,
       "ms_after_beep": 8474,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 11,
       "candidate_number": 32,
       "time": 9.6705,
       "ms_after_beep": 9170,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 12,
       "candidate_number": 48,
       "time": 12.6233,
       "ms_after_beep": 12123,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 13,
       "candidate_number": 50,
       "time": 13.0711,
       "ms_after_beep": 12571,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 14,
       "candidate_number": 52,
       "time": 13.4662,
       "ms_after_beep": 12966,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 15,
       "candidate_number": 53,
       "time": 13.6419,
       "ms_after_beep": 13142,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 16,
       "candidate_number": 61,
       "time": 15.8194,
       "ms_after_beep": 15319,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 17,
       "candidate_number": 62,
       "time": 16.2402,
       "ms_after_beep": 15740,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 18,
       "candidate_number": 63,
       "time": 16.6802,
       "ms_after_beep": 16180,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 19,
       "candidate_number": 64,
       "time": 17.115,
       "ms_after_beep": 16615,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 20,
       "candidate_number": 65,
       "time": 17.5186,
       "ms_after_beep": 17019,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     }
   ],
   "_candidates_pending_audit": {

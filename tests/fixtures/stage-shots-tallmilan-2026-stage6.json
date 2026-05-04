@@ -17,49 +17,56 @@
       "candidate_number": 8,
       "time": 2.757,
       "ms_after_beep": 2257,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 2,
       "candidate_number": 26,
       "time": 6.918,
       "ms_after_beep": 6418,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 3,
       "candidate_number": 29,
       "time": 8.165,
       "ms_after_beep": 7665,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 4,
       "candidate_number": 30,
       "time": 8.921,
       "ms_after_beep": 8421,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 5,
       "candidate_number": 31,
       "time": 9.312,
       "ms_after_beep": 8812,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 32,
       "time": 9.892,
       "ms_after_beep": 9392,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
       "candidate_number": 33,
       "time": 10.224,
       "ms_after_beep": 9724,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
@@ -74,21 +81,24 @@
       "candidate_number": 45,
       "time": 13.674,
       "ms_after_beep": 13174,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 10,
       "candidate_number": 46,
       "time": 14.202,
       "ms_after_beep": 13702,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 11,
       "candidate_number": 47,
       "time": 14.676,
       "ms_after_beep": 14176,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 12,
@@ -103,21 +113,24 @@
       "candidate_number": 49,
       "time": 15.512,
       "ms_after_beep": 15012,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 14,
       "candidate_number": 50,
       "time": 15.786,
       "ms_after_beep": 15286,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 15,
       "candidate_number": 51,
       "time": 16.021,
       "ms_after_beep": 15521,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     }
   ],
   "_candidates_pending_audit": {
@@ -519,9 +532,9 @@
       "4.365": "movement",
       "4.824": "movement",
       "6.437": "movement",
-      "6.662": "steel_ring",
-      "6.756": "steel_ring",
-      "7.679": "steel_ring",
+      "6.662": "speech",
+      "6.756": "speech",
+      "7.679": "speech",
       "8.086": "other",
       "11.122": "cross_bay",
       "11.233": "cross_bay",

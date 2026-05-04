@@ -97,7 +97,8 @@
       "candidate_number": 54,
       "time": 12.0933,
       "ms_after_beep": 11593,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 12,
@@ -112,7 +113,8 @@
       "candidate_number": 59,
       "time": 13.0084,
       "ms_after_beep": 12508,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     }
   ],
   "_candidates_pending_audit": {
@@ -603,7 +605,9 @@
       "12.875": "echo",
       "13.236": "echo",
       "13.407": "echo",
-      "13.542": "cross_bay"
+      "13.542": "cross_bay",
+      "5.568": "movement",
+      "5.755": "movement"
     }
   },
   "stage_rounds": {

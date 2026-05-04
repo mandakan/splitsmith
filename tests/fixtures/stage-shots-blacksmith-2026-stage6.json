@@ -17,91 +17,104 @@
       "candidate_number": 2,
       "time": 1.75,
       "ms_after_beep": 1250,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 2,
       "candidate_number": 3,
       "time": 2.077,
       "ms_after_beep": 1577,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 3,
       "candidate_number": 8,
       "time": 4.398,
       "ms_after_beep": 3898,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 4,
       "candidate_number": 9,
       "time": 4.725,
       "ms_after_beep": 4225,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 5,
       "candidate_number": 11,
       "time": 5.228,
       "ms_after_beep": 4728,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 6,
       "candidate_number": 13,
       "time": 5.769,
       "ms_after_beep": 5269,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 7,
       "candidate_number": 14,
       "time": 5.994,
       "ms_after_beep": 5494,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 8,
       "candidate_number": 16,
       "time": 6.779,
       "ms_after_beep": 6279,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 9,
       "candidate_number": 17,
       "time": 7.294,
       "ms_after_beep": 6794,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 10,
       "candidate_number": 18,
       "time": 7.615,
       "ms_after_beep": 7115,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 11,
       "candidate_number": 20,
       "time": 7.903,
       "ms_after_beep": 7403,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 12,
       "candidate_number": 25,
       "time": 9.261,
       "ms_after_beep": 8761,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 13,
       "candidate_number": 26,
       "time": 9.526,
       "ms_after_beep": 9026,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     }
   ],
   "_candidates_pending_audit": {
@@ -326,7 +339,8 @@
       "9.639": "barrel_echo",
       "10.165": "cross_bay",
       "3.966": "cross_bay",
-      "1.088": "cross_bay"
+      "1.088": "cross_bay",
+      "3.262": "movement"
     }
   },
   "stage_rounds": {
