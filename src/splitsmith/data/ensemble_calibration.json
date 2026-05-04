@@ -1,7 +1,7 @@
 {
   "voter_a_floor": 0.01847127532497797,
   "voter_b_threshold": 0.11580950021743774,
-  "voter_c_threshold": 0.08259430400325778,
+  "voter_c_threshold": 0.04155849624110147,
   "voter_d_threshold": 0.0012177228927612305,
   "voter_c_target_recall": 0.95,
   "tolerance_ms": 75.0,
@@ -40,5 +40,21 @@
   "n_calibration_candidates": 949,
   "n_calibration_positives": 227,
   "voter_c_feature_dim": 25,
-  "built_at": "2026-05-03T18:28:07.769274+00:00"
+  "built_at": "2026-05-04T06:50:15.656730+00:00",
+  "n_mined_negatives_used": 1132,
+  "mining_source_fixtures": [
+    "stage-shots",
+    "stage-shots-blacksmith-2026-stage1",
+    "stage-shots-blacksmith-2026-stage2",
+    "stage-shots-blacksmith-2026-stage3",
+    "stage-shots-blacksmith-2026-stage5",
+    "stage-shots-blacksmith-2026-stage6",
+    "stage-shots-blacksmith-2026-stage8",
+    "stage-shots-blacksmith-h5",
+    "stage-shots-tallmilan-2026-stage5",
+    "stage-shots-tallmilan-2026-stage6",
+    "stage-shots-tallmilan-stage2",
+    "stage-shots-tallmilan-stage7"
+  ],
+  "mining_cap_ratio": 5.0
 }

@@ -54,6 +54,13 @@ config.yaml
 # Cached PANN embeddings (regenerable via scripts/extract_audio_embeddings.py).
 tests/fixtures/.cache/
 
+# Wide-window fixture audio + sidecars produced by
+# scripts/extract_full_fixture_audio.py (issue #87 negative mining).
+# Regenerable from the source videos listed in _sources.yaml.
+tests/fixtures/full/*
+!tests/fixtures/full/_sources.yaml
+!tests/fixtures/full/.gitkeep
+
 # Waveform peaks caches written by splitsmith.waveform.ensure_peaks (#15).
 # Regenerable from the WAV; sidecar JSON next to the audio file.
 *.peaks-*.json
