@@ -1952,12 +1952,12 @@ function StagesSection({
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
-      {/* Cards carry a beep section + stage-move dropdown + multiple
-          video previews; squeezing them into 3 columns at the xl
-          breakpoint (1280px viewport, ~992px content width after the
-          240px sidebar) clipped controls. Push 2-col to lg and 3-col
-          to 2xl so each card has room to breathe. */}
-      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      {/* Each stage card now embeds inline thumbnail-as-poster <video>
+          players for the primary + each secondary plus role action
+          buttons; that needs ~700px of horizontal room before things
+          start clipping. Stay single-column up to 2xl, two-column only
+          above (typically 1536px+ viewports). */}
+      <div className="grid gap-3 2xl:grid-cols-2">
         {project.stages.map((s) => (
           <StageCard
             key={s.stage_number}
@@ -2756,7 +2756,7 @@ function RoleActions({
       {allStages.length > 1 ? (
         <select
           aria-label="Move to a different stage"
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          className="h-8 max-w-[8rem] truncate rounded-md border border-input bg-background px-2 text-xs"
           disabled={busy}
           value=""
           onChange={(e) => {
