@@ -3179,9 +3179,7 @@ def test_secondary_falls_back_to_cross_align(tmp_path: Path, monkeypatch) -> Non
     assert secondary["processed"]["beep"] is True
 
 
-def test_secondary_low_confidence_alignment_stays_soft_failed(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, monkeypatch) -> None:
     """A cross-align result below the confidence floor must not be promoted
     to ``beep_source='aligned'`` -- the secondary stays in the
     soft-failed state so the user gets the manual-align prompt instead
@@ -3250,9 +3248,7 @@ def test_secondary_soft_fail_clears_on_manual_override(tmp_path: Path, monkeypat
     )
     assert final["status"] == "succeeded"
 
-    proj = client.post(
-        f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 2.5}
-    ).json()
+    proj = client.post(f"/api/stages/1/videos/{sec_id}/beep", json={"beep_time": 2.5}).json()
     secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
     assert secondary["beep_time"] == pytest.approx(2.5)
     assert secondary["beep_source"] == "manual"

@@ -365,7 +365,7 @@ def build_artifacts(
     target_recall: float = 0.95,
     tolerance_ms: float = 75.0,
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
-    use_mined_negatives: bool = True,
+    use_mined_negatives: bool = False,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -450,9 +450,16 @@ def main() -> None:
         "positive count. Hardest survivors (highest Voter A confidence) win.",
     )
     p.add_argument(
-        "--no-mining",
+        "--with-mining",
         action="store_true",
-        help="Ignore tests/fixtures/.cache/_mined_negatives.npz even if present.",
+        help=(
+            "Append tests/fixtures/.cache/_mined_negatives.npz rows to voter "
+            "C's training set. OFF by default since the spectral cross-bay "
+            "features (#108) made mining a regression: mined region "
+            "negatives are easier to separate than the in-stage "
+            "cross_bay/echo FPs we actually care about, so the calibrated "
+            "threshold drops and FP count rises in threshold-only eval."
+        ),
     )
     args = p.parse_args()
     build_artifacts(
@@ -460,7 +467,7 @@ def main() -> None:
         target_recall=args.target_recall,
         tolerance_ms=args.tolerance_ms,
         mining_cap_ratio=args.mining_cap_ratio,
-        use_mined_negatives=not args.no_mining,
+        use_mined_negatives=args.with_mining,
     )
 
 

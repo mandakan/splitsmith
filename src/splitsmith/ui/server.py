@@ -1574,9 +1574,7 @@ def create_app(
             # same room means the loudness envelopes line up modulo a
             # constant time offset, even when the secondary's mic missed
             # the sustained 2-5 kHz tone the in-stream detector wants.
-            aligned = _try_align_secondary_to_primary(
-                proj, stg, video, handle
-            )
+            aligned = _try_align_secondary_to_primary(proj, stg, video, handle)
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
             video.beep_candidates = []
@@ -1595,9 +1593,7 @@ def create_app(
                 # the trim block below.
                 beep = aligned
             else:
-                handle.update(
-                    progress=0.55, message="No beep detected; align manually"
-                )
+                handle.update(progress=0.55, message="No beep detected; align manually")
                 video.beep_time = None
                 video.beep_source = "auto"
                 video.beep_alignment_confidence = None

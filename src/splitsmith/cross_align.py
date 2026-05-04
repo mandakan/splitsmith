@@ -148,8 +148,7 @@ def align_secondary_to_primary(
         # Need at least 1 s of template and a haystack longer than it for
         # the correlation to have somewhere to slide.
         raise CrossAlignError(
-            "secondary audio is too short for cross-correlation against the "
-            "primary landmark"
+            "secondary audio is too short for cross-correlation against the " "primary landmark"
         )
 
     # 'valid' mode: only positions where the template fits entirely inside
