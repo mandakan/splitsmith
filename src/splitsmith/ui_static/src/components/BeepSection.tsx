@@ -498,6 +498,8 @@ export function BeepSection({
       </div>
       {disagreement && crossAlignSuggestion != null ? (
         <AlignmentDisagreement
+          stageNumber={stageNumber}
+          videoId={videoId}
           inStreamTime={video.beep_time!}
           crossAlignTime={crossAlignSuggestion}
           deltaMs={deltaMs!}
@@ -825,6 +827,8 @@ function BeepWaveformPicker({
       </div>
       {proposal != null ? (
         <SnapProposal
+          stageNumber={stageNumber}
+          videoId={videoId}
           proposal={proposal}
           onAccept={acceptProposal}
           onDismiss={dismissProposal}
@@ -836,10 +840,14 @@ function BeepWaveformPicker({
 
 
 function SnapProposal({
+  stageNumber,
+  videoId,
   proposal,
   onAccept,
   onDismiss,
 }: {
+  stageNumber: number;
+  videoId: string;
   proposal: BeepSnapResult;
   onAccept: () => void;
   onDismiss: () => void;
@@ -847,32 +855,83 @@ function SnapProposal({
   const deltaMs = Math.round(proposal.delta * 1000);
   const sign = deltaMs >= 0 ? "+" : "";
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
-      <Sparkles className="size-3" />
-      <span className="font-mono tabular-nums">
-        Suggested: {proposal.snapped_time.toFixed(3)}s
-      </span>
-      <span className="text-muted-foreground">
-        ({sign}
-        {deltaMs} ms)
-      </span>
-      <span
-        className="text-muted-foreground"
-        title={`Silence-preference score: ${proposal.score.toFixed(1)}. Run peak amplitude: ${proposal.peak_amplitude.toFixed(2)}. Run duration: ${Math.round(proposal.duration_ms)} ms.`}
-      >
-        peak {proposal.peak_amplitude.toFixed(2)} &middot;{" "}
-        {Math.round(proposal.duration_ms)} ms
-      </span>
-      <div className="ml-auto flex gap-1">
-        <Button size="sm" variant="default" onClick={onAccept}>
-          <Check />
-          Accept
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
-          Dismiss
-        </Button>
+    <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <Sparkles className="size-3" />
+        <span className="font-mono tabular-nums">
+          Suggested: {proposal.snapped_time.toFixed(3)}s
+        </span>
+        <span className="text-muted-foreground">
+          ({sign}
+          {deltaMs} ms)
+        </span>
+        <span
+          className="text-muted-foreground"
+          title={`Silence-preference score: ${proposal.score.toFixed(1)}. Run peak amplitude: ${proposal.peak_amplitude.toFixed(2)}. Run duration: ${Math.round(proposal.duration_ms)} ms.`}
+        >
+          peak {proposal.peak_amplitude.toFixed(2)} &middot;{" "}
+          {Math.round(proposal.duration_ms)} ms
+        </span>
+        <div className="ml-auto flex gap-1">
+          <Button size="sm" variant="default" onClick={onAccept}>
+            <Check />
+            Accept
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
       </div>
+      <ProposalPreview
+        stageNumber={stageNumber}
+        videoId={videoId}
+        time={proposal.snapped_time}
+        ariaLabel={`Preview at suggested ${proposal.snapped_time.toFixed(3)}s`}
+      />
     </div>
+  );
+}
+
+/** A 1-second preview clip centered on a proposed beep time. Reuses the
+ *  same /api/.../beep-preview endpoint as the main BeepPreview, but
+ *  parameterized on an arbitrary time so it works for snap proposals,
+ *  cross-align suggestions, etc. Smaller than BeepPreview so it can sit
+ *  inside a confirmation banner without dominating the row. */
+function ProposalPreview({
+  stageNumber,
+  videoId,
+  time,
+  ariaLabel,
+}: {
+  stageNumber: number;
+  videoId: string;
+  time: number;
+  ariaLabel: string;
+}) {
+  const [errored, setErrored] = useState(false);
+  useEffect(() => {
+    setErrored(false);
+  }, [stageNumber, videoId, time]);
+  if (errored) {
+    return (
+      <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-muted-foreground">
+        <Sparkles className="size-3" />
+        Preview unavailable (no cached clip yet)
+      </div>
+    );
+  }
+  return (
+    <video
+      key={`${stageNumber}:${videoId}:${time.toFixed(3)}`}
+      src={api.videoBeepPreviewUrl(stageNumber, videoId, time)}
+      className="h-32 w-56 rounded-md border border-border/60 bg-black object-cover"
+      playsInline
+      controls
+      preload="metadata"
+      aria-label={ariaLabel}
+      title="1s preview around the proposed time -- press play to verify before accepting"
+      onError={() => setErrored(true)}
+    />
   );
 }
 
@@ -1122,6 +1181,8 @@ function BeepPreview({
  *  override -- in-stream has frequency-domain information cross-align
  *  doesn't -- but we offer the user a one-click swap. */
 function AlignmentDisagreement({
+  stageNumber,
+  videoId,
   inStreamTime,
   crossAlignTime,
   deltaMs,
@@ -1129,6 +1190,8 @@ function AlignmentDisagreement({
   onUseCrossAlign,
   busy,
 }: {
+  stageNumber: number;
+  videoId: string;
   inStreamTime: number;
   crossAlignTime: number;
   deltaMs: number;
@@ -1138,34 +1201,53 @@ function AlignmentDisagreement({
 }) {
   const sign = deltaMs >= 0 ? "+" : "";
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-xs">
-      <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
-      <span>
-        In-stream and cross-align disagree by{" "}
-        <span className="font-mono tabular-nums">
-          {sign}
-          {Math.round(deltaMs)} ms
+    <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
+        <span>
+          In-stream and cross-align disagree by{" "}
+          <span className="font-mono tabular-nums">
+            {sign}
+            {Math.round(deltaMs)} ms
+          </span>
+          . Could be a steel-strike mistaken for the buzzer.
         </span>
-        . Could be a steel-strike mistaken for the buzzer.
-      </span>
-      <span
-        className="text-muted-foreground"
-        title={`In-stream: ${inStreamTime.toFixed(3)}s. Cross-align: ${crossAlignTime.toFixed(3)}s${
-          confidence != null ? ` (conf ${confidence.toFixed(2)})` : ""
-        }.`}
-      >
-        in-stream <span className="font-mono tabular-nums">{inStreamTime.toFixed(3)}s</span> ·
-        cross-align <span className="font-mono tabular-nums">{crossAlignTime.toFixed(3)}s</span>
-      </span>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => void onUseCrossAlign()}
-        disabled={busy}
-        className="ml-auto"
-      >
-        Use cross-align
-      </Button>
+        <span
+          className="text-muted-foreground"
+          title={`In-stream: ${inStreamTime.toFixed(3)}s. Cross-align: ${crossAlignTime.toFixed(3)}s${
+            confidence != null ? ` (conf ${confidence.toFixed(2)})` : ""
+          }.`}
+        >
+          in-stream <span className="font-mono tabular-nums">{inStreamTime.toFixed(3)}s</span> ·
+          cross-align <span className="font-mono tabular-nums">{crossAlignTime.toFixed(3)}s</span>
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void onUseCrossAlign()}
+          disabled={busy}
+          className="ml-auto"
+        >
+          Use cross-align
+        </Button>
+      </div>
+      {/* Side-by-side previews so the user can A/B before swapping. The
+       *  current beep_time preview already lives below this banner via
+       *  BeepPreview; rendering the cross-align candidate here gives the
+       *  user the missing half of the comparison. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] text-muted-foreground">
+            Cross-align preview ({crossAlignTime.toFixed(3)}s)
+          </span>
+          <ProposalPreview
+            stageNumber={stageNumber}
+            videoId={videoId}
+            time={crossAlignTime}
+            ariaLabel={`Cross-align preview at ${crossAlignTime.toFixed(3)}s`}
+          />
+        </div>
+      </div>
     </div>
   );
 }
