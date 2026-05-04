@@ -21,6 +21,7 @@ import {
   Crosshair,
   FileJson,
   FolderInput,
+  FolderOpen,
   HardDrive,
   Monitor,
   PlayCircle,
@@ -1849,6 +1850,19 @@ function UnassignedVideoCard({
             <Button
               size="sm"
               variant="ghost"
+              onClick={() => {
+                void api.revealVideo(video.path).catch(() => {
+                  /* best effort */
+                });
+              }}
+              title="Reveal the source file in the OS file manager"
+              aria-label={`Reveal ${video.path} in file manager`}
+            >
+              <FolderOpen className="size-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               disabled={busy}
               onClick={() => onRemove(video, null)}
               title="Remove from project"
@@ -2081,11 +2095,12 @@ function StageCard({
           <p className="text-sm text-muted-foreground">No videos assigned.</p>
         ) : null}
         {primary ? (
-          <>
+          <div className="space-y-2 rounded-md border border-border bg-muted/10 p-2">
             <VideoRow
               video={primary}
               stage={stage}
               setDragging={setDragging}
+              bare
               badge={
                 <Badge
                   variant={hasConflict ? "statusWarning" : "statusInProgress"}
@@ -2109,20 +2124,25 @@ function StageCard({
             <BeepSection
               stageNumber={stage.stage_number}
               video={primary}
+              bare
               busy={busy}
               setBusy={setBusy}
               setError={setError}
               onProjectUpdate={onProjectUpdate}
             />
-          </>
+          </div>
         ) : null}
-        {secondaries.map((v) => (
-          <div key={v.path} className="space-y-2">
+        {secondaries.map((v, idx) => (
+          <div
+            key={v.path}
+            className="space-y-2 rounded-md border border-border bg-muted/10 p-2"
+          >
             <VideoRow
               video={v}
               stage={stage}
               setDragging={setDragging}
-              badge={<Badge variant="secondary">Secondary</Badge>}
+              bare
+              badge={<Badge variant="secondary">Secondary {idx + 1}</Badge>}
               actions={
                 <RoleActions
                   video={v}
@@ -2138,6 +2158,7 @@ function StageCard({
             <BeepSection
               stageNumber={stage.stage_number}
               video={v}
+              bare
               busy={busy}
               setBusy={setBusy}
               setError={setError}
@@ -2151,6 +2172,7 @@ function StageCard({
             video={v}
             stage={stage}
             setDragging={setDragging}
+            inlinePlayer={false}
             badge={
               <Badge variant="outline" className="gap-1 opacity-70">
                 <XCircle className="size-3" /> Ignored
@@ -2180,36 +2202,93 @@ function VideoRow({
   setDragging,
   badge,
   actions,
+  inlinePlayer = true,
+  bare = false,
 }: {
   video: StageVideo;
   stage: StageEntry | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
   badge: React.ReactNode;
   actions: React.ReactNode;
+  // Render an inline thumbnail-as-poster <video> on the row. Disabled for
+  // ignored videos because the row is collapsed visual-noise by design.
+  inlinePlayer?: boolean;
+  // Drop the row's own border/background when nested inside a video panel
+  // so the panel is the single visual frame for "this video + its beep".
+  bare?: boolean;
 }) {
+  const [meta, setMeta] = useState<FsProbeResponse | null>(null);
+
+  useEffect(() => {
+    if (!inlinePlayer) return;
+    let cancelled = false;
+    api
+      .probeFile(video.path)
+      .then((r) => {
+        if (!cancelled) setMeta(r);
+      })
+      .catch(() => {
+        // Best effort; the <video> element still renders without a poster.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [video.path, inlinePlayer]);
+
+  const reveal = async () => {
+    try {
+      await api.revealVideo(video.path);
+    } catch {
+      // Best effort; don't block the user on a Finder hiccup.
+    }
+  };
+
   return (
     <DraggableVideoRow
       video={video}
       stage={stage}
       setDragging={setDragging}
-      className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5"
+      className={cn(
+        !bare && "rounded-md border border-border/60 bg-muted/20 px-2 py-1.5",
+      )}
+      hoverPreview={false}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          {badge}
-          <span className="truncate font-mono" title={video.path}>
-            {video.path.split("/").pop()}
-          </span>
-          {video.processed.beep ? (
-            <span
-              className="text-muted-foreground"
-              title={`beep at ${video.beep_time?.toFixed(3) ?? "?"}s`}
-            >
-              <CheckCircle2 className="size-3.5" />
+      <div className="flex flex-wrap items-center gap-2">
+        {inlinePlayer ? (
+          <div className="relative w-32 shrink-0 overflow-hidden rounded bg-black/40 aspect-video">
+            <video
+              src={api.videoStreamUrl(video.path)}
+              poster={meta?.thumbnail_url ?? undefined}
+              controls
+              preload="metadata"
+              className="h-full w-full"
+              // Stop drag events bubbling so the user can scrub without
+              // accidentally dragging the row.
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 text-xs">
+            {badge}
+            <span className="truncate font-mono" title={video.path}>
+              {video.path.split("/").pop()}
             </span>
-          ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void reveal()}
+              title="Reveal the source file in the OS file manager"
+              aria-label={`Reveal ${video.path} in file manager`}
+            >
+              <FolderOpen className="size-3.5" />
+            </Button>
+            {actions}
+          </div>
         </div>
-        <div className="flex gap-1">{actions}</div>
       </div>
     </DraggableVideoRow>
   );
@@ -2828,16 +2907,50 @@ function StatusGlyph({ stage }: { stage: StageEntry }) {
       </Badge>
     );
   }
-  if (stage.videos.find((v) => v.role === "primary")) {
+  const primary = stage.videos.find((v) => v.role === "primary");
+  if (!primary) {
     return (
-      <Badge variant="statusComplete" className="gap-1">
-        <CheckCircle2 className="size-3" /> Ready
+      <Badge variant="statusWarning" className="gap-1">
+        ▲ No primary
+      </Badge>
+    );
+  }
+  if (primary.beep_time == null) {
+    return (
+      <Badge variant="statusInProgress" className="gap-1">
+        ○ Detect beep
+      </Badge>
+    );
+  }
+  if (!primary.beep_reviewed) {
+    return (
+      <Badge variant="statusWarning" className="gap-1">
+        ▲ Beep review
+      </Badge>
+    );
+  }
+  // Primary is locked in -- secondaries are nice-to-have for multi-cam
+  // sync but the stage is auditable + exportable on the primary alone.
+  const pendingSecondaries = stage.videos.filter(
+    (v) => v.role === "secondary" && (v.beep_time == null || !v.beep_reviewed),
+  ).length;
+  if (pendingSecondaries > 0) {
+    return (
+      <Badge
+        variant="statusComplete"
+        className="gap-1"
+        title={`Ready to audit. ${pendingSecondaries} secondary cam${
+          pendingSecondaries === 1 ? "" : "s"
+        } still need beep alignment to sync with the primary timeline.`}
+      >
+        <CheckCircle2 className="size-3" /> Ready · {pendingSecondaries} cam
+        pending
       </Badge>
     );
   }
   return (
-    <Badge variant="statusWarning" className="gap-1">
-      ▲ No primary
+    <Badge variant="statusComplete" className="gap-1">
+      <CheckCircle2 className="size-3" /> Ready
     </Badge>
   );
 }

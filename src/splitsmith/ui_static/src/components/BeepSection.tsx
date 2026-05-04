@@ -43,6 +43,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Waveform } from "@/components/Waveform";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   api,
@@ -66,6 +67,9 @@ interface Props {
   onProjectUpdate: (next: MatchProject) => void;
   setBusy: (b: boolean) => void;
   setError: (msg: string | null) => void;
+  /** Drop the section's own border/background when nested inside a video
+   *  panel that already provides the single visual frame. */
+  bare?: boolean;
 }
 
 export function BeepSection({
@@ -75,16 +79,25 @@ export function BeepSection({
   onProjectUpdate,
   setBusy,
   setError,
+  bare = false,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(video.beep_time?.toFixed(3) ?? "");
   const [jobStatus, setJobStatus] = useState<Job | null>(null);
+  // Auto-collapse the section once the beep is reviewed so finished cards
+  // don't dominate the stage view; the user can click the chevron to
+  // re-open. Re-collapses when "Mark reviewed" is clicked mid-session.
+  const [collapsed, setCollapsed] = useState(video.beep_reviewed);
   const isPrimary = video.role === "primary";
   const videoId = video.video_id;
 
   useEffect(() => {
     setDraft(video.beep_time?.toFixed(3) ?? "");
   }, [video.beep_time]);
+
+  useEffect(() => {
+    if (video.beep_reviewed) setCollapsed(true);
+  }, [video.beep_reviewed]);
 
   // After a page reload, an in-flight detect-beep job is still running on
   // the server. Surface it instead of letting the user click "Detect beep"
@@ -252,7 +265,12 @@ export function BeepSection({
 
   if (!video.beep_time) {
     return (
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs",
+          !bare && "rounded-md border border-border/60 bg-muted/20",
+        )}
+      >
         <Badge variant="statusNotStarted" className="gap-1">
           ○ No beep yet
         </Badge>
@@ -322,8 +340,42 @@ export function BeepSection({
     }
   };
 
+  if (collapsed) {
+    return (
+      <div
+        className={cn(
+          "px-2 py-1.5 text-xs",
+          !bare && "rounded-md border border-border/60 bg-muted/20",
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={pillVariant} className="gap-1">
+            <Check className="size-3" />
+            {pillLabel}
+          </Badge>
+          <span className="font-mono tabular-nums">{video.beep_time.toFixed(3)}s</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            onClick={() => setCollapsed(false)}
+            title="Show beep candidates and preview"
+          >
+            <ChevronDown />
+            Expand
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
+    <div
+      className={cn(
+        "space-y-2 px-2 py-1.5 text-xs",
+        !bare && "rounded-md border border-border/60 bg-muted/20",
+      )}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={pillVariant} className="gap-1">
           <Check className="size-3" />
@@ -376,6 +428,17 @@ export function BeepSection({
           >
             <Trash2 />
           </Button>
+          {reviewed ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setCollapsed(true)}
+              title="Collapse this card; the beep is reviewed and stays applied"
+              aria-label="Collapse beep card"
+            >
+              <ChevronRight />
+            </Button>
+          ) : null}
         </div>
       </div>
       <BeepCandidates
