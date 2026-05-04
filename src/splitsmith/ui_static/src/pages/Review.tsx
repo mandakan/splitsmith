@@ -101,6 +101,13 @@ export function Review() {
 
   // Single-element playback (no multi-video). Audio drives time when
   // there's no video; the video drives when present.
+  //
+  // Coordinate-system note: the trimmed sibling WAV has its origin at
+  // ``fixture_window_in_source[0]`` of the source video. The waveform
+  // and all audit markers live in that trimmed coordinate space. When a
+  // video is bound, we offset reads / writes of ``video.currentTime``
+  // by ``videoOffset`` so scrubbing the waveform at audio_t lands the
+  // video at audio_t + offset (and vice versa).
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -322,18 +329,40 @@ export function Review() {
   const playbackEl = (): HTMLMediaElement | null =>
     videoRef.current ?? audioRef.current;
 
-  const handleScrub = useCallback((t: number) => {
-    const el = playbackEl();
-    if (el) el.currentTime = t;
-    setCurrentTime(t);
-    loopAnchorRef.current = t;
-  }, []);
+  // Trimmed-audio-time → media-element-time mapping. The video element
+  // plays the full untrimmed source so its time origin is the source's
+  // time origin, while the waveform / markers live in the trimmed
+  // window's local time. Audio element is the trimmed WAV, no offset.
+  const elapsedFromMedia = useCallback(
+    (mediaT: number, el: HTMLMediaElement | null) =>
+      el && el === videoRef.current && audit?.fixture_window_in_source
+        ? mediaT - audit.fixture_window_in_source[0]
+        : mediaT,
+    [audit],
+  );
+  const mediaFromElapsed = useCallback(
+    (audioT: number, el: HTMLMediaElement | null) =>
+      el && el === videoRef.current && audit?.fixture_window_in_source
+        ? audioT + audit.fixture_window_in_source[0]
+        : audioT,
+    [audit],
+  );
+
+  const handleScrub = useCallback(
+    (t: number) => {
+      const el = playbackEl();
+      if (el) el.currentTime = mediaFromElapsed(t, el);
+      setCurrentTime(t);
+      loopAnchorRef.current = t;
+    },
+    [mediaFromElapsed],
+  );
 
   const togglePlay = useCallback(() => {
     const el = playbackEl();
     if (!el) return;
     if (el.paused) {
-      loopAnchorRef.current = el.currentTime;
+      loopAnchorRef.current = elapsedFromMedia(el.currentTime, el);
       void el.play();
       setIsPlaying(true);
     } else {
@@ -341,23 +370,24 @@ export function Review() {
       setIsPlaying(false);
       if (loopMode && loopAnchorRef.current != null) {
         const target = loopAnchorRef.current;
-        el.currentTime = target;
+        el.currentTime = mediaFromElapsed(target, el);
         setCurrentTime(target);
       }
     }
-  }, [loopMode]);
+  }, [loopMode, elapsedFromMedia, mediaFromElapsed]);
 
-  // rAF loop -- pulls currentTime out of whichever element is playing.
+  // rAF loop -- pulls currentTime out of whichever element is playing
+  // and translates it back into the trimmed coordinate space.
   useEffect(() => {
     if (!isPlaying) return;
     const tick = () => {
       const el = playbackEl();
       if (el) {
-        const t = el.currentTime;
+        const t = elapsedFromMedia(el.currentTime, el);
         const dur = peaks?.duration ?? null;
         if (loopMode && dur != null && t >= dur - 0.05) {
           const target = loopAnchorRef.current ?? 0;
-          el.currentTime = target;
+          el.currentTime = mediaFromElapsed(target, el);
           setCurrentTime(target);
         } else {
           setCurrentTime(t);
@@ -369,7 +399,7 @@ export function Review() {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, loopMode, peaks]);
+  }, [isPlaying, loopMode, peaks, elapsedFromMedia, mediaFromElapsed]);
 
   const stepShot = useCallback(
     (delta: number) => {
@@ -566,8 +596,9 @@ export function Review() {
           if (!el) return;
           const dir = e.key === "ArrowRight" ? 1 : -1;
           const step = e.shiftKey ? 0.025 : 0.25;
-          const dur = peaks?.duration ?? el.currentTime + step;
-          handleScrub(Math.min(dur, Math.max(0, el.currentTime + dir * step)));
+          const audioT = elapsedFromMedia(el.currentTime, el);
+          const dur = peaks?.duration ?? audioT + step;
+          handleScrub(Math.min(dur, Math.max(0, audioT + dir * step)));
         }
       }
     };
@@ -587,6 +618,7 @@ export function Review() {
     markers,
     keptShots,
     currentShotIndex,
+    elapsedFromMedia,
   ]);
 
   // ---- Render ------------------------------------------------------------
