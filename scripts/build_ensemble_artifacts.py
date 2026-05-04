@@ -44,6 +44,7 @@ from sklearn.model_selection import StratifiedKFold
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
+from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
 DEFAULT_FIXTURES = [
@@ -140,8 +141,11 @@ def _build_universe(fixtures: list[str], tolerance_ms: float):
         times = np.array(cand_t, dtype=np.float64)
         confidences = np.array([s.confidence for s in shots], dtype=np.float64)
         peak_amps = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
+        tta_agreement = compute_tta_agreement(
+            audio, sr, truth["beep_time"], truth["stage_time_seconds"], times
+        )
         hand = feat.compute_hand_features(
-            audio, sr, times, truth["beep_time"], confidences, peak_amps
+            audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
         )
 
         for i, shot in enumerate(shots):
@@ -287,7 +291,15 @@ def _load_mined_negatives(
         cand_t = np.array(times[kept_mined_idx], dtype=np.float64)
         cand_conf = np.array(confidences[kept_mined_idx], dtype=np.float64)
         cand_peak = np.array(peaks[kept_mined_idx], dtype=np.float64)
-        hand = feat.compute_hand_features(audio, sr, cand_t, beep_in_full, cand_conf, cand_peak)
+        # Mined negatives sit outside the stage window, where detect_shots
+        # doesn't run -- so we can't recover a real TTA agreement count for
+        # them. Pad with 1.0 (the "original-only" agreement floor). Mining
+        # is OFF by default in production calibration; if it ever turns
+        # back on this needs a full-fixture detector pass.
+        tta_agreement = np.ones(len(cand_t), dtype=np.float64)
+        hand = feat.compute_hand_features(
+            audio, sr, cand_t, beep_in_full, cand_conf, cand_peak, tta_agreement
+        )
 
         for k, ci in enumerate(kept_cache_idx):
             rows.append(

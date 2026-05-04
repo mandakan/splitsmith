@@ -104,7 +104,14 @@ def build_in_stage_rows(fix: str) -> list[dict]:
     times = np.array(cand_t, dtype=np.float64)
     confidences = np.array([s.confidence for s in shots], dtype=np.float64)
     peak_amps = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
-    hand = feat.compute_hand_features(audio, sr, times, truth["beep_time"], confidences, peak_amps)
+    from splitsmith.ensemble.tta import compute_tta_agreement
+
+    tta_arr = compute_tta_agreement(
+        audio, sr, truth["beep_time"], truth["stage_time_seconds"], times
+    )
+    hand = feat.compute_hand_features(
+        audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_arr
+    )
 
     rows: list[dict] = []
     for i, shot in enumerate(shots):
@@ -159,7 +166,12 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
     cand_t = np.array(times[indices], dtype=np.float64)
     cand_conf = np.array(confidences[indices], dtype=np.float64)
     cand_peak = np.array(peaks[indices], dtype=np.float64)
-    hand = feat.compute_hand_features(audio, sr, cand_t, beep_in_full, cand_conf, cand_peak)
+    # Mined negatives sit outside any stage window; TTA agreement isn't
+    # meaningful here, so use the 1.0 floor (matches build_ensemble_artifacts).
+    tta_arr = np.ones(len(cand_t), dtype=np.float64)
+    hand = feat.compute_hand_features(
+        audio, sr, cand_t, beep_in_full, cand_conf, cand_peak, tta_arr
+    )
 
     rows: list[dict] = []
     for k, mi in enumerate(indices):

@@ -5,15 +5,22 @@ Listed roughly in order of how much headroom they represent. Each entry
 documents the *physical* problem so we can pick the right feature/algorithm
 later instead of throwing more GBDT at it.
 
-## Current state (2026-05-03, 12 fixtures, 227 positives)
+## Current state (2026-05-04, 12 fixtures, 225 positives, after #92 TTA)
 
 | Stage | Recall | Precision | Notes |
 |---|---|---|---|
-| Voter C alone, global threshold (SKF) | 95.2 % | **76.9 %** | StratifiedKFold, with AGC features (#88) |
-| Voter C alone, global threshold (LOFO) | 95.2 % | **72.5 %** | cross-fixture honest, with AGC features (#88) |
-| Voter C alone, **adaptive (real K)** | 89.0 % | **88.2 %** | K = stage_rounds.expected (12/12 fixtures); recall hit from makeups |
-| 4-of-4 ensemble, **adaptive (real K)** | 89.0 % | **88.6 %** | |
-| 3-of-4 consensus, global | 100 % | 30.1 % | default UI filter |
+| Voter C alone, global threshold (SKF) | 95.1 % | **82.6 %** | StratifiedKFold, with AGC (#88) + TTA (#92) features |
+| Voter C alone, global threshold (LOFO) | 95.1 % | **78.1 %** | cross-fixture honest, with AGC (#88) + TTA (#92) features |
+| Voter C alone, **adaptive (real K)** | 91.1 % | **89.5 %** | K = stage_rounds.expected (12/12 fixtures) |
+| 4-of-4 ensemble (SKF) | 91.1 % | **90.7 %** | adaptive K disabled here -- pure consensus |
+| 3-of-4 consensus, global | 100 % | 31.8 % | default UI filter |
+
+Pre-#92 baseline (no TTA feature) for reference: voter C LOFO 72.5 %,
+adaptive (real K) 89.0 % / 88.2 %, 4-of-4 adaptive 89.0 % / 88.6 %.
+TTA lifts LOFO precision by **+5.6 pp** at the same recall and lifts the
+adaptive ensemble by **+2.1 pp recall AND +1.3 pp precision** -- the
+"keep precision, gain recall" path the user asked for. The cost is 4
+extra ``detect_shots`` passes per fixture (negligible vs. CLAP/PANN).
 
 Pre-#88 baseline (no AGC features) for reference: SKF 78.5 %, LOFO 71.5 %.
 The AGC features lift LOFO by +1.0 pp on average and don't move the

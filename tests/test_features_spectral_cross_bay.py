@@ -72,10 +72,19 @@ def test_compute_hand_features_emits_expected_dim_and_finite_values() -> None:
     times = np.array([1.0, 1.2])
     amps = np.array([0.6, 0.15])
     confs = np.array([0.9, 0.4])
+    tta = np.array([3.0, 1.0])
     out = compute_hand_features(
-        audio, sr, times, beep_time=0.0, confidences=confs, peak_amplitudes=amps
+        audio,
+        sr,
+        times,
+        beep_time=0.0,
+        confidences=confs,
+        peak_amplitudes=amps,
+        tta_agreement=tta,
     )
     assert out.shape == (2, HAND_FEATURE_DIM)
     assert np.all(np.isfinite(out))
-    # The two new columns are the last two in the hand-feature block.
-    assert out[:, -2:].shape == (2, 2)
+    # The TTA column is the last one; the two spectral columns sit just before it.
+    assert out[0, -1] == 3.0
+    assert out[1, -1] == 1.0
+    assert out[:, -3:-1].shape == (2, 2)

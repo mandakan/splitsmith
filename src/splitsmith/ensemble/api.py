@@ -19,6 +19,7 @@ from ..shot_detect import detect_shots
 from . import features as feat
 from . import voters
 from .calibration import EnsembleCalibration, load_calibration, load_voter_c_model
+from .tta import compute_tta_agreement
 
 
 class EnsembleConfig(BaseModel):
@@ -171,7 +172,10 @@ def detect_shots_ensemble(
     ms_after_beep = np.array([round(s.time_from_beep * 1000) for s in shots], dtype=np.int64)
 
     # Per-voter signals.
-    hand = feat.compute_hand_features(audio, sample_rate, times, beep_time, confidences, peak_amps)
+    tta_agreement = compute_tta_agreement(audio, sample_rate, beep_time, stage_time, times)
+    hand = feat.compute_hand_features(
+        audio, sample_rate, times, beep_time, confidences, peak_amps, tta_agreement
+    )
     clap_sims = feat.compute_clap_similarities(audio, sample_rate, times, runtime.clap)
     clap_diff = feat.clap_diff_from_similarities(clap_sims)
     gunshot_prob = feat.compute_pann_gunshot_probs(audio, sample_rate, times, runtime.pann)
