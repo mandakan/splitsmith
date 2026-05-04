@@ -58,10 +58,14 @@ def test_vote_c_global_threshold() -> None:
 
 
 def test_vote_c_adaptive_top_k_plus_slack() -> None:
-    """K=5 with default slack_min=3 -> keep top-8 candidates by GBDT prob."""
+    """K=5 with default slack_min=3 -> keep top-8 candidates by GBDT prob.
+
+    Default ``slack_frac=0.25`` (issue #103) → ``max(3, 5*0.25=1.25)=3``,
+    so K + slack = 8. Wider K would tip into the fractional regime.
+    """
     probs = np.linspace(0.0, 1.0, 20)
     out = vote_c_adaptive(probs, expected_rounds=5)
-    assert out.sum() == 8  # 5 + max(3, 5*0.10=1) = 8
+    assert out.sum() == 8
     # The top-8 by prob are indices 12..19.
     assert np.all(out[-8:] == 1)
     assert np.all(out[:-8] == 0)
@@ -104,6 +108,26 @@ def test_consensus_keep_combines_votes_with_boost() -> None:
     out = consensus_keep(vote_total, boost, threshold=3)
     # idx 0: 2+1=3 -> keep ; idx 1: 3 -> keep; idx 2: 1 -> drop; idx 3: 4 -> keep
     assert out.tolist() == [True, True, False, True]
+
+
+def test_consensus_keep_c_veto_drops_no_c_candidates() -> None:
+    """Issue #103: with ``c_required=True``, a candidate that meets the
+    consensus threshold via A+B+D is still dropped if voter C said no."""
+    vote_total = np.array([3, 3, 4])
+    boost = np.array([0.0, 0.0, 0.0])
+    vote_c = np.array([0, 1, 0])
+    out = consensus_keep(vote_total, boost, threshold=3, vote_c=vote_c, c_required=True)
+    # idx 0: total=3 but C=0 -> drop
+    # idx 1: total=3, C=1     -> keep
+    # idx 2: total=4 but C=0  -> drop
+    assert out.tolist() == [False, True, False]
+
+
+def test_consensus_keep_c_required_without_vote_c_raises() -> None:
+    vote_total = np.array([3])
+    boost = np.array([0.0])
+    with pytest.raises(ValueError, match="c_required=True"):
+        consensus_keep(vote_total, boost, threshold=3, c_required=True)
 
 
 def test_clap_diff_subtracts_not_shot_mean_from_shot_mean() -> None:
