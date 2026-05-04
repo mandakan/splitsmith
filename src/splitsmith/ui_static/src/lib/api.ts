@@ -271,6 +271,15 @@ export interface FsEntry {
 export interface FsProbeResponse {
   duration: number | null;
   thumbnail_url: string | null;
+  /** Pixel width / height / codec name from ffprobe (cached). Null when the
+   *  on-disk probe cache is empty or the source could not be probed -- the
+   *  unassigned-tray UI shows "—" rather than guessing. */
+  width: number | null;
+  height: number | null;
+  codec: string | null;
+  /** ``stat().st_size`` of the source file, in bytes. Null when the file
+   *  could not be stat'd (broken symlink etc.). */
+  size_bytes: number | null;
 }
 
 /** ``video_match.classify_video_against_stages`` output. ``contested`` ==

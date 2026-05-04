@@ -17,10 +17,12 @@ import {
   AlertCircle,
   CalendarDays,
   CheckCircle2,
+  Clock,
   Crosshair,
   FileJson,
   FolderInput,
   HardDrive,
+  Monitor,
   PlayCircle,
   RefreshCw,
   Search,
@@ -28,6 +30,7 @@ import {
   User,
   Video as VideoIcon,
   WifiOff,
+  X,
   XCircle,
 } from "lucide-react";
 
@@ -47,6 +50,7 @@ import {
   ApiError,
   api,
   asScoreboardError,
+  type FsProbeResponse,
   type MatchAnalysis,
   type MatchProject,
   type NonEmptyOldDirsDetail,
@@ -476,6 +480,7 @@ export function Ingest() {
           <ReadyBanner project={project} analysis={analysis} />
           <UnassignedSection
             project={project}
+            analysis={analysis}
             busy={busy}
             dragging={dragging}
             setDragging={setDragging}
@@ -1562,6 +1567,7 @@ function shortPath(p: string): string {
 
 function UnassignedSection({
   project,
+  analysis,
   busy,
   dragging,
   setDragging,
@@ -1569,6 +1575,7 @@ function UnassignedSection({
   onRemove,
 }: {
   project: MatchProject;
+  analysis: MatchAnalysis | null;
   busy: boolean;
   dragging: { video: StageVideo; stage: StageEntry | null } | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
@@ -1581,6 +1588,14 @@ function UnassignedSection({
   const canAccept = dragging !== null && dragging.stage !== null;
 
   if (project.unassigned_videos.length === 0 && !canAccept) return null;
+
+  // Build a quick lookup so each card can pull its own match-analysis entry
+  // without re-scanning the array per render.
+  const analysisByPath = useMemo(() => {
+    const out = new Map<string, VideoMatchAnalysisEntry>();
+    for (const e of analysis?.videos ?? []) out.set(e.path, e);
+    return out;
+  }, [analysis]);
 
   return (
     <Card
@@ -1611,9 +1626,10 @@ function UnassignedSection({
           Unassigned videos · {project.unassigned_videos.length}
         </CardTitle>
         <CardDescription>
-          Drag onto a stage card to assign, or back here to unassign. Trash
-          removes the video from the project (cache is cleared; the original
-          source on USB / external storage is never touched).
+          Hover any thumbnail for a quick still, or click Preview to scrub the
+          actual clip. Drag a row onto a stage card to assign, or back here to
+          unassign. Trash removes the video from the project (cache is cleared;
+          the original source on USB / external storage is never touched).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -1623,48 +1639,307 @@ function UnassignedSection({
           </p>
         ) : null}
         {project.unassigned_videos.map((v) => (
-          <DraggableVideoRow
+          <UnassignedVideoCard
             key={v.path}
             video={v}
-            stage={null}
+            project={project}
+            matchEntry={analysisByPath.get(v.path) ?? null}
+            busy={busy}
             setDragging={setDragging}
-            className="rounded-md border border-border bg-muted/40 px-3 py-2"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
-                <VideoIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate" title={v.path}>{v.path}</span>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {project.stages.map((s) => (
-                  <Button
-                    key={s.stage_number}
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => onAssign(v.path, s.stage_number, "secondary")}
-                    title={`Assign to stage ${s.stage_number}: ${s.stage_name}`}
-                  >
-                    → S{s.stage_number}
-                  </Button>
-                ))}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => onRemove(v, null)}
-                  title="Remove from project"
-                  aria-label={`Remove ${v.path}`}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            </div>
-          </DraggableVideoRow>
+            onAssign={onAssign}
+            onRemove={onRemove}
+          />
         ))}
       </CardContent>
     </Card>
   );
+}
+
+/** Rich row for the unassigned tray. Surfaces enough metadata (recording
+ *  time, duration, resolution, codec, size, suggested stage) that the user
+ *  can identify which clip is which without opening it in another player,
+ *  and offers an inline preview that scrubs the real video. */
+function UnassignedVideoCard({
+  video,
+  project,
+  matchEntry,
+  busy,
+  setDragging,
+  onAssign,
+  onRemove,
+}: {
+  video: StageVideo;
+  project: MatchProject;
+  matchEntry: VideoMatchAnalysisEntry | null;
+  busy: boolean;
+  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
+  onAssign: (videoPath: string, stage: number | null, role: VideoRole) => void;
+  onRemove: (video: StageVideo, stage: StageEntry | null) => void;
+}) {
+  const [meta, setMeta] = useState<FsProbeResponse | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .probeFile(video.path)
+      .then((r) => {
+        if (!cancelled) setMeta(r);
+      })
+      .catch(() => {
+        // Best effort; row still renders without metadata.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [video.path]);
+
+  const filename = video.path.split("/").pop() ?? video.path;
+  const parentDir = video.path.slice(0, video.path.length - filename.length).replace(/\/$/, "");
+
+  const suggestedStages = matchEntry?.stage_numbers ?? [];
+  const classification = matchEntry?.classification ?? null;
+  const suggestedSet = new Set(suggestedStages);
+  // Sort: suggested stages first (in suggestion order), then the rest in
+  // ascending stage number, so the eye lands on the most likely target.
+  const stagesOrdered = [...project.stages].sort((a, b) => {
+    const ai = suggestedStages.indexOf(a.stage_number);
+    const bi = suggestedStages.indexOf(b.stage_number);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.stage_number - b.stage_number;
+  });
+
+  return (
+    <DraggableVideoRow
+      video={video}
+      stage={null}
+      setDragging={setDragging}
+      className="rounded-md border border-border bg-muted/40 p-3"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row">
+        {/* Thumbnail / inline preview */}
+        <div className="relative w-full shrink-0 overflow-hidden rounded bg-black/40 sm:w-48 aspect-video">
+          {showPreview ? (
+            <>
+              <video
+                src={api.videoStreamUrl(video.path)}
+                controls
+                autoPlay
+                preload="metadata"
+                className="h-full w-full"
+              />
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowPreview(false);
+                }}
+                className="absolute right-1 top-1 rounded bg-black/70 p-1 text-white hover:bg-black/90"
+                title="Close preview"
+                aria-label="Close preview"
+              >
+                <X className="size-3.5" />
+              </button>
+            </>
+          ) : meta?.thumbnail_url ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPreview(true);
+              }}
+              className="group relative block h-full w-full"
+              title="Click to play preview"
+              aria-label="Play preview"
+            >
+              <img
+                src={meta.thumbnail_url}
+                alt={`${filename} thumbnail`}
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
+                <PlayCircle className="size-10 text-white drop-shadow" />
+              </span>
+            </button>
+          ) : (
+            <Skeleton className="h-full w-full rounded-none" />
+          )}
+        </div>
+
+        {/* Metadata */}
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold" title={video.path}>
+              {filename}
+            </div>
+            {parentDir ? (
+              <div
+                className="truncate font-mono text-xs text-muted-foreground"
+                title={parentDir}
+              >
+                {parentDir}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {video.match_timestamp ? (
+              <span
+                className="inline-flex items-center gap-1"
+                title={`Recorded ${video.match_timestamp}`}
+              >
+                <Clock className="size-3.5" />
+                {formatLocalTimestamp(video.match_timestamp)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-amber-500">
+                <Clock className="size-3.5" />
+                no timestamp
+              </span>
+            )}
+            {meta?.duration != null ? (
+              <span className="inline-flex items-center gap-1">
+                <PlayCircle className="size-3.5" />
+                {formatDurationShort(meta.duration)}
+              </span>
+            ) : null}
+            {meta?.width != null && meta?.height != null ? (
+              <span className="inline-flex items-center gap-1">
+                <Monitor className="size-3.5" />
+                {meta.width}×{meta.height}
+              </span>
+            ) : null}
+            {meta?.codec ? (
+              <span className="font-mono uppercase">{meta.codec}</span>
+            ) : null}
+            {meta?.size_bytes != null ? (
+              <span className="inline-flex items-center gap-1">
+                <HardDrive className="size-3.5" />
+                {formatBytesShort(meta.size_bytes)}
+              </span>
+            ) : null}
+          </div>
+
+          {/* Match-window suggestion */}
+          {suggestedStages.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground">Match:</span>
+              {suggestedStages.map((n) => {
+                const stage = project.stages.find((s) => s.stage_number === n);
+                return (
+                  <Badge
+                    key={n}
+                    variant="statusInProgress"
+                    className="cursor-default"
+                    title={
+                      stage
+                        ? `Timestamp falls inside Stage ${n} (${stage.stage_name}) window`
+                        : `Stage ${n}`
+                    }
+                  >
+                    S{n}
+                    {stage ? ` · ${stage.stage_name}` : ""}
+                  </Badge>
+                );
+              })}
+              {classification === "contested" ? (
+                <Badge variant="statusWarning" title="Timestamp matches more than one stage window">
+                  contested
+                </Badge>
+              ) : null}
+            </div>
+          ) : classification === "orphan" ? (
+            <div className="text-xs text-amber-500">
+              No stage window matches this timestamp.
+            </div>
+          ) : null}
+        </div>
+
+        {/* Actions */}
+        <div className="flex shrink-0 flex-row flex-wrap gap-1 sm:flex-col sm:items-end">
+          <Button
+            size="sm"
+            variant={showPreview ? "secondary" : "outline"}
+            onClick={() => setShowPreview((v) => !v)}
+            title={showPreview ? "Hide preview" : "Play inline preview"}
+          >
+            {showPreview ? (
+              <>
+                <X className="mr-1" /> Close
+              </>
+            ) : (
+              <>
+                <PlayCircle className="mr-1" /> Preview
+              </>
+            )}
+          </Button>
+          <div className="flex flex-wrap gap-1 sm:justify-end">
+            {stagesOrdered.map((s) => {
+              const isSuggested = suggestedSet.has(s.stage_number);
+              return (
+                <Button
+                  key={s.stage_number}
+                  size="sm"
+                  variant={isSuggested ? "default" : "outline"}
+                  disabled={busy}
+                  onClick={() => onAssign(video.path, s.stage_number, "secondary")}
+                  title={`Assign to stage ${s.stage_number}: ${s.stage_name}${isSuggested ? " (matches timestamp)" : ""}`}
+                >
+                  → S{s.stage_number}
+                </Button>
+              );
+            })}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => onRemove(video, null)}
+              title="Remove from project"
+              aria-label={`Remove ${video.path}`}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </DraggableVideoRow>
+  );
+}
+
+function formatLocalTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+function formatDurationShort(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "?";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formatBytesShort(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
 }
 
 function StagesSection({
