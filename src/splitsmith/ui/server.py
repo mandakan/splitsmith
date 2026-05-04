@@ -43,13 +43,19 @@ Endpoints (locked v1 surface):
   GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
   GET  /api/user/recent-projects    -- recently-opened MatchProject roots (#75)
   POST /api/user/recent-projects/forget -- drop one entry from the list
+  POST /api/user/recent-projects/bind   -- switch the in-memory project
+  POST /api/user/recent-projects/unbind -- drop the bound project (back to picker)
   GET  /api/user/scoreboard-identity -- saved SSI identity (404 if none)
   PUT  /api/user/scoreboard-identity -- write the SSI identity
 
 Design notes:
 - Localhost only. No auth, no CORS configuration beyond what Vite needs in dev.
-- The server holds a single ``MatchProject`` open at a time, identified by
-  ``project_root`` at startup. Multi-project orchestration lives in the SPA.
+- The server holds at most one ``MatchProject`` open at a time. The
+  binding can be set at startup (``--project``) or chosen at runtime via
+  the SPA picker (POST /api/user/recent-projects/bind). When unbound,
+  every project-bound endpoint returns 409 ``no_project`` and the SPA
+  redirects to its picker route. Multi-project orchestration lives in
+  the SPA.
 - All on-disk mutations go through the project model's atomic save.
 - The server re-loads the project from disk for every request (no caching), so
   external edits are visible without restart.
@@ -444,15 +450,74 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
     raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _no_project_error() -> HTTPException:
+    """Raised by :class:`AppState` when an endpoint that needs a bound
+    project is hit while the server is in unbound (picker) mode.
+
+    The SPA inspects ``detail.code == "no_project"`` to redirect to the
+    picker route instead of rendering a generic error.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "no_project",
+            "message": (
+                "No project is currently open. Pick one from the project "
+                "list (POST /api/user/recent-projects/bind) or restart "
+                "with `splitsmith ui --project <path>`."
+            ),
+        },
+    )
+
+
 @dataclass
 class AppState:
-    """Per-process state. One project root per server instance."""
+    """Per-process state. Holds at most one bound project at a time.
 
-    project_root: Path
+    The server can boot without a project (``splitsmith ui`` with no
+    ``--project`` arg). In that mode every project-bound endpoint raises
+    409 ``no_project`` via the :attr:`project_root` property; the SPA
+    renders the picker route until the user binds via
+    ``POST /api/user/recent-projects/bind``.
+    """
+
+    _project_root: Path | None = None
+    _project_name: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
 
+    @property
+    def project_root(self) -> Path:
+        """Bound project root. Raises 409 ``no_project`` when unbound.
+
+        Property indirection means every existing call-site
+        (``state.project_root``) gets the right behaviour automatically
+        without auditing 80+ usages -- FastAPI translates the
+        HTTPException into a structured response the SPA recognises.
+        """
+        if self._project_root is None:
+            raise _no_project_error()
+        return self._project_root
+
+    @property
+    def is_bound(self) -> bool:
+        return self._project_root is not None
+
+    @property
+    def project_name(self) -> str | None:
+        return self._project_name
+
+    def bind(self, root: Path, name: str) -> None:
+        self._project_root = root
+        self._project_name = name
+
+    def unbind(self) -> None:
+        self._project_root = None
+        self._project_name = None
+
     def load(self) -> MatchProject:
-        return MatchProject.load(self.project_root)
+        if self._project_root is None:
+            raise _no_project_error()
+        return MatchProject.load(self._project_root)
 
 
 # Module-level cache for the 4-voter ensemble runtime (issue #31). Heavy
@@ -481,9 +546,22 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    project_name: str
-    project_root: str
-    schema_version: int
+    bound: bool
+    project_name: str | None = None
+    project_root: str | None = None
+    schema_version: int | None = None
+
+
+class BindRecentProjectRequest(BaseModel):
+    """Body for POST /api/user/recent-projects/bind.
+
+    The server binds in-memory only; on next launch the user reopens via
+    the same picker. ``name`` is optional -- the server reads the
+    on-disk display name from ``project.json`` when available.
+    """
+
+    path: str
+    name: str | None = None
 
 
 # Request bodies ----------------------------------------------------------
@@ -773,40 +851,63 @@ class FsListing(BaseModel):
     suggested_starts: list[SuggestedStart]
 
 
+def _bind_project_to_state(
+    state: AppState,
+    root: Path,
+    fallback_name: str,
+) -> str:
+    """Initialise ``root`` on disk if needed, load its env files, record
+    the open in ``~/.splitsmith/projects.json``, and bind it on ``state``.
+
+    Used both at startup (when ``--project`` was passed) and at runtime
+    (when the SPA POSTs to /api/user/recent-projects/bind). Returns the
+    on-disk display name so the caller can echo it back.
+    """
+    MatchProject.init(root, name=fallback_name)
+    resolved = root.resolve()
+    loaded_env = _load_env_files(resolved)
+    if loaded_env:
+        logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
+    try:
+        loaded_project = MatchProject.load(resolved)
+        recorded_name = loaded_project.name or fallback_name
+    except Exception:  # pragma: no cover -- defensive: never block boot
+        recorded_name = fallback_name
+    user_config.record_project_open(resolved, recorded_name)
+    state.bind(resolved, recorded_name)
+    return recorded_name
+
+
 def create_app(
     *,
-    project_root: Path,
-    project_name: str,
+    project_root: Path | None = None,
+    project_name: str | None = None,
     lab_enabled: bool = False,
 ) -> FastAPI:
-    """Create the FastAPI app bound to a single match project on disk.
+    """Create the FastAPI app, optionally pre-bound to one match project.
 
-    The project is initialized on first call (idempotent), then the app keeps
-    the root path and re-loads on every request that needs it. We avoid
-    caching the model in memory so external edits to ``project.json`` are
-    visible without restarting the server.
+    When ``project_root`` is omitted the server boots **unbound**: the
+    picker endpoints (recent projects, fs/list, project bind) work; every
+    other project-bound endpoint returns 409 ``no_project`` so the SPA
+    can redirect to its picker route. The user binds a project at runtime
+    via POST /api/user/recent-projects/bind.
+
+    When bound, the project is initialised on first call (idempotent),
+    then the app keeps the root path and re-loads on every request. We
+    avoid caching the model in memory so external edits to
+    ``project.json`` are visible without restart.
 
     ``lab_enabled`` gates the ``/api/lab/*`` routes (and the SPA reads
     ``/api/server/features`` on mount to know whether to show the Lab
     nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
     """
-    MatchProject.init(project_root, name=project_name)
-    resolved_root = project_root.resolve()
-    state = AppState(project_root=resolved_root)
-    loaded_env = _load_env_files(resolved_root)
-    if loaded_env:
-        logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
-
-    # Record this open in the global recent-projects list (issue #75). The
-    # disk name on the project may differ from ``project_name`` -- prefer
-    # whatever ``MatchProject.init`` settled on so re-opens don't flip the
-    # display name based on which CLI invocation got there first.
-    try:
-        loaded_project = MatchProject.load(resolved_root)
-        recorded_name = loaded_project.name or project_name
-    except Exception:  # pragma: no cover -- defensive: never block boot
-        recorded_name = project_name
-    user_config.record_project_open(resolved_root, recorded_name)
+    state = AppState()
+    if project_root is not None:
+        _bind_project_to_state(
+            state,
+            project_root,
+            fallback_name=project_name or project_root.name or "match",
+        )
 
     app = FastAPI(
         title="splitsmith UI",
@@ -851,8 +952,11 @@ def create_app(
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
+        if not state.is_bound:
+            return HealthResponse(bound=False)
         project = state.load()
         return HealthResponse(
+            bound=True,
             project_name=project.name,
             project_root=str(state.project_root),
             schema_version=project.schema_version,
@@ -3632,6 +3736,54 @@ def create_app(
             }
         )
 
+    @app.post("/api/user/recent-projects/bind")
+    def bind_recent_project(req: BindRecentProjectRequest) -> HealthResponse:
+        """Switch the in-memory project. Used by the SPA picker route.
+
+        Accepts a path that already exists on disk (a previously-opened
+        project) or a fresh path -- ``MatchProject.init`` is idempotent
+        and will scaffold the subdirs if missing. The ``last_opened_at``
+        timestamp is bumped so the picker re-orders to the top.
+        """
+        target = Path(req.path).expanduser()
+        if not target.exists():
+            # Conservative default: don't silently scaffold a brand-new
+            # project on a typo. The dedicated "create" flow can pass a
+            # ``create=true`` body once we wire it.
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "project_path_missing",
+                    "message": f"Project path does not exist: {target}",
+                },
+            )
+        try:
+            recorded = _bind_project_to_state(
+                state,
+                target,
+                fallback_name=req.name or target.name or "match",
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project = state.load()
+        return HealthResponse(
+            bound=True,
+            project_name=recorded,
+            project_root=str(state.project_root),
+            schema_version=project.schema_version,
+        )
+
+    @app.post("/api/user/recent-projects/unbind")
+    def unbind_recent_project() -> HealthResponse:
+        """Drop the bound project so the SPA returns to the picker.
+
+        Equivalent to a `splitsmith ui` boot with no ``--project``;
+        useful when the user wants to switch projects without leaving
+        the browser tab.
+        """
+        state.unbind()
+        return HealthResponse(bound=False)
+
     @app.get("/api/user/scoreboard-identity")
     def get_scoreboard_identity() -> JSONResponse:
         identity = user_config.load_scoreboard_identity()
@@ -4380,8 +4532,8 @@ def _count_videos_shallow(directory: Path, *, cap: int = 200) -> int:
 
 def serve(
     *,
-    project_root: Path,
-    project_name: str,
+    project_root: Path | None = None,
+    project_name: str | None = None,
     host: str = "127.0.0.1",
     port: int = 5174,
     reload: bool = False,

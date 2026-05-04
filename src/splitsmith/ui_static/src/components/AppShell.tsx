@@ -1,10 +1,18 @@
-import { Crosshair, FileBarChart, FlaskConical, FolderInput, Home, Palette } from "lucide-react";
+import {
+  Crosshair,
+  FileBarChart,
+  FlaskConical,
+  FolderInput,
+  Home,
+  Palette,
+  Repeat,
+} from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { api } from "@/lib/api";
+import { api, type ServerHealth } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -48,6 +56,35 @@ export function AppShell() {
     };
   }, []);
   const nav = labEnabled ? [...BASE_NAV, LAB_NAV] : BASE_NAV;
+
+  // Server bind-state. When the user launches ``splitsmith ui`` with no
+  // ``--project`` the server boots unbound; we redirect to /pick so the
+  // user can choose. The fixture-mode (review) branch keeps working
+  // since /review boots its own throwaway project that always reads as
+  // bound. Null while loading; ``null`` skips the redirect to avoid a
+  // flicker through /pick on bound boots.
+  const [health, setHealth] = useState<ServerHealth | null>(null);
+  useEffect(() => {
+    if (fixtureMode) return;
+    let alive = true;
+    api
+      .getHealth()
+      .then((h) => {
+        if (alive) setHealth(h);
+      })
+      .catch(() => {
+        // Network failure: keep rendering the shell rather than yanking
+        // the user to /pick on a transient hiccup.
+        if (alive) setHealth(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fixtureMode]);
+
+  if (!fixtureMode && health && !health.bound) {
+    return <Navigate to="/pick" replace />;
+  }
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -107,7 +144,7 @@ export function AppShell() {
               splitsmith review
             </div>
           ) : (
-            <ProjectHeader />
+            <ProjectHeader health={health} />
           )}
           <div className="flex items-center gap-2">
             <ThemeToggle />
@@ -122,9 +159,43 @@ export function AppShell() {
   );
 }
 
-function ProjectHeader() {
-  // Project name is fetched from /api/health; for the v1 shell we keep this
-  // simple and let pages render their own headings. A future iteration can
-  // surface the active project name here once the project context is wired.
-  return <div className="text-sm text-muted-foreground">Production UI v1 (Sub 1)</div>;
+function ProjectHeader({ health }: { health: ServerHealth | null }) {
+  const navigate = useNavigate();
+  const [switching, setSwitching] = useState(false);
+
+  async function switchProject() {
+    setSwitching(true);
+    try {
+      await api.unbindProject();
+    } catch {
+      // Best-effort: even if unbind fails the picker can re-bind a
+      // different project on top.
+    }
+    navigate("/pick");
+  }
+
+  if (!health || !health.bound) {
+    return <div className="text-sm text-muted-foreground">splitsmith</div>;
+  }
+
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <div className="flex flex-col leading-tight">
+        <span className="font-medium tracking-tight">{health.project_name}</span>
+        <span className="font-mono text-xs text-muted-foreground truncate max-w-[420px]">
+          {health.project_root}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={switchProject}
+        disabled={switching}
+        className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        title="Switch to a different project"
+      >
+        <Repeat className="size-3.5" />
+        Switch
+      </button>
+    </div>
+  );
 }

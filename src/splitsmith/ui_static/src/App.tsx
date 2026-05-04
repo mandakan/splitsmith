@@ -8,6 +8,7 @@ import { Export } from "@/pages/Export";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
 import { Lab } from "@/pages/Lab";
+import { Pick } from "@/pages/Pick";
 import { Review } from "@/pages/Review";
 
 export function App() {
@@ -15,6 +16,10 @@ export function App() {
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
+          {/* Picker lives outside AppShell -- it has its own header and
+              runs whether or not a project is bound. AppShell redirects
+              here when it sees /api/health.bound === false. */}
+          <Route path="pick" element={<Pick />} />
           <Route element={<AppShell />}>
             <Route index element={<Home />} />
             <Route path="ingest" element={<Ingest />} />

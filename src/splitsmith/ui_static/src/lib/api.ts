@@ -552,6 +552,37 @@ export function asSourceUnreachable(err: unknown): SourceUnreachableDetail | nul
   return body as SourceUnreachableDetail;
 }
 
+/** True when ``err`` is the structured 409 the server raises whenever a
+ *  project-bound endpoint is hit while the server is unbound (picker
+ *  mode). The SPA listens for this to redirect to /pick.
+ */
+export function isNoProjectError(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 409) return false;
+  const body = err.body;
+  if (!body || typeof body !== "object") return false;
+  return (body as { code?: unknown }).code === "no_project";
+}
+
+/** Server health snapshot. ``bound === false`` means no project is open --
+ *  the SPA renders the picker until the user selects one. */
+export interface ServerHealth {
+  status: string;
+  bound: boolean;
+  project_name: string | null;
+  project_root: string | null;
+  schema_version: number | null;
+}
+
+/** One entry from ``GET /api/user/recent-projects``. ``last_opened_at``
+ *  is an ISO-8601 UTC timestamp the picker uses to sort. ``path`` is
+ *  resolved server-side; we don't normalise it client-side. */
+export interface RecentProject {
+  path: string;
+  name: string;
+  last_opened_at: string;
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -885,6 +916,39 @@ export const api = {
    *  surfaces the ``lab`` flag so the SPA can hide the Lab nav entry
    *  unless ``splitsmith ui --lab`` was passed. */
   getServerFeatures: () => request<{ lab: boolean }>("/api/server/features"),
+
+  /** Server health + bind state. The picker route polls this on mount
+   *  to decide whether the user landed in unbound mode (boot with no
+   *  ``--project``) or whether a project is already open. */
+  getHealth: () => request<ServerHealth>("/api/health"),
+
+  /** Recent-projects list, most-recent first. Drives the picker. */
+  getRecentProjects: () =>
+    request<{ projects: RecentProject[] }>("/api/user/recent-projects").then(
+      (r) => r.projects,
+    ),
+
+  /** Drop one entry from the recent list (forget). Returns the updated
+   *  list so the picker can re-render without a follow-up GET. */
+  forgetRecentProject: (path: string) =>
+    request<{ removed: boolean; projects: RecentProject[] }>(
+      "/api/user/recent-projects/forget",
+      { method: "POST", json: { path } },
+    ),
+
+  /** Switch the in-memory project. The picker calls this when the user
+   *  selects an entry; the server updates ``last_opened_at`` and binds.
+   */
+  bindProject: (path: string, name?: string) =>
+    request<ServerHealth>("/api/user/recent-projects/bind", {
+      method: "POST",
+      json: { path, name },
+    }),
+
+  /** Drop the bound project so the SPA returns to the picker (Cmd+P
+   *  "Switch project..." path). */
+  unbindProject: () =>
+    request<ServerHealth>("/api/user/recent-projects/unbind", { method: "POST" }),
 
   listJobs: () => request<Job[]>("/api/jobs"),
   getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),
