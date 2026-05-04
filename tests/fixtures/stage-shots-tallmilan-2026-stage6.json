@@ -65,7 +65,8 @@
       "candidate_number": 34,
       "time": 10.596,
       "ms_after_beep": 10096,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
@@ -100,7 +101,8 @@
       "candidate_number": 48,
       "time": 15.2102,
       "ms_after_beep": 14710,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 14,
@@ -526,7 +528,23 @@
       "6.662": "steel_ring",
       "6.756": "steel_ring",
       "7.679": "steel_ring",
-      "8.086": "other"
+      "8.086": "other",
+      "11.122": "cross_bay",
+      "11.233": "cross_bay",
+      "11.382": "movement",
+      "11.524": "movement",
+      "12.529": "wind",
+      "13.120": "movement",
+      "16.815": "cross_bay",
+      "16.958": "cross_bay",
+      "1.747": "wind",
+      "1.950": "wind",
+      "4.531": "movement",
+      "5.048": "movement",
+      "5.386": "movement",
+      "6.227": "cross_bay",
+      "6.354": "cross_bay",
+      "11.850": "movement"
     }
   },
   "stage_rounds": {

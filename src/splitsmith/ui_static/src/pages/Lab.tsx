@@ -2063,6 +2063,22 @@ function SnippetPlayer({
   const labelText =
     candidate.truth === 1 ? candidate.subclass : candidate.reason;
 
+  // For TP / FN candidates, surface the nearest audit shot time and
+  // the offset from the candidate -- helps decide "is this candidate
+  // really the audited shot, or did we match the wrong onset?"
+  const nearestTruth = useMemo(() => {
+    if (truthTimes.length === 0) return null;
+    let best: { time: number; deltaMs: number } | null = null;
+    for (const tt of truthTimes) {
+      const deltaMs = (tt - t) * 1000;
+      if (Math.abs(deltaMs) > 200) continue; // off-screen / unrelated
+      if (best === null || Math.abs(deltaMs) < Math.abs(best.deltaMs)) {
+        best = { time: tt, deltaMs };
+      }
+    }
+    return best;
+  }, [truthTimes, t]);
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between text-xs">
@@ -2126,6 +2142,15 @@ function SnippetPlayer({
         Visible window: {((ctxEnd - ctxStart) * 1000).toFixed(0)} ms · play window:{" "}
         {(safePreMs + safePostMs).toFixed(0)} ms ({safePreMs.toFixed(0)} pre /{" "}
         {safePostMs.toFixed(0)} post){playing ? " · looping" : " · paused"}
+        {nearestTruth != null && (
+          <>
+            {" · "}
+            <span className="font-mono">
+              audit at {nearestTruth.time.toFixed(3)}s ({nearestTruth.deltaMs >= 0 ? "+" : ""}
+              {nearestTruth.deltaMs.toFixed(0)} ms from candidate)
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2299,10 +2324,10 @@ function ZoomedWaveform({
           })}
         </g>
 
-        {/* Truth shots in window. Matched truths (kept TP candidate
-            within tolerance) render dashed + faint; unmatched truths
-            (FNs) render solid + bright. Both colours come from the
-            CB-safe LAB_PALETTE. */}
+        {/* Truth (audit) reference lines, always dashed so they read
+            as "audit point" rather than "the candidate". Colour
+            encodes whether a kept TP candidate matched this truth:
+            green = matched, red = unmatched (FN). */}
         {truths.map(({ time: tt, matched }, i) => (
           <line
             key={`tr-${i}`}
@@ -2311,9 +2336,9 @@ function ZoomedWaveform({
             y1={0}
             y2={height}
             stroke={matched ? LAB_PALETTE.tp : LAB_PALETTE.fn}
-            strokeOpacity={matched ? 0.55 : 0.85}
-            strokeWidth={matched ? 1 : 1.5}
-            strokeDasharray={matched ? "4 3" : undefined}
+            strokeOpacity={matched ? 0.55 : 0.75}
+            strokeWidth={1}
+            strokeDasharray="4 3"
           />
         ))}
 
