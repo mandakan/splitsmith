@@ -248,11 +248,11 @@ export function BeepSection({
             setError={setError}
           />
         ) : (
-          <div className="text-xs text-muted-foreground">
-            Tip: scrub the preview clip below the section header after Apply --
-            secondaries don't have a project-level waveform yet (the audit
-            timeline is anchored to the primary's audio).
-          </div>
+          <SecondaryScrubPicker
+            videoPath={video.path}
+            initialTime={draftValid ? draftSourceTime : video.beep_time ?? 0}
+            onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
+          />
         )}
       </div>
     );
@@ -691,6 +691,81 @@ function BeepWaveformPicker({
           onDismiss={dismissProposal}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** Inline video scrub + "use current time" picker for secondaries.
+ *
+ *  The primary gets a waveform picker because we already cache stage-level
+ *  audio peaks for it; secondaries don't have that, but they DO have their
+ *  own video stream. Letting the user scrub the secondary's actual footage
+ *  and click "Use current time" is good enough to find the buzzer or
+ *  first-shot moment by ear / eye, which is the core thing the manual
+ *  override needs to support when in-stream beep detection fails (e.g.
+ *  iPhone tripod cam where the buzzer isn't a sustained 2-5 kHz tone). */
+function SecondaryScrubPicker({
+  videoPath,
+  initialTime,
+  onPick,
+}: {
+  videoPath: string;
+  initialTime: number;
+  onPick: (sourceTime: number) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Seek to the current draft time when the user reopens the editor or
+  // edits the numeric input -- the video should follow, so they can verify
+  // the time they typed lands on the right frame.
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (!Number.isFinite(initialTime) || initialTime < 0) return;
+    if (Math.abs(el.currentTime - initialTime) < 0.05) return;
+    try {
+      el.currentTime = initialTime;
+    } catch {
+      // Some browsers throw if metadata isn't loaded yet; the
+      // loadedmetadata handler below will retry.
+    }
+  }, [initialTime]);
+
+  return (
+    <div className="space-y-2">
+      <video
+        ref={videoRef}
+        src={api.videoStreamUrl(videoPath)}
+        controls
+        preload="metadata"
+        className="block w-full max-h-[40vh] rounded bg-black"
+        onLoadedMetadata={(e) => {
+          if (Number.isFinite(initialTime) && initialTime >= 0) {
+            try {
+              e.currentTarget.currentTime = initialTime;
+            } catch {
+              // Source might not support seeking before first decode;
+              // ignored (the user can still scrub manually).
+            }
+          }
+        }}
+      />
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Button
+          size="sm"
+          variant="secondary"
+          type="button"
+          onClick={() => {
+            const el = videoRef.current;
+            if (!el) return;
+            onPick(el.currentTime);
+          }}
+        >
+          <Crosshair />
+          Use current time
+        </Button>
+        <span>Scrub to the buzzer (or first audible shot) and click to set the draft.</span>
+      </div>
     </div>
   );
 }

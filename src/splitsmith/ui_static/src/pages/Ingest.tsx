@@ -30,7 +30,6 @@ import {
   User,
   Video as VideoIcon,
   WifiOff,
-  X,
   XCircle,
 } from "lucide-react";
 
@@ -1626,10 +1625,10 @@ function UnassignedSection({
           Unassigned videos · {project.unassigned_videos.length}
         </CardTitle>
         <CardDescription>
-          Hover any thumbnail for a quick still, or click Preview to scrub the
-          actual clip. Drag a row onto a stage card to assign, or back here to
-          unassign. Trash removes the video from the project (cache is cleared;
-          the original source on USB / external storage is never touched).
+          Hit play on any row to scrub the clip. Drag a row onto a stage card
+          to assign, or back here to unassign. Trash removes the video from
+          the project (cache is cleared; the original source on USB / external
+          storage is never touched).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -1677,7 +1676,6 @@ function UnassignedVideoCard({
   onRemove: (video: StageVideo, stage: StageEntry | null) => void;
 }) {
   const [meta, setMeta] = useState<FsProbeResponse | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1719,51 +1717,25 @@ function UnassignedVideoCard({
       className="rounded-md border border-border bg-muted/40 p-3"
     >
       <div className="flex flex-col gap-3 sm:flex-row">
-        {/* Thumbnail / inline preview */}
+        {/* Inline video with thumbnail poster -- click the native play
+            control to start. No JS state machine: the <video> element
+            already gives us pause / scrub / fullscreen for free, and
+            using the cached thumbnail as a poster avoids the network
+            round-trip browsers do otherwise. */}
         <div className="relative w-full shrink-0 overflow-hidden rounded bg-black/40 sm:w-48 aspect-video">
-          {showPreview ? (
-            <>
-              <video
-                src={api.videoStreamUrl(video.path)}
-                controls
-                autoPlay
-                preload="metadata"
-                className="h-full w-full"
-              />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowPreview(false);
-                }}
-                className="absolute right-1 top-1 rounded bg-black/70 p-1 text-white hover:bg-black/90"
-                title="Close preview"
-                aria-label="Close preview"
-              >
-                <X className="size-3.5" />
-              </button>
-            </>
-          ) : meta?.thumbnail_url ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowPreview(true);
-              }}
-              className="group relative block h-full w-full"
-              title="Click to play preview"
-              aria-label="Play preview"
-            >
-              <img
-                src={meta.thumbnail_url}
-                alt={`${filename} thumbnail`}
-                className="h-full w-full object-cover"
-                draggable={false}
-              />
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
-                <PlayCircle className="size-10 text-white drop-shadow" />
-              </span>
-            </button>
+          {meta ? (
+            <video
+              src={api.videoStreamUrl(video.path)}
+              poster={meta.thumbnail_url ?? undefined}
+              controls
+              preload="none"
+              className="h-full w-full"
+              // Stop drag events bubbling to DraggableVideoRow so the
+              // user can scrub the timeline without accidentally
+              // dragging the row out of the unassigned tray.
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
           ) : (
             <Skeleton className="h-full w-full rounded-none" />
           )}
@@ -1860,22 +1832,6 @@ function UnassignedVideoCard({
 
         {/* Actions */}
         <div className="flex shrink-0 flex-row flex-wrap gap-1 sm:flex-col sm:items-end">
-          <Button
-            size="sm"
-            variant={showPreview ? "secondary" : "outline"}
-            onClick={() => setShowPreview((v) => !v)}
-            title={showPreview ? "Hide preview" : "Play inline preview"}
-          >
-            {showPreview ? (
-              <>
-                <X className="mr-1" /> Close
-              </>
-            ) : (
-              <>
-                <PlayCircle className="mr-1" /> Preview
-              </>
-            )}
-          </Button>
           <div className="flex flex-wrap gap-1 sm:justify-end">
             {stagesOrdered.map((s) => {
               const isSuggested = suggestedSet.has(s.stage_number);
