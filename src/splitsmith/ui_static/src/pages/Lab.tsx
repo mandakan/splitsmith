@@ -754,7 +754,8 @@ const REASON_SHORTCUTS: Record<string, string> = {
   s: "steel_ring",
   h: "handling",
   a: "agc_artifact",
-  y: "speech", // mnemonic: spYech (s is steel_ring)
+  v: "speech", // mnemonic: Voice. Was Y, but Y/S confusion (steel_ring next
+  // to speech on QWERTY) caused a lot of mis-clicks in practice.
   o: "other",
   u: "unknown",
 };
@@ -1606,6 +1607,7 @@ function StepThroughPanel({
   ) => void;
 }) {
   const [filter, setFilter] = useState<StepFilter>("borderline");
+  const [classFilter, setClassFilter] = useState<string>("");
   const [sort, setSort] = useState<StepSort>("ensemble_score_desc");
   const [preMs, setPreMs] = useState(100);
   const [postMs, setPostMs] = useState(300);
@@ -1653,6 +1655,14 @@ function StepThroughPanel({
         return c.reason == null;
       });
     }
+    // Class filter (issue: review-and-relabel by current label class).
+    // Matches against either ``reason`` (for FP-style candidates) or
+    // ``subclass`` (for TP/FN positives), since the user picks the
+    // class they want to audit and the same string can appear on both
+    // axes (e.g., a wrongly-labeled S "steel_ring" reason).
+    if (classFilter) {
+      list = list.filter((c) => c.reason === classFilter || c.subclass === classFilter);
+    }
     list.sort((a, b) => {
       if (sort === "ensemble_score_desc") return b.ensemble_score - a.ensemble_score;
       if (sort === "ensemble_score_asc") return a.ensemble_score - b.ensemble_score;
@@ -1665,7 +1675,7 @@ function StepThroughPanel({
       return a.time - b.time;
     });
     return list;
-  }, [fixture.candidates, filter, sort]);
+  }, [fixture.candidates, filter, classFilter, sort]);
 
   // Register the auto-advance resolver: given the current cn, return
   // the next cn in the active filter+sort or null at the end.
@@ -1721,6 +1731,34 @@ function StepThroughPanel({
             <option value="fps_only">FPs only (kept negatives)</option>
             <option value="unlabeled_only">Unlabeled only</option>
             <option value="all">All candidates</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="font-medium text-muted-foreground">Class</span>
+          <select
+            value={classFilter}
+            onChange={(e) => {
+              setClassFilter(e.target.value);
+              e.currentTarget.blur();
+            }}
+            className="rounded border border-border bg-background px-1 py-0.5"
+            title="Show only candidates currently labeled with this class -- useful for reviewing a known-bad batch (e.g. mis-typed S vs Y)."
+          >
+            <option value="">(any)</option>
+            <optgroup label="FP reason">
+              {LAB_REASONS.map((r) => (
+                <option key={`r-${r}`} value={r}>
+                  {r}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="TP subclass">
+              {LAB_SUBCLASSES.map((s) => (
+                <option key={`s-${s}`} value={s}>
+                  {s}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <label className="flex flex-col gap-1">
@@ -2498,7 +2536,7 @@ function KeyboardLegend({ selectedCn }: { selectedCn: number | null }) {
         <span><kbd>S</kbd> steel_ring / steel</span>
         <span><kbd>H</kbd> handling</span>
         <span><kbd>A</kbd> agc_artifact</span>
-        <span><kbd>Y</kbd> speech</span>
+        <span><kbd>V</kbd> speech (Voice)</span>
         <span><kbd>O</kbd> other</span>
         <span><kbd>U</kbd> unknown</span>
         <span><kbd>P</kbd> paper (TP only)</span>

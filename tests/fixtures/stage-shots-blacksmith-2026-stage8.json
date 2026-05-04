@@ -933,7 +933,12 @@
         "peak_amplitude": 0.056,
         "confidence": 0.169
       }
-    ]
+    ],
+    "labels_by_time": {
+      "1.030": "cross_bay",
+      "22.414": "echo",
+      "23.576": "steel_ring"
+    }
   },
   "stage_rounds": {
     "paper": 10,
