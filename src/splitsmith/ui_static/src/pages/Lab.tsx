@@ -2412,9 +2412,11 @@ function KeyboardLegend({ selectedCn }: { selectedCn: number | null }) {
         <span><kbd>J</kbd> / <kbd>↓</kbd> next</span>
         <span><kbd>K</kbd> / <kbd>↑</kbd> prev</span>
         <span><kbd>Esc</kbd> deselect</span>
+        <span><kbd>Space</kbd> play / pause</span>
         <span><kbd>0</kbd> / <kbd>Bksp</kbd> clear</span>
         <span><kbd>X</kbd> cross_bay</span>
         <span><kbd>E</kbd> echo</span>
+        <span><kbd>B</kbd> barrel_echo / barrel</span>
         <span><kbd>W</kbd> wind</span>
         <span><kbd>M</kbd> movement</span>
         <span><kbd>S</kbd> steel_ring / steel</span>

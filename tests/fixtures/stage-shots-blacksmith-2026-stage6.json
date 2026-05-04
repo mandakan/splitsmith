@@ -32,7 +32,8 @@
       "candidate_number": 8,
       "time": 4.3919,
       "ms_after_beep": 3892,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 4,
@@ -40,7 +41,7 @@
       "time": 4.725,
       "ms_after_beep": 4225,
       "source": "detected",
-      "subclass": "paper"
+      "subclass": "barrel"
     },
     {
       "shot_number": 5,
@@ -48,7 +49,7 @@
       "time": 5.2279,
       "ms_after_beep": 4728,
       "source": "detected",
-      "subclass": "paper"
+      "subclass": "barrel"
     },
     {
       "shot_number": 6,
@@ -56,14 +57,15 @@
       "time": 5.7694,
       "ms_after_beep": 5269,
       "source": "detected",
-      "subclass": "paper"
+      "subclass": "barrel"
     },
     {
       "shot_number": 7,
       "candidate_number": 14,
       "time": 5.9659,
       "ms_after_beep": 5466,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 8,
@@ -71,7 +73,7 @@
       "time": 6.7785,
       "ms_after_beep": 6279,
       "source": "detected",
-      "subclass": "paper"
+      "subclass": "barrel"
     },
     {
       "shot_number": 9,
@@ -79,35 +81,39 @@
       "time": 7.2942,
       "ms_after_beep": 6794,
       "source": "detected",
-      "subclass": "paper"
+      "subclass": "barrel"
     },
     {
       "shot_number": 10,
       "candidate_number": 18,
       "time": 7.6145,
       "ms_after_beep": 7115,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 11,
       "candidate_number": 20,
       "time": 7.9025,
       "ms_after_beep": 7403,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 12,
       "candidate_number": 25,
       "time": 9.2613,
       "ms_after_beep": 8761,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 13,
       "candidate_number": 26,
       "time": 9.5262,
       "ms_after_beep": 9026,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     }
   ],
   "_candidates_pending_audit": {
@@ -318,7 +324,7 @@
       }
     ],
     "labels_by_time": {
-      "8.617": "cross_bay",
+      "8.617": "movement",
       "10.001": "cross_bay",
       "2.728": "cross_bay",
       "2.847": "cross_bay",
@@ -330,7 +336,8 @@
       "8.247": "barrel_echo",
       "8.425": "barrel_echo",
       "9.639": "barrel_echo",
-      "10.165": "cross_bay"
+      "10.165": "cross_bay",
+      "3.966": "cross_bay"
     }
   },
   "stage_rounds": {
