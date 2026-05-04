@@ -83,7 +83,26 @@ export function BeepSection({
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(video.beep_time?.toFixed(3) ?? "");
+  // Brief background highlight on the draft input whenever its value is
+  // changed by a non-typing action (waveform scrub, Snap-to-beep accept,
+  // etc.). The number itself updating is easy to miss when the user's
+  // attention is on a video preview or the Accept button; the flash
+  // makes "we just wrote a new value into the field" obvious. Drives a
+  // tailwind transition-colors fade; see the input className below.
+  const [draftFlashing, setDraftFlashing] = useState(false);
   const [jobStatus, setJobStatus] = useState<Job | null>(null);
+  const flashDraftInput = useCallback(() => {
+    // Drop-then-set across an rAF tick so a second pick in quick
+    // succession re-triggers the fade instead of being a no-op (state
+    // is already true from the previous flash).
+    setDraftFlashing(false);
+    requestAnimationFrame(() => setDraftFlashing(true));
+  }, []);
+  useEffect(() => {
+    if (!draftFlashing) return;
+    const t = setTimeout(() => setDraftFlashing(false), 700);
+    return () => clearTimeout(t);
+  }, [draftFlashing]);
   // Auto-collapse the section once the beep is reviewed so finished cards
   // don't dominate the stage view; the user can click the chevron to
   // re-open. Re-collapses when "Mark reviewed" is clicked mid-session.
@@ -237,7 +256,10 @@ export function BeepSection({
               min="0"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="h-8 w-32 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={cn(
+                "h-8 w-32 rounded-md border border-input px-2 py-1 font-mono text-sm shadow-sm transition-colors duration-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                draftFlashing ? "bg-primary/20" : "bg-background",
+              )}
               disabled={busy}
               aria-label={`Beep time for stage ${stageNumber}`}
               autoFocus
@@ -256,7 +278,10 @@ export function BeepSection({
           videoId={videoId}
           videoBeepTime={video.beep_time}
           draftSourceTime={draftValid ? draftSourceTime : null}
-          onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
+          onPick={(sourceTime) => {
+            setDraft(sourceTime.toFixed(3));
+            flashDraftInput();
+          }}
           setError={setError}
         />
       </div>
