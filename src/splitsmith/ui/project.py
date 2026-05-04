@@ -114,12 +114,23 @@ class StageVideo(BaseModel):
     # this False) so the SPA can surface "align manually" instead of an error
     # toast for secondaries. Cleared whenever ``beep_time`` is set or wiped.
     beep_auto_detect_failed: bool = False
-    # Diagnostic confidence from ``cross_align.align_secondary_to_primary``
-    # when ``beep_source == "aligned"``. Peak-to-runner-up ratio of the
-    # cross-correlation against the primary's landmark audio; >= 1.5 is the
-    # accept threshold. Surfaced so the SPA can flag low-confidence
-    # alignments for the user to double-check before marking reviewed.
+    # Diagnostic confidence from ``cross_align.align_secondary_to_primary``.
+    # Peak-to-runner-up ratio of the cross-correlation against the primary's
+    # landmark audio. Populated whenever cross-align ran on a secondary --
+    # both when in-stream detection failed AND we promoted the alignment
+    # (``beep_source == "aligned"``), and as a sanity check when in-stream
+    # succeeded (``beep_source == "auto"``) to catch the in-stream detector
+    # locking onto a steel-strike-as-beep. >= 1.10 is the accept floor on
+    # in-stream-failed pairs (calibrated empirically; see server.py).
     beep_alignment_confidence: float | None = None
+    # Disagreement between in-stream detection and cross-correlation
+    # alignment, in milliseconds. Populated when both ran successfully on
+    # a secondary (``beep_source == "auto"`` AND cross-align cleared the
+    # confidence floor). The SPA uses this to flag suspected steel-strike
+    # mis-detections: if in-stream snapped to a non-beep transient, its
+    # answer disagrees with the cross-correlation by hundreds of ms or
+    # more. Null when only one of the two methods produced a result.
+    beep_alignment_delta_ms: float | None = None
     # Ranked alternative candidates from the most recent auto-detection run
     # (silence-preference score, descending). The production UI offers these
     # as one-click alternatives to the auto-winner so the user rarely has to
@@ -1149,6 +1160,7 @@ class MatchProject(BaseModel):
         new_primary.beep_reviewed = False
         new_primary.beep_auto_detect_failed = False
         new_primary.beep_alignment_confidence = None
+        new_primary.beep_alignment_delta_ms = None
 
         if backup_audit:
             audit_file = self.audit_path(root) / f"stage{stage_number}.json"
@@ -1255,6 +1267,7 @@ class MatchProject(BaseModel):
                     v.beep_reviewed = False
                     v.beep_auto_detect_failed = False
                     v.beep_alignment_confidence = None
+                    v.beep_alignment_delta_ms = None
 
         return RemovalPlan(
             video_path=video.path,

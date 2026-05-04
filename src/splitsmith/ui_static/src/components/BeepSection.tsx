@@ -83,7 +83,26 @@ export function BeepSection({
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(video.beep_time?.toFixed(3) ?? "");
+  // Brief background highlight on the draft input whenever its value is
+  // changed by a non-typing action (waveform scrub, Snap-to-beep accept,
+  // etc.). The number itself updating is easy to miss when the user's
+  // attention is on a video preview or the Accept button; the flash
+  // makes "we just wrote a new value into the field" obvious. Drives a
+  // tailwind transition-colors fade; see the input className below.
+  const [draftFlashing, setDraftFlashing] = useState(false);
   const [jobStatus, setJobStatus] = useState<Job | null>(null);
+  const flashDraftInput = useCallback(() => {
+    // Drop-then-set across an rAF tick so a second pick in quick
+    // succession re-triggers the fade instead of being a no-op (state
+    // is already true from the previous flash).
+    setDraftFlashing(false);
+    requestAnimationFrame(() => setDraftFlashing(true));
+  }, []);
+  useEffect(() => {
+    if (!draftFlashing) return;
+    const t = setTimeout(() => setDraftFlashing(false), 700);
+    return () => clearTimeout(t);
+  }, [draftFlashing]);
   // Auto-collapse the section once the beep is reviewed so finished cards
   // don't dominate the stage view; the user can click the chevron to
   // re-open. Re-collapses when "Mark reviewed" is clicked mid-session.
@@ -237,7 +256,10 @@ export function BeepSection({
               min="0"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="h-8 w-32 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={cn(
+                "h-8 w-32 rounded-md border border-input px-2 py-1 font-mono text-sm shadow-sm transition-colors duration-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                draftFlashing ? "bg-primary/20" : "bg-background",
+              )}
               disabled={busy}
               aria-label={`Beep time for stage ${stageNumber}`}
               autoFocus
@@ -256,7 +278,10 @@ export function BeepSection({
           videoId={videoId}
           videoBeepTime={video.beep_time}
           draftSourceTime={draftValid ? draftSourceTime : null}
-          onPick={(sourceTime) => setDraft(sourceTime.toFixed(3))}
+          onPick={(sourceTime) => {
+            setDraft(sourceTime.toFixed(3));
+            flashDraftInput();
+          }}
           setError={setError}
         />
       </div>
@@ -264,6 +289,19 @@ export function BeepSection({
   }
 
   if (!video.beep_time) {
+    // Distinguish "never tried" from "tried both detectors and got nothing".
+    // The latter is the secondary soft-fail (#112): in-stream beep_detect
+    // raised + cross-correlation either errored or fell below the
+    // auto-accept floor. Surfacing it tells the user "automatic alignment
+    // gave up; place the marker yourself" instead of letting them re-click
+    // Detect beep and watch it fail again.
+    const failed = video.beep_auto_detect_failed;
+    const conf = video.beep_alignment_confidence;
+    const failedHint = failed
+      ? conf != null
+        ? `Auto-detect + cross-align failed (conf ${conf.toFixed(2)}). Pick the beep on the waveform.`
+        : "Auto-detect failed and the camera doesn't overlap enough with the primary to align. Pick the beep on the waveform."
+      : null;
     return (
       <div
         className={cn(
@@ -271,26 +309,48 @@ export function BeepSection({
           !bare && "rounded-md border border-border/60 bg-muted/20",
         )}
       >
-        <Badge variant="statusNotStarted" className="gap-1">
-          ○ No beep yet
+        <Badge variant={failed ? "statusWarning" : "statusNotStarted"} className="gap-1">
+          {failed ? "! Auto-detect failed" : "○ No beep yet"}
         </Badge>
         {jobStatus ? (
           <JobProgress job={jobStatus} />
         ) : (
           <span className="text-muted-foreground">
-            {isPrimary
-              ? "Audit screen needs this. Run detection or set manually."
-              : "Needed to sync this camera to the primary timeline."}
+            {failedHint ??
+              (isPrimary
+                ? "Audit screen needs this. Run detection or set manually."
+                : "Needed to sync this camera to the primary timeline.")}
           </span>
         )}
         <div className="ml-auto flex gap-1">
-          <Button size="sm" variant="default" onClick={() => detect(false)} disabled={busy}>
-            <RefreshCw />
-            Detect beep
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
-            <Pencil />
-            Set manually
+          {failed ? (
+            <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={busy}>
+              <Pencil />
+              Pick on waveform
+            </Button>
+          ) : (
+            <Button size="sm" variant="default" onClick={() => detect(false)} disabled={busy}>
+              <RefreshCw />
+              Detect beep
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={failed ? () => detect(false) : () => setEditing(true)}
+            disabled={busy}
+          >
+            {failed ? (
+              <>
+                <RefreshCw />
+                Retry detect
+              </>
+            ) : (
+              <>
+                <Pencil />
+                Set manually
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -298,21 +358,41 @@ export function BeepSection({
   }
 
   const isManual = video.beep_source === "manual";
+  const isAligned = video.beep_source === "aligned";
   const reviewed = video.beep_reviewed;
   // Three-state pill (#71): manual entry counts as reviewed
-  // automatically; auto-detect leaves the user a yellow "review" pill
-  // until they confirm. Pure visual nudge -- pipeline doesn't gate on
-  // it.
+  // automatically; auto-detect and cross-aligned suggestions leave the
+  // user a yellow "review" pill until they confirm. Pure visual nudge --
+  // pipeline doesn't gate on it.
   const pillVariant = reviewed
     ? "statusComplete"
     : isManual
       ? "statusComplete"
       : "statusWarning";
+  const sourceLabel = isManual ? "user" : isAligned ? "aligned" : "auto";
   const pillLabel = reviewed
-    ? `beep · ${isManual ? "user" : "auto"} · reviewed`
+    ? `beep · ${sourceLabel} · reviewed`
     : isManual
       ? "beep · user"
-      : "beep · review";
+      : isAligned
+        ? "beep · aligned · verify"
+        : "beep · review";
+  const conf = video.beep_alignment_confidence;
+  const pillTitle =
+    isAligned && conf != null
+      ? `Cross-correlation alignment to primary (conf ${conf.toFixed(2)}). Verify on the waveform before marking reviewed.`
+      : undefined;
+  // Sanity-check disagreement: in-stream succeeded on a secondary AND
+  // cross-correlation also produced a high-confidence answer that
+  // disagrees with it by more than 250 ms. The most common cause is the
+  // in-stream detector mistaking a steel hit / RO command for the
+  // buzzer. Flagged as a yellow strip with the cross-align suggestion
+  // so the user can compare both candidates on the waveform.
+  const deltaMs = video.beep_alignment_delta_ms;
+  const disagreement =
+    !isManual && deltaMs != null && Math.abs(deltaMs) > 250;
+  const crossAlignSuggestion =
+    disagreement && video.beep_time != null ? video.beep_time - deltaMs / 1000 : null;
 
   const markReviewed = async () => {
     setBusy(true);
@@ -377,7 +457,7 @@ export function BeepSection({
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={pillVariant} className="gap-1">
+        <Badge variant={pillVariant} className="gap-1" title={pillTitle}>
           <Check className="size-3" />
           {pillLabel}
         </Badge>
@@ -441,6 +521,33 @@ export function BeepSection({
           ) : null}
         </div>
       </div>
+      {disagreement && crossAlignSuggestion != null ? (
+        <AlignmentDisagreement
+          stageNumber={stageNumber}
+          videoId={videoId}
+          inStreamTime={video.beep_time!}
+          crossAlignTime={crossAlignSuggestion}
+          deltaMs={deltaMs!}
+          confidence={conf}
+          onUseCrossAlign={async () => {
+            setBusy(true);
+            try {
+              const updated = await api.overrideBeepForVideo(
+                stageNumber,
+                videoId,
+                crossAlignSuggestion,
+              );
+              onProjectUpdate(updated);
+              setError(null);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          busy={busy}
+        />
+      ) : null}
       <BeepCandidates
         stageNumber={stageNumber}
         videoId={videoId}
@@ -745,6 +852,8 @@ function BeepWaveformPicker({
       </div>
       {proposal != null ? (
         <SnapProposal
+          stageNumber={stageNumber}
+          videoId={videoId}
           proposal={proposal}
           onAccept={acceptProposal}
           onDismiss={dismissProposal}
@@ -756,10 +865,14 @@ function BeepWaveformPicker({
 
 
 function SnapProposal({
+  stageNumber,
+  videoId,
   proposal,
   onAccept,
   onDismiss,
 }: {
+  stageNumber: number;
+  videoId: string;
   proposal: BeepSnapResult;
   onAccept: () => void;
   onDismiss: () => void;
@@ -767,32 +880,83 @@ function SnapProposal({
   const deltaMs = Math.round(proposal.delta * 1000);
   const sign = deltaMs >= 0 ? "+" : "";
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
-      <Sparkles className="size-3" />
-      <span className="font-mono tabular-nums">
-        Suggested: {proposal.snapped_time.toFixed(3)}s
-      </span>
-      <span className="text-muted-foreground">
-        ({sign}
-        {deltaMs} ms)
-      </span>
-      <span
-        className="text-muted-foreground"
-        title={`Silence-preference score: ${proposal.score.toFixed(1)}. Run peak amplitude: ${proposal.peak_amplitude.toFixed(2)}. Run duration: ${Math.round(proposal.duration_ms)} ms.`}
-      >
-        peak {proposal.peak_amplitude.toFixed(2)} &middot;{" "}
-        {Math.round(proposal.duration_ms)} ms
-      </span>
-      <div className="ml-auto flex gap-1">
-        <Button size="sm" variant="default" onClick={onAccept}>
-          <Check />
-          Accept
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
-          Dismiss
-        </Button>
+    <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <Sparkles className="size-3" />
+        <span className="font-mono tabular-nums">
+          Suggested: {proposal.snapped_time.toFixed(3)}s
+        </span>
+        <span className="text-muted-foreground">
+          ({sign}
+          {deltaMs} ms)
+        </span>
+        <span
+          className="text-muted-foreground"
+          title={`Silence-preference score: ${proposal.score.toFixed(1)}. Run peak amplitude: ${proposal.peak_amplitude.toFixed(2)}. Run duration: ${Math.round(proposal.duration_ms)} ms.`}
+        >
+          peak {proposal.peak_amplitude.toFixed(2)} &middot;{" "}
+          {Math.round(proposal.duration_ms)} ms
+        </span>
+        <div className="ml-auto flex gap-1">
+          <Button size="sm" variant="default" onClick={onAccept}>
+            <Check />
+            Accept
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
       </div>
+      <ProposalPreview
+        stageNumber={stageNumber}
+        videoId={videoId}
+        time={proposal.snapped_time}
+        ariaLabel={`Preview at suggested ${proposal.snapped_time.toFixed(3)}s`}
+      />
     </div>
+  );
+}
+
+/** A 1-second preview clip centered on a proposed beep time. Reuses the
+ *  same /api/.../beep-preview endpoint as the main BeepPreview, but
+ *  parameterized on an arbitrary time so it works for snap proposals,
+ *  cross-align suggestions, etc. Smaller than BeepPreview so it can sit
+ *  inside a confirmation banner without dominating the row. */
+function ProposalPreview({
+  stageNumber,
+  videoId,
+  time,
+  ariaLabel,
+}: {
+  stageNumber: number;
+  videoId: string;
+  time: number;
+  ariaLabel: string;
+}) {
+  const [errored, setErrored] = useState(false);
+  useEffect(() => {
+    setErrored(false);
+  }, [stageNumber, videoId, time]);
+  if (errored) {
+    return (
+      <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-muted-foreground">
+        <Sparkles className="size-3" />
+        Preview unavailable (no cached clip yet)
+      </div>
+    );
+  }
+  return (
+    <video
+      key={`${stageNumber}:${videoId}:${time.toFixed(3)}`}
+      src={api.videoBeepPreviewUrl(stageNumber, videoId, time)}
+      className="h-32 w-56 rounded-md border border-border/60 bg-black object-cover"
+      playsInline
+      controls
+      preload="metadata"
+      aria-label={ariaLabel}
+      title="1s preview around the proposed time -- press play to verify before accepting"
+      onError={() => setErrored(true)}
+    />
   );
 }
 
@@ -1029,6 +1193,86 @@ function BeepPreview({
           Looks wrong? Refine in audit
         </Link>
       ) : null}
+    </div>
+  );
+}
+
+/** Sanity-check banner: in-stream beep_detect succeeded but cross-correlation
+ *  alignment to the primary lands somewhere different by > 250 ms. The most
+ *  common cause is the in-stream detector locking onto a steel hit or other
+ *  loud transient that tone-matches the buzzer's bandpassed envelope. The
+ *  cross-correlation sees the broader loudness shape (silence -> loud ->
+ *  pause -> shots) and is harder to fool by a single tone. We don't auto-
+ *  override -- in-stream has frequency-domain information cross-align
+ *  doesn't -- but we offer the user a one-click swap. */
+function AlignmentDisagreement({
+  stageNumber,
+  videoId,
+  inStreamTime,
+  crossAlignTime,
+  deltaMs,
+  confidence,
+  onUseCrossAlign,
+  busy,
+}: {
+  stageNumber: number;
+  videoId: string;
+  inStreamTime: number;
+  crossAlignTime: number;
+  deltaMs: number;
+  confidence: number | null;
+  onUseCrossAlign: () => void | Promise<void>;
+  busy: boolean;
+}) {
+  const sign = deltaMs >= 0 ? "+" : "";
+  return (
+    <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
+        <span>
+          In-stream and cross-align disagree by{" "}
+          <span className="font-mono tabular-nums">
+            {sign}
+            {Math.round(deltaMs)} ms
+          </span>
+          . Could be a steel-strike mistaken for the buzzer.
+        </span>
+        <span
+          className="text-muted-foreground"
+          title={`In-stream: ${inStreamTime.toFixed(3)}s. Cross-align: ${crossAlignTime.toFixed(3)}s${
+            confidence != null ? ` (conf ${confidence.toFixed(2)})` : ""
+          }.`}
+        >
+          in-stream <span className="font-mono tabular-nums">{inStreamTime.toFixed(3)}s</span> ·
+          cross-align <span className="font-mono tabular-nums">{crossAlignTime.toFixed(3)}s</span>
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void onUseCrossAlign()}
+          disabled={busy}
+          className="ml-auto"
+        >
+          Use cross-align
+        </Button>
+      </div>
+      {/* Side-by-side previews so the user can A/B before swapping. The
+       *  current beep_time preview already lives below this banner via
+       *  BeepPreview; rendering the cross-align candidate here gives the
+       *  user the missing half of the comparison. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] text-muted-foreground">
+            Cross-align preview ({crossAlignTime.toFixed(3)}s)
+          </span>
+          <ProposalPreview
+            stageNumber={stageNumber}
+            videoId={videoId}
+            time={crossAlignTime}
+            ariaLabel={`Cross-align preview at ${crossAlignTime.toFixed(3)}s`}
+          />
+        </div>
+      </div>
     </div>
   );
 }

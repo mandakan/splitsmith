@@ -7,7 +7,11 @@
  */
 
 export type VideoRole = "primary" | "secondary" | "ignored";
-export type BeepSource = "auto" | "manual";
+/** ``"aligned"`` means the in-stream beep detector failed on a secondary
+ *  and ``cross_align`` projected the primary's beep into the secondary's
+ *  timeline. Treated as a *suggestion* the user must verify on the
+ *  waveform picker before "Mark reviewed". */
+export type BeepSource = "auto" | "manual" | "aligned";
 
 /** One ranked beep candidate emitted by ``detect-beep`` (issue #22).
  *  ``score`` is silence-preference (run_peak / pre-window mean); higher =
@@ -61,6 +65,24 @@ export interface StageVideo {
   /** Ranked alternative candidates from the most recent auto-detection run.
    *  Empty when the project predates issue #22 or after a manual override. */
   beep_candidates: BeepCandidate[];
+  /** True when both in-stream beep detection AND the cross-correlation
+   *  fallback ran on a secondary and neither produced a usable timestamp.
+   *  Distinguishes "tried and failed; pick on waveform" from "not started"
+   *  in the no-beep UI. False on primaries (in-stream failure is fatal
+   *  there). */
+  beep_auto_detect_failed: boolean;
+  /** Peak-to-runner-up confidence ratio from the cross-correlation
+   *  fallback / sanity check. Populated whenever cross-align ran on a
+   *  secondary -- as a promoted suggestion (``beep_source="aligned"``),
+   *  as a below-floor diagnostic (``beep_auto_detect_failed=true``), or
+   *  as a sanity check after in-stream succeeded. Null otherwise. */
+  beep_alignment_confidence: number | null;
+  /** Difference (in-stream minus cross-align) in milliseconds when both
+   *  methods produced a usable timestamp on a secondary. The SPA flags
+   *  large disagreements (> ~250 ms) since they typically mean the
+   *  in-stream detector locked onto a steel-strike or other transient
+   *  rather than the buzzer. Null when only one method ran. */
+  beep_alignment_delta_ms: number | null;
   notes: string;
 }
 
