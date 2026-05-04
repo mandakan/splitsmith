@@ -145,7 +145,7 @@ REASON_VALUES: tuple[str, ...] = (
     "other",
     "unknown",
 )
-SUBCLASS_VALUES: tuple[str, ...] = ("paper", "steel", "unknown")
+SUBCLASS_VALUES: tuple[str, ...] = ("paper", "steel", "barrel", "unknown")
 UNLABELED_REASON: str = "unlabeled"
 UNLABELED_SUBCLASS: str = "unlabeled"
 

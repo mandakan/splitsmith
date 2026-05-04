@@ -16,14 +16,16 @@
       "candidate_number": 1,
       "time": 1.0884,
       "ms_after_beep": 588,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 2,
       "candidate_number": 2,
       "time": 1.7495,
       "ms_after_beep": 1250,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 3,
@@ -37,21 +39,24 @@
       "candidate_number": 9,
       "time": 4.725,
       "ms_after_beep": 4225,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 5,
       "candidate_number": 11,
       "time": 5.2279,
       "ms_after_beep": 4728,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 13,
       "time": 5.7694,
       "ms_after_beep": 5269,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
@@ -65,14 +70,16 @@
       "candidate_number": 16,
       "time": 6.7785,
       "ms_after_beep": 6279,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 9,
       "candidate_number": 17,
       "time": 7.2942,
       "ms_after_beep": 6794,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 10,
@@ -320,7 +327,10 @@
       "6.539": "barrel_echo",
       "7.679": "barrel_echo",
       "8.055": "barrel_echo",
-      "8.247": "barrel_echo"
+      "8.247": "barrel_echo",
+      "8.425": "barrel_echo",
+      "9.639": "barrel_echo",
+      "10.165": "cross_bay"
     }
   },
   "stage_rounds": {

@@ -717,6 +717,7 @@ const REASON_SHORTCUTS: Record<string, string> = {
 const SUBCLASS_SHORTCUTS: Record<string, string> = {
   p: "paper",
   s: "steel",
+  b: "barrel",
   u: "unknown",
 };
 

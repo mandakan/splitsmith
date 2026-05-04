@@ -1111,7 +1111,7 @@ export const LAB_REASONS = [
 ] as const;
 export type LabReason = (typeof LAB_REASONS)[number];
 
-export const LAB_SUBCLASSES = ["paper", "steel", "unknown"] as const;
+export const LAB_SUBCLASSES = ["paper", "steel", "barrel", "unknown"] as const;
 export type LabSubclass = (typeof LAB_SUBCLASSES)[number];
 
 export interface LabEvalFixtureMetrics {
