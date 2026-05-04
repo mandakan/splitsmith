@@ -48,21 +48,24 @@
       "candidate_number": 22,
       "time": 7.7803,
       "ms_after_beep": 7280,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 23,
       "time": 8.0368,
       "ms_after_beep": 7537,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
       "candidate_number": 24,
       "time": 8.2418,
       "ms_after_beep": 7742,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
@@ -101,14 +104,16 @@
       "candidate_number": 38,
       "time": 14.9924,
       "ms_after_beep": 14492,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 13,
       "candidate_number": 39,
       "time": 15.1891,
       "ms_after_beep": 14689,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 14,
@@ -187,7 +192,8 @@
       "candidate_number": 66,
       "time": 24.8203,
       "ms_after_beep": 24320,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 24,
@@ -202,7 +208,8 @@
       "candidate_number": 69,
       "time": 26.3157,
       "ms_after_beep": 25816,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 26,
@@ -217,7 +224,8 @@
       "candidate_number": 76,
       "time": 28.96,
       "ms_after_beep": 28460,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 28,
@@ -256,7 +264,8 @@
       "candidate_number": 110,
       "time": 38.4889,
       "ms_after_beep": 37989,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 33,
@@ -271,14 +280,16 @@
       "candidate_number": 114,
       "time": 40.2337,
       "ms_after_beep": 39734,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 35,
       "candidate_number": 118,
       "time": 41.3174,
       "ms_after_beep": 40817,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 36,
@@ -286,21 +297,23 @@
       "time": 42.6656,
       "ms_after_beep": 42166,
       "source": "detected",
-      "subclass": "steel"
+      "subclass": "paper"
     },
     {
       "shot_number": 37,
       "candidate_number": 123,
       "time": 42.8873,
       "ms_after_beep": 42387,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 38,
       "candidate_number": 124,
       "time": 43.2586,
       "ms_after_beep": 42759,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     }
   ],
   "_candidates_pending_audit": {
@@ -1257,7 +1270,8 @@
       "6.819": "wind",
       "7.069": "wind",
       "7.215": "cross_bay",
-      "7.308": "cross_bay"
+      "7.308": "cross_bay",
+      "16.162": "echo"
     }
   },
   "audit_notes": [
