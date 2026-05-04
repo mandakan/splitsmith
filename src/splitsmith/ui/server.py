@@ -2586,6 +2586,44 @@ def create_app(
         except audio_helpers.AudioExtractionError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    def _resolve_video_audio(
+        project: MatchProject, stage_number: int, video: StageVideo
+    ) -> audio_helpers.AuditAudioResult:
+        """Per-video version of :func:`_resolve_audit_audio`.
+
+        Primary delegates to the audit-audio resolver so the existing
+        cache + trim-clip preference is preserved. Non-primary returns
+        the full per-cam WAV (``stage<N>_cam_<vid>.wav``) -- there's no
+        per-secondary trim clip, and the picker needs the whole clip
+        anyway so the user can find the buzzer / first shot regardless
+        of where the current beep estimate sits.
+
+        ``beep_in_clip`` mirrors the primary path: the WAV is full source
+        time, so it's just ``video.beep_time`` (no trim offset). Audit
+        callers that need clip-local time should keep using the primary
+        endpoint -- this resolver is for the per-video beep picker.
+        """
+        if video.role == "primary":
+            return _resolve_audit_audio(project, stage_number)
+        source = project.resolve_video_path(state.project_root, video.path)
+        try:
+            audio_path = audio_helpers.ensure_video_audio(
+                state.project_root,
+                stage_number,
+                video,
+                source,
+                project=project,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except audio_helpers.AudioExtractionError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return audio_helpers.AuditAudioResult(
+            audio_path=audio_path,
+            beep_in_clip=video.beep_time,
+            trimmed=False,
+        )
+
     def _serve_beep_preview(
         project: MatchProject,
         stage_number: int,
@@ -2684,6 +2722,45 @@ def create_app(
         """
         project = state.load()
         audit = _resolve_audit_audio(project, stage_number)
+        peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
+        payload = peaks.model_dump(mode="json")
+        payload["beep_time"] = audit.beep_in_clip
+        payload["trimmed"] = audit.trimmed
+        return JSONResponse(payload)
+
+    @app.get("/api/stages/{stage_number}/videos/{video_id}/audio")
+    def video_audio(stage_number: int, video_id: str) -> FileResponse:
+        """Serve ``video``'s WAV for the per-video beep picker.
+
+        Primary forwards to the legacy stage audio resolver so the
+        trimmed audit clip is preferred. Secondary returns the full
+        per-cam WAV (``stage<N>_cam_<vid>.wav``) -- no per-secondary
+        trim clip exists yet, and the picker needs the entire clip so
+        the user can find the buzzer / first-shot regardless of where
+        the current beep estimate is.
+        """
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        result = _resolve_video_audio(project, stage_number, video)
+        return FileResponse(
+            result.audio_path,
+            media_type="audio/wav",
+            filename=result.audio_path.name,
+        )
+
+    @app.get("/api/stages/{stage_number}/videos/{video_id}/peaks")
+    def video_peaks(
+        stage_number: int,
+        video_id: str,
+        bins: int = Query(default=1200, ge=16, le=8192),
+    ) -> JSONResponse:
+        """Return ``bins`` peak magnitudes for ``video``'s WAV.
+
+        Same shape as ``/api/stages/{n}/peaks`` so the SPA's waveform
+        picker can take the same path for primary + secondary -- the
+        only thing that varies between roles is the URL.
+        """
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        audit = _resolve_video_audio(project, stage_number, video)
         peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip

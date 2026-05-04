@@ -1717,28 +1717,25 @@ function UnassignedVideoCard({
       className="rounded-md border border-border bg-muted/40 p-3"
     >
       <div className="flex flex-col gap-3 sm:flex-row">
-        {/* Inline video with thumbnail poster -- click the native play
-            control to start. No JS state machine: the <video> element
-            already gives us pause / scrub / fullscreen for free, and
-            using the cached thumbnail as a poster avoids the network
-            round-trip browsers do otherwise. */}
+        {/* Inline video with the cached JPG as poster -- click the native
+            play control to start. The <video> element renders as soon as
+            we know the source URL (no waiting on the probe round-trip);
+            the thumbnail just upgrades the poster image when it arrives.
+            preload="metadata" pulls the moov atom so browsers can fall
+            back to the first frame as a poster while the JPG loads. */}
         <div className="relative w-full shrink-0 overflow-hidden rounded bg-black/40 sm:w-48 aspect-video">
-          {meta ? (
-            <video
-              src={api.videoStreamUrl(video.path)}
-              poster={meta.thumbnail_url ?? undefined}
-              controls
-              preload="none"
-              className="h-full w-full"
-              // Stop drag events bubbling to DraggableVideoRow so the
-              // user can scrub the timeline without accidentally
-              // dragging the row out of the unassigned tray.
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <Skeleton className="h-full w-full rounded-none" />
-          )}
+          <video
+            src={api.videoStreamUrl(video.path)}
+            poster={meta?.thumbnail_url ?? undefined}
+            controls
+            preload="metadata"
+            className="h-full w-full"
+            // Stop drag events bubbling to DraggableVideoRow so the
+            // user can scrub the timeline without accidentally
+            // dragging the row out of the unassigned tray.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
 
         {/* Metadata */}
