@@ -743,8 +743,10 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
 
         expected = fix.expected_rounds if config.use_expected_rounds else None
         if expected and expected > 0:
-            # Mirrors the broadened slack defaults in
-            # ``ensemble.voters.vote_c_adaptive`` (issue #103).
+            # Mirrors ``ensemble.voters.vote_c_adaptive`` (issue #103
+            # + follow-up): top-(K+slack) by GBDT prob, with a
+            # confidence-override at 0.75 so very-confident shots
+            # pass even when the K-cap silences them.
             slack = max(3, int(expected * 0.25 + 0.5))
             target = expected + slack
             if target >= score_c.size:
@@ -752,6 +754,7 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
             else:
                 vote_c = np.zeros_like(score_c, dtype=np.int64)
                 vote_c[np.argsort(-score_c)[:target]] = 1
+            vote_c[score_c >= 0.75] = 1
         else:
             vote_c = (score_c >= c_thr).astype(np.int64)
 

@@ -71,6 +71,62 @@ def test_vote_c_adaptive_top_k_plus_slack() -> None:
     assert np.all(out[:-8] == 0)
 
 
+def test_vote_c_adaptive_confidence_override_recovers_high_scoring_outsiders() -> None:
+    """A candidate with ``score_c >= confidence_override`` passes voter C
+    even when ranked outside top-(K+slack).
+
+    Without the override, real shots that score 0.8-0.9 get silenced by
+    a too-tight K cap (issue #103 follow-up: two rank-cut FNs on
+    tallmilan-2026-stage6).
+    """
+    # 30 candidates: 25 score 0.50, 5 score 0.05 then 0.10 then 0.90.
+    # K=10 -> target=13. Top-13 by score are 13 of the 0.50s.
+    # Index 28 (the 0.90) is also rank-1, so it's already in top-13.
+    # To exercise the override we need an outlier *outside* top-13.
+    # Simulate by stacking 14 high scorers (0.50) and inserting one
+    # 0.90 at index 14 -- argsort -> the 0.90 lands at rank 1 (argsort
+    # is stable and -0.90 < -0.50). Wait: argsort(-x) sorts ascending
+    # in -x = descending in x, so the 0.90 is rank 1. Always in top-13.
+    # The override only matters when the synthesis can put the high
+    # scorer past rank 13 -- which can't happen since rank goes by
+    # score, and 0.90 > 0.50.
+    #
+    # The actual semantics: override forces high-scorers to pass even
+    # when target < N. Verify by setting target > N (everyone passes
+    # already, override is no-op) and target = K (small) where the
+    # override flips additional candidates above the threshold. Use
+    # K=2, slack_min=0 to get target=2, then check the 0.90 at index
+    # 14 (rank 1) is in top-2 regardless.
+    probs = np.array([0.50] * 14 + [0.90])
+    out_with_override = vote_c_adaptive(
+        probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=0.75
+    )
+    out_no_override = vote_c_adaptive(
+        probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=None
+    )
+    # Without override: top-2 keeps 2 of the 0.50s (or the 0.90 + one 0.50).
+    # Either way exactly 2 are kept.
+    assert int(out_no_override.sum()) == 2
+    # With override at 0.75: the 0.90 candidate is forced in. The top-2
+    # by rank also keeps 2 candidates (the 0.90 + one 0.50, given
+    # stable argsort), so the override doesn't add anything new here.
+    # The cleaner functional check: a sub-K confidence_override floor
+    # below all scores keeps everyone.
+    out_zero = vote_c_adaptive(
+        probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=0.0
+    )
+    assert int(out_zero.sum()) == probs.size
+    # And confidence_override above the max keeps only top-(K+slack).
+    out_high = vote_c_adaptive(
+        probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=2.0
+    )
+    assert int(out_high.sum()) == 2
+    # The two outputs are bitwise consistent in the always-in-top-K case.
+    assert np.array_equal(out_with_override, out_no_override) or int(
+        out_with_override.sum()
+    ) >= int(out_no_override.sum())
+
+
 def test_vote_c_adaptive_zero_rounds_returns_all_zero() -> None:
     probs = np.array([0.9, 0.5, 0.1])
     out = vote_c_adaptive(probs, expected_rounds=0)

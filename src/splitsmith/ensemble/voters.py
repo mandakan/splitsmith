@@ -33,6 +33,7 @@ def vote_c_adaptive(
     *,
     slack_min: int = 3,
     slack_frac: float = 0.25,
+    confidence_override: float | None = 0.75,
 ) -> np.ndarray:
     """Voter C in adaptive mode: keep the top-(K+slack) probabilities.
 
@@ -44,6 +45,14 @@ def vote_c_adaptive(
     labeled FPs across 4 fixtures: it recovers 100 % of audited truth
     shots while letting only 3 / 281 labeled FPs slip past voter C
     (vs the original 0.10 which missed 4 truth shots).
+
+    ``confidence_override`` (issue #103 follow-up): high-scoring
+    candidates pass voter C regardless of rank. The K-cap can otherwise
+    silence voter C even when its GBDT is very confident -- e.g. real
+    shots that score 0.8-0.9 get cut off by the rank cutoff while the
+    median FP scores ~0.005. The default 0.75 was tuned on 334 labeled
+    FPs (max score 0.73, 13 / 334 ≥ 0.10) and 226 truth shots (the two
+    rank-cut FNs scored 0.80 / 0.90). Pass ``None`` to disable.
     """
     if gbdt_probs.size == 0 or expected_rounds <= 0:
         return np.zeros_like(gbdt_probs, dtype=np.int64)
@@ -54,6 +63,8 @@ def vote_c_adaptive(
     keep = np.zeros_like(gbdt_probs, dtype=np.int64)
     top_idx = np.argsort(-gbdt_probs)[:target]
     keep[top_idx] = 1
+    if confidence_override is not None:
+        keep[gbdt_probs >= confidence_override] = 1
     return keep
 
 
