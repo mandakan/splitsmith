@@ -324,19 +324,55 @@ export function PromoteReview() {
   // pulling in the full editable MarkerLayer; this view is read-only on the
   // anchor side and the secondary side has its own dedicated nudge controls.
   const anchorShotOverlays = useMemo(() => {
-    if (!anchorPeaks) return [] as { left: string; label: number }[];
+    if (!anchorPeaks || sharedDuration <= 0) return [] as { left: string; label: number }[];
     return (anchorFixture?.shots ?? []).map((s) => ({
-      left: `${((s.time ?? 0) / anchorPeaks.duration) * 100}%`,
+      left: `${((s.time ?? 0) / sharedDuration) * 100}%`,
       label: s.shot_number,
     }));
-  }, [anchorFixture, anchorPeaks]);
+  }, [anchorFixture, anchorPeaks, sharedDuration]);
+
+  // Lock both waveform panels to a shared time axis so events at the same
+  // clip-local second appear at the same X position. Without this, anchor
+  // and secondary clips of different durations stretch independently and
+  // the BEEP / shot markers don't visually align even when the times are
+  // correct.
+  const sharedDuration = useMemo(() => {
+    const a = anchorPeaks?.duration ?? 0;
+    const d = derivedPeaks?.duration ?? 0;
+    return Math.max(a, d);
+  }, [anchorPeaks, derivedPeaks]);
+
+  const padPeaksToDuration = useCallback(
+    (peaks: number[], peaksDuration: number): number[] => {
+      if (sharedDuration <= 0 || peaksDuration <= 0) return peaks;
+      if (peaksDuration >= sharedDuration) return peaks;
+      const totalBins = Math.round(peaks.length * (sharedDuration / peaksDuration));
+      const pad = totalBins - peaks.length;
+      if (pad <= 0) return peaks;
+      return [...peaks, ...new Array(pad).fill(0)];
+    },
+    [sharedDuration],
+  );
+
+  const anchorPeaksPadded = useMemo(
+    () =>
+      anchorPeaks ? padPeaksToDuration(anchorPeaks.peaks, anchorPeaks.duration) : [],
+    [anchorPeaks, padPeaksToDuration],
+  );
+
+  const derivedPeaksPadded = useMemo(
+    () =>
+      derivedPeaks ? padPeaksToDuration(derivedPeaks.peaks, derivedPeaks.duration) : [],
+    [derivedPeaks, padPeaksToDuration],
+  );
 
   const derivedShotOverlays = useMemo(() => {
-    if (!derivedPeaks) return [] as { left: string; label: number; color: string }[];
+    if (!derivedPeaks || sharedDuration <= 0)
+      return [] as { left: string; label: number; color: string }[];
     return shots
       .filter((s) => s.time !== null)
       .map((s) => ({
-        left: `${(s.time! / derivedPeaks.duration) * 100}%`,
+        left: `${(s.time! / sharedDuration) * 100}%`,
         label: s.shotNumber,
         color:
           s.status === "confirmed" || s.status === "nudged"
@@ -345,7 +381,7 @@ export function PromoteReview() {
               ? "var(--muted-foreground)"
               : "var(--destructive)",
       }));
-  }, [shots, derivedPeaks]);
+  }, [shots, derivedPeaks, sharedDuration]);
 
   if (!fixturePath) {
     return (
@@ -448,8 +484,8 @@ export function PromoteReview() {
               </div>
               <div className="flex-1 relative overflow-hidden">
                 <Waveform
-                  peaks={anchorPeaks.peaks}
-                  duration={anchorPeaks.duration}
+                  peaks={anchorPeaksPadded}
+                  duration={sharedDuration}
                   currentTime={anchorZoomCenter}
                   onScrub={() => {}}
                   height={140}
@@ -459,7 +495,7 @@ export function PromoteReview() {
                     <div
                       className="absolute top-0 bottom-0 w-0.5"
                       style={{
-                        left: `${(anchorFixture.beep_time / anchorPeaks.duration) * 100}%`,
+                        left: `${(anchorFixture.beep_time / sharedDuration) * 100}%`,
                         backgroundColor: "var(--status-warning)",
                       }}
                     >
@@ -498,8 +534,8 @@ export function PromoteReview() {
               </div>
               <div className="flex-1 relative overflow-hidden">
                 <Waveform
-                  peaks={derivedPeaks.peaks}
-                  duration={derivedPeaks.duration}
+                  peaks={derivedPeaksPadded}
+                  duration={sharedDuration}
                   currentTime={derivedZoomCenter}
                   onScrub={() => {}}
                   height={140}
@@ -509,7 +545,7 @@ export function PromoteReview() {
                     <div
                       className="absolute top-0 bottom-0 w-0.5"
                       style={{
-                        left: `${(fixture.beep_time / derivedPeaks.duration) * 100}%`,
+                        left: `${(fixture.beep_time / sharedDuration) * 100}%`,
                         backgroundColor: "var(--status-warning)",
                       }}
                     >
