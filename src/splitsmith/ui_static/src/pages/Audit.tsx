@@ -530,7 +530,6 @@ export function Audit() {
     }
   }, []);
 
-  // Called when a secondary starts or stops buffering. If any secondary is
   // Called when a secondary starts or stops buffering. We pause all for brief
   // network stalls but give up after SECONDARY_BUFFER_TIMEOUT_MS -- at that
   // point the secondary likely has no content at this audit position (it starts
@@ -581,6 +580,7 @@ export function Audit() {
       }
       secondaryBufferingSet.current.delete(path);
       if (secondaryBufferingSet.current.size === 0 && blockedBySecondaryRef.current) {
+        // Normal recovery: all secondaries are clear, resume everything.
         blockedBySecondaryRef.current = false;
         if (isPlayingRef.current) {
           const pv = videoRef.current;
@@ -589,6 +589,12 @@ export function Audit() {
             void sv.play();
           }
         }
+      } else if (!blockedBySecondaryRef.current && isPlayingRef.current) {
+        // The give-up timer already fired and cleared the block, but this
+        // secondary just gained content (canplay after a scrub, or late buffer
+        // arrival). Resume it independently so it re-joins playback.
+        const sv = secondaryRefsMap.current.get(path);
+        if (sv && sv.paused) void sv.play();
       }
     }
   }, []);
