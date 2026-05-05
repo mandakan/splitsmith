@@ -51,6 +51,20 @@ DEFAULT_FIXTURES = [
     "stage-shots-tallmilan-2026-stage7",
     "stage-shots-tallmilan-2026-stage5",
     "stage-shots-tallmilan-2026-stage6",
+    # Phone-cam fixtures (PR #134 + PR #152). Promoted from headcam
+    # anchors; shots[] inherited verbatim, camera.mount=hand.
+    "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage4-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage6-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage8-apple-iphone17pro",
 ]
 FIXTURES_DIR = Path("tests/fixtures")
 CACHE_DIR = FIXTURES_DIR / ".cache"
