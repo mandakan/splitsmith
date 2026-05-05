@@ -154,6 +154,35 @@ class Gun(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class Shooter(BaseModel):
+    """Identifies which shooter performed the run captured by this fixture.
+
+    Two videos from the same match + stage may capture different shooters
+    (a friend films their own run on the same stage with the same gun
+    rules). The event-grouping key (``event_id`` in :class:`FixtureRecord`)
+    must therefore include shooter identity so multi-cam coverage of one
+    shooter doesn't get cross-grouped with another shooter on the same
+    physical stage.
+
+    ``id`` is the canonical, slugified shooter key written into
+    ``event_id``. Stable across promotions so siblings cluster correctly.
+    Conventions:
+
+    * ``"ssi-<shooterId>"`` -- preferred when the project's SSI shooter
+      pin is known (``MatchProject.selected_shooter_id``).
+    * ``"name-<slug>"`` -- when only the competitor's name is available.
+    * ``"self"`` -- legacy / single-shooter fallback for projects that
+      pre-date this field. The migration uses this as the default.
+
+    ``ssi_shooter_id`` and ``name`` carry the resolvable details for the
+    Lab UI; ``id`` is the load-bearing key the grouping logic depends on.
+    """
+
+    id: str
+    name: str | None = None
+    ssi_shooter_id: int | None = None
+
+
 class Camera(BaseModel):
     """Identifies the physical device and its recording setup for this fixture.
 

@@ -473,5 +473,9 @@
     "muzzle_device": "none",
     "action": "semi-auto",
     "power_factor": "minor"
-  }
+  },
+  "shooter": {
+    "id": "self"
+  },
+  "event_id": "tallmilan-2026:3:self"
 }

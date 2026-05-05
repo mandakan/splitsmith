@@ -40,6 +40,12 @@ from ..fixture_schema import (
     now_iso,
     shots_revision_sha,
 )
+from .core import (
+    DEFAULT_SHOOTER_KEY,
+    build_event_id,
+    event_id_from_payload,
+    match_stage_from_slug,
+)
 from .snap_window import SnapResult, guided_snap_anchor_shots, snap_anchor_shots
 
 _TOOL_VERSION = "0.1.0"
@@ -395,10 +401,49 @@ def _build_fixture(
         "_candidates_pending_audit": candidates_block,
         "audit_notes": "",
         "stage_rounds": anchor.get("stage_rounds"),
+        "shooter": _inherit_shooter(anchor),
+        "event_id": _inherit_event_id(anchor, anchor_link.fixture_slug),
         "camera": camera.model_dump(mode="json"),
         "anchor": anchor_link.model_dump(mode="json"),
         "history": [history_entry.model_dump(mode="json")],
     }
+
+
+def _inherit_shooter(anchor: dict[str, Any]) -> dict[str, Any]:
+    """Derived fixtures share the anchor's shooter identity verbatim.
+
+    Multi-cam siblings always belong to the same shooter -- they are
+    different angles of the same physical run. Falls back to the legacy
+    sentinel for anchors that pre-date the field.
+    """
+    block = anchor.get("shooter")
+    if isinstance(block, dict) and isinstance(block.get("id"), str) and block["id"]:
+        return dict(block)
+    return {"id": DEFAULT_SHOOTER_KEY}
+
+
+def _inherit_event_id(anchor: dict[str, Any], anchor_slug: str) -> str | None:
+    """Derived fixtures share the anchor's event_id when set; otherwise
+    the same shooter + stage parse + match keeps siblings grouped."""
+    raw = anchor.get("event_id")
+    if isinstance(raw, str) and raw:
+        return raw
+    parsed = match_stage_from_slug(anchor_slug)
+    if parsed is None:
+        return None
+    match_slug, n = parsed
+    shooter_block = anchor.get("shooter")
+    shooter_key = DEFAULT_SHOOTER_KEY
+    if isinstance(shooter_block, dict):
+        sid = shooter_block.get("id")
+        if isinstance(sid, str) and sid:
+            shooter_key = sid
+    return build_event_id(match_slug, n, shooter_key)
+
+
+# Re-exported so callers (server.py promote-from-project) can resolve the
+# event_id without re-importing core.
+_ = (event_id_from_payload,)
 
 
 def _find_candidate_number(snap_time: float, ensemble: EnsembleResult) -> int | None:

@@ -631,6 +631,48 @@ function FixtureTable({
     return map;
   }, [run]);
 
+  // Group catalog rows by ``event_id`` so multi-camera siblings render
+  // together. Sort: events with siblings first (multi-cam coverage is
+  // the more interesting case), then by event_id, then ungrouped rows
+  // alphabetically. Within an event, anchor-style rows (no anchor_slug)
+  // come before derived siblings so the headcam baseline reads first.
+  const groupedCatalog = useMemo(() => {
+    const groups = new Map<string, LabFixtureRecord[]>();
+    const ungrouped: LabFixtureRecord[] = [];
+    for (const rec of catalog) {
+      if (rec.event_id) {
+        const list = groups.get(rec.event_id) ?? [];
+        list.push(rec);
+        groups.set(rec.event_id, list);
+      } else {
+        ungrouped.push(rec);
+      }
+    }
+    for (const list of groups.values()) {
+      list.sort((a, b) => {
+        const ad = a.anchor_slug ? 1 : 0;
+        const bd = b.anchor_slug ? 1 : 0;
+        if (ad !== bd) return ad - bd;
+        return a.slug.localeCompare(b.slug);
+      });
+    }
+    const ordered: { eventId: string | null; rows: LabFixtureRecord[] }[] = [];
+    const sortedEventIds = Array.from(groups.keys()).sort((a, b) => {
+      const aSize = groups.get(a)!.length;
+      const bSize = groups.get(b)!.length;
+      if (aSize !== bSize) return bSize - aSize;
+      return a.localeCompare(b);
+    });
+    for (const eventId of sortedEventIds) {
+      ordered.push({ eventId, rows: groups.get(eventId)! });
+    }
+    if (ungrouped.length > 0) {
+      ungrouped.sort((a, b) => a.slug.localeCompare(b.slug));
+      ordered.push({ eventId: null, rows: ungrouped });
+    }
+    return ordered;
+  }, [catalog]);
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -662,118 +704,171 @@ function FixtureTable({
               </tr>
             </thead>
             <tbody>
-              {catalog.map((rec) => {
-                const m = metricsBySlug.get(rec.slug);
-                const active = rec.slug === activeSlug;
-                return (
-                  <tr
+              {groupedCatalog.flatMap((group) => {
+                const rows: React.ReactNode[] = [];
+                if (group.eventId !== null && group.rows.length > 1) {
+                  // Always show the full event_id including the shooter
+                  // suffix -- per user direction, shooter identity is
+                  // load-bearing for training data and shouldn't be
+                  // implicit. ``self`` rows surface as such so they can
+                  // be re-tagged later when SSI ids become available.
+                  rows.push(
+                    <tr
+                      key={`event:${group.eventId}`}
+                      className="bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground"
+                    >
+                      <td colSpan={10} className="px-4 py-1 font-medium">
+                        Event {group.eventId} -- {group.rows.length} cameras
+                      </td>
+                    </tr>,
+                  );
+                }
+                for (const rec of group.rows) {
+                  const m = metricsBySlug.get(rec.slug);
+                  const active = rec.slug === activeSlug;
+                  const isSibling =
+                    group.eventId !== null && group.rows.length > 1;
+                  rows.push(<FixtureRow
                     key={rec.slug}
-                    className={cn(
-                      "cursor-pointer border-b border-border/40 hover:bg-muted/40",
-                      active && "bg-accent/40",
-                    )}
-                    onClick={() => onSelect(active ? null : rec.slug)}
-                  >
-                    <td className="px-4 py-2 font-mono text-xs">
-                      {rec.slug}
-                      {!rec.has_audio && (
-                        <Badge variant="destructive" className="ml-2 text-[10px]">
-                          no wav
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">{rec.n_shots}</td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? m.metrics.n_kept : "--"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? <LabelProgress fixture={m} /> : "--"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? fmtPct(m.metrics.precision) : "--"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? fmtPct(m.metrics.recall) : "--"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? m.metrics.f1.toFixed(3) : "--"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? (
-                        <span className={m.metrics.false_positives ? "text-orange-500" : ""}>
-                          {m.metrics.false_positives}
-                        </span>
-                      ) : (
-                        "--"
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs">
-                      {m ? (
-                        <span className={m.metrics.false_negatives ? "text-red-500" : ""}>
-                          {m.metrics.false_negatives}
-                        </span>
-                      ) : (
-                        "--"
-                      )}
-                    </td>
-                    <td className="px-2 py-2 text-muted-foreground">
-                      <div className="flex items-center justify-end gap-1">
-                        {rec.anchor_slug && (
-                          <Link
-                            to={promoteReviewUrl(rec.audit_path, rec.anchor_slug)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                            title="Re-open the secondary diff-confirm review"
-                            aria-label={`Re-review promotion ${rec.slug}`}
-                          >
-                            <Link2 className="size-3.5" />
-                          </Link>
-                        )}
-                        <Link
-                          to={reviewUrl(rec.audit_path, rec.source_video)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          title="Re-label this fixture in the review editor"
-                          aria-label={`Re-label ${rec.slug}`}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Link>
-                        {rec.anchor_slug && (
-                          <button
-                            type="button"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (
-                                !window.confirm(
-                                  `Delete derived fixture "${rec.slug}"? This removes the JSON, WAV, peaks and promotion-report.`,
-                                )
-                              )
-                                return;
-                              try {
-                                await api.deleteFixture(rec.slug);
-                                onDeleted(rec.slug);
-                              } catch (err) {
-                                window.alert(`Delete failed: ${err}`);
-                              }
-                            }}
-                            className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            title="Delete this derived fixture (anchor not affected)"
-                            aria-label={`Delete derived fixture ${rec.slug}`}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        )}
-                        <ChevronRight className="size-3.5" />
-                      </div>
-                    </td>
-                  </tr>
-                );
+                    rec={rec}
+                    m={m}
+                    active={active}
+                    onSelect={onSelect}
+                    onDeleted={onDeleted}
+                    isSibling={isSibling}
+                  />);
+                }
+                return rows;
               })}
             </tbody>
           </table>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function FixtureRow({
+  rec,
+  m,
+  active,
+  isSibling,
+  onSelect,
+  onDeleted,
+}: {
+  rec: LabFixtureRecord;
+  m: LabEvalFixture | undefined;
+  active: boolean;
+  isSibling: boolean;
+  onSelect: (slug: string | null) => void;
+  onDeleted: (slug: string) => void;
+}) {
+  return (
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-border/40 hover:bg-muted/40",
+        active && "bg-accent/40",
+      )}
+      onClick={() => onSelect(active ? null : rec.slug)}
+    >
+      <td
+        className={cn(
+          "px-4 py-2 font-mono text-xs",
+          isSibling && "pl-8 text-muted-foreground",
+        )}
+      >
+        {rec.slug}
+        {!rec.has_audio && (
+          <Badge variant="destructive" className="ml-2 text-[10px]">
+            no wav
+          </Badge>
+        )}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">{rec.n_shots}</td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? m.metrics.n_kept : "--"}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? <LabelProgress fixture={m} /> : "--"}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? fmtPct(m.metrics.precision) : "--"}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? fmtPct(m.metrics.recall) : "--"}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? m.metrics.f1.toFixed(3) : "--"}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? (
+          <span className={m.metrics.false_positives ? "text-orange-500" : ""}>
+            {m.metrics.false_positives}
+          </span>
+        ) : (
+          "--"
+        )}
+      </td>
+      <td className="px-3 py-2 text-right font-mono text-xs">
+        {m ? (
+          <span className={m.metrics.false_negatives ? "text-red-500" : ""}>
+            {m.metrics.false_negatives}
+          </span>
+        ) : (
+          "--"
+        )}
+      </td>
+      <td className="px-2 py-2 text-muted-foreground">
+        <div className="flex items-center justify-end gap-1">
+          {rec.anchor_slug && (
+            <Link
+              to={promoteReviewUrl(rec.audit_path, rec.anchor_slug)}
+              onClick={(e) => e.stopPropagation()}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="Re-open the secondary diff-confirm review"
+              aria-label={`Re-review promotion ${rec.slug}`}
+            >
+              <Link2 className="size-3.5" />
+            </Link>
+          )}
+          <Link
+            to={reviewUrl(rec.audit_path, rec.source_video)}
+            onClick={(e) => e.stopPropagation()}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="Re-label this fixture in the review editor"
+            aria-label={`Re-label ${rec.slug}`}
+          >
+            <Pencil className="size-3.5" />
+          </Link>
+          {rec.anchor_slug && (
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (
+                  !window.confirm(
+                    `Delete derived fixture "${rec.slug}"? This removes the JSON, WAV, peaks and promotion-report.`,
+                  )
+                )
+                  return;
+                try {
+                  await api.deleteFixture(rec.slug);
+                  onDeleted(rec.slug);
+                } catch (err) {
+                  window.alert(`Delete failed: ${err}`);
+                }
+              }}
+              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              title="Delete this derived fixture (anchor not affected)"
+              aria-label={`Delete derived fixture ${rec.slug}`}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          )}
+          <ChevronRight className="size-3.5" />
+        </div>
+      </td>
+    </tr>
   );
 }
 

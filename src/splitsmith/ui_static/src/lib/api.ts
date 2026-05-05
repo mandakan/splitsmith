@@ -1338,6 +1338,12 @@ export interface LabFixtureRecord {
   /** Set on derived (promoted-from-anchor) fixtures; the SPA uses this
    *  to surface a "re-review" link back to /promote-review. */
   anchor_slug: string | null;
+  /** Event grouping key (e.g., ``"blacksmith-2026:6"``). Multi-camera
+   *  siblings of the same shooter-stage event share this id; the Lab
+   *  table groups by it. ``null`` for fixtures whose slug doesn't match
+   *  the standard pattern and which have no explicit ``event_id`` on
+   *  disk -- those rows render ungrouped. */
+  event_id: string | null;
 }
 
 export interface LabEvalConfig {

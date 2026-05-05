@@ -4125,5 +4125,9 @@
     "action": "semi-auto",
     "power_factor": "minor"
   },
-  "history": []
+  "history": [],
+  "shooter": {
+    "id": "self"
+  },
+  "event_id": "tallmilan-2026:4:self"
 }

@@ -4162,6 +4162,26 @@ def create_app(
                     status_code=409,
                     detail="stage has no audit JSON / WAV; run shot-detect first",
                 )
+            # Refuse to promote without an explicit shooter pin (#149
+            # follow-up). Fixture training data is only useful when we
+            # can attribute it to a known shooter; the legacy ``self``
+            # sentinel is for migrating pre-existing corpora, not for
+            # new promotions. Pin via the SSI search on the Ingest page.
+            if project.selected_shooter_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "this project has no SSI shooter pinned; "
+                        "promote refuses to land a fixture with an "
+                        "unknown shooter. Pin yourself (or the shooter "
+                        "whose run this is) via the Ingest page first."
+                    ),
+                )
+            shooter_payload: dict[str, Any] = {
+                "id": f"ssi-{project.selected_shooter_id}",
+                "ssi_shooter_id": project.selected_shooter_id,
+                "name": project.competitor_name,
+            }
             try:
                 rec = lab_module.promote_stage_to_fixture(
                     lab_module.PromoteRequest(
@@ -4174,6 +4194,7 @@ def create_app(
                             "stage_number": stage_n,
                             "stage_name": getattr(stg, "name", None),
                         },
+                        shooter=shooter_payload,
                     )
                 )
             except FileExistsError as exc:
