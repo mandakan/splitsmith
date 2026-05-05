@@ -1949,9 +1949,64 @@ function StagesSection({
     }
   }
 
+  const handleRedetectAll = async (reset: boolean) => {
+    if (busy) return;
+    const verb = reset ? "Re-detect AND reset shots" : "Re-detect (preserve current shots)";
+    if (
+      !window.confirm(
+        `${verb} on every eligible stage?\n\n` +
+          (reset
+            ? "This will discard each stage's current ``shots[]`` (kept / rejected decisions) and re-seed from the new consensus. Ineligible stages (no primary, no beep, no time_seconds) are skipped."
+            : "Existing ``shots[]`` are kept untouched; only the candidate universe is refreshed. Use this when you've already audited shots and only want updated voter signals."),
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const resp = await api.detectShotsAll({ reset });
+      if (resp.skipped.length > 0) {
+        setError(
+          `Submitted ${resp.jobs.length} job(s); skipped ${resp.skipped.length}: ` +
+            resp.skipped.map((s) => `stage ${s.stage_number} (${s.reason})`).join(", "),
+        );
+      } else {
+        setError(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => handleRedetectAll(false)}
+            title="Re-run shot detection on every stage. Existing shots[] are kept; only the candidate universe / voter signals are refreshed."
+          >
+            <Crosshair className="size-3.5" />
+            Re-detect all
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => handleRedetectAll(true)}
+            title="Re-run shot detection AND clear each stage's shots[] so consensus reseeds from scratch. Discards prior keep/reject decisions."
+          >
+            <Crosshair className="size-3.5" />
+            Re-detect all + reset
+          </Button>
+        </div>
+      </div>
       {/* Each stage card now embeds inline thumbnail-as-poster <video>
           players for the primary + each secondary plus role action
           buttons; that needs ~700px of horizontal room before things

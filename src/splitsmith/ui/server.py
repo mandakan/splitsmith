@@ -19,6 +19,7 @@ Endpoints (locked v1 surface):
   POST /api/stages/{n}/beep/select  -- promote one ranked candidate (synchronous)
   POST /api/stages/{n}/trim         -- submit an audit-mode trim job
   POST /api/stages/{n}/shot-detect  -- submit shot detection on the audit clip
+  POST /api/stages/shot-detect      -- bulk shot detection on every eligible stage
   POST /api/stages/{n}/videos/{vid}/detect-beep -- per-video beep detection
   POST /api/stages/{n}/videos/{vid}/beep         -- per-video manual override
   POST /api/stages/{n}/videos/{vid}/beep/select  -- per-video candidate select
@@ -2376,6 +2377,48 @@ def create_app(
             prim_fresh.processed["shot_detect"] = True
             fresh.save(state.project_root)
         handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
+
+    @app.post("/api/stages/shot-detect")
+    def shot_detect_all_endpoint(reset: bool = False) -> JSONResponse:
+        """Submit shot-detection on every eligible stage in the project.
+
+        A stage is eligible when it has a primary video with a confirmed
+        ``beep_time`` and ``time_seconds > 0`` -- i.e. the same gates the
+        per-stage endpoint checks. Stages that don't qualify are silently
+        skipped and reported in ``skipped`` so the SPA can surface them.
+
+        Idempotent dedupe: stages with an already-active shot-detect job
+        adopt the existing job instead of starting a second.
+
+        ``reset=true`` clears each affected stage's ``shots[]`` before
+        running, matching the per-stage endpoint's semantics.
+        """
+        project = state.load()
+        jobs: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for stage in project.stages:
+            stage_number = stage.stage_number
+            primary = stage.primary()
+            if primary is None:
+                skipped.append({"stage_number": stage_number, "reason": "no_primary"})
+                continue
+            if primary.beep_time is None:
+                skipped.append({"stage_number": stage_number, "reason": "no_beep"})
+                continue
+            if stage.time_seconds <= 0:
+                skipped.append({"stage_number": stage_number, "reason": "no_time_seconds"})
+                continue
+            existing = state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+            if existing is not None:
+                jobs.append(existing.model_dump(mode="json"))
+                continue
+            job = state.jobs.submit(
+                kind="shot_detect",
+                stage_number=stage_number,
+                fn=lambda h, n=stage_number, r=reset: _run_shot_detect(h, n, reset=r),
+            )
+            jobs.append(job.model_dump(mode="json"))
+        return JSONResponse({"jobs": jobs, "skipped": skipped})
 
     @app.post("/api/stages/{stage_number}/shot-detect")
     def shot_detect_endpoint(stage_number: int, reset: bool = False) -> JSONResponse:

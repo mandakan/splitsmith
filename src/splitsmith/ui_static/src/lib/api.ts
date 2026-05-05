@@ -934,6 +934,18 @@ export const api = {
     return request<Job>(`/api/stages/${stageNumber}/shot-detect${qs}`, { method: "POST" });
   },
 
+  /** Submit shot detection on every eligible stage. A stage is eligible
+   *  when it has a primary with confirmed beep + non-zero time_seconds.
+   *  Returns the list of submitted (or already-active) jobs plus a
+   *  ``skipped`` array describing why ineligible stages were left alone. */
+  detectShotsAll: (opts: { reset?: boolean } = {}) => {
+    const qs = opts.reset ? "?reset=true" : "";
+    return request<{
+      jobs: Job[];
+      skipped: { stage_number: number; reason: string }[];
+    }>(`/api/stages/shot-detect${qs}`, { method: "POST" });
+  },
+
   /** Server-side feature flags (fetched once on app mount). Today this
    *  surfaces the ``lab`` flag so the SPA can hide the Lab nav entry
    *  unless ``splitsmith ui --lab`` was passed. */

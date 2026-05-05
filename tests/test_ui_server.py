@@ -2174,6 +2174,86 @@ def test_shot_detect_endpoint_passes_default_class_when_mount_missing(
     assert captured.get("camera_class") == "headcam"
 
 
+def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, monkeypatch) -> None:
+    """``POST /api/stages/shot-detect`` submits a job per eligible stage and
+    reports skipped stages with reasons. Eligible: primary + beep + time_seconds."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+
+    src2 = tmp_path / "extra" / "VID_S2.mp4"
+    src2.parent.mkdir(parents=True, exist_ok=True)
+    src2.write_bytes(b"\x00")
+    project.register_video(src2, project_root)
+    src3 = tmp_path / "extra" / "VID_S3.mp4"
+    src3.write_bytes(b"\x00")
+    project.register_video(src3, project_root)
+
+    project.stages.append(
+        StageEntry(stage_number=2, stage_name="B", time_seconds=8.0, scorecard_updated_at=None)
+    )
+    project.stages.append(
+        StageEntry(stage_number=3, stage_name="C", time_seconds=8.0, scorecard_updated_at=None)
+    )
+    project.stages.append(
+        StageEntry(stage_number=4, stage_name="D", time_seconds=0.0, scorecard_updated_at=None)
+    )
+    project.assign_video(Path("raw") / "VID_S2.mp4", to_stage_number=2, role="primary")
+    s2_primary = project.stages[1].primary()
+    assert s2_primary is not None
+    s2_primary.beep_time = 4.0
+    project.assign_video(Path("raw") / "VID_S3.mp4", to_stage_number=3, role="primary")
+
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    for n in (1, 2):
+        sf.write(audio_dir / f"stage{n}_audit.wav", np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    for n in (1, 2):
+        (trimmed_dir / f"stage{n}_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        def __init__(self, n: int) -> None:
+            self.audio_path = audio_dir / f"stage{n}_audit.wav"
+            self.beep_in_clip = 5.0 if n == 1 else 4.0
+            self.trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda root, n, *a, **kw: FakeAudit(n))
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(
+        ensemble_module,
+        "detect_shots_ensemble",
+        lambda *a, **kw: _fake_ensemble_result([]),
+    )
+
+    resp = client.post("/api/stages/shot-detect")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    submitted = sorted(j["stage_number"] for j in body["jobs"])
+    assert submitted == [1, 2]
+    skipped = {s["stage_number"]: s["reason"] for s in body["skipped"]}
+    assert skipped == {3: "no_beep", 4: "no_primary"}
+
+    for j in body["jobs"]:
+        _wait_for_job(client, j["id"])
+
+
 def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(
     tmp_path: Path, monkeypatch
 ) -> None:
