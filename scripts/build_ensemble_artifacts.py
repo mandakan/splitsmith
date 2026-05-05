@@ -71,10 +71,33 @@ DEFAULT_FIXTURES = [
     # ``scripts/extract_audio_embeddings.py`` for these stems first to
     # pick them up.
     "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage4-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
+    # Phone-cam (PR #152, anchored against the blacksmith headcam fixtures
+    # to land cross-match acoustic variation -- issue #149's near-term ask).
+    "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage6-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage8-apple-iphone17pro",
 ]
+
+# Fixtures whose promote-report flagged ``wrong_clip_suspected: true`` --
+# the phone clip linked to that stage is silent at the snapped shot
+# positions (probably the wrong clip / occluded mic). Keeping them in
+# repo for inspection, skipping them in calibration so they don't pull
+# the GBDT toward labelling silence as positive. See issue #154 for the
+# re-anchor plan.
+WRONG_CLIP_FIXTURES: frozenset[str] = frozenset(
+    {
+        "stage-shots-blacksmith-2026-stage6-apple-iphone17pro",
+        "stage-shots-tallmilan-2026-stage4-apple-iphone17pro",
+    }
+)
 FIXTURES_DIR = Path("tests/fixtures")
 FULL_DIR = FIXTURES_DIR / "full"
 CACHE_DIR = FIXTURES_DIR / ".cache"
@@ -121,6 +144,9 @@ def _build_universe(
     """
     universe = []
     for fix in fixtures:
+        if fix in WRONG_CLIP_FIXTURES:
+            log(f"  skip {fix}: wrong_clip_suspected (see issue tracking re-anchor)")
+            continue
         truth_path = FIXTURES_DIR / f"{fix}.json"
         wav_path = FIXTURES_DIR / f"{fix}.wav"
         clap_path = CACHE_DIR / f"{fix}_clap.npz"

@@ -1,7 +1,7 @@
 {
   "voter_a_floor": 0.01847127532497797,
   "voter_b_threshold": 0.03676433116197586,
-  "voter_c_threshold": 0.18106901722420746,
+  "voter_c_threshold": 0.23368319568561985,
   "voter_d_threshold": 0.00018919698777608573,
   "voter_c_target_recall": 0.95,
   "tolerance_ms": 75.0,
@@ -40,22 +40,34 @@
     "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro"
+    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage8-apple-iphone17pro"
   ],
-  "n_calibration_candidates": 1149,
-  "n_calibration_positives": 305,
+  "n_calibration_candidates": 1436,
+  "n_calibration_positives": 442,
   "voter_c_feature_dim": 30,
-  "built_at": "2026-05-05T15:04:42.692069+00:00",
+  "built_at": "2026-05-05T17:43:42.241034+00:00",
   "default_camera_class": "headcam",
   "thresholds_by_camera_class": {
     "handheld": {
-      "voter_a_floor": 0.028904263730108303,
-      "voter_b_threshold": 0.2286214381456375,
-      "voter_c_threshold": 0.1088627703256771,
-      "voter_d_threshold": 0.005257793702185154,
-      "n_calibration_candidates": 137,
-      "n_calibration_positives": 62,
+      "voter_a_floor": 0.014766008911448754,
+      "voter_b_threshold": 0.19692590832710266,
+      "voter_c_threshold": 0.6019218260273177,
+      "voter_d_threshold": 0.003342473180964589,
+      "n_calibration_candidates": 424,
+      "n_calibration_positives": 199,
       "calibration_fixtures": [
+        "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
+        "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
+        "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
+        "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
+        "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
+        "stage-shots-blacksmith-2026-stage8-apple-iphone17pro",
         "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
         "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
         "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
@@ -65,7 +77,7 @@
     "headcam": {
       "voter_a_floor": 0.01847127532497797,
       "voter_b_threshold": 0.03676433116197586,
-      "voter_c_threshold": 0.18106901722420746,
+      "voter_c_threshold": 0.23368319568561985,
       "voter_d_threshold": 0.00018919698777608573,
       "n_calibration_candidates": 1012,
       "n_calibration_positives": 243,
@@ -88,19 +100,19 @@
   },
   "voter_c_metrics_by_camera_class": {
     "handheld": {
-      "voter_c_precision_cv": 0.9365,
-      "voter_c_recall_cv": 0.9516,
-      "voter_c_f1_cv": 0.944,
-      "voter_c_tp": 59,
-      "voter_c_fp": 4,
-      "voter_c_fn": 3
+      "voter_c_precision_cv": 0.9645,
+      "voter_c_recall_cv": 0.9548,
+      "voter_c_f1_cv": 0.9596,
+      "voter_c_tp": 190,
+      "voter_c_fp": 7,
+      "voter_c_fn": 9
     },
     "headcam": {
-      "voter_c_precision_cv": 0.8524,
+      "voter_c_precision_cv": 0.8462,
       "voter_c_recall_cv": 0.9506,
-      "voter_c_f1_cv": 0.8988,
+      "voter_c_f1_cv": 0.8953,
       "voter_c_tp": 231,
-      "voter_c_fp": 40,
+      "voter_c_fp": 42,
       "voter_c_fn": 12
     }
   },
