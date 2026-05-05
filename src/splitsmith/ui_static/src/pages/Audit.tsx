@@ -428,12 +428,21 @@ export function Audit() {
           }
         } else {
           setCurrentTime(auditT);
-          // Drift-correct secondaries: nudge if >50 ms off.
+          // Drift-correct secondaries: nudge if >50 ms off. Also auto-resume
+          // any secondary that the give-up timer left paused -- as the primary
+          // advances into a region where this secondary has content (i.e. the
+          // expected position is within [0, duration]), seek it there and
+          // restart playback so it rejoins automatically.
           for (const [path, sv] of secondaryRefsMap.current) {
             const off = secondaryOffsetsRef.current.get(path);
             if (off == null) continue;
             const expected = auditT + off;
-            if (Math.abs(sv.currentTime - expected) > 0.05) {
+            const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+            const inRange = expected >= 0 && (dur == null || expected <= dur);
+            if (sv.paused && inRange) {
+              sv.currentTime = expected;
+              void sv.play();
+            } else if (Math.abs(sv.currentTime - expected) > 0.05) {
               sv.currentTime = expected;
             }
           }
