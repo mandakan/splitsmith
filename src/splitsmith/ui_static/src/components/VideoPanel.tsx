@@ -46,6 +46,7 @@ interface VideoPanelProps {
   onGridModeToggle: () => void;
   onSecondaryRef: (path: string, el: HTMLVideoElement | null) => void;
   onSecondaryBuffering: (path: string, buffering: boolean) => void;
+  onPrimaryTimeUpdate?: () => void;
   className?: string;
 }
 
@@ -164,6 +165,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       onGridModeToggle,
       onSecondaryRef,
       onSecondaryBuffering,
+      onPrimaryTimeUpdate,
       className,
     },
     ref,
@@ -334,6 +336,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
               onWaiting={() => setStatus("buffering")}
               onSeeking={() => setStatus("buffering")}
               onStalled={() => setStatus("buffering")}
+              onTimeUpdate={onPrimaryTimeUpdate}
               onError={(e) => {
                 setStatus("error");
                 const code = e.currentTarget.error?.code;

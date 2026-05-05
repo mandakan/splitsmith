@@ -434,33 +434,29 @@ export function Audit() {
     };
   }, [isPlaying, beepOffset, loopMode, peaks]);
 
-  // Master/slave sync: on each primary timeupdate (~4 Hz, browser-throttled),
-  // reconcile each secondary's state to the primary's. If the primary is in
-  // the secondary's content range and the secondary is paused, seek+play it.
-  // If the primary moved out of range, pause the secondary. This is the
-  // standard pattern for multi-video sync -- using rAF causes seek-thrash.
-  useEffect(() => {
+  // Master/slave sync: invoked from the primary's <video onTimeUpdate>.
+  // Browser-throttled to ~4 Hz, which is the right rate for reconciliation.
+  // For each secondary: if the primary is inside the secondary's content
+  // range and it's paused, seek+play it; if out of range and playing, pause.
+  // Standard multi-video sync recipe -- rAF would seek-thrash.
+  const handlePrimaryTimeUpdate = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onTime = () => {
-      const auditT = v.currentTime - beepOffset;
-      for (const [path, sv] of secondaryRefsMap.current) {
-        const off = secondaryOffsetsRef.current.get(path);
-        if (off == null) continue;
-        const expected = auditT + off;
-        const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-        const inRange = expected >= 0 && (dur == null || expected <= dur);
-        if (inRange && sv.paused && isPlayingRef.current) {
-          sv.currentTime = expected;
-          void sv.play().catch(() => {});
-        } else if (!inRange && !sv.paused) {
-          sv.pause();
-        }
+    const auditT = v.currentTime - beepOffset;
+    for (const [path, sv] of secondaryRefsMap.current) {
+      const off = secondaryOffsetsRef.current.get(path);
+      if (off == null) continue;
+      const expected = auditT + off;
+      const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+      const inRange = expected >= 0 && (dur == null || expected <= dur);
+      if (inRange && sv.paused && isPlayingRef.current) {
+        sv.currentTime = expected;
+        void sv.play().catch(() => {});
+      } else if (!inRange && !sv.paused) {
+        sv.pause();
       }
-    };
-    v.addEventListener("timeupdate", onTime);
-    return () => v.removeEventListener("timeupdate", onTime);
-  }, [beepOffset, activeVideoIndex]);
+    }
+  }, [beepOffset]);
 
   const handleScrub = useCallback(
     (primaryTime: number) => {
@@ -1266,6 +1262,7 @@ export function Audit() {
               onGridModeToggle={handleGridModeToggle}
               onSecondaryRef={handleSecondaryRef}
               onSecondaryBuffering={handleSecondaryBuffering}
+              onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
             />
             {peaksLoading ? (
               <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
