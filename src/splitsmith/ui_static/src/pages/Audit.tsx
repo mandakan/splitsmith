@@ -89,6 +89,9 @@ import { cn } from "@/lib/utils";
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
 const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
+// If a secondary hasn't recovered from buffering within this window, assume it
+// has no content at the current audit position and let the primary continue.
+const SECONDARY_BUFFER_TIMEOUT_MS = 1500;
 
 export function Audit() {
   const { stage: stageParam } = useParams();
@@ -141,10 +144,14 @@ export function Audit() {
   // Map of secondary video path -> beep offset (secondary.beep_time - auditBeep).
   // Rebuilt whenever videos or auditBeep change so the rAF loop reads stable values.
   const secondaryOffsetsRef = useRef<Map<string, number>>(new Map());
-  // Paths of secondaries currently buffering; when non-empty, primary is paused.
+  // Paths of secondaries currently blocking playback (buffering within timeout window).
   const secondaryBufferingSet = useRef<Set<string>>(new Set());
-  // True while the primary is paused because a secondary is buffering (not user-paused).
+  // True while the primary is paused because a secondary is buffering.
   const blockedBySecondaryRef = useRef(false);
+  // Per-secondary give-up timers: if a secondary doesn't recover within
+  // SECONDARY_BUFFER_TIMEOUT_MS, we assume it has no content at this position
+  // and remove it from the blocking set so the primary can keep playing.
+  const bufferingTimersRef = useRef<Map<string, number>>(new Map());
   // Auto-advance to the next visible marker after K toggles a candidate.
   // Default on (FCP-style "mark and move"); persisted across sessions
   // because the user audits in long flow blocks and shouldn't have to
@@ -314,6 +321,8 @@ export function Audit() {
     secondaryRefsMap.current.clear();
     secondaryBufferingSet.current.clear();
     blockedBySecondaryRef.current = false;
+    for (const t of bufferingTimersRef.current.values()) window.clearTimeout(t);
+    bufferingTimersRef.current.clear();
     const v = videoRef.current;
     if (v) {
       v.pause();
@@ -516,14 +525,26 @@ export function Audit() {
     } else {
       secondaryRefsMap.current.delete(path);
       secondaryBufferingSet.current.delete(path);
+      const t = bufferingTimersRef.current.get(path);
+      if (t != null) { window.clearTimeout(t); bufferingTimersRef.current.delete(path); }
     }
   }, []);
 
   // Called when a secondary starts or stops buffering. If any secondary is
-  // buffering, pause everything; resume when all clear (if user intent is play).
+  // Called when a secondary starts or stops buffering. We pause all for brief
+  // network stalls but give up after SECONDARY_BUFFER_TIMEOUT_MS -- at that
+  // point the secondary likely has no content at this audit position (it starts
+  // later or ended earlier), so we drop it from the blocking set and let the
+  // primary continue. The secondary keeps its own buffering overlay.
   const handleSecondaryBuffering = useCallback((path: string, isBuffering: boolean) => {
     if (isBuffering) {
+      // Cancel any previous give-up timer for this path (e.g., rapid seek).
+      const existing = bufferingTimersRef.current.get(path);
+      if (existing != null) window.clearTimeout(existing);
+
       secondaryBufferingSet.current.add(path);
+
+      // Pause everything on first blocker.
       if (!blockedBySecondaryRef.current) {
         blockedBySecondaryRef.current = true;
         const pv = videoRef.current;
@@ -532,7 +553,32 @@ export function Audit() {
           if (!sv.paused) sv.pause();
         }
       }
+
+      // Give-up timer: if the secondary hasn't recovered, unblock the primary.
+      const timer = window.setTimeout(() => {
+        bufferingTimersRef.current.delete(path);
+        secondaryBufferingSet.current.delete(path);
+        if (secondaryBufferingSet.current.size === 0 && blockedBySecondaryRef.current) {
+          blockedBySecondaryRef.current = false;
+          if (isPlayingRef.current) {
+            const pv = videoRef.current;
+            if (pv) void pv.play();
+            // Resume other secondaries that are ready; the timed-out one stays
+            // paused/buffering at its current position.
+            for (const sv of secondaryRefsMap.current.values()) {
+              if (sv.readyState >= 3) void sv.play();
+            }
+          }
+        }
+      }, SECONDARY_BUFFER_TIMEOUT_MS);
+      bufferingTimersRef.current.set(path, timer);
     } else {
+      // Secondary recovered -- cancel the give-up timer and unblock if clear.
+      const timer = bufferingTimersRef.current.get(path);
+      if (timer != null) {
+        window.clearTimeout(timer);
+        bufferingTimersRef.current.delete(path);
+      }
       secondaryBufferingSet.current.delete(path);
       if (secondaryBufferingSet.current.size === 0 && blockedBySecondaryRef.current) {
         blockedBySecondaryRef.current = false;
@@ -557,6 +603,8 @@ export function Audit() {
         secondaryRefsMap.current.clear();
         secondaryBufferingSet.current.clear();
         blockedBySecondaryRef.current = false;
+        for (const t of bufferingTimersRef.current.values()) window.clearTimeout(t);
+        bufferingTimersRef.current.clear();
       }
       return !prev;
     });
