@@ -560,6 +560,25 @@ class HealthResponse(BaseModel):
     schema_version: int | None = None
 
 
+class PromoteSecondaryBody(BaseModel):
+    """Body for the project-aware promote-secondary endpoint.
+
+    Defined at module scope (not inside the lab-route factory) so FastAPI
+    can resolve the forward reference under ``from __future__ import
+    annotations``.
+    """
+
+    mount: str
+    position: str
+    audio_source: str = "internal"
+    agc_state: str = "unknown"
+    snap_window_ms: float = 60.0
+    min_spacing_ms: float = 80.0
+    slug: str | None = None
+    camera_id: str | None = None
+    overwrite: bool = False
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -4317,17 +4336,6 @@ def create_app(
         # ------------------------------------------------------------------
         # Project-aware secondary promotion (issue #125 follow-up)
         # ------------------------------------------------------------------
-
-        class PromoteSecondaryBody(BaseModel):
-            mount: str
-            position: str
-            audio_source: str = "internal"
-            agc_state: str = "unknown"
-            snap_window_ms: float = 60.0
-            min_spacing_ms: float = 80.0
-            slug: str | None = None
-            camera_id: str | None = None
-            overwrite: bool = False
 
         @app.post("/api/stages/{stage_number}/videos/{video_id}/promote-secondary")
         def promote_secondary(
