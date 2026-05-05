@@ -2145,8 +2145,8 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
     [secondaries],
   );
   const [videoId, setVideoId] = useState(eligible[0]?.video_id ?? "");
-  const [mount, setMount] = useState("tripod");
-  const [position, setPosition] = useState("bay-fixed");
+  const [mount, setMount] = useState("hand");
+  const [position, setPosition] = useState("shooter");
   const [overwrite, setOverwrite] = useState(false);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
@@ -2262,11 +2262,14 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
                   onChange={(e) => setMount(e.target.value)}
                   className={`${fieldCls} mt-1`}
                 >
+                  <option value="hand">hand (handheld)</option>
                   <option value="tripod">tripod</option>
+                  <option value="monopod">monopod</option>
+                  <option value="gimbal">gimbal</option>
                   <option value="head">head</option>
                   <option value="chest">chest</option>
-                  <option value="handheld">handheld</option>
-                  <option value="other">other</option>
+                  <option value="belt">belt</option>
+                  <option value="helmet">helmet</option>
                 </select>
               </label>
               <label className="mt-2 block text-[11px]">
@@ -2276,9 +2279,10 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
                   onChange={(e) => setPosition(e.target.value)}
                   className={`${fieldCls} mt-1`}
                 >
+                  <option value="shooter">shooter (follows shooter)</option>
                   <option value="bay-fixed">bay-fixed</option>
-                  <option value="shooter-mounted">shooter-mounted</option>
-                  <option value="other">other</option>
+                  <option value="ro">ro</option>
+                  <option value="squadmate">squadmate</option>
                 </select>
               </label>
               <label className="mt-2 flex items-center gap-2 text-[11px]">

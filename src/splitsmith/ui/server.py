@@ -4331,7 +4331,9 @@ def create_app(
 
         @app.post("/api/stages/{stage_number}/videos/{video_id}/promote-secondary")
         def promote_secondary(
-            stage_number: int, video_id: str, body: PromoteSecondaryBody
+            stage_number: int,
+            video_id: str,
+            body: PromoteSecondaryBody = Body(...),  # noqa: B008
         ) -> JSONResponse:
             """Promote a project-mapped secondary video to a derived fixture.
 
