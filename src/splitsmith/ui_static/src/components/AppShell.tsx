@@ -13,6 +13,7 @@ import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-route
 import { JobsPanel } from "@/components/JobsPanel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { api, type ServerHealth } from "@/lib/api";
+import { useLabEnabled } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -38,23 +39,11 @@ export function AppShell() {
   const fixtureMode = pathname.startsWith("/review");
 
   // Server-side feature flags. ``lab`` defaults off and is opt-in via
-  // ``splitsmith ui --lab``; if the call fails we just don't show the
-  // Lab nav, which is the correct behaviour for an end-user install.
-  const [labEnabled, setLabEnabled] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    api
-      .getServerFeatures()
-      .then((f) => {
-        if (alive) setLabEnabled(Boolean(f.lab));
-      })
-      .catch(() => {
-        if (alive) setLabEnabled(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // ``splitsmith ui --lab``; if the fetch fails we hide the Lab nav,
+  // which is the correct behaviour for an end-user install. Shared
+  // across pages via the ``useLabEnabled`` hook so per-page fixture
+  // affordances stay in sync without separate fetches.
+  const labEnabled = useLabEnabled();
   const nav = labEnabled ? [...BASE_NAV, LAB_NAV] : BASE_NAV;
 
   // Server bind-state. When the user launches ``splitsmith ui`` with no

@@ -4574,3 +4574,55 @@ def test_load_env_files_picks_up_user_config_env(
     import os
 
     assert os.environ.get("SPLITSMITH_TEST_TOKEN") == "from-user-config"
+
+
+def test_promote_against_fixture_endpoint_lab_gated(tmp_path: Path) -> None:
+    """Without ``lab_enabled``, the new endpoint isn't registered (404 / 405)."""
+    app = create_app(project_root=tmp_path / "match-noflag", project_name="x")
+    client = TestClient(app)
+    resp = client.post(
+        "/api/lab/projects/1/videos/abc/promote-against-fixture",
+        json={"anchor_slug": "stage-shots-foo-2026-stage1", "mount": "hand", "position": "shooter"},
+    )
+    # 404 (no such route) or 405 (no such method on a partial match) --
+    # both prove the endpoint is unreachable without --lab.
+    assert resp.status_code in (404, 405)
+
+
+def test_promote_against_fixture_endpoint_validates_anchor_exists(
+    tmp_path: Path,
+) -> None:
+    """Lab-enabled, but the anchor slug doesn't exist on disk -> 404."""
+    project_root = tmp_path / "match-anchor"
+    app = create_app(
+        project_root=project_root,
+        project_name="x",
+        lab_enabled=True,
+    )
+    client = TestClient(app)
+    # Seed a stage + a video with a beep_time so we get past the
+    # earlier validation gates.
+    from splitsmith.ui.project import MatchProject, StageEntry
+
+    project = MatchProject.load(project_root)
+    project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
+    src = project_root / "raw" / "VID.mp4"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"\x00")
+    video = project.register_video(src, project_root)
+    project.assign_video(video.path, to_stage_number=1, role="primary")
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.save(project_root)
+
+    resp = client.post(
+        f"/api/lab/projects/1/videos/{primary.video_id}/promote-against-fixture",
+        json={
+            "anchor_slug": "stage-shots-does-not-exist-2026-stage1",
+            "mount": "hand",
+            "position": "shooter",
+        },
+    )
+    assert resp.status_code == 404
+    assert "anchor fixture not found" in resp.json()["detail"]

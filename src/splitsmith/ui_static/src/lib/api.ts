@@ -1263,6 +1263,37 @@ export const api = {
       `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-secondary`,
       { method: "POST", json: payload },
     ),
+
+  /** Anchor a project video against an arbitrary fixture (issue #149
+   *  follow-up). Lab-only. Used when the headcam ground truth lives
+   *  as a fixture in ``tests/fixtures/`` and the project has a phone-cam
+   *  primary that should be aligned against it. */
+  promoteAgainstFixture: (
+    stageNumber: number,
+    videoId: string,
+    payload: {
+      anchor_slug: string;
+      mount: string;
+      position: string;
+      audio_source?: string;
+      agc_state?: string;
+      snap_window_ms?: number;
+      slug?: string;
+      camera_id?: string;
+      overwrite?: boolean;
+    },
+  ) =>
+    request<{
+      job: Job;
+      fixture_path: string;
+      anchor_path: string;
+      slug: string;
+      camera_id: string;
+      anchor_slug: string;
+    }>(
+      `/api/lab/projects/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-against-fixture`,
+      { method: "POST", json: payload },
+    ),
 };
 
 export interface PromoteSnapResult {
