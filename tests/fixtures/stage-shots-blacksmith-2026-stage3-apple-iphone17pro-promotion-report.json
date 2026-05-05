@@ -1,0 +1,153 @@
+{
+  "slug": "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
+  "secondary_source": "/Users/mathias/matches/blacksmith-2026/raw/IMG_2979.MOV",
+  "anchor_slug": "volumes-go-3s-dcim-camera01-vid-20260412-091752-00-034-mp4-s",
+  "cross_align": {
+    "method": "known_beeps",
+    "secondary_beep_time": 19.525,
+    "offset_seconds": 19.025,
+    "confidence": null,
+    "peak_correlation": 1.0
+  },
+  "snap_window_ms": 60.0,
+  "drift_ms_per_minute": -0.0,
+  "counts": {
+    "anchor_shots": 11,
+    "snapped": 11,
+    "missed": 0,
+    "monotonicity_flagged": 0,
+    "min_spacing_flagged": 0,
+    "voter_a_candidates": 27,
+    "total_candidates": 28
+  },
+  "displacement_stats": {
+    "mean_ms": 19.0,
+    "stdev_ms": 1.57,
+    "p95_ms": 20.62,
+    "min_ms": 16.36,
+    "max_ms": 20.64
+  },
+  "amplitude_stats": {
+    "median": 0.7173,
+    "p10": 0.6234,
+    "low_amplitude_shots": 0
+  },
+  "quality": {
+    "wrong_clip_suspected": false,
+    "snap_rate": 1.0,
+    "warnings": []
+  },
+  "per_shot": [
+    {
+      "shot_number": 1,
+      "anchor_time": 2.5271,
+      "predicted_time": 21.551358926025,
+      "snapped_time": 21.572,
+      "displacement_ms": 20.641073974999813,
+      "snap_confidence": 0.802581787109375,
+      "time_since_beep_s": 2.0271,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 2,
+      "anchor_time": 2.9253,
+      "predicted_time": 21.949413350741665,
+      "snapped_time": 21.968,
+      "displacement_ms": 18.586649258335086,
+      "snap_confidence": 0.86767578125,
+      "time_since_beep_s": 2.4253,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 3,
+      "anchor_time": 4.4931,
+      "predicted_time": 23.516640189191666,
+      "snapped_time": 23.533,
+      "displacement_ms": 16.359810808335595,
+      "snap_confidence": 0.717315673828125,
+      "time_since_beep_s": 3.9931,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 4,
+      "anchor_time": 5.1313,
+      "predicted_time": 24.15460687390833,
+      "snapped_time": 24.175,
+      "displacement_ms": 20.39312609166899,
+      "snap_confidence": 0.895782470703125,
+      "time_since_beep_s": 4.6313,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 5,
+      "anchor_time": 7.5983,
+      "predicted_time": 26.620704979825,
+      "snapped_time": 26.641,
+      "displacement_ms": 20.295020174998513,
+      "snap_confidence": 0.75958251953125,
+      "time_since_beep_s": 7.0983,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 6,
+      "anchor_time": 8.3021,
+      "predicted_time": 27.324247682274997,
+      "snapped_time": 27.344,
+      "displacement_ms": 19.752317725004076,
+      "snap_confidence": 0.912750244140625,
+      "time_since_beep_s": 7.802099999999999,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 7,
+      "anchor_time": 8.8145,
+      "predicted_time": 27.836460357375,
+      "snapped_time": 27.853,
+      "displacement_ms": 16.53964262500196,
+      "snap_confidence": 0.657012939453125,
+      "time_since_beep_s": 8.3145,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 8,
+      "anchor_time": 10.0587,
+      "predicted_time": 29.080205498591667,
+      "snapped_time": 29.099,
+      "displacement_ms": 18.794501408333275,
+      "snap_confidence": 0.623382568359375,
+      "time_since_beep_s": 9.5587,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 9,
+      "anchor_time": 11.734,
+      "predicted_time": 30.75489303683333,
+      "snapped_time": 30.772,
+      "displacement_ms": 17.106963166668265,
+      "snap_confidence": 0.593170166015625,
+      "time_since_beep_s": 11.234,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 10,
+      "anchor_time": 12.3644,
+      "predicted_time": 31.385062573099997,
+      "snapped_time": 31.405,
+      "displacement_ms": 19.937426900003885,
+      "snap_confidence": 0.674285888671875,
+      "time_since_beep_s": 11.8644,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 11,
+      "anchor_time": 12.5538,
+      "predicted_time": 31.574393331616665,
+      "snapped_time": 31.595,
+      "displacement_ms": 20.60666838333347,
+      "snap_confidence": 0.62646484375,
+      "time_since_beep_s": 12.0538,
+      "sanity_flag": ""
+    }
+  ],
+  "warnings": []
+}

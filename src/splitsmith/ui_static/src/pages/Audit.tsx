@@ -75,6 +75,7 @@ import {
   type AuditEvent,
   type AuditShot,
   type Job,
+  type LabFixtureRecord,
   type MatchProject,
   type PeaksResult,
   type StageAudit,
@@ -85,6 +86,7 @@ import {
   keptShotsFromMarkers,
 } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
+import { useLabEnabled } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -94,6 +96,7 @@ const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
 export function Audit() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
+  const labEnabled = useLabEnabled();
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -1414,16 +1417,23 @@ export function Audit() {
                       <Save className="size-4" />
                     )}
                   </Button>
-                  {stageNumber != null && stage && (
+                  {labEnabled && stageNumber != null && stage && (
                     <PromoteFixtureButton
                       stageNumber={stageNumber}
                       defaultSlug={`stage-shots-${slugify(project?.name ?? "match")}-stage${stageNumber}`}
                     />
                   )}
-                  {stageNumber != null && stage && videos.length > 1 && (
+                  {labEnabled && stageNumber != null && stage && videos.length > 1 && (
                     <PromoteSecondaryButton
                       stageNumber={stageNumber}
                       secondaries={videos.slice(1)}
+                    />
+                  )}
+                  {labEnabled && stageNumber != null && stage && (
+                    <PromoteAgainstFixtureButton
+                      stageNumber={stageNumber}
+                      videos={videos}
+                      stageName={stage.stage_name}
                     />
                   )}
                   <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
@@ -2317,6 +2327,248 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
               size="sm"
               onClick={submit}
               disabled={busy || !videoId || eligible.length === 0}
+            >
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PromoteAgainstFixtureButtonProps {
+  stageNumber: number;
+  videos: StageVideo[];
+  stageName: string;
+}
+
+/** Anchor any project video against an existing fixture (issue #149).
+ *
+ * Use case: phone-cam project where the headcam ground truth lives as
+ * a fixture in ``tests/fixtures/`` rather than as a video on this
+ * project's stage. Click button, pick the video + the fixture
+ * anchor (auto-suggested when ``event_id`` matches), submit. */
+function PromoteAgainstFixtureButton({
+  stageNumber,
+  videos,
+  stageName: _stageName,
+}: PromoteAgainstFixtureButtonProps) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [fixtures, setFixtures] = useState<LabFixtureRecord[]>([]);
+  const eligibleVideos = useMemo(
+    () => videos.filter((v) => v.beep_time != null),
+    [videos],
+  );
+  const [videoId, setVideoId] = useState(eligibleVideos[0]?.video_id ?? "");
+  const [anchorSlug, setAnchorSlug] = useState("");
+  const [mount, setMount] = useState("hand");
+  const [position, setPosition] = useState("shooter");
+  const [overwrite, setOverwrite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [paths, setPaths] = useState<{ fixture_path: string; anchor_path: string } | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || fixtures.length > 0) return;
+    api
+      .listLabFixtures()
+      .then((list) => setFixtures(list))
+      .catch((e) => setError(String(e)));
+  }, [open, fixtures.length]);
+
+  // Auto-suggest the anchor when fixtures or stage changes. Suggest a
+  // fixture whose event_id has ``:<stageNumber>:<shooter>`` -- meaning
+  // the fixture's stage_number matches.
+  useEffect(() => {
+    if (anchorSlug || fixtures.length === 0) return;
+    const match = fixtures.find((f) => {
+      if (!f.event_id) return false;
+      const parts = f.event_id.split(":");
+      return parts.length >= 2 && parts[parts.length - 2] === String(stageNumber);
+    });
+    if (match) setAnchorSlug(match.slug);
+  }, [fixtures, stageNumber, anchorSlug]);
+
+  useEffect(() => {
+    if (!eligibleVideos.find((v) => v.video_id === videoId)) {
+      setVideoId(eligibleVideos[0]?.video_id ?? "");
+    }
+  }, [eligibleVideos, videoId]);
+
+  useEffect(() => {
+    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") return;
+    const id = job.id;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await api.getJob(id);
+        setJob(updated);
+        if (
+          updated.status === "succeeded" ||
+          updated.status === "failed" ||
+          updated.status === "cancelled"
+        ) {
+          setBusy(false);
+        }
+      } catch {
+        // ignore -- next tick retries
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [job]);
+
+  useEffect(() => {
+    if (job?.status === "succeeded" && paths) {
+      navigate(
+        `/promote-review?fixture=${encodeURIComponent(paths.fixture_path)}&anchor=${encodeURIComponent(paths.anchor_path)}`,
+      );
+    }
+  }, [job, paths, anchorSlug, navigate]);
+
+  const submit = useCallback(async () => {
+    if (!videoId || !anchorSlug) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const resp = await api.promoteAgainstFixture(stageNumber, videoId, {
+        anchor_slug: anchorSlug,
+        mount,
+        position,
+        overwrite,
+      });
+      setJob(resp.job);
+      setPaths({ fixture_path: resp.fixture_path, anchor_path: resp.anchor_path });
+    } catch (e) {
+      setBusy(false);
+      setError(String(e));
+    }
+  }, [stageNumber, videoId, anchorSlug, mount, position, overwrite]);
+
+  const fieldCls =
+    "w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs";
+
+  return (
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        title="Promote a project video against an existing fixture (Lab)"
+        disabled={eligibleVideos.length === 0}
+      >
+        <FlaskConical className="size-4" />
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-96 rounded-md border border-border bg-popover p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Promote against fixture
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Aligns a project video against an existing fixture's audited
+            shots and writes a derived fixture. Use when the headcam ground
+            truth lives in tests/fixtures/ but this project only has the
+            phone-cam video.
+          </p>
+          {eligibleVideos.length === 0 ? (
+            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+              No video on this stage has a beep yet.
+            </div>
+          ) : (
+            <>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Project video</span>
+                <select
+                  value={videoId}
+                  onChange={(e) => setVideoId(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  {eligibleVideos.map((v) => (
+                    <option key={v.video_id} value={v.video_id}>
+                      {v.path.split("/").pop() ?? v.path} ({v.role})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Anchor fixture</span>
+                <select
+                  value={anchorSlug}
+                  onChange={(e) => setAnchorSlug(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  <option value="" disabled>
+                    -- pick a fixture --
+                  </option>
+                  {fixtures.map((f) => (
+                    <option key={f.slug} value={f.slug}>
+                      {f.slug}
+                      {f.event_id ? ` -- ${f.event_id}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Mount</span>
+                <select
+                  value={mount}
+                  onChange={(e) => setMount(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  <option value="hand">hand (handheld)</option>
+                  <option value="tripod">tripod</option>
+                  <option value="monopod">monopod</option>
+                  <option value="gimbal">gimbal</option>
+                  <option value="head">head</option>
+                  <option value="chest">chest</option>
+                  <option value="belt">belt</option>
+                  <option value="helmet">helmet</option>
+                </select>
+              </label>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Position</span>
+                <select
+                  value={position}
+                  onChange={(e) => setPosition(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  <option value="shooter">shooter</option>
+                  <option value="bay-fixed">bay-fixed</option>
+                  <option value="ro">ro</option>
+                  <option value="squadmate">squadmate</option>
+                </select>
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-[11px]">
+                <input
+                  type="checkbox"
+                  checked={overwrite}
+                  onChange={(e) => setOverwrite(e.target.checked)}
+                />
+                Overwrite if exists
+              </label>
+            </>
+          )}
+          {error && (
+            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+              {error}
+            </div>
+          )}
+          {job && job.status === "running" && (
+            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+              {job.message ?? "running..."}
+            </div>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={busy || !videoId || !anchorSlug || eligibleVideos.length === 0}
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
             </Button>

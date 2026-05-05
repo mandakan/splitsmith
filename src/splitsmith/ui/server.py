@@ -619,6 +619,29 @@ class PromoteSecondaryBody(BaseModel):
     overwrite: bool = False
 
 
+class PromoteAgainstFixtureBody(BaseModel):
+    """Body for ``/api/lab/projects/.../promote-against-fixture`` (issue #149 follow-up).
+
+    Like :class:`PromoteSecondaryBody` but the anchor comes from an
+    explicit fixture slug rather than being derived from the project's
+    name + stage number. Lets the user anchor *any* project video
+    (primary or secondary) against any existing fixture -- the typical
+    case is a phone-cam-only project anchored against a previously
+    audited headcam fixture.
+    """
+
+    anchor_slug: str
+    mount: str
+    position: str
+    audio_source: str = "internal"
+    agc_state: str = "unknown"
+    snap_window_ms: float = 60.0
+    min_spacing_ms: float = 80.0
+    slug: str | None = None
+    camera_id: str | None = None
+    overwrite: bool = False
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -4776,6 +4799,209 @@ def create_app(
                     "slug": slug,
                     "camera_id": camera_id,
                     "anchor_slug": primary_slug,
+                }
+            )
+
+        # ------------------------------------------------------------------
+        # Promote a project video against an arbitrary fixture anchor
+        # (issue #149 follow-up). Used when the headcam ground truth
+        # already lives as a fixture in ``tests/fixtures/`` and the user
+        # has a phone-cam project they want to anchor against it -- no
+        # in-project primary required, any video on the stage works.
+        # ------------------------------------------------------------------
+
+        @app.post("/api/lab/projects/{stage_number}/videos/{video_id}/promote-against-fixture")
+        def lab_promote_against_fixture(
+            stage_number: int,
+            video_id: str,
+            body: PromoteAgainstFixtureBody = Body(...),  # noqa: B008
+        ) -> JSONResponse:
+            """Anchor a project video against an existing fixture.
+
+            Skips the role=='secondary' gate that the in-project
+            ``promote-secondary`` endpoint enforces -- the typical use
+            case here is a phone-cam project where the iPhone is the
+            primary and there's no in-project anchor video. Anchor
+            comes from ``body.anchor_slug`` (any fixture in
+            ``tests/fixtures/``).
+            """
+            project, _stage, video = _resolve_stage_video(stage_number, video_id)
+            if video.beep_time is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="video has no beep_time; detect or align beep first",
+                )
+
+            fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
+            anchor_slug = body.anchor_slug.strip()
+            if not anchor_slug:
+                raise HTTPException(status_code=400, detail="anchor_slug is required")
+            anchor_path = fixtures_root / f"{anchor_slug}.json"
+            if not anchor_path.exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"anchor fixture not found: {anchor_path.name}",
+                )
+            anchor_wav_path = anchor_path.with_suffix(".wav")
+            if not anchor_wav_path.exists():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"anchor WAV missing: {anchor_wav_path.name}",
+                )
+
+            source = project.resolve_video_path(state.project_root, video.path)
+            _ensure_source_reachable(stage_number, source)
+
+            try:
+                secondary_wav_path = audio_helpers.ensure_video_audio(
+                    state.project_root, stage_number, video, source, project=project
+                )
+            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            probe = probe_camera_metadata(source)
+            camera_id = (
+                body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}"
+            ).strip()
+            if not camera_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="camera_id could not be derived; please supply one",
+                )
+
+            slug = (body.slug or f"{anchor_slug}-{camera_id}").strip()
+            target_json = fixtures_root / f"{slug}.json"
+            if target_json.exists() and not body.overwrite:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"fixture already exists: {target_json.name}"
+                        " (set overwrite=true to replace)"
+                    ),
+                )
+
+            try:
+                camera = Camera(
+                    id=camera_id,
+                    mount=CameraMount(body.mount),
+                    position=CameraPosition(body.position),
+                    audio_source=AudioSource(body.audio_source),
+                    agc_state=AgcState(body.agc_state),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            secondary_source_desc = str(source)
+            known_secondary_beep = float(video.beep_time)
+
+            def _run(handle: JobHandle) -> None:
+                handle.update(progress=0.05, message="loading audio...")
+                primary_audio, primary_sr = beep_detect.load_audio(anchor_wav_path)
+                secondary_audio, secondary_sr = beep_detect.load_audio(secondary_wav_path)
+
+                handle.update(progress=0.10, message="loading ensemble models...")
+                runtime = _get_ensemble_runtime()
+
+                handle.check_cancel()
+                handle.update(progress=0.20, message="detecting shots...")
+
+                anchor_data = json.loads(anchor_path.read_text(encoding="utf-8"))
+                result = lab_module.promote_from_anchor(
+                    lab_module.PromoteFromAnchorRequest(
+                        anchor_data=anchor_data,
+                        primary_audio=primary_audio,
+                        primary_sr=primary_sr,
+                        secondary_audio=secondary_audio,
+                        secondary_sr=secondary_sr,
+                        secondary_source_desc=secondary_source_desc,
+                        camera=camera,
+                        slug=slug,
+                        snap_window_ms=body.snap_window_ms,
+                        min_spacing_ms=body.min_spacing_ms,
+                        secondary_beep_time=known_secondary_beep,
+                    ),
+                    runtime=runtime,
+                )
+                for w in result.warnings:
+                    handle.update(message=f"WARNING: {w}")
+
+                handle.check_cancel()
+                handle.update(progress=0.85, message="writing fixture...")
+
+                fixture_data = dict(result.fixture_data)
+                secondary_beep = float(fixture_data.get("beep_time") or 0.0)
+                shot_times = [
+                    float(s["time"])
+                    for s in fixture_data.get("shots", [])
+                    if s.get("time") is not None
+                ]
+                trim_buffer = 5.0
+                trim_tail = 5.0
+                clip_start = max(0.0, secondary_beep - trim_buffer)
+                clip_end_floor = secondary_beep + trim_buffer
+                clip_end = max(shot_times) + trim_tail if shot_times else clip_end_floor
+                clip_end = max(clip_end, clip_end_floor)
+
+                fixtures_root.mkdir(parents=True, exist_ok=True)
+                target_wav = fixtures_root / f"{slug}.wav"
+                handle.update(progress=0.88, message="trimming clip audio...")
+                _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
+
+                fixture_data["beep_time"] = round(secondary_beep - clip_start, 4)
+                fixture_data["fixture_window_in_source"] = [
+                    round(clip_start, 4),
+                    round(clip_end, 4),
+                ]
+                rebased_shots = []
+                for s in fixture_data.get("shots", []):
+                    s = dict(s)
+                    if s.get("time") is not None:
+                        s["time"] = round(float(s["time"]) - clip_start, 4)
+                    rebased_shots.append(s)
+                fixture_data["shots"] = rebased_shots
+                cands = (fixture_data.get("_candidates_pending_audit") or {}).get("candidates")
+                if cands:
+                    rebased_cands = []
+                    for c in cands:
+                        c = dict(c)
+                        if c.get("time") is not None:
+                            c["time"] = round(float(c["time"]) - clip_start, 4)
+                        rebased_cands.append(c)
+                    fixture_data["_candidates_pending_audit"] = {
+                        **fixture_data["_candidates_pending_audit"],
+                        "candidates": rebased_cands,
+                    }
+
+                tmp = target_json.with_suffix(".json.tmp")
+                tmp.write_text(
+                    json.dumps(fixture_data, indent=2, ensure_ascii=True) + "\n",
+                    encoding="utf-8",
+                )
+                tmp.replace(target_json)
+
+                report_path = fixtures_root / f"{slug}-promotion-report.json"
+                report_path.write_text(
+                    json.dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
+                    encoding="utf-8",
+                )
+
+                handle.update(
+                    progress=1.0,
+                    message=(
+                        f"done -- {result.promotion_report['counts']['snapped']}/"
+                        f"{result.promotion_report['counts']['anchor_shots']} snapped"
+                    ),
+                )
+
+            job = state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            return JSONResponse(
+                {
+                    "job": job.model_dump(mode="json"),
+                    "fixture_path": str(target_json),
+                    "anchor_path": str(anchor_path),
+                    "slug": slug,
+                    "camera_id": camera_id,
+                    "anchor_slug": anchor_slug,
                 }
             )
 
