@@ -67,6 +67,13 @@ class PromoteFromAnchorRequest:
     slug: str
     snap_window_ms: float = _DEFAULT_SNAP_WINDOW_MS
     min_spacing_ms: float = _DEFAULT_MIN_SPACING_MS
+    # When the caller has the secondary's audited beep position (project
+    # flow: ``StageVideo.beep_time`` from in-stream detect or manual
+    # override), pass it here. The engine then skips cross-correlation
+    # entirely -- the offset is just ``secondary_beep_time - anchor_beep``.
+    # Cross-correlation remains the fallback for raw-WAV / CLI use where
+    # no audited beep exists.
+    secondary_beep_time: float | None = None
 
 
 @dataclass
@@ -117,24 +124,36 @@ def promote_from_anchor(
     stage_time = float(anchor["stage_time_seconds"])
     expected_rounds: int | None = anchor.get("stage_rounds", {}).get("expected")
 
-    # 1. Cross-align.
-    align = align_secondary_to_primary(
-        primary_audio=req.primary_audio,
-        primary_sr=req.primary_sr,
-        primary_beep_time=anchor_beep,
-        secondary_audio=req.secondary_audio,
-        secondary_sr=req.secondary_sr,
-    )
-    if align.confidence < _ALIGN_CONFIDENCE_WARN:
-        warnings.append(
-            f"cross-align confidence {align.confidence:.2f} is below "
-            f"{_ALIGN_CONFIDENCE_WARN} -- alignment may be inaccurate "
-            f"(offset {align.lag_seconds:.3f}s). "
-            "Consider using --secondary-wav with the project-extracted audio "
-            "or supplying a manual offset."
+    # 1. Determine the secondary beep position. The project flow passes
+    # the audited ``StageVideo.beep_time`` directly so we don't re-derive
+    # what the ingest screen already captured. Cross-correlation only
+    # fires when no known beep is supplied (CLI / raw-WAV use).
+    if req.secondary_beep_time is not None:
+        secondary_beep_time = float(req.secondary_beep_time)
+        align = CrossAlignResult(
+            secondary_beep_time=secondary_beep_time,
+            lag_seconds=secondary_beep_time - anchor_beep,
+            confidence=float("inf"),
+            peak_correlation=1.0,
+            method="known_beeps",
         )
-
-    secondary_beep_time = align.secondary_beep_time
+    else:
+        align = align_secondary_to_primary(
+            primary_audio=req.primary_audio,
+            primary_sr=req.primary_sr,
+            primary_beep_time=anchor_beep,
+            secondary_audio=req.secondary_audio,
+            secondary_sr=req.secondary_sr,
+        )
+        if align.confidence < _ALIGN_CONFIDENCE_WARN:
+            warnings.append(
+                f"cross-align confidence {align.confidence:.2f} is below "
+                f"{_ALIGN_CONFIDENCE_WARN} -- alignment may be inaccurate "
+                f"(offset {align.lag_seconds:.3f}s). "
+                "Consider using --secondary-wav with the project-extracted audio "
+                "or supplying a manual offset."
+            )
+        secondary_beep_time = align.secondary_beep_time
 
     # 2. Ensemble detection on secondary.
     if runtime is None:
@@ -370,9 +389,12 @@ def _build_report(
         "secondary_source": secondary_source,
         "anchor_slug": anchor_slug,
         "cross_align": {
+            "method": align.method,
             "secondary_beep_time": round(align.secondary_beep_time, 4),
             "offset_seconds": round(align.lag_seconds, 4),
-            "confidence": round(align.confidence, 3),
+            "confidence": (
+                None if align.confidence == float("inf") else round(align.confidence, 3)
+            ),
             "peak_correlation": round(align.peak_correlation, 4),
         },
         "snap_window_ms": snap_window_ms,

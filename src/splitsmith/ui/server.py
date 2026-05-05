@@ -4464,6 +4464,11 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             secondary_source_desc = str(source)
+            # Use the audited in-stream beep time from the project so the
+            # promote engine can skip cross-correlation entirely. The
+            # ingest screen owns this value (auto + manual + review); we
+            # treat it as ground truth on the project flow.
+            known_secondary_beep = float(video.beep_time)
 
             def _run(handle: JobHandle) -> None:
                 handle.update(progress=0.05, message="loading audio...")
@@ -4474,7 +4479,7 @@ def create_app(
                 runtime = _get_ensemble_runtime()
 
                 handle.check_cancel()
-                handle.update(progress=0.20, message="aligning + detecting shots...")
+                handle.update(progress=0.20, message="detecting shots...")
 
                 anchor_data = __import__("json").loads(anchor_path.read_text(encoding="utf-8"))
                 result = lab_module.promote_from_anchor(
@@ -4489,6 +4494,7 @@ def create_app(
                         slug=slug,
                         snap_window_ms=body.snap_window_ms,
                         min_spacing_ms=body.min_spacing_ms,
+                        secondary_beep_time=known_secondary_beep,
                     ),
                     runtime=runtime,
                 )

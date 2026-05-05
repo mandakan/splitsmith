@@ -44,12 +44,22 @@ from scipy.signal import correlate, hilbert
 
 
 class CrossAlignResult(BaseModel):
-    """Output of :func:`align_secondary_to_primary`."""
+    """Output of :func:`align_secondary_to_primary`.
+
+    ``method`` records how the offset was obtained:
+
+    - ``"cross_correlation"`` -- inferred from envelope cross-correlation
+      against the primary's beep landmark (this module's own work).
+    - ``"known_beeps"`` -- caller supplied audited beep positions for
+      both clips, so the offset was just arithmetic. The promote
+      pipeline takes this path on the project flow.
+    """
 
     secondary_beep_time: float
     confidence: float
     peak_correlation: float
     lag_seconds: float
+    method: str = "cross_correlation"
 
 
 class CrossAlignError(RuntimeError):
