@@ -402,7 +402,7 @@ export function PromoteReview() {
             {report.counts.missed > 0 && (
               <span className="text-destructive">{report.counts.missed} missed</span>
             )}
-            {report.cross_align.confidence < 1.5 && (
+            {report.cross_align.confidence != null && report.cross_align.confidence < 1.5 && (
               <Badge variant="destructive" className="text-[10px] px-1.5">
                 low align conf {report.cross_align.confidence.toFixed(2)}
               </Badge>

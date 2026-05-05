@@ -1265,8 +1265,12 @@ export interface PromoteReport {
   cross_align: {
     secondary_beep_time: number;
     offset_seconds: number;
-    confidence: number;
+    /** Null when ``method == "known_beeps"`` -- arithmetic, no
+     *  correlation involved. Numeric only on the cross-correlation
+     *  fallback. */
+    confidence: number | null;
     peak_correlation: number;
+    method?: "cross_correlation" | "known_beeps";
   };
   snap_window_ms: number;
   drift_ms_per_minute: number | null;
