@@ -40,7 +40,7 @@ from ..fixture_schema import (
     now_iso,
     shots_revision_sha,
 )
-from .snap_window import SnapResult, snap_anchor_shots
+from .snap_window import SnapResult, guided_snap_anchor_shots, snap_anchor_shots
 
 _TOOL_VERSION = "0.1.0"
 _ALIGN_CONFIDENCE_WARN = 1.5
@@ -171,15 +171,36 @@ def promote_from_anchor(
         (c.time, c.confidence) for c in ensemble_result.candidates if c.vote_a >= 1
     ]
 
-    # 3. Snap.
-    snaps = snap_anchor_shots(
-        anchor_beep_time=anchor_beep,
-        anchor_shots=anchor_shot_times,
-        secondary_beep_time=secondary_beep_time,
-        voter_a_candidates=voter_a_candidates,
-        window_ms=req.snap_window_ms,
-        min_spacing_ms=req.min_spacing_ms,
-    )
+    # 3. Snap. Two paths:
+    #    - Trusted-prior (project flow with known beep): guided snap.
+    #      The anchor is ground truth; we only need to localize, not
+    #      classify. Drop voter A's calibrated threshold and pick the
+    #      local envelope peak around each predicted secondary time.
+    #      Phone-cam shots that voter A's headcam-tuned floor filters
+    #      out still snap correctly because the prior tells us where
+    #      to look.
+    #    - Untrusted-prior (cross-correlation fallback): threshold-based
+    #      snap against voter A. Without a known beep we can't trust
+    #      the offset enough to drop the detector threshold.
+    if req.secondary_beep_time is not None:
+        snaps = guided_snap_anchor_shots(
+            anchor_beep_time=anchor_beep,
+            anchor_shots=anchor_shot_times,
+            secondary_beep_time=secondary_beep_time,
+            secondary_audio=req.secondary_audio,
+            secondary_sr=req.secondary_sr,
+            window_ms=req.snap_window_ms,
+            min_spacing_ms=req.min_spacing_ms,
+        )
+    else:
+        snaps = snap_anchor_shots(
+            anchor_beep_time=anchor_beep,
+            anchor_shots=anchor_shot_times,
+            secondary_beep_time=secondary_beep_time,
+            voter_a_candidates=voter_a_candidates,
+            window_ms=req.snap_window_ms,
+            min_spacing_ms=req.min_spacing_ms,
+        )
 
     # 4. Drift estimation: linear fit of displacement vs time-since-beep.
     drift_ms_per_minute = _estimate_drift(snaps)
