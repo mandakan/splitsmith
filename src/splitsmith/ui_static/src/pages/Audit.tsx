@@ -131,6 +131,20 @@ export function Audit() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
+  const [gridMode, setGridMode] = useState(false);
+  // Stable refs used by grid-mode callbacks to avoid stale closures without
+  // adding them to useCallback / useEffect dep arrays.
+  const isPlayingRef = useRef(false);
+  const currentTimeRef = useRef(0);
+  // Map of secondary video path -> element, populated by SecondarySlot mounts.
+  const secondaryRefsMap = useRef<Map<string, HTMLVideoElement>>(new Map());
+  // Map of secondary video path -> beep offset (secondary.beep_time - auditBeep).
+  // Rebuilt whenever videos or auditBeep change so the rAF loop reads stable values.
+  const secondaryOffsetsRef = useRef<Map<string, number>>(new Map());
+  // Paths of secondaries currently buffering; when non-empty, primary is paused.
+  const secondaryBufferingSet = useRef<Set<string>>(new Set());
+  // True while the primary is paused because a secondary is buffering (not user-paused).
+  const blockedBySecondaryRef = useRef(false);
   // Auto-advance to the next visible marker after K toggles a candidate.
   // Default on (FCP-style "mark and move"); persisted across sessions
   // because the user audits in long flow blocks and shouldn't have to
@@ -150,6 +164,11 @@ export function Audit() {
   // here. Matches the old review SPA's "Loop: pause snaps the playhead
   // back to where playback started" behavior.
   const loopAnchorRef = useRef<number | null>(null);
+
+  // Keep stable refs in sync so callbacks that can't take deps use them.
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
+
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
   // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
   // relative to fit. Reset on stage change.
@@ -250,6 +269,21 @@ export function Audit() {
   // server falls back to full-source audio, peaks.beep_time mirrors
   // primary.beep_time. Either way, this value is the correct anchor.
   const auditBeep = peaks?.beep_time ?? primaryBeep;
+
+  // Rebuild the secondary offset table whenever videos or auditBeep change.
+  // The rAF tick loop reads this map without needing it in its dep array.
+  useEffect(() => {
+    const map = new Map<string, number>();
+    if (auditBeep != null) {
+      for (const v of videos.slice(1)) {
+        if (v.beep_time != null) {
+          map.set(v.path, v.beep_time - auditBeep);
+        }
+      }
+    }
+    secondaryOffsetsRef.current = map;
+  }, [videos, auditBeep]);
+
   const beepOffset = useMemo(() => {
     // Primary tab: served clip *is* the audit timeline (trimmed primary
     // serves trimmed; untrimmed primary serves source). Offset is zero.
@@ -276,6 +310,10 @@ export function Audit() {
     sessionEventsRef.current = [];
     isDirtyRef.current = false;
     setSaveStatus({ kind: "idle" });
+    setGridMode(false);
+    secondaryRefsMap.current.clear();
+    secondaryBufferingSet.current.clear();
+    blockedBySecondaryRef.current = false;
     const v = videoRef.current;
     if (v) {
       v.pause();
@@ -374,8 +412,22 @@ export function Audit() {
           const target = loopAnchorRef.current ?? 0;
           v.currentTime = target + beepOffset;
           setCurrentTime(target);
+          // Snap secondaries to the loop anchor too.
+          for (const [path, sv] of secondaryRefsMap.current) {
+            const off = secondaryOffsetsRef.current.get(path);
+            if (off != null) sv.currentTime = target + off;
+          }
         } else {
           setCurrentTime(auditT);
+          // Drift-correct secondaries: nudge if >50 ms off.
+          for (const [path, sv] of secondaryRefsMap.current) {
+            const off = secondaryOffsetsRef.current.get(path);
+            if (off == null) continue;
+            const expected = auditT + off;
+            if (Math.abs(sv.currentTime - expected) > 0.05) {
+              sv.currentTime = expected;
+            }
+          }
         }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -395,6 +447,11 @@ export function Audit() {
       // dragging to a candidate, then play-pausing would yank the
       // playhead back to the OLD anchor instead of the new one.
       loopAnchorRef.current = primaryTime;
+      // Seek all secondaries to the equivalent position.
+      for (const [path, sv] of secondaryRefsMap.current) {
+        const off = secondaryOffsetsRef.current.get(path);
+        if (off != null) sv.currentTime = primaryTime + off;
+      }
     },
     [beepOffset],
   );
@@ -406,15 +463,25 @@ export function Audit() {
       // Starting playback -- record the anchor in audit-timeline coords.
       loopAnchorRef.current = v.currentTime - beepOffset;
       void v.play();
+      for (const sv of secondaryRefsMap.current.values()) {
+        void sv.play();
+      }
       setIsPlaying(true);
     } else {
       v.pause();
+      for (const sv of secondaryRefsMap.current.values()) {
+        sv.pause();
+      }
       setIsPlaying(false);
       // Loop semantics: pause snaps back to where play started.
       if (loopMode && loopAnchorRef.current != null) {
         const target = loopAnchorRef.current;
         v.currentTime = target + beepOffset;
         setCurrentTime(target);
+        for (const [path, sv] of secondaryRefsMap.current) {
+          const off = secondaryOffsetsRef.current.get(path);
+          if (off != null) sv.currentTime = target + off;
+        }
       }
     }
   }, [beepOffset, loopMode]);
@@ -429,6 +496,73 @@ export function Audit() {
     });
     isDirtyRef.current = true;
   }, []);
+
+  // ---- Grid mode callbacks (#128) -----------------------------------------
+
+  // Called by VideoPanel's SecondarySlot when a secondary video mounts/unmounts.
+  const handleSecondaryRef = useCallback((path: string, el: HTMLVideoElement | null) => {
+    if (el) {
+      secondaryRefsMap.current.set(path, el);
+      const off = secondaryOffsetsRef.current.get(path);
+      if (off != null) {
+        const target = currentTimeRef.current + off;
+        if (el.readyState >= 1) {
+          el.currentTime = target;
+        } else {
+          el.addEventListener("loadedmetadata", () => { el.currentTime = target; }, { once: true });
+        }
+        if (isPlayingRef.current) void el.play();
+      }
+    } else {
+      secondaryRefsMap.current.delete(path);
+      secondaryBufferingSet.current.delete(path);
+    }
+  }, []);
+
+  // Called when a secondary starts or stops buffering. If any secondary is
+  // buffering, pause everything; resume when all clear (if user intent is play).
+  const handleSecondaryBuffering = useCallback((path: string, isBuffering: boolean) => {
+    if (isBuffering) {
+      secondaryBufferingSet.current.add(path);
+      if (!blockedBySecondaryRef.current) {
+        blockedBySecondaryRef.current = true;
+        const pv = videoRef.current;
+        if (pv && !pv.paused) pv.pause();
+        for (const sv of secondaryRefsMap.current.values()) {
+          if (!sv.paused) sv.pause();
+        }
+      }
+    } else {
+      secondaryBufferingSet.current.delete(path);
+      if (secondaryBufferingSet.current.size === 0 && blockedBySecondaryRef.current) {
+        blockedBySecondaryRef.current = false;
+        if (isPlayingRef.current) {
+          const pv = videoRef.current;
+          if (pv) void pv.play();
+          for (const sv of secondaryRefsMap.current.values()) {
+            void sv.play();
+          }
+        }
+      }
+    }
+  }, []);
+
+  const handleGridModeToggle = useCallback(() => {
+    setGridMode((prev) => {
+      if (!prev) {
+        // Entering grid mode: lock to primary so beepOffset stays at 0.
+        setActiveVideoIndex(0);
+      } else {
+        // Leaving grid mode: clean up secondary state.
+        secondaryRefsMap.current.clear();
+        secondaryBufferingSet.current.clear();
+        blockedBySecondaryRef.current = false;
+      }
+      return !prev;
+    });
+  }, []);
+
+  // ---- Marker mutators (push prev state to undo stack) -------------------
 
   const mutate = useCallback((next: AuditMarker[]) => {
     setMarkers((prev) => {
@@ -1117,6 +1251,10 @@ export function Audit() {
               activeIndex={activeVideoIndex}
               onActiveIndexChange={setActiveVideoIndex}
               videoSrc={videoSrc}
+              gridMode={gridMode}
+              onGridModeToggle={handleGridModeToggle}
+              onSecondaryRef={handleSecondaryRef}
+              onSecondaryBuffering={handleSecondaryBuffering}
             />
             {peaksLoading ? (
               <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
