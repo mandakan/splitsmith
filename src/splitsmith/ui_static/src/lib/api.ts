@@ -1302,6 +1302,9 @@ export interface LabFixtureRecord {
   source_video: string | null;
   audit_mtime: number;
   audio_mtime: number | null;
+  /** Set on derived (promoted-from-anchor) fixtures; the SPA uses this
+   *  to surface a "re-review" link back to /promote-review. */
+  anchor_slug: string | null;
 }
 
 export interface LabEvalConfig {

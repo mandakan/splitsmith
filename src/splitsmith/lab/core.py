@@ -50,6 +50,10 @@ class FixtureRecord(BaseModel):
     source_video: str | None = None
     audit_mtime: float
     audio_mtime: float | None = None
+    # Slug of the anchor fixture this one was promoted from (issue #125).
+    # Non-null only for derived secondary fixtures; the SPA surfaces a
+    # "re-review" link back to the diff-confirm screen for these.
+    anchor_slug: str | None = None
 
 
 def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
@@ -76,6 +80,12 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
         rounds = None
         if isinstance(payload.get("stage_rounds"), dict):
             rounds = payload["stage_rounds"].get("expected")
+        anchor_slug: str | None = None
+        anchor_block = payload.get("anchor")
+        if isinstance(anchor_block, dict):
+            raw = anchor_block.get("fixture_slug")
+            if isinstance(raw, str):
+                anchor_slug = raw
         out.append(
             FixtureRecord(
                 slug=json_path.stem,
@@ -90,6 +100,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 source_video=payload.get("source_video"),
                 audit_mtime=json_path.stat().st_mtime,
                 audio_mtime=wav.stat().st_mtime if wav.exists() else None,
+                anchor_slug=anchor_slug,
             )
         )
     return out

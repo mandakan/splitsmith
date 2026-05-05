@@ -537,6 +537,45 @@ _ENSEMBLE_RUNTIME: ensemble_module.EnsembleRuntime | None = None
 _ENSEMBLE_RUNTIME_LOCK = threading.Lock()
 
 
+def _trim_wav_to_clip(src_wav: Path, dst_wav: Path, start_s: float, end_s: float) -> None:
+    """Cut ``src_wav`` to ``[start_s, end_s)`` and write to ``dst_wav``.
+
+    Used by promote-secondary so the derived fixture's audio matches the
+    "fixture is clip-local" convention shared with primary fixtures.
+    Re-encodes (PCM s16 / mono / 48 kHz) so the output is a stable WAV
+    regardless of the source codec.
+    """
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg binary not found on PATH")
+    duration = max(0.0, end_s - start_s)
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start_s:.3f}",
+        "-i",
+        str(src_wav),
+        "-t",
+        f"{duration:.3f}",
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-c:a",
+        "pcm_s16le",
+        str(dst_wav),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"ffmpeg trim failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc
+
+
 def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
     """Lazy-load + cache the ensemble runtime; thread-safe.
 
@@ -4427,8 +4466,6 @@ def create_app(
             secondary_source_desc = str(source)
 
             def _run(handle: JobHandle) -> None:
-                import shutil as _shutil
-
                 handle.update(progress=0.05, message="loading audio...")
                 primary_audio, primary_sr = beep_detect.load_audio(anchor_wav_path)
                 secondary_audio, secondary_sr = beep_detect.load_audio(secondary_wav_path)
@@ -4461,17 +4498,63 @@ def create_app(
                 handle.check_cancel()
                 handle.update(progress=0.85, message="writing fixture...")
 
+                # Trim secondary WAV to a clip-local window around the beep,
+                # mirroring the convention used by primary fixtures (the
+                # /api/fixture/peaks endpoint marks fixture audio as
+                # ``trimmed=true``). Without this the audit screen renders
+                # the entire raw recording with shots clustered far down
+                # the timeline.
+                fixture_data = dict(result.fixture_data)
+                secondary_beep = float(fixture_data.get("beep_time") or 0.0)
+                shot_times = [
+                    float(s["time"])
+                    for s in fixture_data.get("shots", [])
+                    if s.get("time") is not None
+                ]
+                trim_buffer = 5.0
+                trim_tail = 5.0
+                clip_start = max(0.0, secondary_beep - trim_buffer)
+                clip_end_floor = secondary_beep + trim_buffer
+                clip_end = max(shot_times) + trim_tail if shot_times else clip_end_floor
+                clip_end = max(clip_end, clip_end_floor)
+
                 fixtures_root.mkdir(parents=True, exist_ok=True)
+                target_wav = fixtures_root / f"{slug}.wav"
+                handle.update(progress=0.88, message="trimming clip audio...")
+                _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
+
+                # Rebase time-axis fields to clip-local coordinates.
+                fixture_data["beep_time"] = round(secondary_beep - clip_start, 4)
+                fixture_data["fixture_window_in_source"] = [
+                    round(clip_start, 4),
+                    round(clip_end, 4),
+                ]
+                rebased_shots = []
+                for s in fixture_data.get("shots", []):
+                    s = dict(s)
+                    if s.get("time") is not None:
+                        s["time"] = round(float(s["time"]) - clip_start, 4)
+                    rebased_shots.append(s)
+                fixture_data["shots"] = rebased_shots
+                cands = (fixture_data.get("_candidates_pending_audit") or {}).get("candidates")
+                if cands:
+                    rebased_cands = []
+                    for c in cands:
+                        c = dict(c)
+                        if c.get("time") is not None:
+                            c["time"] = round(float(c["time"]) - clip_start, 4)
+                        rebased_cands.append(c)
+                    fixture_data["_candidates_pending_audit"] = {
+                        **fixture_data["_candidates_pending_audit"],
+                        "candidates": rebased_cands,
+                    }
+
                 tmp = target_json.with_suffix(".json.tmp")
                 tmp.write_text(
-                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(fixture_data, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
                 tmp.replace(target_json)
-
-                target_wav = fixtures_root / f"{slug}.wav"
-                _shutil.copy2(secondary_wav_path, target_wav)
 
                 report_path = fixtures_root / f"{slug}-promotion-report.json"
                 report_path.write_text(

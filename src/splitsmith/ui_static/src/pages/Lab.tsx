@@ -80,6 +80,13 @@ function reviewUrl(auditPath: string, sourceVideo: string | null | undefined): s
   return url;
 }
 
+function promoteReviewUrl(derivedAuditPath: string, anchorSlug: string): string {
+  // Derived fixture and its anchor live side-by-side in the same dir.
+  const dir = derivedAuditPath.slice(0, derivedAuditPath.lastIndexOf("/"));
+  const anchorPath = `${dir}/${anchorSlug}.json`;
+  return `/promote-review?fixture=${encodeURIComponent(derivedAuditPath)}&anchor=${encodeURIComponent(anchorPath)}`;
+}
+
 export function Lab() {
   const navigate = useNavigate();
   const { slug } = useParams<{ slug?: string }>();
@@ -705,6 +712,17 @@ function FixtureTable({
                     </td>
                     <td className="px-2 py-2 text-muted-foreground">
                       <div className="flex items-center justify-end gap-1">
+                        {rec.anchor_slug && (
+                          <Link
+                            to={promoteReviewUrl(rec.audit_path, rec.anchor_slug)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                            title="Re-open the secondary diff-confirm review"
+                            aria-label={`Re-review promotion ${rec.slug}`}
+                          >
+                            <Link2 className="size-3.5" />
+                          </Link>
+                        )}
                         <Link
                           to={reviewUrl(rec.audit_path, rec.source_video)}
                           onClick={(e) => e.stopPropagation()}

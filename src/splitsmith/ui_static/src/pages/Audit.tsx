@@ -2005,7 +2005,11 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
     note: "",
   }));
   // Manual shots: those without a matching candidate_number.
+  // Derived (promoted) fixtures may include shots with ``time: null`` for
+  // anchor shots that the secondary couldn't snap; skip those here so the
+  // marker drawer doesn't crash on ``time.toFixed(...)``.
   for (const s of audit.shots ?? []) {
+    if (s.time == null) continue;
     if (s.candidate_number == null || s.source === "manual") {
       markers.push({
         id: `manual-shot-${s.shot_number}`,
