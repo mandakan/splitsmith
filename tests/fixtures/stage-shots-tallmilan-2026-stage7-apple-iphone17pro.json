@@ -678,7 +678,17 @@
         "kept": true
       }
     ],
-    "labels_by_time": {}
+    "labels_by_time": {
+      "15.130": "movement",
+      "5.529": "speech",
+      "5.851": "movement",
+      "6.024": "movement",
+      "6.841": "speech",
+      "7.135": "movement",
+      "15.581": "movement",
+      "16.306": "movement",
+      "6.217": "speech"
+    }
   },
   "audit_notes": "",
   "stage_rounds": {
@@ -722,5 +732,15 @@
         "sanity_flagged": 0
       }
     }
-  ]
+  ],
+  "venue": {
+    "environment": "outdoor",
+    "surface": "unknown"
+  },
+  "gun": {
+    "calibre": "9mm",
+    "muzzle_device": "none",
+    "action": "semi-auto",
+    "power_factor": "minor"
+  }
 }

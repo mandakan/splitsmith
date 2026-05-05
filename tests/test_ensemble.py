@@ -382,3 +382,186 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     # consensus while the bottom 2 do not.
     kept_idx = [c.candidate_number - 1 for c in result.candidates if c.kept]
     assert kept_idx == [0, 2]
+
+
+# ---------------------------------------------------------------------------
+# Per-camera-class threshold stratification (issue #137)
+# ---------------------------------------------------------------------------
+
+
+def test_camera_class_from_mount_maps_known_mounts() -> None:
+    from splitsmith.ensemble import (
+        CAMERA_CLASS_HANDHELD,
+        CAMERA_CLASS_HEADCAM,
+        DEFAULT_CAMERA_CLASS,
+        camera_class_from_mount,
+    )
+
+    assert camera_class_from_mount("head") == CAMERA_CLASS_HEADCAM
+    assert camera_class_from_mount("chest") == CAMERA_CLASS_HEADCAM
+    assert camera_class_from_mount("helmet") == CAMERA_CLASS_HEADCAM
+    assert camera_class_from_mount("belt") == CAMERA_CLASS_HEADCAM
+    assert camera_class_from_mount("hand") == CAMERA_CLASS_HANDHELD
+    assert camera_class_from_mount("gimbal") == CAMERA_CLASS_HANDHELD
+    assert camera_class_from_mount("tripod") == CAMERA_CLASS_HANDHELD
+    assert camera_class_from_mount("monopod") == CAMERA_CLASS_HANDHELD
+    # Unknown / missing -> default class so callers can pass through
+    # whatever the fixture says without guarding.
+    assert camera_class_from_mount(None) == DEFAULT_CAMERA_CLASS
+    assert camera_class_from_mount("future-mount") == DEFAULT_CAMERA_CLASS
+
+
+def test_calibration_thresholds_for_class_returns_class_thresholds() -> None:
+    """Per-class lookup hits the correct entry; unknown classes fall back."""
+    from splitsmith.ensemble.calibration import ClassThresholds
+
+    cal = EnsembleCalibration(
+        voter_a_floor=0.05,
+        voter_b_threshold=0.0,
+        voter_c_threshold=0.5,
+        voter_d_threshold=0.0,
+        voter_c_target_recall=0.95,
+        tolerance_ms=75.0,
+        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
+        clap_prompts=list(CLAP_PROMPTS),
+        calibration_fixtures=["a", "b"],
+        n_calibration_candidates=10,
+        n_calibration_positives=5,
+        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
+        built_at="1970-01-01T00:00:00Z",
+        default_camera_class="headcam",
+        thresholds_by_camera_class={
+            "headcam": ClassThresholds(
+                voter_a_floor=0.05,
+                voter_b_threshold=0.0,
+                voter_c_threshold=0.5,
+                voter_d_threshold=0.0,
+                n_calibration_candidates=8,
+                n_calibration_positives=4,
+                calibration_fixtures=["a"],
+            ),
+            "handheld": ClassThresholds(
+                voter_a_floor=0.10,
+                voter_b_threshold=0.20,
+                voter_c_threshold=0.30,
+                voter_d_threshold=0.40,
+                n_calibration_candidates=2,
+                n_calibration_positives=1,
+                calibration_fixtures=["b"],
+            ),
+        },
+    )
+
+    assert cal.thresholds_for("headcam").voter_c_threshold == 0.5
+    assert cal.thresholds_for("handheld").voter_c_threshold == 0.30
+    # Unknown class -> default.
+    assert cal.thresholds_for("future-class").voter_c_threshold == 0.5
+    # No class given -> default.
+    assert cal.thresholds_for(None).voter_c_threshold == 0.5
+
+
+def test_calibration_thresholds_for_legacy_artifact_synthesizes_single_class() -> None:
+    """Pre-issue-#137 artifacts (no per-class dict) still resolve to a single set."""
+    cal = EnsembleCalibration(
+        voter_a_floor=0.07,
+        voter_b_threshold=0.08,
+        voter_c_threshold=0.42,
+        voter_d_threshold=0.09,
+        voter_c_target_recall=0.95,
+        tolerance_ms=75.0,
+        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
+        clap_prompts=list(CLAP_PROMPTS),
+        calibration_fixtures=["legacy"],
+        n_calibration_candidates=1,
+        n_calibration_positives=1,
+        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
+        built_at="1970-01-01T00:00:00Z",
+    )
+
+    th = cal.thresholds_for("anything-at-all")
+    assert th.voter_a_floor == 0.07
+    assert th.voter_c_threshold == 0.42
+
+
+def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
+    """A handheld-class detection picks up the handheld voter A floor.
+
+    Headcam threshold (0.05) would let confidence=0.07 pass voter A;
+    handheld threshold (0.20) rejects it. The test asserts that passing
+    ``camera_class="handheld"`` flips voter A from yes to no on the same
+    candidate without changing any other state.
+    """
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+    from splitsmith.ensemble.calibration import ClassThresholds
+
+    runtime = _build_stub_runtime()
+    runtime.calibration = runtime.calibration.model_copy(
+        update={
+            "default_camera_class": "headcam",
+            "thresholds_by_camera_class": {
+                "headcam": ClassThresholds(
+                    voter_a_floor=0.05,
+                    voter_b_threshold=0.0,
+                    voter_c_threshold=0.5,
+                    voter_d_threshold=0.0,
+                    n_calibration_candidates=10,
+                    n_calibration_positives=5,
+                    calibration_fixtures=["stub"],
+                ),
+                "handheld": ClassThresholds(
+                    voter_a_floor=0.20,
+                    voter_b_threshold=0.0,
+                    voter_c_threshold=0.5,
+                    voter_d_threshold=0.0,
+                    n_calibration_candidates=5,
+                    n_calibration_positives=2,
+                    calibration_fixtures=["stub-phone"],
+                ),
+            },
+        }
+    )
+
+    fake_shots = [
+        Shot(
+            shot_number=1,
+            time_absolute=5.5,
+            time_from_beep=0.5,
+            split=0.5,
+            peak_amplitude=0.4,
+            confidence=0.07,
+            notes="",
+        )
+    ]
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+
+    # Headcam class (default): floor 0.05 -> confidence 0.07 passes voter A.
+    result_head = detect_shots_ensemble(
+        audio, 48_000, beep_time=5.0, stage_time=10.0, runtime=runtime
+    )
+    assert result_head.candidates[0].vote_a == 1
+
+    # Handheld class: floor 0.20 -> 0.07 rejected by voter A.
+    result_hand = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        camera_class="handheld",
+    )
+    assert result_hand.candidates[0].vote_a == 0

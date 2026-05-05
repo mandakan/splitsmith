@@ -35,17 +35,27 @@ from .api import (
     load_ensemble_runtime,
 )
 from .calibration import (
+    CAMERA_CLASS_HANDHELD,
+    CAMERA_CLASS_HEADCAM,
+    DEFAULT_CAMERA_CLASS,
+    ClassThresholds,
     EnsembleCalibration,
+    camera_class_from_mount,
     load_calibration,
     load_voter_c_model,
 )
 
 __all__ = [
+    "CAMERA_CLASS_HANDHELD",
+    "CAMERA_CLASS_HEADCAM",
+    "ClassThresholds",
+    "DEFAULT_CAMERA_CLASS",
     "EnsembleCalibration",
     "EnsembleCandidate",
     "EnsembleConfig",
     "EnsembleResult",
     "EnsembleRuntime",
+    "camera_class_from_mount",
     "detect_shots_ensemble",
     "load_calibration",
     "load_ensemble_runtime",
