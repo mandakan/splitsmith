@@ -320,17 +320,6 @@ export function PromoteReview() {
   const derivedZoomCenter = currentShot?.time ?? 0;
   const anchorZoomCenter = anchorFixture && currentShot ? currentShot.anchorTime : 0;
 
-  // Vertical-line shot overlays computed in % of waveform width.  Cheaper than
-  // pulling in the full editable MarkerLayer; this view is read-only on the
-  // anchor side and the secondary side has its own dedicated nudge controls.
-  const anchorShotOverlays = useMemo(() => {
-    if (!anchorPeaks || sharedDuration <= 0) return [] as { left: string; label: number }[];
-    return (anchorFixture?.shots ?? []).map((s) => ({
-      left: `${((s.time ?? 0) / sharedDuration) * 100}%`,
-      label: s.shot_number,
-    }));
-  }, [anchorFixture, anchorPeaks, sharedDuration]);
-
   // Lock both waveform panels to a shared time axis so events at the same
   // clip-local second appear at the same X position. Without this, anchor
   // and secondary clips of different durations stretch independently and
@@ -341,6 +330,17 @@ export function PromoteReview() {
     const d = derivedPeaks?.duration ?? 0;
     return Math.max(a, d);
   }, [anchorPeaks, derivedPeaks]);
+
+  // Vertical-line shot overlays computed in % of waveform width.  Cheaper than
+  // pulling in the full editable MarkerLayer; this view is read-only on the
+  // anchor side and the secondary side has its own dedicated nudge controls.
+  const anchorShotOverlays = useMemo(() => {
+    if (!anchorPeaks || sharedDuration <= 0) return [] as { left: string; label: number }[];
+    return (anchorFixture?.shots ?? []).map((s) => ({
+      left: `${((s.time ?? 0) / sharedDuration) * 100}%`,
+      label: s.shot_number,
+    }));
+  }, [anchorFixture, anchorPeaks, sharedDuration]);
 
   const padPeaksToDuration = useCallback(
     (peaks: number[], peaksDuration: number): number[] => {
