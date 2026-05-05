@@ -172,17 +172,36 @@ def promote_from_anchor(
     ]
 
     # 3. Snap. Two paths:
-    #    - Trusted-prior (project flow with known beep): guided snap.
-    #      The anchor is ground truth; we only need to localize, not
-    #      classify. Drop voter A's calibrated threshold and pick the
-    #      local envelope peak around each predicted secondary time.
-    #      Phone-cam shots that voter A's headcam-tuned floor filters
-    #      out still snap correctly because the prior tells us where
-    #      to look.
+    #    - Trusted-prior (project flow with known beep): guided snap in
+    #      onset mode (rising-edge time = ground-truth shot moment),
+    #      run twice. First pass with a wide window (150 ms default)
+    #      absorbs cross-camera clock drift; we fit a linear drift
+    #      model on the first-pass displacements; the second pass
+    #      re-snaps with drift-corrected predictions and a tighter
+    #      window so the result is robust against multi-second stages
+    #      where drift would push later shots outside a single-pass
+    #      window.
     #    - Untrusted-prior (cross-correlation fallback): threshold-based
     #      snap against voter A. Without a known beep we can't trust
     #      the offset enough to drop the detector threshold.
     if req.secondary_beep_time is not None:
+        first_pass = guided_snap_anchor_shots(
+            anchor_beep_time=anchor_beep,
+            anchor_shots=anchor_shot_times,
+            secondary_beep_time=secondary_beep_time,
+            secondary_audio=req.secondary_audio,
+            secondary_sr=req.secondary_sr,
+            window_ms=max(150.0, req.snap_window_ms * 2.5),
+            min_spacing_ms=req.min_spacing_ms,
+            mode="onset",
+            drift_ms_per_s=0.0,
+        )
+        first_pass_drift_per_minute = _estimate_drift(first_pass)
+        drift_ms_per_s = (
+            (first_pass_drift_per_minute or 0.0) / 60.0
+            if first_pass_drift_per_minute is not None
+            else 0.0
+        )
         snaps = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
             anchor_shots=anchor_shot_times,
@@ -191,6 +210,8 @@ def promote_from_anchor(
             secondary_sr=req.secondary_sr,
             window_ms=req.snap_window_ms,
             min_spacing_ms=req.min_spacing_ms,
+            mode="onset",
+            drift_ms_per_s=drift_ms_per_s,
         )
     else:
         snaps = snap_anchor_shots(
@@ -202,7 +223,9 @@ def promote_from_anchor(
             min_spacing_ms=req.min_spacing_ms,
         )
 
-    # 4. Drift estimation: linear fit of displacement vs time-since-beep.
+    # 4. Drift estimation on the final pass: linear fit of displacement
+    # vs time-since-beep. After the two-pass correction this is the
+    # *residual* drift the second pass couldn't model linearly.
     drift_ms_per_minute = _estimate_drift(snaps)
 
     # 5. Build fixture JSON.
