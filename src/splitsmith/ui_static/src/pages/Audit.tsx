@@ -89,9 +89,6 @@ import { cn } from "@/lib/utils";
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
 const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
-// If a secondary hasn't recovered from buffering within this window, assume it
-// has no content at the current audit position and let the primary continue.
-const SECONDARY_BUFFER_TIMEOUT_MS = 1500;
 
 export function Audit() {
   const { stage: stageParam } = useParams();
@@ -144,14 +141,6 @@ export function Audit() {
   // Map of secondary video path -> beep offset (secondary.beep_time - auditBeep).
   // Rebuilt whenever videos or auditBeep change so the rAF loop reads stable values.
   const secondaryOffsetsRef = useRef<Map<string, number>>(new Map());
-  // Paths of secondaries currently blocking playback (buffering within timeout window).
-  const secondaryBufferingSet = useRef<Set<string>>(new Set());
-  // True while the primary is paused because a secondary is buffering.
-  const blockedBySecondaryRef = useRef(false);
-  // Per-secondary give-up timers: if a secondary doesn't recover within
-  // SECONDARY_BUFFER_TIMEOUT_MS, we assume it has no content at this position
-  // and remove it from the blocking set so the primary can keep playing.
-  const bufferingTimersRef = useRef<Map<string, number>>(new Map());
   // Auto-advance to the next visible marker after K toggles a candidate.
   // Default on (FCP-style "mark and move"); persisted across sessions
   // because the user audits in long flow blocks and shouldn't have to
@@ -319,10 +308,6 @@ export function Audit() {
     setSaveStatus({ kind: "idle" });
     setGridMode(true);
     secondaryRefsMap.current.clear();
-    secondaryBufferingSet.current.clear();
-    blockedBySecondaryRef.current = false;
-    for (const t of bufferingTimersRef.current.values()) window.clearTimeout(t);
-    bufferingTimersRef.current.clear();
     const v = videoRef.current;
     if (v) {
       v.pause();
@@ -428,21 +413,14 @@ export function Audit() {
           }
         } else {
           setCurrentTime(auditT);
-          // Drift-correct secondaries: nudge if >50 ms off. Also auto-resume
-          // any secondary that the give-up timer left paused -- as the primary
-          // advances into a region where this secondary has content (i.e. the
-          // expected position is within [0, duration]), seek it there and
-          // restart playback so it rejoins automatically.
+          // Drift-correct secondaries: nudge if >50 ms off. Auto-resume is
+          // handled event-driven via the primary's "timeupdate" listener -- not
+          // here -- to avoid seek-thrashing at 60 fps.
           for (const [path, sv] of secondaryRefsMap.current) {
             const off = secondaryOffsetsRef.current.get(path);
             if (off == null) continue;
             const expected = auditT + off;
-            const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-            const inRange = expected >= 0 && (dur == null || expected <= dur);
-            if (sv.paused && inRange) {
-              sv.currentTime = expected;
-              void sv.play();
-            } else if (Math.abs(sv.currentTime - expected) > 0.05) {
+            if (!sv.paused && Math.abs(sv.currentTime - expected) > 0.05) {
               sv.currentTime = expected;
             }
           }
@@ -456,6 +434,34 @@ export function Audit() {
     };
   }, [isPlaying, beepOffset, loopMode, peaks]);
 
+  // Master/slave sync: on each primary timeupdate (~4 Hz, browser-throttled),
+  // reconcile each secondary's state to the primary's. If the primary is in
+  // the secondary's content range and the secondary is paused, seek+play it.
+  // If the primary moved out of range, pause the secondary. This is the
+  // standard pattern for multi-video sync -- using rAF causes seek-thrash.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onTime = () => {
+      const auditT = v.currentTime - beepOffset;
+      for (const [path, sv] of secondaryRefsMap.current) {
+        const off = secondaryOffsetsRef.current.get(path);
+        if (off == null) continue;
+        const expected = auditT + off;
+        const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+        const inRange = expected >= 0 && (dur == null || expected <= dur);
+        if (inRange && sv.paused && isPlayingRef.current) {
+          sv.currentTime = expected;
+          void sv.play().catch(() => {});
+        } else if (!inRange && !sv.paused) {
+          sv.pause();
+        }
+      }
+    };
+    v.addEventListener("timeupdate", onTime);
+    return () => v.removeEventListener("timeupdate", onTime);
+  }, [beepOffset, activeVideoIndex]);
+
   const handleScrub = useCallback(
     (primaryTime: number) => {
       const v = videoRef.current;
@@ -465,14 +471,17 @@ export function Audit() {
       // dragging to a candidate, then play-pausing would yank the
       // playhead back to the OLD anchor instead of the new one.
       loopAnchorRef.current = primaryTime;
-      // Seek all secondaries to the equivalent position. If a secondary was
-      // paused by the give-up timer (no content at the previous position),
-      // call play() so it rejoins as soon as the new position has data.
+      // Seek all secondaries to the equivalent position. The primary's
+      // timeupdate listener will resume any that are in their content range.
       for (const [path, sv] of secondaryRefsMap.current) {
         const off = secondaryOffsetsRef.current.get(path);
-        if (off != null) {
-          sv.currentTime = primaryTime + off;
-          if (isPlayingRef.current && sv.paused) void sv.play();
+        if (off == null) continue;
+        const expected = primaryTime + off;
+        const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+        const inRange = expected >= 0 && (dur == null || expected <= dur);
+        if (inRange) {
+          sv.currentTime = expected;
+          if (isPlayingRef.current && sv.paused) void sv.play().catch(() => {});
         }
       }
     },
@@ -538,80 +547,18 @@ export function Audit() {
       }
     } else {
       secondaryRefsMap.current.delete(path);
-      secondaryBufferingSet.current.delete(path);
-      const t = bufferingTimersRef.current.get(path);
-      if (t != null) { window.clearTimeout(t); bufferingTimersRef.current.delete(path); }
     }
   }, []);
 
-  // Called when a secondary starts or stops buffering. We pause all for brief
-  // network stalls but give up after SECONDARY_BUFFER_TIMEOUT_MS -- at that
-  // point the secondary likely has no content at this audit position (it starts
-  // later or ended earlier), so we drop it from the blocking set and let the
-  // primary continue. The secondary keeps its own buffering overlay.
-  const handleSecondaryBuffering = useCallback((path: string, isBuffering: boolean) => {
-    if (isBuffering) {
-      // Cancel any previous give-up timer for this path (e.g., rapid seek).
-      const existing = bufferingTimersRef.current.get(path);
-      if (existing != null) window.clearTimeout(existing);
-
-      secondaryBufferingSet.current.add(path);
-
-      // Pause everything on first blocker.
-      if (!blockedBySecondaryRef.current) {
-        blockedBySecondaryRef.current = true;
-        const pv = videoRef.current;
-        if (pv && !pv.paused) pv.pause();
-        for (const sv of secondaryRefsMap.current.values()) {
-          if (!sv.paused) sv.pause();
-        }
-      }
-
-      // Give-up timer: if the secondary hasn't recovered, unblock the primary.
-      const timer = window.setTimeout(() => {
-        bufferingTimersRef.current.delete(path);
-        secondaryBufferingSet.current.delete(path);
-        if (secondaryBufferingSet.current.size === 0 && blockedBySecondaryRef.current) {
-          blockedBySecondaryRef.current = false;
-          if (isPlayingRef.current) {
-            const pv = videoRef.current;
-            if (pv) void pv.play();
-            // Resume other secondaries that are ready; the timed-out one stays
-            // paused/buffering at its current position.
-            for (const sv of secondaryRefsMap.current.values()) {
-              if (sv.readyState >= 3) void sv.play();
-            }
-          }
-        }
-      }, SECONDARY_BUFFER_TIMEOUT_MS);
-      bufferingTimersRef.current.set(path, timer);
-    } else {
-      // Secondary recovered -- cancel the give-up timer and unblock if clear.
-      const timer = bufferingTimersRef.current.get(path);
-      if (timer != null) {
-        window.clearTimeout(timer);
-        bufferingTimersRef.current.delete(path);
-      }
-      secondaryBufferingSet.current.delete(path);
-      if (secondaryBufferingSet.current.size === 0 && blockedBySecondaryRef.current) {
-        // Normal recovery: all secondaries are clear, resume everything.
-        blockedBySecondaryRef.current = false;
-        if (isPlayingRef.current) {
-          const pv = videoRef.current;
-          if (pv) void pv.play();
-          for (const sv of secondaryRefsMap.current.values()) {
-            void sv.play();
-          }
-        }
-      } else if (!blockedBySecondaryRef.current && isPlayingRef.current) {
-        // The give-up timer already fired and cleared the block, but this
-        // secondary just gained content (canplay after a scrub, or late buffer
-        // arrival). Resume it independently so it re-joins playback.
-        const sv = secondaryRefsMap.current.get(path);
-        if (sv && sv.paused) void sv.play();
-      }
-    }
-  }, []);
+  // Buffering events are no-ops at the page level: each secondary plays
+  // independently. The primary's timeupdate listener reconciles state on the
+  // fly, so a secondary that stalls or runs off the end of its source just
+  // pauses naturally and the primary keeps going. SecondarySlot still shows
+  // its own buffering overlay locally.
+  const handleSecondaryBuffering = useCallback(
+    (_path: string, _isBuffering: boolean) => {},
+    [],
+  );
 
   const handleGridModeToggle = useCallback(() => {
     setGridMode((prev) => {
@@ -619,12 +566,8 @@ export function Audit() {
         // Entering grid mode: lock to primary so beepOffset stays at 0.
         setActiveVideoIndex(0);
       } else {
-        // Leaving grid mode: clean up secondary state.
+        // Leaving grid mode: clean up secondary refs.
         secondaryRefsMap.current.clear();
-        secondaryBufferingSet.current.clear();
-        blockedBySecondaryRef.current = false;
-        for (const t of bufferingTimersRef.current.values()) window.clearTimeout(t);
-        bufferingTimersRef.current.clear();
       }
       return !prev;
     });
