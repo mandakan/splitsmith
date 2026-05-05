@@ -456,10 +456,15 @@ export function Audit() {
       // dragging to a candidate, then play-pausing would yank the
       // playhead back to the OLD anchor instead of the new one.
       loopAnchorRef.current = primaryTime;
-      // Seek all secondaries to the equivalent position.
+      // Seek all secondaries to the equivalent position. If a secondary was
+      // paused by the give-up timer (no content at the previous position),
+      // call play() so it rejoins as soon as the new position has data.
       for (const [path, sv] of secondaryRefsMap.current) {
         const off = secondaryOffsetsRef.current.get(path);
-        if (off != null) sv.currentTime = primaryTime + off;
+        if (off != null) {
+          sv.currentTime = primaryTime + off;
+          if (isPlayingRef.current && sv.paused) void sv.play();
+        }
       }
     },
     [beepOffset],
