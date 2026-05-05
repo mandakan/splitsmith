@@ -722,5 +722,15 @@
         "sanity_flagged": 0
       }
     }
-  ]
+  ],
+  "venue": {
+    "environment": "outdoor",
+    "surface": "unknown"
+  },
+  "gun": {
+    "calibre": "9mm",
+    "muzzle_device": "none",
+    "action": "semi-auto",
+    "power_factor": "minor"
+  }
 }

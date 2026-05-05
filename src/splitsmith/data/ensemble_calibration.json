@@ -1,8 +1,8 @@
 {
   "voter_a_floor": 0.01847127532497797,
-  "voter_b_threshold": 0.14829593896865845,
-  "voter_c_threshold": 0.12029789753438905,
-  "voter_d_threshold": 0.0012177228927612305,
+  "voter_b_threshold": 0.03676433116197586,
+  "voter_c_threshold": 0.15617287243877248,
+  "voter_d_threshold": 0.00018919698777608573,
   "voter_c_target_recall": 0.95,
   "tolerance_ms": 75.0,
   "clap_prompts_shot": [
@@ -34,13 +34,74 @@
     "stage-shots-blacksmith-2026-stage8",
     "stage-shots-tallmilan-2026-stage2",
     "stage-shots-tallmilan-2026-stage7",
+    "stage-shots-tallmilan-2026-stage4",
     "stage-shots-tallmilan-2026-stage5",
-    "stage-shots-tallmilan-2026-stage6"
+    "stage-shots-tallmilan-2026-stage6",
+    "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro"
   ],
-  "n_calibration_candidates": 949,
-  "n_calibration_positives": 225,
+  "n_calibration_candidates": 1107,
+  "n_calibration_positives": 293,
   "voter_c_feature_dim": 28,
-  "built_at": "2026-05-04T16:43:54.791028+00:00",
+  "built_at": "2026-05-05T12:21:05.190213+00:00",
+  "default_camera_class": "headcam",
+  "thresholds_by_camera_class": {
+    "handheld": {
+      "voter_a_floor": 0.028904263730108303,
+      "voter_b_threshold": 0.25617897510528564,
+      "voter_c_threshold": 0.24903511466976236,
+      "voter_d_threshold": 0.005257793702185154,
+      "n_calibration_candidates": 95,
+      "n_calibration_positives": 50,
+      "calibration_fixtures": [
+        "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
+        "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
+        "stage-shots-tallmilan-2026-stage7-apple-iphone17pro"
+      ]
+    },
+    "headcam": {
+      "voter_a_floor": 0.01847127532497797,
+      "voter_b_threshold": 0.03676433116197586,
+      "voter_c_threshold": 0.15617287243877248,
+      "voter_d_threshold": 0.00018919698777608573,
+      "n_calibration_candidates": 1012,
+      "n_calibration_positives": 243,
+      "calibration_fixtures": [
+        "stage-shots-blacksmith-2026-stage1",
+        "stage-shots-blacksmith-2026-stage2",
+        "stage-shots-blacksmith-2026-stage3",
+        "stage-shots-blacksmith-2026-stage5",
+        "stage-shots-blacksmith-2026-stage6",
+        "stage-shots-blacksmith-2026-stage7",
+        "stage-shots-blacksmith-2026-stage8",
+        "stage-shots-tallmilan-2026-stage2",
+        "stage-shots-tallmilan-2026-stage3",
+        "stage-shots-tallmilan-2026-stage4",
+        "stage-shots-tallmilan-2026-stage5",
+        "stage-shots-tallmilan-2026-stage6",
+        "stage-shots-tallmilan-2026-stage7"
+      ]
+    }
+  },
+  "voter_c_metrics_by_camera_class": {
+    "handheld": {
+      "voter_c_precision_cv": 0.96,
+      "voter_c_recall_cv": 0.96,
+      "voter_c_f1_cv": 0.96,
+      "voter_c_tp": 48,
+      "voter_c_fp": 2,
+      "voter_c_fn": 2
+    },
+    "headcam": {
+      "voter_c_precision_cv": 0.837,
+      "voter_c_recall_cv": 0.9506,
+      "voter_c_f1_cv": 0.8902,
+      "voter_c_tp": 231,
+      "voter_c_fp": 45,
+      "voter_c_fn": 12
+    }
+  },
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": []
 }

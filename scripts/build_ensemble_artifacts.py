@@ -62,6 +62,7 @@ DEFAULT_FIXTURES = [
     "stage-shots-blacksmith-2026-stage8",
     "stage-shots-tallmilan-2026-stage2",
     "stage-shots-tallmilan-2026-stage7",
+    "stage-shots-tallmilan-2026-stage4",
     "stage-shots-tallmilan-2026-stage5",
     "stage-shots-tallmilan-2026-stage6",
     # Phone-cam (issue #137 / promote-secondary, PR #134). Calibration
