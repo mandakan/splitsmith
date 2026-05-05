@@ -38,6 +38,39 @@ from .. import video_match
 from ..config import BeepCandidate, StageData, VideoMatchConfig
 from ..video_match import match_videos_to_stages
 
+# Camera-make heuristic for the default ``StageVideo.camera_mount``
+# (issue #143). The fixture schema's full ``CameraMount`` enum is much
+# richer; we just need a coarse default that makes the per-camera-class
+# threshold dispatch in #137 do the right thing for the common cases:
+# headcams stay headcam, phones become handheld. Anything we don't
+# recognise stays ``None`` and the user can set it manually.
+_MAKE_TO_MOUNT_HEURISTIC: tuple[tuple[str, str], ...] = (
+    ("apple", "hand"),
+    ("samsung", "hand"),
+    ("google", "hand"),
+    ("oneplus", "hand"),
+    ("xiaomi", "hand"),
+    ("insta360", "head"),
+    ("gopro", "head"),
+)
+
+
+def _heuristic_mount_from_make(make: str | None) -> str | None:
+    """Coarse default mount derived from QuickTime / EXIF make tag.
+
+    Returns ``None`` for unknown vendors so the StageVideo stays
+    explicitly "not classified" rather than silently mis-classified.
+    Callers can override per-video via the API.
+    """
+    if not make:
+        return None
+    needle = make.strip().lower()
+    for token, mount in _MAKE_TO_MOUNT_HEURISTIC:
+        if token in needle:
+            return mount
+    return None
+
+
 VIDEO_EXTENSIONS = {
     ".mp4",
     ".mov",
@@ -137,6 +170,15 @@ class StageVideo(BaseModel):
     # type a timestamp by hand. Cleared on manual override / clear (issue #22).
     beep_candidates: list[BeepCandidate] = Field(default_factory=list)
     notes: str = ""
+    # Camera mount classification (issue #143). Drives per-camera-class
+    # threshold selection in the 4-voter ensemble. Stored as the bare
+    # ``CameraMount`` string ("head", "hand", ...) to keep the project
+    # JSON loose -- avoids a hard import dependency on ``fixture_schema``
+    # and lets old projects upgrade without a migration. ``None`` means
+    # "not yet determined" -- the detector probes the source on first
+    # shot-detect and caches the result here. The user can override via
+    # the project SPA / API at any time.
+    camera_mount: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -1046,7 +1088,24 @@ class MatchProject(BaseModel):
             match_ts = video_match.video_timestamp(source, prefer_ctime=True)
         except OSError:
             match_ts = None
-        video = StageVideo(path=stored, match_timestamp=match_ts)
+
+        # Heuristic camera mount stamp (issue #143). Probe is best-effort:
+        # if ffprobe fails or the make is unknown, ``camera_mount`` stays
+        # ``None`` and the detector falls back to the default class. The
+        # user can correct via the videos PATCH endpoint.
+        from ..fixture_schema import probe_camera_metadata
+
+        try:
+            probe = probe_camera_metadata(source)
+            mount_default = _heuristic_mount_from_make(probe.make)
+        except Exception:
+            mount_default = None
+
+        video = StageVideo(
+            path=stored,
+            match_timestamp=match_ts,
+            camera_mount=mount_default,
+        )
         self.unassigned_videos.append(video)
         return video
 

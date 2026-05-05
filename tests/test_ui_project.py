@@ -618,6 +618,63 @@ def test_register_video_symlinks_into_raw(tmp_path: Path) -> None:
     assert len(project.unassigned_videos) == 1
 
 
+def test_register_video_stamps_camera_mount_from_make_heuristic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Registering an iPhone clip stamps ``camera_mount='hand'`` (issue #143).
+
+    The probe is monkeypatched so the test doesn't need ffprobe / a
+    real iPhone container; what we're verifying is the wiring + the
+    make-vendor heuristic, not ffprobe.
+    """
+    root = tmp_path / "match-iphone"
+    project = MatchProject.init(root, name="iPhone Match")
+    source = tmp_path / "external" / "IMG_1234.MOV"
+    source.parent.mkdir()
+    source.write_bytes(b"\x00\x00\x00 ftypqt  ")
+
+    from splitsmith import fixture_schema
+
+    monkeypatch.setattr(
+        "splitsmith.ui.project.probe_camera_metadata",
+        lambda _path: fixture_schema.CameraProbeResult(make="Apple", model="iPhone 15 Pro"),
+        raising=False,
+    )
+    # The import in register_video is local; patch the symbol on the
+    # fixture_schema module too so the local ``from .. import`` lookup
+    # picks up the stub.
+    monkeypatch.setattr(
+        fixture_schema,
+        "probe_camera_metadata",
+        lambda _path: fixture_schema.CameraProbeResult(make="Apple", model="iPhone 15 Pro"),
+    )
+
+    video = project.register_video(source, root)
+    assert video.camera_mount == "hand"
+
+
+def test_register_video_unknown_make_leaves_camera_mount_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unrecognised vendor leaves ``camera_mount=None`` -- the user can override."""
+    root = tmp_path / "match-unknown"
+    project = MatchProject.init(root, name="Unknown Cam")
+    source = tmp_path / "external" / "RANDOM.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"")
+
+    from splitsmith import fixture_schema
+
+    monkeypatch.setattr(
+        fixture_schema,
+        "probe_camera_metadata",
+        lambda _path: fixture_schema.CameraProbeResult(make="ObscureCam Inc.", model="X1"),
+    )
+
+    video = project.register_video(source, root)
+    assert video.camera_mount is None
+
+
 def test_register_video_is_idempotent(tmp_path: Path) -> None:
     root = tmp_path / "match-idem"
     project = MatchProject.init(root, name="Idempotent Match")
