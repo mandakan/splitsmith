@@ -428,6 +428,49 @@ def _build_report(
 ) -> dict[str, Any]:
     snapped = [s for s in snaps if s.snapped_time is not None]
     displacements = [s.displacement_ms for s in snapped if s.displacement_ms is not None]
+    amplitudes = [s.snap_confidence for s in snapped if s.snap_confidence is not None]
+
+    # Fixture-level quality verdict. Catches "this clip doesn't actually
+    # belong to this stage" -- block-max guided snap finds *some* peak
+    # in any window, even silence, so a per-shot relative threshold
+    # alone can't distinguish "shot we snapped to" from "noise blip in a
+    # wrong-stage clip". The structure gives it away though: a real
+    # match has tightly-clustered residuals after drift correction and
+    # consistent shot amplitudes; a wrong-clip match has neither.
+    disp_std = float(np.std(displacements)) if len(displacements) > 1 else 0.0
+    disp_p95 = float(np.percentile(displacements, 95)) if displacements else None
+    amp_median = float(np.median(amplitudes)) if amplitudes else None
+    amp_p10 = float(np.percentile(amplitudes, 10)) if amplitudes else None
+    # Flag the fixture as suspicious when:
+    #   - residual displacement std > 30 ms (snaps look like noise picks
+    #     within the search window rather than locking to a real peak)
+    #   - OR median snap amplitude < 0.05 (whole clip is essentially
+    #     silent at "shot" positions)
+    #   - OR fewer than 60% of shots snapped (lots of "no candidate")
+    snap_rate = len(snapped) / len(snaps) if snaps else 0.0
+    wrong_clip_suspected = bool(
+        len(snapped) >= 2
+        and (disp_std > 30.0 or (amp_median is not None and amp_median < 0.05) or snap_rate < 0.6)
+    )
+
+    quality_warnings: list[str] = []
+    if disp_std > 30.0:
+        quality_warnings.append(
+            f"residual displacement std {disp_std:.1f} ms is high; "
+            "snaps may be landing on noise rather than actual shots"
+        )
+    if amp_median is not None and amp_median < 0.05:
+        quality_warnings.append(
+            f"median snap amplitude {amp_median:.3f} is very low; "
+            "the secondary may be silent at shot positions "
+            "(wrong stage / occluded mic / wrong video)"
+        )
+    if snap_rate < 0.6:
+        quality_warnings.append(
+            f"only {len(snapped)}/{len(snaps)} shots snapped; "
+            "verify that this clip covers the right stage"
+        )
+
     return {
         "slug": slug,
         "secondary_source": secondary_source,
@@ -454,10 +497,21 @@ def _build_report(
         },
         "displacement_stats": {
             "mean_ms": round(float(np.mean(displacements)), 2) if displacements else None,
-            "stdev_ms": round(float(np.std(displacements)), 2) if len(displacements) > 1 else None,
+            "stdev_ms": round(disp_std, 2) if len(displacements) > 1 else None,
+            "p95_ms": round(disp_p95, 2) if disp_p95 is not None else None,
             "min_ms": round(min(displacements), 2) if displacements else None,
             "max_ms": round(max(displacements), 2) if displacements else None,
         },
+        "amplitude_stats": {
+            "median": round(amp_median, 4) if amp_median is not None else None,
+            "p10": round(amp_p10, 4) if amp_p10 is not None else None,
+            "low_amplitude_shots": sum(1 for s in snaps if s.sanity_flag == "low-amplitude"),
+        },
+        "quality": {
+            "wrong_clip_suspected": wrong_clip_suspected,
+            "snap_rate": round(snap_rate, 3),
+            "warnings": quality_warnings,
+        },
         "per_shot": [s.model_dump() for s in snaps],
-        "warnings": warnings,
+        "warnings": warnings + quality_warnings,
     }

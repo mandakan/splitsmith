@@ -4372,6 +4372,60 @@ def create_app(
                 ) from exc
             return JSONResponse(data)
 
+        @app.delete("/api/lab/fixture")
+        def lab_delete_fixture(slug: str) -> JSONResponse:
+            """Delete a derived fixture (JSON + WAV + sibling artifacts).
+
+            Refuses to delete primary fixtures (those without an
+            ``anchor`` block) so a user can't accidentally nuke a
+            ground-truth headcam fixture by clicking the wrong button.
+            Use the file system directly if you really want to remove
+            a primary -- forcing that explicitness is intentional.
+            """
+            fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
+            json_path = fixtures_root / f"{slug}.json"
+            if not json_path.exists():
+                raise HTTPException(status_code=404, detail=f"no fixture: {slug}")
+            try:
+                payload = __import__("json").loads(json_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500, detail=f"failed to read fixture: {exc}"
+                ) from exc
+            anchor_block = payload.get("anchor")
+            if not isinstance(anchor_block, dict) or not anchor_block.get("fixture_slug"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"refusing to delete '{slug}': not a derived fixture "
+                        "(no anchor block). Remove primary fixtures from disk directly."
+                    ),
+                )
+            # Sibling artifacts to clean up alongside the fixture JSON.
+            removed: list[str] = []
+            for sibling in [
+                json_path,
+                json_path.with_suffix(".wav"),
+                fixtures_root / f"{slug}-promotion-report.json",
+                json_path.with_suffix(".json.bak"),
+            ]:
+                if sibling.exists():
+                    try:
+                        sibling.unlink()
+                        removed.append(sibling.name)
+                    except OSError as exc:
+                        raise HTTPException(
+                            status_code=500, detail=f"failed to remove {sibling.name}: {exc}"
+                        ) from exc
+            # Also remove peaks-* JSON cache files for this fixture.
+            for cache in fixtures_root.glob(f"{slug}.peaks-*.json"):
+                try:
+                    cache.unlink()
+                    removed.append(cache.name)
+                except OSError:
+                    pass
+            return JSONResponse({"removed": removed})
+
         # ------------------------------------------------------------------
         # Project-aware secondary promotion (issue #125 follow-up)
         # ------------------------------------------------------------------

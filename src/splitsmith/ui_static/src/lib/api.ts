@@ -1220,6 +1220,12 @@ export const api = {
   getPromoteReport: (slug: string) =>
     request<PromoteReport>(`/api/lab/promote-report?slug=${encodeURIComponent(slug)}`),
 
+  deleteFixture: (slug: string) =>
+    request<{ removed: string[] }>(
+      `/api/lab/fixture?slug=${encodeURIComponent(slug)}`,
+      { method: "DELETE" },
+    ),
+
   promoteSecondary: (
     stageNumber: number,
     videoId: string,
@@ -1286,8 +1292,19 @@ export interface PromoteReport {
   displacement_stats: {
     mean_ms: number | null;
     stdev_ms: number | null;
+    p95_ms?: number | null;
     min_ms: number | null;
     max_ms: number | null;
+  };
+  amplitude_stats?: {
+    median: number | null;
+    p10: number | null;
+    low_amplitude_shots: number;
+  };
+  quality?: {
+    wrong_clip_suspected: boolean;
+    snap_rate: number;
+    warnings: string[];
   };
   per_shot: PromoteSnapResult[];
   warnings: string[];

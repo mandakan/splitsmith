@@ -34,6 +34,7 @@ import {
   RotateCcw,
   Save,
   Settings2,
+  Trash2,
 } from "lucide-react";
 
 import { Waveform } from "@/components/Waveform";
@@ -227,6 +228,9 @@ export function Lab() {
         run={run}
         activeSlug={slug ?? null}
         onSelect={(s) => navigate(s ? `/lab/${s}` : "/lab")}
+        onDeleted={(deletedSlug) =>
+          setCatalog((prev) => prev.filter((r) => r.slug !== deletedSlug))
+        }
       />
 
       {focused ? (
@@ -613,11 +617,13 @@ function FixtureTable({
   run,
   activeSlug,
   onSelect,
+  onDeleted,
 }: {
   catalog: LabFixtureRecord[];
   run: LabEvalRun | null;
   activeSlug: string | null;
   onSelect: (slug: string | null) => void;
+  onDeleted: (slug: string) => void;
 }) {
   const metricsBySlug = useMemo(() => {
     const map = new Map<string, LabEvalFixture>();
@@ -732,6 +738,31 @@ function FixtureTable({
                         >
                           <Pencil className="size-3.5" />
                         </Link>
+                        {rec.anchor_slug && (
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (
+                                !window.confirm(
+                                  `Delete derived fixture "${rec.slug}"? This removes the JSON, WAV, peaks and promotion-report.`,
+                                )
+                              )
+                                return;
+                              try {
+                                await api.deleteFixture(rec.slug);
+                                onDeleted(rec.slug);
+                              } catch (err) {
+                                window.alert(`Delete failed: ${err}`);
+                              }
+                            }}
+                            className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            title="Delete this derived fixture (anchor not affected)"
+                            aria-label={`Delete derived fixture ${rec.slug}`}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        )}
                         <ChevronRight className="size-3.5" />
                       </div>
                     </td>

@@ -605,6 +605,15 @@ export function PromoteReview() {
                 low align conf {report.cross_align.confidence.toFixed(2)}
               </Badge>
             )}
+            {report.quality?.wrong_clip_suspected && (
+              <Badge
+                variant="destructive"
+                className="text-[10px] px-1.5"
+                title={report.quality.warnings.join("\n")}
+              >
+                ⚠ wrong clip suspected
+              </Badge>
+            )}
           </div>
         )}
         <div className="flex items-center gap-1">
@@ -670,6 +679,29 @@ export function PromoteReview() {
           )}
         </div>
       </div>
+
+      {report?.quality?.wrong_clip_suspected && report.quality.warnings.length > 0 && (
+        <div
+          className="px-4 py-2 border-b text-xs flex flex-col gap-1"
+          style={{
+            backgroundColor: "color-mix(in oklch, var(--destructive) 8%, transparent)",
+            borderColor: "color-mix(in oklch, var(--destructive) 30%, transparent)",
+          }}
+        >
+          <div className="flex items-center gap-2 font-medium" style={{ color: "var(--destructive)" }}>
+            <AlertCircle size={14} />
+            <span>
+              This fixture looks suspect -- the secondary may not actually
+              cover this stage
+            </span>
+          </div>
+          <ul className="text-[11px] text-muted-foreground list-disc pl-6">
+            {report.quality.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Waveforms -- left panel */}
