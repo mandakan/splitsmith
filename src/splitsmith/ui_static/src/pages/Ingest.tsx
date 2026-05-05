@@ -1949,9 +1949,48 @@ function StagesSection({
     }
   }
 
+  const handleRedetectAll = async () => {
+    if (busy) return;
+    if (
+      !window.confirm(
+        "Re-run shot detection on every eligible stage in this project? Stages with an active job will adopt that job; ineligible stages (no primary, no beep, no time_seconds) are skipped.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const resp = await api.detectShotsAll();
+      if (resp.skipped.length > 0) {
+        setError(
+          `Submitted ${resp.jobs.length} job(s); skipped ${resp.skipped.length}: ` +
+            resp.skipped.map((s) => `stage ${s.stage_number} (${s.reason})`).join(", "),
+        );
+      } else {
+        setError(null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={handleRedetectAll}
+          title="Submit shot-detect on every stage with a primary + confirmed beep"
+        >
+          <Crosshair className="size-3.5" />
+          Re-detect all
+        </Button>
+      </div>
       {/* Each stage card now embeds inline thumbnail-as-poster <video>
           players for the primary + each secondary plus role action
           buttons; that needs ~700px of horizontal room before things
