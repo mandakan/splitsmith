@@ -35,6 +35,7 @@ import {
   Crosshair,
   FlaskConical,
   HelpCircle,
+  Link2,
   ListChecks,
   Loader2,
   Pause,
@@ -1419,6 +1420,12 @@ export function Audit() {
                       defaultSlug={`stage-shots-${slugify(project?.name ?? "match")}-stage${stageNumber}`}
                     />
                   )}
+                  {stageNumber != null && stage && videos.length > 1 && (
+                    <PromoteSecondaryButton
+                      stageNumber={stageNumber}
+                      secondaries={videos.slice(1)}
+                    />
+                  )}
                   <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{detectedCount} detected</span>
                     <span>{rejectedCount} rejected</span>
@@ -2116,6 +2123,193 @@ function PromoteFixtureButton({ stageNumber, defaultSlug }: PromoteFixtureButton
               Close
             </Button>
             <Button size="sm" onClick={submit} disabled={busy || !slug.trim()}>
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PromoteSecondaryButtonProps {
+  stageNumber: number;
+  secondaries: StageVideo[];
+}
+
+function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryButtonProps) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const eligible = useMemo(
+    () => secondaries.filter((v) => v.beep_time != null),
+    [secondaries],
+  );
+  const [videoId, setVideoId] = useState(eligible[0]?.video_id ?? "");
+  const [mount, setMount] = useState("tripod");
+  const [position, setPosition] = useState("bay-fixed");
+  const [overwrite, setOverwrite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [paths, setPaths] = useState<{ fixture_path: string; anchor_path: string } | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!eligible.find((v) => v.video_id === videoId)) {
+      setVideoId(eligible[0]?.video_id ?? "");
+    }
+  }, [eligible, videoId]);
+
+  useEffect(() => {
+    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled")
+      return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const j = await api.getJob(job.id);
+        if (stopped) return;
+        setJob(j);
+        if (j.status === "succeeded" && paths) {
+          setOpen(false);
+          setBusy(false);
+          navigate(
+            `/promote-review?fixture=${encodeURIComponent(paths.fixture_path)}&anchor=${encodeURIComponent(paths.anchor_path)}`,
+          );
+        } else if (j.status === "failed") {
+          setBusy(false);
+          setError(j.error ?? "promotion failed");
+        }
+      } catch (err) {
+        if (!stopped) {
+          setBusy(false);
+          setError(String(err));
+        }
+      }
+    };
+    const id = window.setInterval(tick, 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [job, paths, navigate]);
+
+  const submit = useCallback(async () => {
+    if (!videoId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const resp = await api.promoteSecondary(stageNumber, videoId, {
+        mount,
+        position,
+        overwrite,
+      });
+      setJob(resp.job);
+      setPaths({ fixture_path: resp.fixture_path, anchor_path: resp.anchor_path });
+    } catch (e) {
+      setBusy(false);
+      setError(String(e));
+    }
+  }, [stageNumber, videoId, mount, position, overwrite]);
+
+  const fieldCls =
+    "w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs";
+
+  return (
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        title="Promote a secondary camera to a derived fixture"
+        disabled={eligible.length === 0}
+      >
+        <Link2 className="size-4" />
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Promote secondary
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Cross-aligns to the primary fixture, runs detection, snaps shots
+            into a derived fixture.
+          </p>
+          {eligible.length === 0 ? (
+            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+              No secondary on this stage has a beep yet.
+            </div>
+          ) : (
+            <>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Secondary</span>
+                <select
+                  value={videoId}
+                  onChange={(e) => setVideoId(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  {eligible.map((v) => (
+                    <option key={v.video_id} value={v.video_id}>
+                      {v.path.split("/").pop() ?? v.path}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Mount</span>
+                <select
+                  value={mount}
+                  onChange={(e) => setMount(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  <option value="tripod">tripod</option>
+                  <option value="head">head</option>
+                  <option value="chest">chest</option>
+                  <option value="handheld">handheld</option>
+                  <option value="other">other</option>
+                </select>
+              </label>
+              <label className="mt-2 block text-[11px]">
+                <span className="text-muted-foreground">Position</span>
+                <select
+                  value={position}
+                  onChange={(e) => setPosition(e.target.value)}
+                  className={`${fieldCls} mt-1`}
+                >
+                  <option value="bay-fixed">bay-fixed</option>
+                  <option value="shooter-mounted">shooter-mounted</option>
+                  <option value="other">other</option>
+                </select>
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-[11px]">
+                <input
+                  type="checkbox"
+                  checked={overwrite}
+                  onChange={(e) => setOverwrite(e.target.checked)}
+                />
+                Overwrite if exists
+              </label>
+            </>
+          )}
+          {error && (
+            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+              {error}
+            </div>
+          )}
+          {job && job.status === "running" && (
+            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+              {job.message ?? "running..."}
+            </div>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={busy || !videoId || eligible.length === 0}
+            >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
             </Button>
           </div>

@@ -1219,6 +1219,32 @@ export const api = {
 
   getPromoteReport: (slug: string) =>
     request<PromoteReport>(`/api/lab/promote-report?slug=${encodeURIComponent(slug)}`),
+
+  promoteSecondary: (
+    stageNumber: number,
+    videoId: string,
+    payload: {
+      mount: string;
+      position: string;
+      audio_source?: string;
+      agc_state?: string;
+      snap_window_ms?: number;
+      slug?: string;
+      camera_id?: string;
+      overwrite?: boolean;
+    },
+  ) =>
+    request<{
+      job: Job;
+      fixture_path: string;
+      anchor_path: string;
+      slug: string;
+      camera_id: string;
+      anchor_slug: string;
+    }>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-secondary`,
+      { method: "POST", json: payload },
+    ),
 };
 
 export interface PromoteSnapResult {
