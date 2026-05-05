@@ -4282,17 +4282,20 @@ def create_app(
                         f"done -- {result.promotion_report['counts']['snapped']}/"
                         f"{result.promotion_report['counts']['anchor_shots']} snapped"
                     ),
-                    result={
-                        "fixture_path": str(target_json),
-                        "slug": body.slug,
-                        "snapped": result.promotion_report["counts"]["snapped"],
-                        "missed": result.promotion_report["counts"]["missed"],
-                        "warnings": result.warnings,
-                    },
                 )
 
             job = state.jobs.submit(kind="promote_from_anchor", fn=_run)
-            return JSONResponse(job.model_dump(mode="json"))
+            # Return the resolved fixture + anchor paths alongside the job so the
+            # SPA can navigate to the review page once the job succeeds without
+            # needing a separate result-fetch endpoint.
+            return JSONResponse(
+                {
+                    "job": job.model_dump(mode="json"),
+                    "fixture_path": str(target_json),
+                    "anchor_path": str(anchor_path),
+                    "slug": body.slug,
+                }
+            )
 
         @app.get("/api/lab/promote-report")
         def lab_promote_report(slug: str) -> JSONResponse:

@@ -183,7 +183,7 @@ export function Lab() {
             </Badge>
           )}
           <SaveYamlButton run={run} />
-          <PromoteFromAnchorButton fixtures={fixtures} />
+          <PromoteFromAnchorButton fixtures={catalog} />
           <RebuildCalibrationButton onCompleted={() => setRun(null)} />
           <Button onClick={runEval} disabled={evalLoading}>
             {evalLoading ? (
@@ -1455,10 +1455,19 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
   const [overwrite, setOverwrite] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
+  const [resolvedPaths, setResolvedPaths] = useState<{
+    fixture_path: string;
+    anchor_path: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled")
+    if (
+      !job ||
+      job.status === "succeeded" ||
+      job.status === "failed" ||
+      job.status === "cancelled"
+    )
       return;
     let stopped = false;
     const tick = async () => {
@@ -1466,12 +1475,10 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
         const j = await api.getJob(job.id);
         if (stopped) return;
         setJob(j);
-        if (j.status === "succeeded" && j.result) {
-          const fixPath = (j.result as any).fixture_path as string;
-          const anchorPath = fixtures.find((f) => f.slug === anchorSlug)?.audit_path ?? "";
+        if (j.status === "succeeded" && resolvedPaths) {
           setOpen(false);
           navigate(
-            `/promote-review?fixture=${encodeURIComponent(fixPath)}&anchor=${encodeURIComponent(anchorPath)}`,
+            `/promote-review?fixture=${encodeURIComponent(resolvedPaths.fixture_path)}&anchor=${encodeURIComponent(resolvedPaths.anchor_path)}`,
           );
         }
       } catch (err) {
@@ -1483,7 +1490,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
       stopped = true;
       window.clearInterval(id);
     };
-  }, [job, anchorSlug, fixtures, navigate]);
+  }, [job, resolvedPaths, navigate]);
 
   const submit = useCallback(async () => {
     const anchor = fixtures.find((f) => f.slug === anchorSlug);
@@ -1491,7 +1498,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
     setSubmitting(true);
     setError(null);
     try {
-      const j = await api.promoteFromAnchor({
+      const resp = await api.promoteFromAnchor({
         anchor_path: anchor.audit_path,
         secondary_wav_path: secondaryWav,
         slug,
@@ -1502,13 +1509,28 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
         snap_window_ms: snapWindowMs,
         overwrite,
       });
-      setJob(j);
+      setJob(resp.job);
+      setResolvedPaths({
+        fixture_path: resp.fixture_path,
+        anchor_path: resp.anchor_path,
+      });
     } catch (e) {
       setError(String(e));
     } finally {
       setSubmitting(false);
     }
-  }, [anchorSlug, audioSource, cameraId, fixtures, mount, overwrite, position, secondaryWav, slug, snapWindowMs]);
+  }, [
+    anchorSlug,
+    audioSource,
+    cameraId,
+    fixtures,
+    mount,
+    overwrite,
+    position,
+    secondaryWav,
+    slug,
+    snapWindowMs,
+  ]);
 
   const running = job && (job.status === "pending" || job.status === "running");
 

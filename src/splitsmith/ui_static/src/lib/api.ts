@@ -1211,10 +1211,14 @@ export const api = {
     agc_state?: string;
     snap_window_ms?: number;
     overwrite?: boolean;
-  }) => request<Job>("/api/lab/promote-from-anchor", { method: "POST", json: payload }),
+  }) =>
+    request<{ job: Job; fixture_path: string; anchor_path: string; slug: string }>(
+      "/api/lab/promote-from-anchor",
+      { method: "POST", json: payload },
+    ),
 
   getPromoteReport: (slug: string) =>
-    request<PromoteReport>("/api/lab/promote-report", { params: { slug } }),
+    request<PromoteReport>(`/api/lab/promote-report?slug=${encodeURIComponent(slug)}`),
 };
 
 export interface PromoteSnapResult {

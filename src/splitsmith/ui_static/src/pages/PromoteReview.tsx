@@ -27,7 +27,6 @@ import {
   X,
 } from "lucide-react";
 
-import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,13 +35,11 @@ import {
   type AuditShot,
   type PeaksResult,
   type PromoteReport,
-  type PromoteSnapResult,
   type StageAudit,
 } from "@/lib/api";
 
 const PEAK_BINS = 1500;
 const NUDGE_MS = 5;
-const ZOOM_WINDOW_S = 0.6; // half-window around current shot (seconds each side)
 
 type ShotStatus =
   | "pending"
@@ -183,17 +180,22 @@ export function PromoteReview() {
         if (ancFix) setAnchorFixture(ancFix as StageAudit);
         if (ancPeaks) setAnchorPeaks(ancPeaks as PeaksResult);
 
-        // Initialise shot state from fixture shots
-        const initShots: ShotState[] = (fix as StageAudit).shots.map((s: AuditShot) => ({
-          shotNumber: s.shot_number,
-          time: s.time ?? null,
-          anchorTime: (s as any).anchor_time ?? s.time ?? 0,
-          status: "pending",
-          originalSource: (s as any).source ?? "promoted",
-          displacement_ms: (s as any).snap_displacement_ms ?? null,
-          sanityFlag: (s as any).sanity_flag ?? "",
-          subclass: s.subclass ?? "unknown",
-        }));
+        // Initialise shot state from fixture shots. Anchor link / subclass /
+        // snap-promotion fields aren't in the canonical AuditShot type so we
+        // cast to ``any`` and fall back to safe defaults when missing.
+        const initShots: ShotState[] = (fix as StageAudit).shots.map((s: AuditShot) => {
+          const sx = s as unknown as Record<string, unknown>;
+          return {
+            shotNumber: s.shot_number,
+            time: s.time ?? null,
+            anchorTime: (sx.anchor_time as number | undefined) ?? s.time ?? 0,
+            status: "pending",
+            originalSource: (sx.source as string | undefined) ?? "promoted",
+            displacement_ms: (sx.snap_displacement_ms as number | null | undefined) ?? null,
+            sanityFlag: (sx.sanity_flag as string | undefined) ?? "",
+            subclass: (sx.subclass as string | undefined) ?? "unknown",
+          };
+        });
         setShots(initShots);
       })
       .catch((e) => setError(String(e)));
@@ -313,44 +315,37 @@ export function PromoteReview() {
     }
   }, [fixturePath, fixture, shots]);
 
-  // Waveform zoom: centre on current shot in secondary
+  // Waveform centre: the current shot's time on each side.
   const currentShot = shots[currentIdx];
   const derivedZoomCenter = currentShot?.time ?? 0;
-  const anchorZoomCenter = anchorFixture && currentShot
-    ? currentShot.anchorTime
-    : 0;
+  const anchorZoomCenter = anchorFixture && currentShot ? currentShot.anchorTime : 0;
 
-  // Build anchor markers (frozen)
-  const anchorMarkers: AuditMarker[] = useMemo(() => {
-    if (!anchorFixture) return [];
-    return anchorFixture.shots.map((s, i) => ({
-      id: `anchor-${i}`,
-      time: s.time ?? 0,
-      kind: "shot" as const,
-      label: `${s.shot_number}`,
-      color: "blue",
+  // Vertical-line shot overlays computed in % of waveform width.  Cheaper than
+  // pulling in the full editable MarkerLayer; this view is read-only on the
+  // anchor side and the secondary side has its own dedicated nudge controls.
+  const anchorShotOverlays = useMemo(() => {
+    if (!anchorPeaks) return [] as { left: string; label: number }[];
+    return (anchorFixture?.shots ?? []).map((s) => ({
+      left: `${((s.time ?? 0) / anchorPeaks.duration) * 100}%`,
+      label: s.shot_number,
     }));
-  }, [anchorFixture]);
+  }, [anchorFixture, anchorPeaks]);
 
-  // Build derived markers
-  const derivedMarkers: AuditMarker[] = useMemo(
-    () =>
-      shots
-        .filter((s) => s.time !== null)
-        .map((s, i) => ({
-          id: `shot-${i}`,
-          time: s.time!,
-          kind: "shot" as const,
-          label: `${s.shotNumber}`,
-          color:
-            s.status === "confirmed" || s.status === "nudged"
-              ? "green"
-              : s.status === "pending"
-                ? "gray"
-                : "red",
-        })),
-    [shots],
-  );
+  const derivedShotOverlays = useMemo(() => {
+    if (!derivedPeaks) return [] as { left: string; label: number; color: string }[];
+    return shots
+      .filter((s) => s.time !== null)
+      .map((s) => ({
+        left: `${(s.time! / derivedPeaks.duration) * 100}%`,
+        label: s.shotNumber,
+        color:
+          s.status === "confirmed" || s.status === "nudged"
+            ? "rgb(34 197 94)"
+            : s.status === "pending"
+              ? "rgb(148 163 184)"
+              : "rgb(239 68 68)",
+      }));
+  }, [shots, derivedPeaks]);
 
   if (!fixturePath) {
     return (
@@ -387,13 +382,14 @@ export function PromoteReview() {
         </Button>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{slug}</div>
-          {fixture.anchor && (
+          {(fixture as unknown as { anchor?: { fixture_slug?: string; revision_sha?: string } }).anchor && (
             <div className="text-xs text-muted-foreground">
               derived from{" "}
-              <span className="font-mono">{(fixture.anchor as any).fixture_slug}</span>
-              {" "}
+              <span className="font-mono">
+                {(fixture as unknown as { anchor: { fixture_slug?: string } }).anchor.fixture_slug}
+              </span>{" "}
               <span className="text-[10px] font-mono opacity-60">
-                {(fixture.anchor as any).revision_sha?.slice(0, 8)}
+                {(fixture as unknown as { anchor: { revision_sha?: string } }).anchor.revision_sha?.slice(0, 8)}
               </span>
             </div>
           )}
@@ -454,15 +450,23 @@ export function PromoteReview() {
                 <Waveform
                   peaks={anchorPeaks.peaks}
                   duration={anchorPeaks.duration}
-                  pixelsPerSecond={300}
-                  scrollToTime={anchorZoomCenter}
-                />
-                <MarkerLayer
-                  markers={anchorMarkers}
-                  duration={anchorPeaks.duration}
-                  pixelsPerSecond={300}
                   currentTime={anchorZoomCenter}
+                  onScrub={() => {}}
+                  height={140}
                 />
+                <div className="pointer-events-none absolute inset-0">
+                  {anchorShotOverlays.map((m, i) => (
+                    <div
+                      key={`anchor-${i}`}
+                      className="absolute top-0 bottom-0 w-px bg-blue-400/70"
+                      style={{ left: m.left }}
+                    >
+                      <div className="absolute -top-0.5 -translate-x-1/2 text-[9px] text-blue-500 bg-background/80 px-0.5 rounded">
+                        {m.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -477,15 +481,26 @@ export function PromoteReview() {
                 <Waveform
                   peaks={derivedPeaks.peaks}
                   duration={derivedPeaks.duration}
-                  pixelsPerSecond={300}
-                  scrollToTime={derivedZoomCenter}
-                />
-                <MarkerLayer
-                  markers={derivedMarkers}
-                  duration={derivedPeaks.duration}
-                  pixelsPerSecond={300}
                   currentTime={derivedZoomCenter}
+                  onScrub={() => {}}
+                  height={140}
                 />
+                <div className="pointer-events-none absolute inset-0">
+                  {derivedShotOverlays.map((m, i) => (
+                    <div
+                      key={`shot-${i}`}
+                      className="absolute top-0 bottom-0 w-px"
+                      style={{ left: m.left, backgroundColor: m.color }}
+                    >
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
+                        style={{ color: m.color }}
+                      >
+                        {m.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
