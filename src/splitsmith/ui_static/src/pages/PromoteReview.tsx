@@ -340,10 +340,10 @@ export function PromoteReview() {
         label: s.shotNumber,
         color:
           s.status === "confirmed" || s.status === "nudged"
-            ? "rgb(34 197 94)"
+            ? "var(--status-complete)"
             : s.status === "pending"
-              ? "rgb(148 163 184)"
-              : "rgb(239 68 68)",
+              ? "var(--muted-foreground)"
+              : "var(--destructive)",
       }));
   }, [shots, derivedPeaks]);
 
@@ -455,13 +455,32 @@ export function PromoteReview() {
                   height={140}
                 />
                 <div className="pointer-events-none absolute inset-0">
+                  {anchorFixture.beep_time != null && (
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5"
+                      style={{
+                        left: `${(anchorFixture.beep_time / anchorPeaks.duration) * 100}%`,
+                        backgroundColor: "var(--status-warning)",
+                      }}
+                    >
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
+                        style={{ color: "var(--status-warning)" }}
+                      >
+                        BEEP
+                      </div>
+                    </div>
+                  )}
                   {anchorShotOverlays.map((m, i) => (
                     <div
                       key={`anchor-${i}`}
-                      className="absolute top-0 bottom-0 w-px bg-blue-400/70"
-                      style={{ left: m.left }}
+                      className="absolute top-0 bottom-0 w-px opacity-70"
+                      style={{ left: m.left, backgroundColor: "var(--marker-detected)" }}
                     >
-                      <div className="absolute -top-0.5 -translate-x-1/2 text-[9px] text-blue-500 bg-background/80 px-0.5 rounded">
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
+                        style={{ color: "var(--marker-detected)" }}
+                      >
                         {m.label}
                       </div>
                     </div>
@@ -486,6 +505,22 @@ export function PromoteReview() {
                   height={140}
                 />
                 <div className="pointer-events-none absolute inset-0">
+                  {fixture?.beep_time != null && (
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5"
+                      style={{
+                        left: `${(fixture.beep_time / derivedPeaks.duration) * 100}%`,
+                        backgroundColor: "var(--status-warning)",
+                      }}
+                    >
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
+                        style={{ color: "var(--status-warning)" }}
+                      >
+                        BEEP
+                      </div>
+                    </div>
+                  )}
                   {derivedShotOverlays.map((m, i) => (
                     <div
                       key={`shot-${i}`}
