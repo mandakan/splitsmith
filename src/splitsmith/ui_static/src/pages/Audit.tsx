@@ -2424,7 +2424,7 @@ function PromoteAgainstFixtureButton({
   useEffect(() => {
     if (job?.status === "succeeded" && paths) {
       navigate(
-        `/promote-review?audit=${encodeURIComponent(paths.fixture_path)}&anchor=${encodeURIComponent(anchorSlug)}`,
+        `/promote-review?fixture=${encodeURIComponent(paths.fixture_path)}&anchor=${encodeURIComponent(paths.anchor_path)}`,
       );
     }
   }, [job, paths, anchorSlug, navigate]);
