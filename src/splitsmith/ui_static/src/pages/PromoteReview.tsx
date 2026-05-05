@@ -320,59 +320,89 @@ export function PromoteReview() {
   const derivedZoomCenter = currentShot?.time ?? 0;
   const anchorZoomCenter = anchorFixture && currentShot ? currentShot.anchorTime : 0;
 
-  // Lock both waveform panels to a shared time axis so events at the same
-  // clip-local second appear at the same X position. Without this, anchor
-  // and secondary clips of different durations stretch independently and
-  // the BEEP / shot markers don't visually align even when the times are
-  // correct.
-  const sharedDuration = useMemo(() => {
-    const a = anchorPeaks?.duration ?? 0;
-    const d = derivedPeaks?.duration ?? 0;
-    return Math.max(a, d);
-  }, [anchorPeaks, derivedPeaks]);
+  // Align both panels by BEEP. The X axis is "time since beep", so both
+  // BEEP markers always render at the same X position (preBeep / span)
+  // regardless of clip durations or where the buzzer sits within each
+  // clip. A correctly-snapped shot then lands at the same X as its
+  // anchor counterpart. A vertical line drawn at any X cuts through both
+  // panels at the same physical moment.
+  const anchorBeep = anchorFixture?.beep_time ?? null;
+  const secondaryBeep = fixture?.beep_time ?? null;
+
+  const axis = useMemo(() => {
+    if (
+      !anchorPeaks ||
+      !derivedPeaks ||
+      anchorBeep == null ||
+      secondaryBeep == null
+    ) {
+      return null;
+    }
+    const preBeep = Math.max(anchorBeep, secondaryBeep);
+    const postBeep = Math.max(
+      anchorPeaks.duration - anchorBeep,
+      derivedPeaks.duration - secondaryBeep,
+    );
+    return { preBeep, postBeep, span: preBeep + postBeep };
+  }, [anchorPeaks, derivedPeaks, anchorBeep, secondaryBeep]);
+
+  const xPercent = useCallback(
+    (clipTime: number, beepTime: number): string => {
+      if (!axis || axis.span <= 0) return "0%";
+      return `${((clipTime - beepTime + axis.preBeep) / axis.span) * 100}%`;
+    },
+    [axis],
+  );
+
+  // Pad peaks at both ends so the actual content sits in the same
+  // beep-aligned region of the X axis as the markers above.
+  const padPeaks = useCallback(
+    (peaks: number[], peaksDuration: number, beep: number): number[] => {
+      if (!axis || axis.span <= 0 || peaksDuration <= 0) return peaks;
+      const peaksPerSecond = peaks.length / peaksDuration;
+      const frontPadSeconds = axis.preBeep - beep;
+      const tailPadSeconds = axis.span - frontPadSeconds - peaksDuration;
+      const front = Math.max(0, Math.round(frontPadSeconds * peaksPerSecond));
+      const tail = Math.max(0, Math.round(tailPadSeconds * peaksPerSecond));
+      return [
+        ...new Array(front).fill(0),
+        ...peaks,
+        ...new Array(tail).fill(0),
+      ];
+    },
+    [axis],
+  );
+
+  const anchorPeaksPadded = useMemo(() => {
+    if (!anchorPeaks || anchorBeep == null) return [] as number[];
+    return padPeaks(anchorPeaks.peaks, anchorPeaks.duration, anchorBeep);
+  }, [anchorPeaks, anchorBeep, padPeaks]);
+
+  const derivedPeaksPadded = useMemo(() => {
+    if (!derivedPeaks || secondaryBeep == null) return [] as number[];
+    return padPeaks(derivedPeaks.peaks, derivedPeaks.duration, secondaryBeep);
+  }, [derivedPeaks, secondaryBeep, padPeaks]);
 
   // Vertical-line shot overlays computed in % of waveform width.  Cheaper than
   // pulling in the full editable MarkerLayer; this view is read-only on the
   // anchor side and the secondary side has its own dedicated nudge controls.
   const anchorShotOverlays = useMemo(() => {
-    if (!anchorPeaks || sharedDuration <= 0) return [] as { left: string; label: number }[];
-    return (anchorFixture?.shots ?? []).map((s) => ({
-      left: `${((s.time ?? 0) / sharedDuration) * 100}%`,
-      label: s.shot_number,
-    }));
-  }, [anchorFixture, anchorPeaks, sharedDuration]);
-
-  const padPeaksToDuration = useCallback(
-    (peaks: number[], peaksDuration: number): number[] => {
-      if (sharedDuration <= 0 || peaksDuration <= 0) return peaks;
-      if (peaksDuration >= sharedDuration) return peaks;
-      const totalBins = Math.round(peaks.length * (sharedDuration / peaksDuration));
-      const pad = totalBins - peaks.length;
-      if (pad <= 0) return peaks;
-      return [...peaks, ...new Array(pad).fill(0)];
-    },
-    [sharedDuration],
-  );
-
-  const anchorPeaksPadded = useMemo(
-    () =>
-      anchorPeaks ? padPeaksToDuration(anchorPeaks.peaks, anchorPeaks.duration) : [],
-    [anchorPeaks, padPeaksToDuration],
-  );
-
-  const derivedPeaksPadded = useMemo(
-    () =>
-      derivedPeaks ? padPeaksToDuration(derivedPeaks.peaks, derivedPeaks.duration) : [],
-    [derivedPeaks, padPeaksToDuration],
-  );
+    if (!axis || anchorBeep == null) return [] as { left: string; label: number }[];
+    return (anchorFixture?.shots ?? [])
+      .filter((s) => s.time != null)
+      .map((s) => ({
+        left: xPercent(s.time as number, anchorBeep),
+        label: s.shot_number,
+      }));
+  }, [anchorFixture, axis, anchorBeep, xPercent]);
 
   const derivedShotOverlays = useMemo(() => {
-    if (!derivedPeaks || sharedDuration <= 0)
+    if (!axis || secondaryBeep == null)
       return [] as { left: string; label: number; color: string }[];
     return shots
       .filter((s) => s.time !== null)
       .map((s) => ({
-        left: `${(s.time! / sharedDuration) * 100}%`,
+        left: xPercent(s.time as number, secondaryBeep),
         label: s.shotNumber,
         color:
           s.status === "confirmed" || s.status === "nudged"
@@ -381,7 +411,7 @@ export function PromoteReview() {
               ? "var(--muted-foreground)"
               : "var(--destructive)",
       }));
-  }, [shots, derivedPeaks, sharedDuration]);
+  }, [shots, axis, secondaryBeep, xPercent]);
 
   if (!fixturePath) {
     return (
@@ -479,23 +509,32 @@ export function PromoteReview() {
           {/* Anchor waveform (frozen) */}
           {anchorPeaks && anchorFixture && (
             <div className="flex flex-col border-b" style={{ height: "45%" }}>
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0">
-                anchor (frozen) &mdash; {anchorPath?.split("/").pop()?.replace(".json", "")}
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0 flex items-center gap-2">
+                <span>anchor (frozen) &mdash; {anchorPath?.split("/").pop()?.replace(".json", "")}</span>
+                {anchorPath && (
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={`/api/fixture/audio?path=${encodeURIComponent(anchorPath)}`}
+                    className="ml-auto h-7"
+                    style={{ maxWidth: 280 }}
+                  />
+                )}
               </div>
               <div className="flex-1 relative overflow-hidden">
                 <Waveform
                   peaks={anchorPeaksPadded}
-                  duration={sharedDuration}
+                  duration={axis?.span ?? 1}
                   currentTime={anchorZoomCenter}
                   onScrub={() => {}}
                   height={140}
                 />
                 <div className="pointer-events-none absolute inset-0">
-                  {anchorFixture.beep_time != null && (
+                  {anchorBeep != null && axis && (
                     <div
                       className="absolute top-0 bottom-0 w-0.5"
                       style={{
-                        left: `${(anchorFixture.beep_time / sharedDuration) * 100}%`,
+                        left: xPercent(anchorBeep, anchorBeep),
                         backgroundColor: "var(--status-warning)",
                       }}
                     >
@@ -529,23 +568,32 @@ export function PromoteReview() {
           {/* Secondary waveform (editable) */}
           {derivedPeaks && (
             <div className="flex flex-col" style={{ flex: 1 }}>
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0">
-                secondary &mdash; {slug}
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0 flex items-center gap-2">
+                <span>secondary &mdash; {slug}</span>
+                {fixturePath && (
+                  <audio
+                    controls
+                    preload="metadata"
+                    src={`/api/fixture/audio?path=${encodeURIComponent(fixturePath)}`}
+                    className="ml-auto h-7"
+                    style={{ maxWidth: 280 }}
+                  />
+                )}
               </div>
               <div className="flex-1 relative overflow-hidden">
                 <Waveform
                   peaks={derivedPeaksPadded}
-                  duration={sharedDuration}
+                  duration={axis?.span ?? 1}
                   currentTime={derivedZoomCenter}
                   onScrub={() => {}}
                   height={140}
                 />
                 <div className="pointer-events-none absolute inset-0">
-                  {fixture?.beep_time != null && (
+                  {secondaryBeep != null && axis && (
                     <div
                       className="absolute top-0 bottom-0 w-0.5"
                       style={{
-                        left: `${(fixture.beep_time / sharedDuration) * 100}%`,
+                        left: xPercent(secondaryBeep, secondaryBeep),
                         backgroundColor: "var(--status-warning)",
                       }}
                     >
