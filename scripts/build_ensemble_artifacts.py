@@ -216,8 +216,34 @@ def _split_by_camera_class(universe: list[dict]) -> dict[str, list[dict]]:
 
 
 def _x_from(universe: list[dict]) -> np.ndarray:
-    return np.array(
+    """Stack per-row Voter C features: ``[hand | clap_sims | clap_diff | camera_class_onehot]``.
+
+    Camera-class one-hot is appended last so the column order matches
+    ``voter_c_feature_matrix`` at runtime.
+    """
+    if not universe:
+        return np.zeros((0, feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
+    base = np.array(
         [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in universe],
+        dtype=np.float64,
+    )
+    classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]
+    cam_block = feat.camera_class_one_hot(classes, base.shape[0])
+    return np.concatenate([base, cam_block], axis=1)
+
+
+def _sample_weights(universe: list[dict], phone_upweight: float) -> np.ndarray:
+    """Per-row sample weights: phone-class rows get ``phone_upweight`` to
+    counterbalance the headcam-dominated corpus.
+
+    Returns a uniform vector when only one class is present (single-class
+    builds get the same training behaviour they did pre-#139).
+    """
+    classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]
+    if len(set(classes)) <= 1:
+        return np.ones(len(classes), dtype=np.float64)
+    return np.array(
+        [phone_upweight if c != DEFAULT_CAMERA_CLASS else 1.0 for c in classes],
         dtype=np.float64,
     )
 
@@ -394,16 +420,22 @@ def _threshold_for_recall(probs: np.ndarray, labels: np.ndarray, target_recall: 
     return threshold
 
 
-def _train_voter_c(universe: list[dict], target_recall: float):
+def _train_voter_c(universe: list[dict], target_recall: float, *, phone_upweight: float):
     """Fit GBDT; return ``(model, global_threshold, cv_probs)``.
 
     ``cv_probs`` is the held-out probability for each row from 5-fold
     CV -- callers use it to pick per-camera-class thresholds without
     refitting. ``global_threshold`` is the single-class fallback used
     when an artifact has no per-class calibration on file.
+
+    ``phone_upweight`` (issue #139) multiplies the sample weight on
+    handheld rows to counterbalance the headcam-dominated corpus.
+    1.0 disables weighting (legacy behaviour); 3-5 is reasonable when
+    the phone class is roughly 1/4 the size of headcam.
     """
     X = _x_from(universe)
     y = np.array([c["label"] for c in universe], dtype=np.int64)
+    sample_weight = _sample_weights(universe, phone_upweight)
     if y.sum() < 5:
         raise SystemExit(
             f"need at least 5 positives for 5-fold CV; got {int(y.sum())}. "
@@ -416,7 +448,7 @@ def _train_voter_c(universe: list[dict], target_recall: float):
         f = GradientBoostingClassifier(
             n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
         )
-        f.fit(X[tr], y[tr])
+        f.fit(X[tr], y[tr], sample_weight=sample_weight[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
     threshold = _threshold_for_recall(cv_probs, y, target_recall)
@@ -424,8 +456,11 @@ def _train_voter_c(universe: list[dict], target_recall: float):
     clf = GradientBoostingClassifier(
         n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
     )
-    clf.fit(X, y)
+    clf.fit(X, y, sample_weight=sample_weight)
     return clf, threshold, cv_probs
+
+
+DEFAULT_PHONE_UPWEIGHT: float = 4.0
 
 
 def build_artifacts(
@@ -435,6 +470,7 @@ def build_artifacts(
     tolerance_ms: float = 75.0,
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
     use_mined_negatives: bool = False,
+    phone_upweight: float = DEFAULT_PHONE_UPWEIGHT,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -478,7 +514,14 @@ def build_artifacts(
             f"{len(mined_rows)} mined negatives = {len(voter_c_universe)} rows."
         )
 
-    clf, voter_c_global, cv_probs = _train_voter_c(voter_c_universe, target_recall=target_recall)
+    clf, voter_c_global, cv_probs = _train_voter_c(
+        voter_c_universe, target_recall=target_recall, phone_upweight=phone_upweight
+    )
+    if phone_upweight != 1.0 and any(
+        row.get("camera_class", DEFAULT_CAMERA_CLASS) != DEFAULT_CAMERA_CLASS
+        for row in voter_c_universe
+    ):
+        log(f"Voter C trained with phone-class sample weight x{phone_upweight:g}")
 
     # Per-class thresholds. The shared GBDT's CV predictions are sliced
     # by class so the operating point hits target_recall *on that class*
@@ -615,6 +658,17 @@ def main() -> None:
         "positive count. Hardest survivors (highest Voter A confidence) win.",
     )
     p.add_argument(
+        "--phone-upweight",
+        type=float,
+        default=DEFAULT_PHONE_UPWEIGHT,
+        help=(
+            "Sample-weight multiplier on handheld-class rows when fitting "
+            "voter C. Counterbalances the headcam-dominated corpus. 1.0 "
+            "disables weighting; 3-5 is reasonable when the phone class is "
+            "roughly 1/4 the size of headcam."
+        ),
+    )
+    p.add_argument(
         "--with-mining",
         action="store_true",
         help=(
@@ -633,6 +687,7 @@ def main() -> None:
         tolerance_ms=args.tolerance_ms,
         mining_cap_ratio=args.mining_cap_ratio,
         use_mined_negatives=args.with_mining,
+        phone_upweight=args.phone_upweight,
     )
 
 

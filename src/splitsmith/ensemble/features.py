@@ -98,7 +98,41 @@ _BAND_MID_HI: float = 4000.0
 _BAND_HIGH_LO: float = 8000.0
 
 HAND_FEATURE_DIM: int = len(_HAND_FEATURE_NAMES)
-VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1
+
+# Camera-class one-hot block for Voter C (issue #139). Frozen vocabulary
+# so the shipped GBDT artifact stays aligned with the runtime input;
+# adding a new class requires bumping ``VOTER_C_FEATURE_DIM``, retraining,
+# and reshipping. Order matters: the column index of each class must
+# match between training (build_ensemble_artifacts.py) and runtime
+# (api.py / voter_c_feature_matrix).
+CAMERA_CLASS_FEATURE_NAMES: tuple[str, ...] = ("headcam", "handheld")
+CAMERA_CLASS_FEATURE_DIM: int = len(CAMERA_CLASS_FEATURE_NAMES)
+_CAMERA_CLASS_TO_INDEX: dict[str, int] = {
+    name: idx for idx, name in enumerate(CAMERA_CLASS_FEATURE_NAMES)
+}
+
+VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + CAMERA_CLASS_FEATURE_DIM
+
+
+def camera_class_one_hot(camera_classes: list[str] | np.ndarray, n_rows: int) -> np.ndarray:
+    """Build the camera-class one-hot block for Voter C.
+
+    ``camera_classes`` may be a single class name (broadcast to all rows)
+    or a per-row sequence. Unknown classes default to ``headcam`` so the
+    runtime fallback path matches the calibration default class.
+    """
+    out = np.zeros((n_rows, CAMERA_CLASS_FEATURE_DIM), dtype=np.float64)
+    if isinstance(camera_classes, str):
+        idx = _CAMERA_CLASS_TO_INDEX.get(camera_classes, 0)
+        if n_rows:
+            out[:, idx] = 1.0
+        return out
+    for row, cls in enumerate(camera_classes):
+        if row >= n_rows:
+            break
+        idx = _CAMERA_CLASS_TO_INDEX.get(str(cls), 0)
+        out[row, idx] = 1.0
+    return out
 
 
 @dataclass
@@ -384,15 +418,33 @@ def voter_c_feature_matrix(
     hand_features: np.ndarray,
     clap_sims: np.ndarray,
     clap_diff: np.ndarray,
+    camera_classes: list[str] | np.ndarray | str | None = None,
 ) -> np.ndarray:
-    """Stack the GBDT input vector ``[hand | clap_sims | clap_diff]``.
+    """Stack the GBDT input vector ``[hand | clap_sims | clap_diff | camera_class_onehot]``.
 
     Column order matches the calibration script. Drift here -- adding
-    features, reordering CLAP prompts, etc. -- silently desyncs voter C.
+    features, reordering CLAP prompts, reordering camera classes -- silently
+    desyncs voter C, so any change requires rebuilding the shipped GBDT.
+
+    ``camera_classes`` (issue #139) is a per-row class label (or a single
+    string broadcast to every row). ``None`` and unknown classes fall back
+    to ``headcam`` so legacy callers keep working byte-identically.
     """
-    if hand_features.shape[0] == 0:
+    n_rows = hand_features.shape[0]
+    if n_rows == 0:
         return np.zeros((0, VOTER_C_FEATURE_DIM), dtype=np.float64)
+    classes_input: list[str] | np.ndarray | str
+    if camera_classes is None:
+        classes_input = "headcam"
+    else:
+        classes_input = camera_classes
+    cam_block = camera_class_one_hot(classes_input, n_rows)
     return np.concatenate(
-        [hand_features, clap_sims.astype(np.float64), clap_diff.astype(np.float64)[:, None]],
+        [
+            hand_features,
+            clap_sims.astype(np.float64),
+            clap_diff.astype(np.float64)[:, None],
+            cam_block,
+        ],
         axis=1,
     )
