@@ -84,6 +84,9 @@ from pydantic import BaseModel
 from .. import beep_detect, cross_align, report, user_config, video_probe
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
+from .. import thumbnail as thumbnail_helpers
+from .. import waveform as waveform_helpers
+from ..config import BeepDetectConfig, Config
 from ..fixture_schema import (
     AgcState,
     AudioSource,
@@ -92,9 +95,6 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
-from .. import thumbnail as thumbnail_helpers
-from .. import waveform as waveform_helpers
-from ..config import BeepDetectConfig, Config
 from . import audio as audio_helpers
 from . import exports as export_helpers
 from .jobs import Job, JobCancelled, JobHandle, JobRegistry
@@ -4188,9 +4188,7 @@ def create_app(
             secondary_wav_path = Path(body.secondary_wav_path).resolve()
 
             if not anchor_path.exists():
-                raise HTTPException(
-                    status_code=404, detail=f"anchor not found: {anchor_path}"
-                )
+                raise HTTPException(status_code=404, detail=f"anchor not found: {anchor_path}")
             if not secondary_wav_path.exists():
                 raise HTTPException(
                     status_code=404,
@@ -4236,9 +4234,7 @@ def create_app(
                 handle.check_cancel()
                 handle.update(progress=0.20, message="aligning + detecting shots...")
 
-                anchor_data = __import__("json").loads(
-                    anchor_path.read_text(encoding="utf-8")
-                )
+                anchor_data = __import__("json").loads(anchor_path.read_text(encoding="utf-8"))
                 result = lab_module.promote_from_anchor(
                     lab_module.PromoteFromAnchorRequest(
                         anchor_data=anchor_data,
@@ -4263,9 +4259,7 @@ def create_app(
                 fixtures_root.mkdir(parents=True, exist_ok=True)
                 tmp = target_json.with_suffix(".json.tmp")
                 tmp.write_text(
-                    __import__("json").dumps(
-                        result.fixture_data, indent=2, ensure_ascii=True
-                    )
+                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True)
                     + "\n",
                     encoding="utf-8",
                 )
@@ -4276,9 +4270,7 @@ def create_app(
 
                 report_path = fixtures_root / f"{body.slug}-promotion-report.json"
                 report_path.write_text(
-                    __import__("json").dumps(
-                        result.promotion_report, indent=2, ensure_ascii=True
-                    )
+                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True)
                     + "\n",
                     encoding="utf-8",
                 )
@@ -4391,7 +4383,9 @@ def create_app(
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
             probe = probe_camera_metadata(source)
-            camera_id = (body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}").strip()
+            camera_id = (
+                body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}"
+            ).strip()
             if not camera_id:
                 raise HTTPException(
                     status_code=400,
@@ -4403,7 +4397,10 @@ def create_app(
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"fixture already exists: {target_json.name} (set overwrite=true to replace)",
+                    detail=(
+                        f"fixture already exists: {target_json.name}"
+                        " (set overwrite=true to replace)"
+                    ),
                 )
 
             try:
@@ -4432,9 +4429,7 @@ def create_app(
                 handle.check_cancel()
                 handle.update(progress=0.20, message="aligning + detecting shots...")
 
-                anchor_data = __import__("json").loads(
-                    anchor_path.read_text(encoding="utf-8")
-                )
+                anchor_data = __import__("json").loads(anchor_path.read_text(encoding="utf-8"))
                 result = lab_module.promote_from_anchor(
                     lab_module.PromoteFromAnchorRequest(
                         anchor_data=anchor_data,
@@ -4459,9 +4454,7 @@ def create_app(
                 fixtures_root.mkdir(parents=True, exist_ok=True)
                 tmp = target_json.with_suffix(".json.tmp")
                 tmp.write_text(
-                    __import__("json").dumps(
-                        result.fixture_data, indent=2, ensure_ascii=True
-                    )
+                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True)
                     + "\n",
                     encoding="utf-8",
                 )
@@ -4472,9 +4465,7 @@ def create_app(
 
                 report_path = fixtures_root / f"{slug}-promotion-report.json"
                 report_path.write_text(
-                    __import__("json").dumps(
-                        result.promotion_report, indent=2, ensure_ascii=True
-                    )
+                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True)
                     + "\n",
                     encoding="utf-8",
                 )

@@ -21,12 +21,10 @@ from splitsmith.fixture_schema import (
 )
 from splitsmith.lab.promote import (
     _build_fixture,
-    _build_report,
     _estimate_drift,
     _slug_from_source,
 )
 from splitsmith.lab.snap_window import SnapResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
