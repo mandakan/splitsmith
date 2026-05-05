@@ -434,21 +434,50 @@ export function PromoteReview() {
       }));
   }, [anchorFixture, axis, anchorBeep, xPercent]);
 
+  // Encode state with BOTH colour (Wong palette tokens, colour-blind safe)
+  // AND a non-colour glyph + line style so the panel still parses for
+  // anyone who can't read the hue.
   const derivedShotOverlays = useMemo(() => {
     if (!axis || secondaryBeep == null)
-      return [] as { left: string; label: number; color: string }[];
+      return [] as {
+        left: string;
+        label: string;
+        color: string;
+        dashed: boolean;
+        thick: boolean;
+      }[];
     return shots
       .filter((s) => s.time !== null)
-      .map((s) => ({
-        left: xPercent(s.time as number, secondaryBeep),
-        label: s.shotNumber,
-        color:
-          s.status === "confirmed" || s.status === "nudged"
-            ? "var(--status-complete)"
-            : s.status === "pending"
-              ? "var(--muted-foreground)"
-              : "var(--destructive)",
-      }));
+      .map((s) => {
+        let color = "var(--split-ok)"; // yellow; pending
+        let glyph = "";
+        let dashed = false;
+        let thick = false;
+        if (s.status === "confirmed") {
+          color = "var(--split-good)"; // green
+          glyph = "✓ "; // check
+          thick = true;
+        } else if (s.status === "nudged") {
+          color = "var(--split-good)";
+          glyph = "· "; // middle dot
+          dashed = true;
+          thick = true;
+        } else if (s.status !== "pending") {
+          // missed-detector / missed-anchor-wrong / missed-dropped
+          color = "var(--split-slow)"; // vermillion
+          glyph = "! ";
+          dashed = s.status === "missed-anchor-wrong";
+        } else {
+          glyph = "";
+        }
+        return {
+          left: xPercent(s.time as number, secondaryBeep),
+          label: `${glyph}${s.shotNumber}`,
+          color,
+          dashed,
+          thick,
+        };
+      });
   }, [shots, axis, secondaryBeep, xPercent]);
 
   if (!fixturePath) {
@@ -646,11 +675,23 @@ export function PromoteReview() {
                   {derivedShotOverlays.map((m, i) => (
                     <div
                       key={`shot-${i}`}
-                      className="absolute top-0 bottom-0 w-px"
-                      style={{ left: m.left, backgroundColor: m.color }}
+                      className={`absolute top-0 bottom-0 ${m.thick ? "w-0.5" : "w-px"}`}
+                      style={{
+                        left: m.left,
+                        // Solid for confirmed, dashed for nudged /
+                        // anchor-wrong, plain for pending. Encodes state
+                        // with line style so the markers parse without
+                        // depending on color alone.
+                        backgroundColor: m.dashed ? "transparent" : m.color,
+                        backgroundImage: m.dashed
+                          ? `linear-gradient(to bottom, ${m.color} 50%, transparent 50%)`
+                          : undefined,
+                        backgroundSize: m.dashed ? "1px 6px" : undefined,
+                        backgroundRepeat: m.dashed ? "repeat-y" : undefined,
+                      }}
                     >
                       <div
-                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/90 px-0.5 rounded font-medium"
                         style={{ color: m.color }}
                       >
                         {m.label}
