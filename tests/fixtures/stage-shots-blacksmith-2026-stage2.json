@@ -638,5 +638,9 @@
     "muzzle_device": "none",
     "action": "semi-auto",
     "power_factor": "minor"
-  }
+  },
+  "shooter": {
+    "id": "self"
+  },
+  "event_id": "blacksmith-2026:2:self"
 }

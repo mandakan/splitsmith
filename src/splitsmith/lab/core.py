@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -28,6 +29,67 @@ from ..ensemble.api import (
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_RUNS_ROOT = Path("build/lab/runs")
 LATEST_RUN_FILENAME = "latest.json"
+
+# Slug pattern for fixtures audited from a stage: ``stage-shots-<match-slug>-stage<N>(-<extra>)?``.
+# Used by :func:`match_stage_from_slug` to derive the (match, stage) part of
+# the event_id without needing the audit JSON in hand. Shooter identity
+# can't be derived from the slug -- it comes from the fixture's
+# ``shooter`` block; ``DEFAULT_SHOOTER_KEY`` is the legacy fallback.
+_SLUG_PATTERN = re.compile(r"^stage-shots-(?P<match>.+)-stage(?P<n>\d+)(?:-.+)?$")
+
+# Sentinel shooter key for fixtures with no recorded shooter identity.
+# All pre-issue-#149 fixtures default to this on migration -- they were
+# all the project owner. Going forward, promote-from-project stamps a
+# real ``ssi-<id>`` key when the project's shooter pin is set.
+DEFAULT_SHOOTER_KEY: str = "self"
+
+
+def match_stage_from_slug(slug: str) -> tuple[str, int] | None:
+    """Parse ``stage-shots-<match>-stage<N>(-<extra>)?`` -> ``(match, N)``.
+
+    Returns ``None`` for slugs that don't fit the standard pattern. The
+    shooter component of the event_id is *not* in the slug; combine the
+    parsed result with a shooter key via :func:`build_event_id`.
+    """
+    match = _SLUG_PATTERN.match(slug)
+    if not match:
+        return None
+    return match.group("match"), int(match.group("n"))
+
+
+def build_event_id(match_slug: str, stage_number: int, shooter_key: str) -> str:
+    """Compose the canonical event_id ``<match>:<stage>:<shooter>``.
+
+    Multi-camera siblings of the same shooter-stage performance share an
+    event_id; different shooters on the same physical stage get distinct
+    ids so the Lab table never cross-groups them.
+    """
+    return f"{match_slug}:{int(stage_number)}:{shooter_key}"
+
+
+def event_id_from_payload(slug: str, payload: dict[str, Any]) -> str | None:
+    """Build the full ``event_id`` for a fixture JSON.
+
+    Precedence: explicit top-level ``event_id`` on the JSON wins.
+    Otherwise: parse the slug for ``(match, stage)``, combine with the
+    shooter key from ``payload["shooter"]["id"]`` (``DEFAULT_SHOOTER_KEY``
+    when absent). Returns ``None`` only when the slug doesn't fit the
+    standard pattern AND no explicit event_id is set.
+    """
+    explicit = payload.get("event_id")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    parsed = match_stage_from_slug(slug)
+    if parsed is None:
+        return None
+    match_slug, n = parsed
+    shooter_key = DEFAULT_SHOOTER_KEY
+    shooter_block = payload.get("shooter")
+    if isinstance(shooter_block, dict):
+        raw = shooter_block.get("id")
+        if isinstance(raw, str) and raw:
+            shooter_key = raw
+    return build_event_id(match_slug, n, shooter_key)
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +116,11 @@ class FixtureRecord(BaseModel):
     # Non-null only for derived secondary fixtures; the SPA surfaces a
     # "re-review" link back to the diff-confirm screen for these.
     anchor_slug: str | None = None
+    # Event grouping key (issue #149 follow-up). Identifies the same
+    # shooter-stage-match across multi-camera coverage so the Lab table
+    # can render siblings together. Stored on the fixture JSON when
+    # available; falls back to slug derivation for legacy fixtures.
+    event_id: str | None = None
 
 
 def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
@@ -86,6 +153,11 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
             raw = anchor_block.get("fixture_slug")
             if isinstance(raw, str):
                 anchor_slug = raw
+        # event_id precedence: explicit on the fixture JSON beats
+        # slug+shooter derivation. Lets a curated event-grouping
+        # override the parser for cases where the slug doesn't match
+        # the standard pattern.
+        event_id = event_id_from_payload(json_path.stem, payload)
         out.append(
             FixtureRecord(
                 slug=json_path.stem,
@@ -101,6 +173,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 audit_mtime=json_path.stat().st_mtime,
                 audio_mtime=wav.stat().st_mtime if wav.exists() else None,
                 anchor_slug=anchor_slug,
+                event_id=event_id,
             )
         )
     return out
@@ -845,6 +918,14 @@ class PromoteRequest:
     fixtures_root: Path | None = None
     overwrite: bool = False
     extra_metadata: dict[str, Any] = field(default_factory=dict)
+    # Shooter identity to stamp on the fixture (issue #149 follow-up).
+    # ``None`` means "preserve whatever's in the source audit JSON, else
+    # default to ``DEFAULT_SHOOTER_KEY``" -- used by promote-from-anchor
+    # paths that already inherited shooter from the anchor block.
+    # Promote-from-project paths pass an explicit dict with ``id``,
+    # optional ``name`` + ``ssi_shooter_id`` so the resulting fixture
+    # groups under its shooter rather than the legacy ``self`` sentinel.
+    shooter: dict[str, Any] | None = None
 
 
 def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
@@ -870,6 +951,19 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
     payload["promoted_from"] = str(req.audit_json_path)
     if req.extra_metadata:
         payload.setdefault("provenance", {}).update(req.extra_metadata)
+
+    # Shooter identity + event_id stamping. Caller-supplied shooter wins
+    # over whatever's in the source audit JSON (project-promote provides
+    # this from ``selected_shooter_id``); falls back to existing data on
+    # the audit, then to the DEFAULT_SHOOTER_KEY sentinel.
+    if req.shooter is not None:
+        payload["shooter"] = dict(req.shooter)
+    elif not isinstance(payload.get("shooter"), dict):
+        payload["shooter"] = {"id": DEFAULT_SHOOTER_KEY}
+    if "event_id" not in payload or not isinstance(payload.get("event_id"), str):
+        derived = event_id_from_payload(req.fixture_slug, payload)
+        if derived:
+            payload["event_id"] = derived
 
     tmp_json = target_json.with_suffix(".json.tmp")
     tmp_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
