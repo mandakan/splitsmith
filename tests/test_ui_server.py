@@ -2174,6 +2174,71 @@ def test_shot_detect_endpoint_passes_default_class_when_mount_missing(
     assert captured.get("camera_class") == "headcam"
 
 
+def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Stage's ``stage_rounds`` (from scoreboard import) lands in the audit
+    JSON and reaches the ensemble as ``expected_rounds``.
+
+    Validates the end-to-end path: project state -> seeded audit -> ensemble.
+    """
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    from splitsmith.config import StageRounds
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.stages[0].stage_rounds = StageRounds(expected=12, paper_targets=6, steel_targets=0)
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+
+    captured: dict = {}
+
+    def _fake_detect(audio_array, sr, beep, stage_t, runtime, **kwargs):
+        captured.update(kwargs)
+        return _fake_ensemble_result([])
+
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", _fake_detect)
+
+    resp = client.post("/api/stages/1/shot-detect")
+    assert resp.status_code == 200
+    _wait_for_job(client, resp.json()["id"])
+
+    assert captured.get("expected_rounds") == 12
+
+    audit = _json.loads((project_root / "audit" / "stage1.json").read_text())
+    assert audit["stage_rounds"]["expected"] == 12
+    assert audit["stage_rounds"]["paper_targets"] == 6
+
+
 def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
     """PATCH /camera-mount validates against the CameraMount enum and persists."""
     client, _ = _seed_project_with_primary(tmp_path)

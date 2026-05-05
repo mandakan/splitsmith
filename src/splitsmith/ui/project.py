@@ -35,7 +35,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, computed_field
 
 from .. import video_match
-from ..config import BeepCandidate, StageData, VideoMatchConfig
+from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from ..video_match import match_videos_to_stages
 
 # Camera-make heuristic for the default ``StageVideo.camera_mount``
@@ -69,6 +69,46 @@ def _heuristic_mount_from_make(make: str | None) -> str | None:
         if token in needle:
             return mount
     return None
+
+
+def _stage_rounds_from_info(stage: Any) -> StageRounds | None:
+    """Extract ``StageRounds`` from a scoreboard ``StageInfo`` (or any object
+    that exposes ``min_rounds`` / ``paper_targets`` / ``steel_targets``).
+
+    Returns ``None`` when none of the fields are populated -- avoids
+    sticking an empty ``StageRounds()`` block on every stage just to
+    represent "not in the payload".
+    """
+    expected = getattr(stage, "min_rounds", None)
+    paper = getattr(stage, "paper_targets", None)
+    steel = getattr(stage, "steel_targets", None)
+    if expected is None and paper is None and steel is None:
+        return None
+    return StageRounds(expected=expected, paper_targets=paper, steel_targets=steel)
+
+
+def _stage_rounds_by_number(raw_stages: list[Any]) -> dict[int, StageRounds]:
+    """Map ``stage_number -> StageRounds`` from a raw scoreboard top-level
+    ``stages`` array of dicts.
+
+    Used by the legacy ``import_scoreboard`` path which receives stage-
+    card data alongside the per-competitor scores. Silently skips entries
+    missing ``stage_number`` or with no rounds metadata.
+    """
+    out: dict[int, StageRounds] = {}
+    for s in raw_stages:
+        if not isinstance(s, dict):
+            continue
+        n = s.get("stage_number")
+        if not isinstance(n, int):
+            continue
+        expected = s.get("min_rounds")
+        paper = s.get("paper_targets")
+        steel = s.get("steel_targets")
+        if expected is None and paper is None and steel is None:
+            continue
+        out[n] = StageRounds(expected=expected, paper_targets=paper, steel_targets=steel)
+    return out
 
 
 VIDEO_EXTENSIONS = {
@@ -212,6 +252,14 @@ class StageEntry(BaseModel):
     # the proper metadata while preserving any video assignments. See
     # MatchProject.init_placeholder_stages and import_scoreboard.
     placeholder: bool = False
+    # Per-stage round count + target breakdown from SSI Scoreboard
+    # (``min_rounds`` / ``paper_targets`` / ``steel_targets``). Drives the
+    # ensemble's adaptive Voter C top-(K+slack) and apriori boost when
+    # populated -- without it the detector falls back to global thresholds
+    # and runs much hotter on phone-cam audio. ``None`` for placeholders
+    # and for projects imported before this field existed; the next
+    # scoreboard import will populate it.
+    stage_rounds: StageRounds | None = None
 
     def primary(self) -> StageVideo | None:
         """Return the primary video, or ``None`` if no video is the primary yet."""
@@ -869,6 +917,12 @@ class MatchProject(BaseModel):
 
         new_stages: list[StageEntry] = []
         scoreboard_numbers: set[int] = set()
+        # Top-level "stages" array carries stage-card metadata
+        # (min_rounds / paper_targets / steel_targets) keyed by
+        # ``stage_number``; per-competitor entries don't always have it.
+        # Index it once so the loop below can pick up rounds without
+        # re-scanning per stage.
+        rounds_by_number = _stage_rounds_by_number(raw.get("stages") or [])
         for s in primary_competitor.get("stages", []):
             stage_data = StageData.model_validate(s)
             scoreboard_numbers.add(stage_data.stage_number)
@@ -879,6 +933,7 @@ class MatchProject(BaseModel):
                     time_seconds=stage_data.time_seconds,
                     scorecard_updated_at=stage_data.scorecard_updated_at,
                     videos=videos_by_stage.get(stage_data.stage_number, []),
+                    stage_rounds=rounds_by_number.get(stage_data.stage_number),
                 )
             )
         new_stages.sort(key=lambda s: s.stage_number)
@@ -959,6 +1014,7 @@ class MatchProject(BaseModel):
                 scorecard_updated_at=None,
                 videos=videos_by_stage.get(stage.stage_number, []),
                 placeholder=True,
+                stage_rounds=_stage_rounds_from_info(stage),
             )
             for stage in match_data.stages
         ]
@@ -972,6 +1028,35 @@ class MatchProject(BaseModel):
             for v in videos:
                 v.role = "secondary"
                 self.unassigned_videos.append(v)
+
+    def merge_stage_rounds(self, match_data: Any) -> int:
+        """Backfill ``stage_rounds`` from a parsed ``MatchData`` without
+        disturbing any other stage state.
+
+        Used to upgrade existing projects to the post-issue-#143 schema
+        without forcing a full ``populate_from_match_data(overwrite=True)``
+        (which would orphan video assignments). Only fills stages whose
+        ``stage_rounds`` is ``None`` -- never overwrites a value already
+        set, so a user-edited override survives a re-fetch.
+
+        Returns the count of stages updated.
+        """
+        from splitsmith.ui.scoreboard.models import MatchData
+
+        if not isinstance(match_data, MatchData):
+            match_data = MatchData.model_validate(match_data)
+        stages_by_number = {s.stage_number: s for s in self.stages}
+        updated = 0
+        for info in match_data.stages:
+            stage = stages_by_number.get(info.stage_number)
+            if stage is None or stage.stage_rounds is not None:
+                continue
+            rounds = _stage_rounds_from_info(info)
+            if rounds is None:
+                continue
+            stage.stage_rounds = rounds
+            updated += 1
+        return updated
 
     def merge_stage_times(self, results: Any) -> int:
         """Overlay per-stage timing onto existing stages keyed by ``stage_number``.

@@ -299,6 +299,172 @@ def test_import_scoreboard_populates_stages(tmp_path: Path) -> None:
     assert project.stages[0].time_seconds == 42.76
 
 
+def test_merge_stage_rounds_backfills_only_missing_entries(tmp_path: Path) -> None:
+    """Existing projects can pick up ``stage_rounds`` without re-importing.
+
+    Stages with ``stage_rounds=None`` get filled from the cached
+    ``MatchData``; stages with a value already set are left alone so a
+    user-edited override survives a refresh.
+    """
+    from splitsmith.config import StageRounds
+    from splitsmith.ui.scoreboard.models import CacheInfo, MatchData, StageInfo
+
+    root = tmp_path / "match-backfill"
+    project = MatchProject.init(root, name="x")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="K-vallen",
+            time_seconds=42.76,
+            stage_rounds=None,
+        ),
+        StageEntry(
+            stage_number=2,
+            stage_name="100m",
+            time_seconds=12.48,
+            # User-edited override; backfill must NOT touch this.
+            stage_rounds=StageRounds(expected=99),
+        ),
+    ]
+
+    match_data = MatchData.model_construct(
+        name="x",
+        ssi_url=None,
+        stages_count=2,
+        competitors_count=0,
+        scoring_completed=0.0,
+        match_status="open",
+        results_status="open",
+        registration_status="closed",
+        is_registration_possible=False,
+        is_squadding_possible=False,
+        stages=[
+            StageInfo(
+                id=1,
+                stage_number=1,
+                name="K-vallen",
+                min_rounds=31,
+                paper_targets=14,
+                steel_targets=3,
+            ),
+            StageInfo(
+                id=2,
+                stage_number=2,
+                name="100m",
+                min_rounds=12,
+                paper_targets=6,
+                steel_targets=0,
+            ),
+        ],
+        competitors=[],
+        squads=[],
+        cacheInfo=CacheInfo.model_construct(),
+    )
+
+    updated = project.merge_stage_rounds(match_data)
+    assert updated == 1
+    assert project.stages[0].stage_rounds.expected == 31
+    assert project.stages[0].stage_rounds.paper_targets == 14
+    # User override is preserved.
+    assert project.stages[1].stage_rounds.expected == 99
+
+
+def test_populate_from_match_data_populates_stage_rounds(tmp_path: Path) -> None:
+    """``StageInfo.min_rounds`` flows through to ``StageEntry.stage_rounds`` (online path)."""
+    from splitsmith.ui.scoreboard.models import CacheInfo, MatchData, StageInfo
+
+    root = tmp_path / "match-md"
+    project = MatchProject.init(root, name="placeholder")
+
+    # Bypass MatchData's full-shape validation -- we only care about the
+    # fields populate_from_match_data actually reads (name, ssi_url,
+    # stages). model_construct skips validation for this focused test.
+    match_data = MatchData.model_construct(
+        name="Blacksmith Handgun Open 2026",
+        ssi_url="https://shootnscoreit.com/event/match/22/27046/",
+        stages_count=2,
+        competitors_count=0,
+        scoring_completed=0.0,
+        match_status="open",
+        results_status="open",
+        registration_status="closed",
+        is_registration_possible=False,
+        is_squadding_possible=False,
+        stages=[
+            StageInfo(
+                id=94151,
+                stage_number=1,
+                name="K-vallen",
+                min_rounds=31,
+                paper_targets=14,
+                steel_targets=3,
+            ),
+            StageInfo(
+                id=94152,
+                stage_number=2,
+                name="100m",
+                min_rounds=12,
+                paper_targets=6,
+                steel_targets=0,
+            ),
+        ],
+        competitors=[],
+        squads=[],
+        cacheInfo=CacheInfo.model_construct(),
+    )
+    project.populate_from_match_data(match_data)
+
+    s1 = project.stages[0]
+    assert s1.stage_rounds is not None
+    assert s1.stage_rounds.expected == 31
+    assert s1.stage_rounds.paper_targets == 14
+    assert s1.stage_rounds.steel_targets == 3
+    assert project.stages[1].stage_rounds.expected == 12
+
+
+def test_import_scoreboard_populates_stage_rounds_from_top_level_stages(
+    tmp_path: Path,
+) -> None:
+    """Top-level ``stages`` array carries ``min_rounds`` / target counts; legacy
+    drop-JSON path picks them up so adaptive Voter C + apriori boost can fire."""
+    root = tmp_path / "match-rounds"
+    project = MatchProject.init(root, name="placeholder")
+
+    scoreboard = {
+        "match": {"id": "27046", "name": "Blacksmith"},
+        "stages": [
+            {"stage_number": 1, "min_rounds": 31, "paper_targets": 14, "steel_targets": 3},
+            {"stage_number": 2, "min_rounds": 12, "paper_targets": 6, "steel_targets": 0},
+        ],
+        "competitors": [
+            {
+                "name": "Sample",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "K-vallen",
+                        "time_seconds": 42.76,
+                        "scorecard_updated_at": "2026-04-12T11:29:28.833034+00:00",
+                    },
+                    {
+                        "stage_number": 2,
+                        "stage_name": "100m",
+                        "time_seconds": 12.48,
+                        "scorecard_updated_at": "2026-04-12T12:03:32.729554+00:00",
+                    },
+                ],
+            }
+        ],
+    }
+    project.import_scoreboard(scoreboard)
+
+    assert project.stages[0].stage_rounds is not None
+    assert project.stages[0].stage_rounds.expected == 31
+    assert project.stages[0].stage_rounds.paper_targets == 14
+    assert project.stages[0].stage_rounds.steel_targets == 3
+    assert project.stages[1].stage_rounds.expected == 12
+
+
 def test_import_scoreboard_refuses_overwrite_by_default(tmp_path: Path) -> None:
     from splitsmith.ui.project import ScoreboardImportConflictError
 
