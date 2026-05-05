@@ -268,6 +268,13 @@ export function Audit() {
 
   // Rebuild the secondary offset table whenever videos or auditBeep change.
   // The rAF tick loop reads this map without needing it in its dep array.
+  //
+  // Also catch up any already-mounted secondaries: the SecondarySlot ref
+  // callback fires during the commit phase (before this effect), so on the
+  // initial render after data loads -- and on stage change -- the new
+  // <video> elements land in secondaryRefsMap *before* this map is
+  // populated. Without a re-seek here they stay parked at source time 0
+  // and play out of sync once the user hits play.
   useEffect(() => {
     const map = new Map<string, number>();
     if (auditBeep != null) {
@@ -278,6 +285,22 @@ export function Audit() {
       }
     }
     secondaryOffsetsRef.current = map;
+    for (const [path, sv] of secondaryRefsMap.current) {
+      const off = map.get(path);
+      if (off == null) continue;
+      const target = currentTimeRef.current + off;
+      if (sv.readyState >= 1) {
+        sv.currentTime = target;
+      } else {
+        sv.addEventListener(
+          "loadedmetadata",
+          () => {
+            sv.currentTime = target;
+          },
+          { once: true },
+        );
+      }
+    }
   }, [videos, auditBeep]);
 
   const beepOffset = useMemo(() => {
@@ -307,7 +330,11 @@ export function Audit() {
     isDirtyRef.current = false;
     setSaveStatus({ kind: "idle" });
     setGridMode(true);
-    secondaryRefsMap.current.clear();
+    // Don't clear secondaryRefsMap here. Refs attach during commit before
+    // this effect runs, so a clear() would wipe the freshly-mounted new
+    // stage's <video> elements. SecondarySlot's unmount path calls
+    // setRef(null) -> handleSecondaryRef deletes stale entries, which is
+    // sufficient to keep the map clean across stage transitions.
     const v = videoRef.current;
     if (v) {
       v.pause();
