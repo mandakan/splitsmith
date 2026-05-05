@@ -737,6 +737,65 @@ def test_assign_video_demotes_existing_primary(tmp_path: Path) -> None:
     assert primaries[0].path == v2.path
 
 
+def test_assign_video_secondary_to_empty_stage_auto_upgrades_to_primary(
+    tmp_path: Path,
+) -> None:
+    """First video onto a stage becomes primary even when role='secondary'.
+
+    Bootstraps placeholder-mode projects (no scoreboard -> ``auto_match``
+    returns nothing) so the user doesn't have to manually promote.
+    """
+    root = tmp_path / "match-auto-primary"
+    project = MatchProject.init(root, name="Auto Primary Match")
+    project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
+    src = tmp_path / "VID.mp4"
+    src.write_bytes(b"")
+    v = project.register_video(src, root)
+
+    # Default role from the SPA's drag-drop is "secondary".
+    project.assign_video(v.path, to_stage_number=1, role="secondary")
+
+    assert project.stages[0].videos[0].role == "primary"
+
+
+def test_assign_video_secondary_when_primary_exists_stays_secondary(
+    tmp_path: Path,
+) -> None:
+    """A second 'secondary' assignment does NOT demote the existing primary."""
+    root = tmp_path / "match-no-demote"
+    project = MatchProject.init(root, name="No Demote Match")
+    project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
+    src1 = tmp_path / "VID_a.mp4"
+    src2 = tmp_path / "VID_b.mp4"
+    src1.write_bytes(b"")
+    src2.write_bytes(b"")
+    v1 = project.register_video(src1, root)
+    v2 = project.register_video(src2, root)
+    project.assign_video(v1.path, to_stage_number=1, role="primary")
+    project.assign_video(v2.path, to_stage_number=1, role="secondary")
+
+    stage = project.stages[0]
+    primaries = [v for v in stage.videos if v.role == "primary"]
+    secondaries = [v for v in stage.videos if v.role == "secondary"]
+    assert len(primaries) == 1 and primaries[0].path == v1.path
+    assert len(secondaries) == 1 and secondaries[0].path == v2.path
+
+
+def test_assign_video_ignored_does_not_auto_upgrade(tmp_path: Path) -> None:
+    """role='ignored' is the explicit opt-out; never gets upgraded to primary."""
+    root = tmp_path / "match-ignored"
+    project = MatchProject.init(root, name="Ignored Match")
+    project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
+    src = tmp_path / "VID.mp4"
+    src.write_bytes(b"")
+    v = project.register_video(src, root)
+
+    project.assign_video(v.path, to_stage_number=1, role="ignored")
+
+    assert project.stages[0].videos[0].role == "ignored"
+    assert project.stages[0].primary() is None
+
+
 def test_assign_video_back_to_unassigned(tmp_path: Path) -> None:
     root = tmp_path / "match-back"
     project = MatchProject.init(root, name="Back Match")

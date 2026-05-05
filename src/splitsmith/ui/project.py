@@ -1127,6 +1127,12 @@ class MatchProject(BaseModel):
           ``role``.
         - ``to_stage_number=N, role="primary"``: there can be only one primary
           per stage; any existing primary is demoted to ``"secondary"``.
+        - ``to_stage_number=N, role="secondary"`` on a stage with no primary
+          yet: auto-upgrade to ``"primary"``. Matches user expectation that
+          the first video assigned to a stage becomes the primary -- and is
+          the only way to bootstrap a primary in placeholder-mode projects
+          where ``auto_match`` has no scoreboard timestamps to anchor on.
+          Pass ``role="ignored"`` explicitly to opt out of the upgrade.
 
         Returns the moved ``StageVideo``. Raises ``KeyError`` if the video or
         stage doesn't exist.
@@ -1153,11 +1159,17 @@ class MatchProject(BaseModel):
             return video
 
         target = self.stage(to_stage_number)
-        if role == "primary":
+        # Auto-upgrade: a "secondary" assignment to a stage with no primary
+        # yet becomes the primary. Skipped for "ignored" (explicit opt-out)
+        # and a no-op when the caller already passed "primary".
+        effective_role: VideoRole = role
+        if role == "secondary" and not any(v.role == "primary" for v in target.videos):
+            effective_role = "primary"
+        if effective_role == "primary":
             for v in target.videos:
                 if v.role == "primary":
                     v.role = "secondary"
-        video.role = role
+        video.role = effective_role
         target.videos.append(video)
         return video
 
