@@ -22,6 +22,62 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Coarse camera classes the ensemble stratifies thresholds on. Keeping the
+# vocabulary small on purpose: we only stratify per-voter thresholds today,
+# the GBDT is shared, and deeper splits need more fixtures than we have.
+# When the corpus grows, additional classes can be added without breaking
+# old artifacts (loader falls back to ``DEFAULT_CAMERA_CLASS`` for unknown
+# values).
+CAMERA_CLASS_HEADCAM = "headcam"
+CAMERA_CLASS_HANDHELD = "handheld"
+DEFAULT_CAMERA_CLASS = CAMERA_CLASS_HEADCAM
+
+# Map fixture-schema mounts to a calibration class. Body-worn mounts share
+# acoustics (close-mic, AGC mostly off, similar noise floor); handheld /
+# stand mounts are the off-body bucket (phone in pocket / hand, gimbal,
+# tripod). Unknown / new mounts fall back to the default class so old
+# fixtures and new mount values keep working.
+_MOUNT_TO_CLASS: dict[str, str] = {
+    "head": CAMERA_CLASS_HEADCAM,
+    "chest": CAMERA_CLASS_HEADCAM,
+    "helmet": CAMERA_CLASS_HEADCAM,
+    "belt": CAMERA_CLASS_HEADCAM,
+    "hand": CAMERA_CLASS_HANDHELD,
+    "gimbal": CAMERA_CLASS_HANDHELD,
+    "tripod": CAMERA_CLASS_HANDHELD,
+    "monopod": CAMERA_CLASS_HANDHELD,
+}
+
+
+def camera_class_from_mount(mount: str | None) -> str:
+    """Map a fixture-schema ``CameraMount`` value to a calibration class.
+
+    Unknown / missing mounts return ``DEFAULT_CAMERA_CLASS`` so callers
+    can blindly forward whatever they have without guarding.
+    """
+    if mount is None:
+        return DEFAULT_CAMERA_CLASS
+    return _MOUNT_TO_CLASS.get(str(mount), DEFAULT_CAMERA_CLASS)
+
+
+class ClassThresholds(BaseModel):
+    """Per-camera-class voter thresholds + the slice of provenance they were derived from.
+
+    Voter A/B/D thresholds use the lowest-positive rule on this class's
+    slice of the calibration universe. Voter C uses the shared GBDT but
+    its operating threshold is picked from per-class CV predictions to
+    hit ``voter_c_target_recall`` *on this class*, so a class with a
+    different score distribution doesn't drag the cutoff with it.
+    """
+
+    voter_a_floor: float
+    voter_b_threshold: float
+    voter_c_threshold: float
+    voter_d_threshold: float
+    n_calibration_candidates: int
+    n_calibration_positives: int
+    calibration_fixtures: list[str]
+
 
 class EnsembleCalibration(BaseModel):
     """Per-voter thresholds + provenance.
@@ -97,6 +153,54 @@ class EnsembleCalibration(BaseModel):
     built_at: str = Field(
         description="ISO-8601 timestamp of when the artifacts were generated.",
     )
+    default_camera_class: str = Field(
+        default=DEFAULT_CAMERA_CLASS,
+        description=(
+            "Class used when the caller does not provide one or provides "
+            "a class with no calibrated thresholds. Default ``headcam`` "
+            "preserves byte-identical behaviour for existing projects."
+        ),
+    )
+    thresholds_by_camera_class: dict[str, ClassThresholds] | None = Field(
+        default=None,
+        description=(
+            "Per-camera-class threshold sets. ``None`` on legacy artifacts "
+            "(pre-issue #137); the loader synthesizes a single-class entry "
+            "from the top-level voter_*_threshold fields so old artifacts "
+            "still load. Default headcam thresholds are frozen across "
+            "rebuilds to protect the dominant class."
+        ),
+    )
+
+    def thresholds_for(self, camera_class: str | None) -> ClassThresholds:
+        """Return calibrated thresholds for ``camera_class``, falling back to the default class.
+
+        ``camera_class=None`` returns the default-class set. Unknown
+        classes (no calibration on file) also fall back -- with a future
+        warning hook so the server can surface the miss.
+        """
+        per_class = self.thresholds_by_camera_class
+        if per_class is None:
+            # Pre-issue-#137 artifact: synthesize a single-class set from
+            # the top-level fields. No need to cache; this branch is
+            # rare and the result is cheap.
+            return ClassThresholds(
+                voter_a_floor=self.voter_a_floor,
+                voter_b_threshold=self.voter_b_threshold,
+                voter_c_threshold=self.voter_c_threshold,
+                voter_d_threshold=self.voter_d_threshold,
+                n_calibration_candidates=self.n_calibration_candidates,
+                n_calibration_positives=self.n_calibration_positives,
+                calibration_fixtures=list(self.calibration_fixtures),
+            )
+        cls = camera_class or self.default_camera_class
+        if cls in per_class:
+            return per_class[cls]
+        if self.default_camera_class in per_class:
+            return per_class[self.default_camera_class]
+        # Last-resort: pick any class. Should never happen on a real
+        # artifact since the build script always emits the default class.
+        return next(iter(per_class.values()))
 
 
 _DATA_PACKAGE = "splitsmith.data"

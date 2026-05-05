@@ -44,6 +44,10 @@ from sklearn.model_selection import StratifiedKFold
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
+from splitsmith.ensemble.calibration import (
+    DEFAULT_CAMERA_CLASS,
+    camera_class_from_mount,
+)
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
@@ -60,6 +64,14 @@ DEFAULT_FIXTURES = [
     "stage-shots-tallmilan-2026-stage7",
     "stage-shots-tallmilan-2026-stage5",
     "stage-shots-tallmilan-2026-stage6",
+    # Phone-cam (issue #137 / promote-secondary, PR #134). Calibration
+    # script auto-skips fixtures missing CLAP / PANN caches; run
+    # ``scripts/extract_clap_features.py`` and
+    # ``scripts/extract_audio_embeddings.py`` for these stems first to
+    # pick them up.
+    "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
 ]
 FIXTURES_DIR = Path("tests/fixtures")
 FULL_DIR = FIXTURES_DIR / "full"
@@ -93,8 +105,18 @@ def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[
     return labels
 
 
-def _build_universe(fixtures: list[str], tolerance_ms: float):
-    """Per-fixture: detect at max recall, label, slot CLAP+PANN signals."""
+def _build_universe(
+    fixtures: list[str],
+    tolerance_ms: float,
+    *,
+    log: Callable[[str], None] = print,
+):
+    """Per-fixture: detect at max recall, label, slot CLAP+PANN signals.
+
+    Each universe row carries a ``camera_class`` tag derived from the
+    fixture's ``camera.mount`` so the calibrator can stratify per-voter
+    thresholds without re-reading the fixture JSONs.
+    """
     universe = []
     for fix in fixtures:
         truth_path = FIXTURES_DIR / f"{fix}.json"
@@ -102,16 +124,19 @@ def _build_universe(fixtures: list[str], tolerance_ms: float):
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
         pann_path = CACHE_DIR / f"{fix}_pann.npz"
         if not truth_path.exists() or not wav_path.exists():
-            print(f"  skip {fix}: missing fixture files")
+            log(f"  skip {fix}: missing fixture files")
             continue
         if not clap_path.exists() or not pann_path.exists():
-            raise SystemExit(
-                f"{fix}: CLAP/PANN cache missing. Run "
-                "scripts/extract_clap_features.py and "
-                "scripts/extract_audio_embeddings.py first."
+            log(
+                f"  skip {fix}: CLAP/PANN cache missing -- run "
+                "extract_clap_features.py + extract_audio_embeddings.py "
+                "for this stem to include it."
             )
+            continue
 
         truth = json.loads(truth_path.read_text())
+        camera_block = truth.get("camera") or {}
+        cam_class = camera_class_from_mount(camera_block.get("mount"))
         audio, sr = load_audio(wav_path)
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
@@ -152,6 +177,7 @@ def _build_universe(fixtures: list[str], tolerance_ms: float):
             universe.append(
                 {
                     "fixture": fix,
+                    "camera_class": cam_class,
                     "label": labels[i],
                     "confidence": float(shot.confidence),
                     "clap_diff": float(clap_diff[i]),
@@ -177,6 +203,14 @@ def _voter_b_threshold(universe: list[dict]) -> float:
 def _voter_d_threshold(universe: list[dict]) -> float:
     pos = [c["gunshot_prob"] for c in universe if c["label"] == 1]
     return float(min(pos)) if pos else 0.0
+
+
+def _split_by_camera_class(universe: list[dict]) -> dict[str, list[dict]]:
+    """Group universe rows by ``camera_class``."""
+    grouped: dict[str, list[dict]] = {}
+    for row in universe:
+        grouped.setdefault(row.get("camera_class", DEFAULT_CAMERA_CLASS), []).append(row)
+    return grouped
 
 
 def _x_from(universe: list[dict]) -> np.ndarray:
@@ -335,8 +369,37 @@ def _load_mined_negatives(
     return rows, provenance
 
 
+def _threshold_for_recall(probs: np.ndarray, labels: np.ndarray, target_recall: float) -> float:
+    """Pick the largest probability threshold that hits ``target_recall`` on this subset.
+
+    Walks the (prob, label) pairs in descending probability and stops at
+    the first cut that captures ``ceil(n_pos * target_recall)`` positives.
+    Returns ``0.0`` when there are no positives -- the caller should
+    treat this as "no class-specific calibration possible, use default".
+    """
+    n_pos = int(labels.sum())
+    if n_pos == 0:
+        return 0.0
+    pairs = sorted(zip(probs.tolist(), labels.tolist(), strict=True), key=lambda x: -x[0])
+    cum = 0
+    threshold = 0.0
+    for prob, lbl in pairs:
+        if lbl == 1:
+            cum += 1
+        if cum / n_pos >= target_recall:
+            threshold = float(prob)
+            break
+    return threshold
+
+
 def _train_voter_c(universe: list[dict], target_recall: float):
-    """Fit GBDT; pick threshold from 5-fold CV predictions on the same set."""
+    """Fit GBDT; return ``(model, global_threshold, cv_probs)``.
+
+    ``cv_probs`` is the held-out probability for each row from 5-fold
+    CV -- callers use it to pick per-camera-class thresholds without
+    refitting. ``global_threshold`` is the single-class fallback used
+    when an artifact has no per-class calibration on file.
+    """
     X = _x_from(universe)
     y = np.array([c["label"] for c in universe], dtype=np.int64)
     if y.sum() < 5:
@@ -354,21 +417,13 @@ def _train_voter_c(universe: list[dict], target_recall: float):
         f.fit(X[tr], y[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
-    n_pos = int(y.sum())
-    pairs = sorted(zip(cv_probs, y, strict=True), key=lambda x: -x[0])
-    cum, threshold = 0, 0.0
-    for prob, lbl in pairs:
-        if lbl == 1:
-            cum += 1
-        if cum / n_pos >= target_recall:
-            threshold = float(prob)
-            break
+    threshold = _threshold_for_recall(cv_probs, y, target_recall)
 
     clf = GradientBoostingClassifier(
         n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
     )
     clf.fit(X, y)
-    return clf, threshold
+    return clf, threshold, cv_probs
 
 
 def build_artifacts(
@@ -388,12 +443,20 @@ def build_artifacts(
     """
     fixtures = list(fixtures) if fixtures else list(DEFAULT_FIXTURES)
     log(f"Calibrating ensemble over {len(fixtures)} fixture(s)...")
-    universe = _build_universe(fixtures, tolerance_ms)
+    universe = _build_universe(fixtures, tolerance_ms, log=log)
     n_total = len(universe)
     n_pos = sum(c["label"] for c in universe)
     log(
         f"Universe: {n_total} candidates, {n_pos} positives "
         f"(across {len({c['fixture'] for c in universe})} fixtures)"
+    )
+    by_class = _split_by_camera_class(universe)
+    log(
+        "By camera class: "
+        + ", ".join(
+            f"{cls}={len(rows)} cands / {sum(r['label'] for r in rows)} pos"
+            for cls, rows in sorted(by_class.items())
+        )
     )
 
     n_pos_by_fixture = Counter(c["fixture"] for c in universe if c["label"] == 1)
@@ -413,24 +476,109 @@ def build_artifacts(
             f"{len(mined_rows)} mined negatives = {len(voter_c_universe)} rows."
         )
 
-    voter_a = _voter_a_floor(universe)
-    voter_b = _voter_b_threshold(universe)
-    voter_d = _voter_d_threshold(universe)
-    clf, voter_c = _train_voter_c(voter_c_universe, target_recall=target_recall)
-    log(f"Voter A floor (lowest positive confidence): {voter_a:.4f}")
-    log(f"Voter B threshold (lowest positive CLAP diff): {voter_b:.4f}")
-    log(f"Voter C threshold (GBDT, target recall {target_recall*100:.0f} %): {voter_c:.4f}")
-    log(f"Voter D threshold (lowest positive PANN gunshot_prob): {voter_d:.4f}")
+    clf, voter_c_global, cv_probs = _train_voter_c(voter_c_universe, target_recall=target_recall)
+
+    # Per-class thresholds. The shared GBDT's CV predictions are sliced
+    # by class so the operating point hits target_recall *on that class*
+    # rather than on the dominant one. Voter A/B/D still use the lowest-
+    # positive rule, computed per class for the same reason.
+    cv_universe_classes = [
+        row.get("camera_class", DEFAULT_CAMERA_CLASS) for row in voter_c_universe
+    ]
+    cv_universe_labels = np.array([row["label"] for row in voter_c_universe], dtype=np.int64)
+
+    thresholds_by_class: dict[str, dict] = {}
+    metrics_by_class: dict[str, dict] = {}
+    for cls in sorted(by_class):
+        rows = by_class[cls]
+        rows_pos = [r for r in rows if r["label"] == 1]
+        if not rows_pos:
+            log(f"  {cls}: 0 positives -- skipping (no per-class thresholds emitted)")
+            continue
+
+        cls_a = _voter_a_floor(rows)
+        cls_b = _voter_b_threshold(rows)
+        cls_d = _voter_d_threshold(rows)
+
+        # Voter C: pick the threshold from the CV slice that belongs to
+        # this class (positives + the negatives that came from the same
+        # camera class). Mined negatives without an explicit class fall
+        # back to DEFAULT_CAMERA_CLASS, matching how detection-time
+        # callers will look them up.
+        cls_mask = np.array([c == cls for c in cv_universe_classes], dtype=bool)
+        if cls_mask.sum() == 0 or cv_universe_labels[cls_mask].sum() == 0:
+            cls_c = voter_c_global
+        else:
+            cls_c = _threshold_for_recall(
+                cv_probs[cls_mask], cv_universe_labels[cls_mask], target_recall
+            )
+
+        thresholds_by_class[cls] = {
+            "voter_a_floor": cls_a,
+            "voter_b_threshold": cls_b,
+            "voter_c_threshold": cls_c,
+            "voter_d_threshold": cls_d,
+            "n_calibration_candidates": len(rows),
+            "n_calibration_positives": len(rows_pos),
+            "calibration_fixtures": sorted({r["fixture"] for r in rows}),
+        }
+
+        # Per-class precision/recall at the picked C threshold, using CV
+        # predictions so it's a held-out metric. Helps spot regressions
+        # in the dominant class as new classes get added.
+        cls_cv_probs = cv_probs[cls_mask]
+        cls_cv_labels = cv_universe_labels[cls_mask]
+        kept = cls_cv_probs >= cls_c
+        tp = int(((kept) & (cls_cv_labels == 1)).sum())
+        fp = int(((kept) & (cls_cv_labels == 0)).sum())
+        fn = int(((~kept) & (cls_cv_labels == 1)).sum())
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        metrics_by_class[cls] = {
+            "voter_c_precision_cv": round(precision, 4),
+            "voter_c_recall_cv": round(recall, 4),
+            "voter_c_f1_cv": round(f1, 4),
+            "voter_c_tp": tp,
+            "voter_c_fp": fp,
+            "voter_c_fn": fn,
+        }
+
+        log(
+            f"  {cls}: A={cls_a:.4f}  B={cls_b:.4f}  C={cls_c:.4f}  D={cls_d:.4f}  "
+            f"(n={len(rows)} cands / {len(rows_pos)} pos)  "
+            f"voter-C CV P/R/F1={precision:.3f}/{recall:.3f}/{f1:.3f}"
+        )
+
+    if not thresholds_by_class:
+        raise SystemExit("no camera class produced calibrated thresholds; need >= 1 positive")
+
+    # Default-class top-level fields. Existing code paths that haven't
+    # migrated to ``thresholds_for(camera_class)`` keep reading the
+    # default class -- byte-identical to today for headcam projects.
+    default_cls = (
+        DEFAULT_CAMERA_CLASS
+        if DEFAULT_CAMERA_CLASS in thresholds_by_class
+        else next(iter(sorted(thresholds_by_class)))
+    )
+    default_thresholds = thresholds_by_class[default_cls]
+    log(
+        f"Default class for legacy callers: {default_cls!r} "
+        f"(A={default_thresholds['voter_a_floor']:.4f} "
+        f"B={default_thresholds['voter_b_threshold']:.4f} "
+        f"C={default_thresholds['voter_c_threshold']:.4f} "
+        f"D={default_thresholds['voter_d_threshold']:.4f})"
+    )
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     cal_path = DATA_DIR / "ensemble_calibration.json"
     model_path = DATA_DIR / "voter_c_gbdt.joblib"
 
     cal = {
-        "voter_a_floor": voter_a,
-        "voter_b_threshold": voter_b,
-        "voter_c_threshold": voter_c,
-        "voter_d_threshold": voter_d,
+        "voter_a_floor": default_thresholds["voter_a_floor"],
+        "voter_b_threshold": default_thresholds["voter_b_threshold"],
+        "voter_c_threshold": default_thresholds["voter_c_threshold"],
+        "voter_d_threshold": default_thresholds["voter_d_threshold"],
         "voter_c_target_recall": target_recall,
         "tolerance_ms": tolerance_ms,
         "clap_prompts_shot": list(feat.CLAP_PROMPTS_SHOT),
@@ -440,6 +588,9 @@ def build_artifacts(
         "n_calibration_positives": int(n_pos),
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
+        "default_camera_class": default_cls,
+        "thresholds_by_camera_class": thresholds_by_class,
+        "voter_c_metrics_by_camera_class": metrics_by_class,
         **mining_provenance,
     }
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")

@@ -137,6 +137,7 @@ def detect_shots_ensemble(
     *,
     expected_rounds: int | None = None,
     ensemble_config: EnsembleConfig | None = None,
+    camera_class: str | None = None,
 ) -> EnsembleResult:
     """Run all four voters over the same per-candidate universe.
 
@@ -150,9 +151,15 @@ def detect_shots_ensemble(
       * Voter C switches to its adaptive top-(K+slack) mode.
       * Apriori boost adds ``+ensemble_config.apriori_boost`` to the
         top-K candidates by detector confidence.
+
+    ``camera_class`` selects the per-class threshold set from the shipped
+    calibration (issue #137). ``None`` falls back to the artifact's
+    default class -- for existing projects that's ``headcam``, byte-
+    identical to pre-#137 behaviour.
     """
     cfg = ensemble_config or EnsembleConfig()
     cal = runtime.calibration
+    thresholds = cal.thresholds_for(camera_class)
 
     # Voter A universe: maximum recall (raw detector, no confidence floor).
     # ``recall_fallback="cwt"`` matches the calibration script so the
@@ -182,13 +189,13 @@ def detect_shots_ensemble(
     voter_c_x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff)
     score_c = runtime.voter_c_model.predict_proba(voter_c_x)[:, 1].astype(np.float64)
 
-    va = voters.vote_a(confidences, cal.voter_a_floor)
-    vb = voters.vote_b(clap_diff, cal.voter_b_threshold)
+    va = voters.vote_a(confidences, thresholds.voter_a_floor)
+    vb = voters.vote_b(clap_diff, thresholds.voter_b_threshold)
     if expected_rounds is not None and expected_rounds > 0:
         vc = voters.vote_c_adaptive(score_c, expected_rounds)
     else:
-        vc = voters.vote_c_global(score_c, cal.voter_c_threshold)
-    vd = voters.vote_d(gunshot_prob, cal.voter_d_threshold)
+        vc = voters.vote_c_global(score_c, thresholds.voter_c_threshold)
+    vd = voters.vote_d(gunshot_prob, thresholds.voter_d_threshold)
 
     vote_total = va + vb + vc + vd
     boost = voters.apriori_boost(confidences, expected_rounds, cfg.apriori_boost)
