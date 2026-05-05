@@ -335,8 +335,6 @@ export function PromoteReview() {
 
   // Waveform centre: the current shot's time on each side.
   const currentShot = shots[currentIdx];
-  const derivedZoomCenter = currentShot?.time ?? 0;
-  const anchorZoomCenter = anchorFixture && currentShot ? currentShot.anchorTime : 0;
 
   // Align both panels by BEEP. The X axis is "time since beep", so both
   // BEEP markers always render at the same X position (preBeep / span)
@@ -371,6 +369,28 @@ export function PromoteReview() {
     },
     [axis],
   );
+
+  // Translate clip-local time to axis-space (time-since-beep + preBeep)
+  // so Waveform's playhead, which it renders at ``(currentTime /
+  // duration) * width``, lands at the axis-correct X. Without this the
+  // anchor and secondary playheads drift apart as the user steps
+  // through shots, even though the snap data is correct.
+  const toAxisTime = useCallback(
+    (clipTime: number, beepTime: number): number => {
+      if (!axis) return 0;
+      return clipTime - beepTime + axis.preBeep;
+    },
+    [axis],
+  );
+
+  const derivedZoomCenter =
+    currentShot?.time != null && secondaryBeep != null
+      ? toAxisTime(currentShot.time, secondaryBeep)
+      : 0;
+  const anchorZoomCenter =
+    anchorFixture && currentShot && anchorBeep != null
+      ? toAxisTime(currentShot.anchorTime, anchorBeep)
+      : 0;
 
   // Pad peaks at both ends so the actual content sits in the same
   // beep-aligned region of the X axis as the markers above.
