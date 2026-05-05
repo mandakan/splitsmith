@@ -5,7 +5,18 @@ Listed roughly in order of how much headroom they represent. Each entry
 documents the *physical* problem so we can pick the right feature/algorithm
 later instead of throwing more GBDT at it.
 
-## Current state (2026-05-04, 12 fixtures, 225 positives, after #92 TTA)
+## Current state (2026-05-05, 12 fixtures, 225 positives, after #92 TTA)
+
+**LOFO grouping note (#126):** LOFO folds are now keyed by stage-event
+identity ``(match, stage_number)`` rather than by fixture slug. This ensures
+that when secondary-camera derived fixtures are added (#97), the anchor
+headcam fixture and all derived recordings of the same stage are always held
+out together -- preventing the model from training on one camera's version
+while testing on another, which would inflate the LOFO metric. With the
+current 12-fixture headcam-only corpus the numbers are unchanged (each
+fixture maps to a unique stage group), but the scaffolding is correct.
+
+## Baseline before multi-camera corpus (2026-05-04, 12 fixtures)
 
 | Stage | Recall | Precision | Notes |
 |---|---|---|---|

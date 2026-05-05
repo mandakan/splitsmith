@@ -41,6 +41,11 @@ from .core import (
     save_config_yaml,
     save_run,
 )
+from .promote import (
+    PromoteFromAnchorRequest,
+    PromoteFromAnchorResult,
+    promote_from_anchor,
+)
 
 __all__ = [
     "REASON_VALUES",
@@ -53,11 +58,14 @@ __all__ = [
     "EvalRun",
     "EvalUniverse",
     "FixtureRecord",
+    "PromoteFromAnchorRequest",
+    "PromoteFromAnchorResult",
     "PromoteRequest",
     "RunSummary",
     "apply_labels",
     "list_fixtures",
     "load_run",
+    "promote_from_anchor",
     "promote_stage_to_fixture",
     "relabel_run",
     "rescore_universe",

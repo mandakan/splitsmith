@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Hammer,
   Headphones,
+  Link2,
   Loader2,
   Pause,
   Pencil,
@@ -182,6 +183,7 @@ export function Lab() {
             </Badge>
           )}
           <SaveYamlButton run={run} />
+          <PromoteFromAnchorButton fixtures={fixtures} />
           <RebuildCalibrationButton onCompleted={() => setRun(null)} />
           <Button onClick={runEval} disabled={evalLoading}>
             {evalLoading ? (
@@ -1428,6 +1430,225 @@ function SaveYamlButton({ run }: { run: LabEvalRun | null }) {
             <Button size="sm" onClick={submit} disabled={busy || !name.trim()}>
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
             </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Promote-from-anchor trigger (issue #125)
+// ---------------------------------------------------------------------------
+
+function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [anchorSlug, setAnchorSlug] = useState("");
+  const [secondaryWav, setSecondaryWav] = useState("");
+  const [slug, setSlug] = useState("");
+  const [cameraId, setCameraId] = useState("");
+  const [mount, setMount] = useState("tripod");
+  const [position, setPosition] = useState("bay-fixed");
+  const [audioSource, setAudioSource] = useState("internal");
+  const [snapWindowMs, setSnapWindowMs] = useState(60);
+  const [overwrite, setOverwrite] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled")
+      return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const j = await api.getJob(job.id);
+        if (stopped) return;
+        setJob(j);
+        if (j.status === "succeeded" && j.result) {
+          const fixPath = (j.result as any).fixture_path as string;
+          const anchorPath = fixtures.find((f) => f.slug === anchorSlug)?.audit_path ?? "";
+          setOpen(false);
+          navigate(
+            `/promote-review?fixture=${encodeURIComponent(fixPath)}&anchor=${encodeURIComponent(anchorPath)}`,
+          );
+        }
+      } catch (err) {
+        if (!stopped) setError(String(err));
+      }
+    };
+    const id = window.setInterval(tick, 1500);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [job, anchorSlug, fixtures, navigate]);
+
+  const submit = useCallback(async () => {
+    const anchor = fixtures.find((f) => f.slug === anchorSlug);
+    if (!anchor) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const j = await api.promoteFromAnchor({
+        anchor_path: anchor.audit_path,
+        secondary_wav_path: secondaryWav,
+        slug,
+        camera_id: cameraId,
+        mount,
+        position,
+        audio_source: audioSource,
+        snap_window_ms: snapWindowMs,
+        overwrite,
+      });
+      setJob(j);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [anchorSlug, audioSource, cameraId, fixtures, mount, overwrite, position, secondaryWav, slug, snapWindowMs]);
+
+  const running = job && (job.status === "pending" || job.status === "running");
+
+  const fieldCls = "w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-1.5"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!!running}
+      >
+        {running ? <Loader2 className="size-3.5 animate-spin" /> : <Link2 className="size-3.5" />}
+        Promote from anchor
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-96 rounded-md border border-border bg-popover p-4 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+            Promote from anchor
+          </div>
+          <div className="flex flex-col gap-2.5">
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Anchor fixture</div>
+              <select
+                className={fieldCls}
+                value={anchorSlug}
+                onChange={(e) => setAnchorSlug(e.target.value)}
+              >
+                <option value="">Pick anchor...</option>
+                {fixtures.map((f) => (
+                  <option key={f.slug} value={f.slug}>
+                    {f.slug} ({f.n_shots} shots)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Secondary WAV path (absolute)</div>
+              <input
+                className={fieldCls}
+                placeholder="/path/to/secondary.wav"
+                value={secondaryWav}
+                onChange={(e) => setSecondaryWav(e.target.value)}
+              />
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Target fixture slug</div>
+              <input
+                className={fieldCls}
+                placeholder="tallmilan-2026-stage5-phone"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Camera ID</div>
+                <input
+                  className={fieldCls}
+                  placeholder="apple-iphone17pro"
+                  value={cameraId}
+                  onChange={(e) => setCameraId(e.target.value)}
+                />
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Snap window (ms)</div>
+                <input
+                  className={fieldCls}
+                  type="number"
+                  min={10}
+                  max={500}
+                  value={snapWindowMs}
+                  onChange={(e) => setSnapWindowMs(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Mount</div>
+                <select className={fieldCls} value={mount} onChange={(e) => setMount(e.target.value)}>
+                  {["head","chest","belt","helmet","hand","tripod","monopod","gimbal"].map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Position</div>
+                <select className={fieldCls} value={position} onChange={(e) => setPosition(e.target.value)}>
+                  {["shooter","ro","squadmate","bay-fixed"].map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">Audio source</div>
+                <select className={fieldCls} value={audioSource} onChange={(e) => setAudioSource(e.target.value)}>
+                  {["internal","lav-wired","lav-wireless","shotgun-hotshoe"].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs cursor-pointer text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={overwrite}
+                onChange={(e) => setOverwrite(e.target.checked)}
+              />
+              Overwrite if slug exists
+            </label>
+            {running && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {job?.message ?? "running..."}
+                {job?.progress != null && (
+                  <span className="ml-auto font-mono">{Math.round(job.progress * 100)}%</span>
+                )}
+              </div>
+            )}
+            {error && (
+              <div className="text-xs text-destructive flex gap-1.5">
+                <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                {error}
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={submit}
+                disabled={submitting || !!running || !anchorSlug || !secondaryWav || !slug || !cameraId}
+              >
+                {submitting ? <Loader2 className="size-3.5 animate-spin mr-1" /> : null}
+                Promote
+              </Button>
+            </div>
           </div>
         </div>
       )}

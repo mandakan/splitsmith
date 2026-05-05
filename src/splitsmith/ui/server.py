@@ -84,6 +84,7 @@ from pydantic import BaseModel
 from .. import beep_detect, cross_align, report, user_config, video_probe
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
+from ..fixture_schema import AgcState, AudioSource, Camera, CameraMount, CameraPosition
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..config import BeepDetectConfig, Config
@@ -4150,6 +4151,166 @@ def create_app(
 
             job = state.jobs.submit(kind="rebuild_calibration", fn=_run)
             return JSONResponse(job.model_dump(mode="json"))
+
+        # ------------------------------------------------------------------
+        # Promote-from-anchor (issue #125)
+        # ------------------------------------------------------------------
+
+        class PromoteFromAnchorBody(BaseModel):
+            anchor_path: str
+            secondary_wav_path: str
+            slug: str
+            camera_id: str
+            mount: str
+            position: str
+            audio_source: str = "internal"
+            agc_state: str = "unknown"
+            snap_window_ms: float = 60.0
+            min_spacing_ms: float = 80.0
+            overwrite: bool = False
+
+        @app.post("/api/lab/promote-from-anchor")
+        def lab_promote_from_anchor(body: PromoteFromAnchorBody) -> JSONResponse:
+            """Submit a promote-from-anchor job (issue #125).
+
+            Runs cross-align + ensemble detection + snap on the secondary
+            audio, writes the pre-filled fixture JSON / WAV / promotion
+            report to the fixtures directory, and returns the job ID.
+            """
+            anchor_path = Path(body.anchor_path).resolve()
+            secondary_wav_path = Path(body.secondary_wav_path).resolve()
+
+            if not anchor_path.exists():
+                raise HTTPException(
+                    status_code=404, detail=f"anchor not found: {anchor_path}"
+                )
+            if not secondary_wav_path.exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"secondary WAV not found: {secondary_wav_path}",
+                )
+
+            anchor_wav_path = anchor_path.with_suffix(".wav")
+            if not anchor_wav_path.exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"anchor WAV not found: {anchor_wav_path}",
+                )
+
+            fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
+            target_json = fixtures_root / f"{body.slug}.json"
+            if target_json.exists() and not body.overwrite:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"fixture already exists: {target_json} (set overwrite=true to replace)",
+                )
+
+            try:
+                camera = Camera(
+                    id=body.camera_id,
+                    mount=CameraMount(body.mount),
+                    position=CameraPosition(body.position),
+                    audio_source=AudioSource(body.audio_source),
+                    agc_state=AgcState(body.agc_state),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            def _run(handle: JobHandle) -> None:
+                import shutil as _shutil
+
+                handle.update(progress=0.05, message="loading audio...")
+                primary_audio, primary_sr = beep_detect.load_audio(anchor_wav_path)
+                secondary_audio, secondary_sr = beep_detect.load_audio(secondary_wav_path)
+
+                handle.update(progress=0.10, message="loading ensemble models...")
+                runtime = _get_ensemble_runtime()
+
+                handle.check_cancel()
+                handle.update(progress=0.20, message="aligning + detecting shots...")
+
+                anchor_data = __import__("json").loads(
+                    anchor_path.read_text(encoding="utf-8")
+                )
+                result = lab_module.promote_from_anchor(
+                    lab_module.PromoteFromAnchorRequest(
+                        anchor_data=anchor_data,
+                        primary_audio=primary_audio,
+                        primary_sr=primary_sr,
+                        secondary_audio=secondary_audio,
+                        secondary_sr=secondary_sr,
+                        secondary_source_desc=str(secondary_wav_path),
+                        camera=camera,
+                        slug=body.slug,
+                        snap_window_ms=body.snap_window_ms,
+                        min_spacing_ms=body.min_spacing_ms,
+                    ),
+                    runtime=runtime,
+                )
+                for w in result.warnings:
+                    handle.update(message=f"WARNING: {w}")
+
+                handle.check_cancel()
+                handle.update(progress=0.85, message="writing fixture...")
+
+                fixtures_root.mkdir(parents=True, exist_ok=True)
+                tmp = target_json.with_suffix(".json.tmp")
+                tmp.write_text(
+                    __import__("json").dumps(
+                        result.fixture_data, indent=2, ensure_ascii=True
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                tmp.replace(target_json)
+
+                target_wav = fixtures_root / f"{body.slug}.wav"
+                _shutil.copy2(secondary_wav_path, target_wav)
+
+                report_path = fixtures_root / f"{body.slug}-promotion-report.json"
+                report_path.write_text(
+                    __import__("json").dumps(
+                        result.promotion_report, indent=2, ensure_ascii=True
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+                handle.update(
+                    progress=1.0,
+                    message=(
+                        f"done -- {result.promotion_report['counts']['snapped']}/"
+                        f"{result.promotion_report['counts']['anchor_shots']} snapped"
+                    ),
+                    result={
+                        "fixture_path": str(target_json),
+                        "slug": body.slug,
+                        "snapped": result.promotion_report["counts"]["snapped"],
+                        "missed": result.promotion_report["counts"]["missed"],
+                        "warnings": result.warnings,
+                    },
+                )
+
+            job = state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            return JSONResponse(job.model_dump(mode="json"))
+
+        @app.get("/api/lab/promote-report")
+        def lab_promote_report(slug: str) -> JSONResponse:
+            """Return the promotion report for a completed promote-from-anchor run."""
+            fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
+            report_path = fixtures_root / f"{slug}-promotion-report.json"
+            if not report_path.exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"promotion report not found for slug '{slug}'",
+                )
+            try:
+                data = __import__("json").loads(report_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500, detail=f"failed to read report: {exc}"
+                ) from exc
+            return JSONResponse(data)
 
     if lab_enabled:
         _setup_lab()

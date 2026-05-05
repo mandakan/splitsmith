@@ -1199,7 +1199,65 @@ export const api = {
 
   rebuildLabCalibration: (payload: { target_recall?: number; tolerance_ms?: number; fixtures?: string[] } = {}) =>
     request<Job>("/api/lab/rebuild-calibration", { method: "POST", json: payload }),
+
+  promoteFromAnchor: (payload: {
+    anchor_path: string;
+    secondary_wav_path: string;
+    slug: string;
+    camera_id: string;
+    mount: string;
+    position: string;
+    audio_source?: string;
+    agc_state?: string;
+    snap_window_ms?: number;
+    overwrite?: boolean;
+  }) => request<Job>("/api/lab/promote-from-anchor", { method: "POST", json: payload }),
+
+  getPromoteReport: (slug: string) =>
+    request<PromoteReport>("/api/lab/promote-report", { params: { slug } }),
 };
+
+export interface PromoteSnapResult {
+  shot_number: number;
+  anchor_time: number;
+  predicted_time: number;
+  snapped_time: number | null;
+  displacement_ms: number | null;
+  snap_confidence: number | null;
+  time_since_beep_s: number;
+  sanity_flag: "" | "no-candidate" | "monotonicity" | "min-spacing";
+}
+
+export interface PromoteReport {
+  slug: string;
+  secondary_source: string;
+  anchor_slug: string;
+  cross_align: {
+    secondary_beep_time: number;
+    offset_seconds: number;
+    confidence: number;
+    peak_correlation: number;
+  };
+  snap_window_ms: number;
+  drift_ms_per_minute: number | null;
+  counts: {
+    anchor_shots: number;
+    snapped: number;
+    missed: number;
+    monotonicity_flagged: number;
+    min_spacing_flagged: number;
+    voter_a_candidates: number;
+    total_candidates: number;
+  };
+  displacement_stats: {
+    mean_ms: number | null;
+    stdev_ms: number | null;
+    min_ms: number | null;
+    max_ms: number | null;
+  };
+  per_shot: PromoteSnapResult[];
+  warnings: string[];
+}
 
 export interface LabFixtureRecord {
   slug: string;

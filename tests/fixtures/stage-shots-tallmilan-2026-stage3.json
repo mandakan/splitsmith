@@ -450,5 +450,28 @@
     "plates": 0,
     "shots_per_paper": 2,
     "expected": 12
+  },
+  "camera": {
+    "id": "go3s",
+    "make": "Insta360",
+    "model": "GO 3S",
+    "mount": "head",
+    "position": "shooter",
+    "audio_source": "internal",
+    "agc_state": "unknown",
+    "sample_rate": 48000,
+    "bit_depth": null,
+    "audio_codec": null
+  },
+  "history": [],
+  "venue": {
+    "environment": "outdoor",
+    "surface": "unknown"
+  },
+  "gun": {
+    "calibre": "9mm",
+    "muzzle_device": "none",
+    "action": "semi-auto",
+    "power_factor": "minor"
   }
 }

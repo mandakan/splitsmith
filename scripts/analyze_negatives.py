@@ -48,6 +48,29 @@ DEFAULT_FIXTURES = [
 FIXTURES_DIR = Path("tests/fixtures")
 CACHE_DIR = FIXTURES_DIR / ".cache"
 
+
+def _stage_group(fixture_slug: str, fixtures_dir: Path = FIXTURES_DIR) -> str:
+    """Stable group key for LOFO folds: the stage-event identity.
+
+    For derived fixtures (those with an ``anchor`` block) the anchor's
+    slug is used as the group base so anchor + all derived recordings of
+    the same stage are held out in the same fold.  This prevents the
+    model from training on the headcam version of a stage while being
+    tested on the phone version -- an information leak that would inflate
+    LOFO precision.
+
+    Returns a string like ``"blacksmith-2026-stage5"`` (strips the
+    ``"stage-shots-"`` prefix from the relevant slug).
+    """
+    try:
+        data = json.loads((fixtures_dir / f"{fixture_slug}.json").read_text())
+        anchor = data.get("anchor") or {}
+        base = anchor.get("fixture_slug") or fixture_slug
+    except Exception:
+        base = fixture_slug
+    prefix = "stage-shots-"
+    return base[len(prefix):] if base.startswith(prefix) else base
+
 _CLAP_PROMPTS_SHOT = {
     "a single gunshot at close range",
     "a loud handgun shot recorded with a body-worn microphone",
@@ -147,20 +170,28 @@ def _holdout_probs(X, y, sample_weight=None):
     return probs
 
 
-def _lofo_probs(X, y, fixtures):
-    """Leave-one-fixture-out held-out probabilities.
+def _lofo_probs(X, y, fixtures, groups=None):
+    """Leave-one-stage-group-out held-out probabilities (issue #126).
 
-    For each fixture: train on all candidates from the OTHER fixtures, score
-    only the held-out fixture's candidates. This stresses cross-fixture
-    generalization (mic placement, gain, ambient profile) much harder than
-    StratifiedKFold which mixes fixtures across folds.
+    ``groups`` is the array of stage-event group keys (one per candidate).
+    When provided, each fold holds out ALL candidates whose group matches --
+    this ensures that an anchor headcam fixture and any derived secondary
+    fixtures of the same stage are always held out together, preventing
+    the model from training on one camera's version while testing on another.
+
+    When ``groups`` is ``None`` (legacy behaviour), falls back to grouping
+    by fixture slug (one fold per fixture slug).
     """
     from sklearn.ensemble import GradientBoostingClassifier
-    fixtures = np.asarray(fixtures)
+
+    fold_keys = np.asarray(groups if groups is not None else fixtures)
     probs = np.zeros_like(y, dtype=np.float64)
-    for fix in np.unique(fixtures):
-        te = fixtures == fix
+    for key in np.unique(fold_keys):
+        te = fold_keys == key
         tr = ~te
+        if tr.sum() == 0 or y[tr].sum() == 0:
+            # Not enough training data after holding this group out; skip.
+            continue
         clf = GradientBoostingClassifier(
             n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
         )
@@ -223,13 +254,20 @@ def main() -> None:
     print(f"Pass 1 (unweighted, target recall {args.target_recall*100:.0f} %):")
     print(f"  threshold {thr:.4f}  kept {kept}  recall {pos}/{n_pos} = {pos/n_pos*100:.1f}%  precision {pos/kept*100:.1f}%")
 
-    # Leave-one-fixture-out: stress cross-fixture generalization. If the
-    # StratifiedKFold gain comes from per-fixture overfitting, LOFO will
-    # collapse it; if it comes from physical structure, LOFO will hold.
+    # Leave-one-stage-group-out: stress cross-fixture generalization.
+    # Group key = stage-event identity (issue #126): anchor + all derived
+    # fixtures of the same stage share one group so they are always held
+    # out together. Prevents inflation when both headcam and phone versions
+    # of a stage are in the corpus.
     fixture_arr = [c["fixture"] for c in universe]
-    lofo_probs = _lofo_probs(X, y, fixture_arr)
+    group_arr = [_stage_group(c["fixture"]) for c in universe]
+    n_groups = len(set(group_arr))
+    lofo_probs = _lofo_probs(X, y, fixture_arr, groups=group_arr)
     lofo_thr, lofo_kept, lofo_pos = _eval_at_target_recall(lofo_probs, y, args.target_recall)
-    print(f"\nLOFO (leave-one-fixture-out, target recall {args.target_recall*100:.0f} %):")
+    print(
+        f"\nLOFO (leave-one-stage-group-out, {n_groups} groups, "
+        f"target recall {args.target_recall*100:.0f} %):"
+    )
     print(f"  threshold {lofo_thr:.4f}  kept {lofo_kept}  recall {lofo_pos}/{n_pos} = {lofo_pos/n_pos*100:.1f}%  precision {lofo_pos/lofo_kept*100:.1f}%")
 
     # Per-fixture LOFO breakdown so we can see which fixtures generalize and

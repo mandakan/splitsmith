@@ -422,6 +422,31 @@ def main() -> None:
         prec = pos / kept if kept else 0.0
         print(f"{fix:38s} {kept:5d} {rec*100:7.1f}% {prec*100:7.1f}% {gt:4d}")
 
+    # Per-camera-class breakdown (issue #126).  Reads camera.id from each
+    # fixture JSON.  All current fixtures are from the same headcam so this
+    # will show a single row until secondary-camera derived fixtures are added.
+    camera_id_by_fixture: dict[str, str] = {}
+    for fix in fixtures:
+        try:
+            d = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+            camera_id_by_fixture[fix] = d.get("camera", {}).get("id") or "unknown"
+        except Exception:
+            camera_id_by_fixture[fix] = "unknown"
+
+    camera_classes = sorted({camera_id_by_fixture[f] for f in fixtures})
+    if len(camera_classes) > 1:
+        print("\n=== Per-camera-class breakdown (consensus 3-of-4) ===")
+        print(f"{'camera':20s} {'fixtures':>8s} {'gt':>4s} {'kept':>5s} {'recall':>8s} {'prec':>8s}")
+        for cam in camera_classes:
+            cam_fixes = [f for f in fixtures if camera_id_by_fixture[f] == cam]
+            cam_rows = [c for c in universe if camera_id_by_fixture.get(c["fixture"], "unknown") == cam]
+            c_kept = sum(1 for c in cam_rows if c["vote_total"] >= 3)
+            c_pos = sum(1 for c in cam_rows if c["vote_total"] >= 3 and c["label"] == 1)
+            c_gt = sum(c["label"] for c in cam_rows)
+            c_rec = c_pos / c_gt * 100 if c_gt else 0.0
+            c_prec = c_pos / c_kept * 100 if c_kept else 0.0
+            print(f"{cam:20s} {len(cam_fixes):>8d} {c_gt:>4d} {c_kept:>5d} {c_rec:>7.1f}% {c_prec:>7.1f}%")
+
     print("\n=== Disagreement set (vote_total = 1) -- audit priority ===")
     disagreements = sorted(
         [c for c in universe if c["vote_total"] == 1],
