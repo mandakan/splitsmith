@@ -537,6 +537,45 @@ _ENSEMBLE_RUNTIME: ensemble_module.EnsembleRuntime | None = None
 _ENSEMBLE_RUNTIME_LOCK = threading.Lock()
 
 
+def _trim_wav_to_clip(src_wav: Path, dst_wav: Path, start_s: float, end_s: float) -> None:
+    """Cut ``src_wav`` to ``[start_s, end_s)`` and write to ``dst_wav``.
+
+    Used by promote-secondary so the derived fixture's audio matches the
+    "fixture is clip-local" convention shared with primary fixtures.
+    Re-encodes (PCM s16 / mono / 48 kHz) so the output is a stable WAV
+    regardless of the source codec.
+    """
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg binary not found on PATH")
+    duration = max(0.0, end_s - start_s)
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start_s:.3f}",
+        "-i",
+        str(src_wav),
+        "-t",
+        f"{duration:.3f}",
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-c:a",
+        "pcm_s16le",
+        str(dst_wav),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"ffmpeg trim failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc
+
+
 def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
     """Lazy-load + cache the ensemble runtime; thread-safe.
 
@@ -558,6 +597,25 @@ class HealthResponse(BaseModel):
     project_name: str | None = None
     project_root: str | None = None
     schema_version: int | None = None
+
+
+class PromoteSecondaryBody(BaseModel):
+    """Body for the project-aware promote-secondary endpoint.
+
+    Defined at module scope (not inside the lab-route factory) so FastAPI
+    can resolve the forward reference under ``from __future__ import
+    annotations``.
+    """
+
+    mount: str
+    position: str
+    audio_source: str = "internal"
+    agc_state: str = "unknown"
+    snap_window_ms: float = 60.0
+    min_spacing_ms: float = 80.0
+    slug: str | None = None
+    camera_id: str | None = None
+    overwrite: bool = False
 
 
 class BindRecentProjectRequest(BaseModel):
@@ -4314,24 +4372,69 @@ def create_app(
                 ) from exc
             return JSONResponse(data)
 
+        @app.delete("/api/lab/fixture")
+        def lab_delete_fixture(slug: str) -> JSONResponse:
+            """Delete a derived fixture (JSON + WAV + sibling artifacts).
+
+            Refuses to delete primary fixtures (those without an
+            ``anchor`` block) so a user can't accidentally nuke a
+            ground-truth headcam fixture by clicking the wrong button.
+            Use the file system directly if you really want to remove
+            a primary -- forcing that explicitness is intentional.
+            """
+            fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
+            json_path = fixtures_root / f"{slug}.json"
+            if not json_path.exists():
+                raise HTTPException(status_code=404, detail=f"no fixture: {slug}")
+            try:
+                payload = __import__("json").loads(json_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500, detail=f"failed to read fixture: {exc}"
+                ) from exc
+            anchor_block = payload.get("anchor")
+            if not isinstance(anchor_block, dict) or not anchor_block.get("fixture_slug"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"refusing to delete '{slug}': not a derived fixture "
+                        "(no anchor block). Remove primary fixtures from disk directly."
+                    ),
+                )
+            # Sibling artifacts to clean up alongside the fixture JSON.
+            removed: list[str] = []
+            for sibling in [
+                json_path,
+                json_path.with_suffix(".wav"),
+                fixtures_root / f"{slug}-promotion-report.json",
+                json_path.with_suffix(".json.bak"),
+            ]:
+                if sibling.exists():
+                    try:
+                        sibling.unlink()
+                        removed.append(sibling.name)
+                    except OSError as exc:
+                        raise HTTPException(
+                            status_code=500, detail=f"failed to remove {sibling.name}: {exc}"
+                        ) from exc
+            # Also remove peaks-* JSON cache files for this fixture.
+            for cache in fixtures_root.glob(f"{slug}.peaks-*.json"):
+                try:
+                    cache.unlink()
+                    removed.append(cache.name)
+                except OSError:
+                    pass
+            return JSONResponse({"removed": removed})
+
         # ------------------------------------------------------------------
         # Project-aware secondary promotion (issue #125 follow-up)
         # ------------------------------------------------------------------
 
-        class PromoteSecondaryBody(BaseModel):
-            mount: str
-            position: str
-            audio_source: str = "internal"
-            agc_state: str = "unknown"
-            snap_window_ms: float = 60.0
-            min_spacing_ms: float = 80.0
-            slug: str | None = None
-            camera_id: str | None = None
-            overwrite: bool = False
-
         @app.post("/api/stages/{stage_number}/videos/{video_id}/promote-secondary")
         def promote_secondary(
-            stage_number: int, video_id: str, body: PromoteSecondaryBody
+            stage_number: int,
+            video_id: str,
+            body: PromoteSecondaryBody = Body(...),  # noqa: B008
         ) -> JSONResponse:
             """Promote a project-mapped secondary video to a derived fixture.
 
@@ -4415,10 +4518,13 @@ def create_app(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             secondary_source_desc = str(source)
+            # Use the audited in-stream beep time from the project so the
+            # promote engine can skip cross-correlation entirely. The
+            # ingest screen owns this value (auto + manual + review); we
+            # treat it as ground truth on the project flow.
+            known_secondary_beep = float(video.beep_time)
 
             def _run(handle: JobHandle) -> None:
-                import shutil as _shutil
-
                 handle.update(progress=0.05, message="loading audio...")
                 primary_audio, primary_sr = beep_detect.load_audio(anchor_wav_path)
                 secondary_audio, secondary_sr = beep_detect.load_audio(secondary_wav_path)
@@ -4427,7 +4533,7 @@ def create_app(
                 runtime = _get_ensemble_runtime()
 
                 handle.check_cancel()
-                handle.update(progress=0.20, message="aligning + detecting shots...")
+                handle.update(progress=0.20, message="detecting shots...")
 
                 anchor_data = __import__("json").loads(anchor_path.read_text(encoding="utf-8"))
                 result = lab_module.promote_from_anchor(
@@ -4442,6 +4548,7 @@ def create_app(
                         slug=slug,
                         snap_window_ms=body.snap_window_ms,
                         min_spacing_ms=body.min_spacing_ms,
+                        secondary_beep_time=known_secondary_beep,
                     ),
                     runtime=runtime,
                 )
@@ -4451,17 +4558,63 @@ def create_app(
                 handle.check_cancel()
                 handle.update(progress=0.85, message="writing fixture...")
 
+                # Trim secondary WAV to a clip-local window around the beep,
+                # mirroring the convention used by primary fixtures (the
+                # /api/fixture/peaks endpoint marks fixture audio as
+                # ``trimmed=true``). Without this the audit screen renders
+                # the entire raw recording with shots clustered far down
+                # the timeline.
+                fixture_data = dict(result.fixture_data)
+                secondary_beep = float(fixture_data.get("beep_time") or 0.0)
+                shot_times = [
+                    float(s["time"])
+                    for s in fixture_data.get("shots", [])
+                    if s.get("time") is not None
+                ]
+                trim_buffer = 5.0
+                trim_tail = 5.0
+                clip_start = max(0.0, secondary_beep - trim_buffer)
+                clip_end_floor = secondary_beep + trim_buffer
+                clip_end = max(shot_times) + trim_tail if shot_times else clip_end_floor
+                clip_end = max(clip_end, clip_end_floor)
+
                 fixtures_root.mkdir(parents=True, exist_ok=True)
+                target_wav = fixtures_root / f"{slug}.wav"
+                handle.update(progress=0.88, message="trimming clip audio...")
+                _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
+
+                # Rebase time-axis fields to clip-local coordinates.
+                fixture_data["beep_time"] = round(secondary_beep - clip_start, 4)
+                fixture_data["fixture_window_in_source"] = [
+                    round(clip_start, 4),
+                    round(clip_end, 4),
+                ]
+                rebased_shots = []
+                for s in fixture_data.get("shots", []):
+                    s = dict(s)
+                    if s.get("time") is not None:
+                        s["time"] = round(float(s["time"]) - clip_start, 4)
+                    rebased_shots.append(s)
+                fixture_data["shots"] = rebased_shots
+                cands = (fixture_data.get("_candidates_pending_audit") or {}).get("candidates")
+                if cands:
+                    rebased_cands = []
+                    for c in cands:
+                        c = dict(c)
+                        if c.get("time") is not None:
+                            c["time"] = round(float(c["time"]) - clip_start, 4)
+                        rebased_cands.append(c)
+                    fixture_data["_candidates_pending_audit"] = {
+                        **fixture_data["_candidates_pending_audit"],
+                        "candidates": rebased_cands,
+                    }
+
                 tmp = target_json.with_suffix(".json.tmp")
                 tmp.write_text(
-                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(fixture_data, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
                 tmp.replace(target_json)
-
-                target_wav = fixtures_root / f"{slug}.wav"
-                _shutil.copy2(secondary_wav_path, target_wav)
 
                 report_path = fixtures_root / f"{slug}-promotion-report.json"
                 report_path.write_text(

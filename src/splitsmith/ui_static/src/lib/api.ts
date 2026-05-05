@@ -1220,6 +1220,12 @@ export const api = {
   getPromoteReport: (slug: string) =>
     request<PromoteReport>(`/api/lab/promote-report?slug=${encodeURIComponent(slug)}`),
 
+  deleteFixture: (slug: string) =>
+    request<{ removed: string[] }>(
+      `/api/lab/fixture?slug=${encodeURIComponent(slug)}`,
+      { method: "DELETE" },
+    ),
+
   promoteSecondary: (
     stageNumber: number,
     videoId: string,
@@ -1265,8 +1271,12 @@ export interface PromoteReport {
   cross_align: {
     secondary_beep_time: number;
     offset_seconds: number;
-    confidence: number;
+    /** Null when ``method == "known_beeps"`` -- arithmetic, no
+     *  correlation involved. Numeric only on the cross-correlation
+     *  fallback. */
+    confidence: number | null;
     peak_correlation: number;
+    method?: "cross_correlation" | "known_beeps";
   };
   snap_window_ms: number;
   drift_ms_per_minute: number | null;
@@ -1282,8 +1292,19 @@ export interface PromoteReport {
   displacement_stats: {
     mean_ms: number | null;
     stdev_ms: number | null;
+    p95_ms?: number | null;
     min_ms: number | null;
     max_ms: number | null;
+  };
+  amplitude_stats?: {
+    median: number | null;
+    p10: number | null;
+    low_amplitude_shots: number;
+  };
+  quality?: {
+    wrong_clip_suspected: boolean;
+    snap_rate: number;
+    warnings: string[];
   };
   per_shot: PromoteSnapResult[];
   warnings: string[];
@@ -1302,6 +1323,9 @@ export interface LabFixtureRecord {
   source_video: string | null;
   audit_mtime: number;
   audio_mtime: number | null;
+  /** Set on derived (promoted-from-anchor) fixtures; the SPA uses this
+   *  to surface a "re-review" link back to /promote-review. */
+  anchor_slug: string | null;
 }
 
 export interface LabEvalConfig {

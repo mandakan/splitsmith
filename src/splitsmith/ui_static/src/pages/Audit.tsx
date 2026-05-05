@@ -2005,7 +2005,11 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
     note: "",
   }));
   // Manual shots: those without a matching candidate_number.
+  // Derived (promoted) fixtures may include shots with ``time: null`` for
+  // anchor shots that the secondary couldn't snap; skip those here so the
+  // marker drawer doesn't crash on ``time.toFixed(...)``.
   for (const s of audit.shots ?? []) {
+    if (s.time == null) continue;
     if (s.candidate_number == null || s.source === "manual") {
       markers.push({
         id: `manual-shot-${s.shot_number}`,
@@ -2145,8 +2149,8 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
     [secondaries],
   );
   const [videoId, setVideoId] = useState(eligible[0]?.video_id ?? "");
-  const [mount, setMount] = useState("tripod");
-  const [position, setPosition] = useState("bay-fixed");
+  const [mount, setMount] = useState("hand");
+  const [position, setPosition] = useState("shooter");
   const [overwrite, setOverwrite] = useState(false);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
@@ -2262,11 +2266,14 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
                   onChange={(e) => setMount(e.target.value)}
                   className={`${fieldCls} mt-1`}
                 >
+                  <option value="hand">hand (handheld)</option>
                   <option value="tripod">tripod</option>
+                  <option value="monopod">monopod</option>
+                  <option value="gimbal">gimbal</option>
                   <option value="head">head</option>
                   <option value="chest">chest</option>
-                  <option value="handheld">handheld</option>
-                  <option value="other">other</option>
+                  <option value="belt">belt</option>
+                  <option value="helmet">helmet</option>
                 </select>
               </label>
               <label className="mt-2 block text-[11px]">
@@ -2276,9 +2283,10 @@ function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryBu
                   onChange={(e) => setPosition(e.target.value)}
                   className={`${fieldCls} mt-1`}
                 >
+                  <option value="shooter">shooter (follows shooter)</option>
                   <option value="bay-fixed">bay-fixed</option>
-                  <option value="shooter-mounted">shooter-mounted</option>
-                  <option value="other">other</option>
+                  <option value="ro">ro</option>
+                  <option value="squadmate">squadmate</option>
                 </select>
               </label>
               <label className="mt-2 flex items-center gap-2 text-[11px]">

@@ -952,6 +952,7 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
     note: "",
   }));
   for (const s of audit.shots ?? []) {
+    if (s.time == null) continue;
     if (s.candidate_number == null || s.source === "manual") {
       markers.push({
         id: `manual-shot-${s.shot_number}`,

@@ -21,10 +21,13 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Crosshair,
   ExternalLink,
   Save,
   SkipForward,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 import { Waveform } from "@/components/Waveform";
@@ -53,6 +56,7 @@ interface ShotState {
   shotNumber: number;
   time: number | null; // current time in secondary clip
   anchorTime: number;
+  predictedTime: number; // secondary_beep + (anchor_time - anchor_beep)
   status: ShotStatus;
   originalSource: string;
   displacement_ms: number | null;
@@ -162,7 +166,33 @@ export function PromoteReview() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Shared playhead in axis space (0 .. axis.span). Drives the playhead
+  // line in BOTH waveform panels and seeks BOTH audio elements so the
+  // user can scrub once and hear/see the same physical moment on each
+  // side.
+  const [playheadAxisTime, setPlayheadAxisTime] = useState(0);
+  // Manual zoom level. 1 = panel-fit, 2x/4x/8x stretches the content
+  // proportionally on both panels in lockstep.
+  const [zoomLevel, setZoomLevel] = useState(1);
+  // Manual override flag: once the user scrubs, stop auto-following the
+  // current shot (otherwise keyboard navigation would yank scrub away).
+  const [scrubLockedToShot, setScrubLockedToShot] = useState(true);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const waveColumnRef = useRef<HTMLDivElement>(null);
+  const [waveWidth, setWaveWidth] = useState(0);
+  const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const secondaryAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const el = waveColumnRef.current;
+    if (!el) return;
+    const update = () => setWaveWidth(el.getBoundingClientRect().width);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Load fixture + anchor + report
   useEffect(() => {
@@ -180,18 +210,28 @@ export function PromoteReview() {
         if (ancFix) setAnchorFixture(ancFix as StageAudit);
         if (ancPeaks) setAnchorPeaks(ancPeaks as PeaksResult);
 
+        const fixData = fix as StageAudit;
+        const ancData = (ancFix as StageAudit | undefined) ?? null;
+        const secBeep = fixData.beep_time ?? 0;
+        const ancBeep = ancData?.beep_time ?? 0;
+
         // Initialise shot state from fixture shots. Anchor link / subclass /
         // snap-promotion fields aren't in the canonical AuditShot type so we
         // cast to ``any`` and fall back to safe defaults when missing.
-        const initShots: ShotState[] = (fix as StageAudit).shots.map((s: AuditShot) => {
+        const initShots: ShotState[] = fixData.shots.map((s: AuditShot, i: number) => {
           const sx = s as unknown as Record<string, unknown>;
+          const ancShot = ancData?.shots[i];
+          const ancT = ancShot?.time ?? (sx.anchor_time as number | undefined) ?? s.time ?? 0;
+          const predicted = secBeep + (ancT - ancBeep);
           return {
             shotNumber: s.shot_number,
             time: s.time ?? null,
-            anchorTime: (sx.anchor_time as number | undefined) ?? s.time ?? 0,
+            anchorTime: ancT,
+            predictedTime: predicted,
             status: "pending",
             originalSource: (sx.source as string | undefined) ?? "promoted",
-            displacement_ms: (sx.snap_displacement_ms as number | null | undefined) ?? null,
+            displacement_ms:
+              s.time != null ? (s.time - predicted) * 1000 : null,
             sanityFlag: (sx.sanity_flag as string | undefined) ?? "",
             subclass: (sx.subclass as string | undefined) ?? "unknown",
           };
@@ -267,6 +307,13 @@ export function PromoteReview() {
       if (s.time === null) return prev;
       s.time = Math.max(0, s.time + deltaMsArg / 1000);
       s.status = "nudged";
+      // Recompute displacement from the (now-shifted) time. Amplitude
+      // sanity flag isn't recomputed here -- that needs the audio
+      // envelope, which lives on the server. We just clear it once a
+      // shot has been manually nudged so a stale "low-amplitude" badge
+      // doesn't mislead the user about the current marker position.
+      s.displacement_ms = (s.time - s.predictedTime) * 1000;
+      if (s.sanityFlag === "low-amplitude") s.sanityFlag = "";
       next[idx] = s;
       return next;
     });
@@ -317,35 +364,186 @@ export function PromoteReview() {
 
   // Waveform centre: the current shot's time on each side.
   const currentShot = shots[currentIdx];
-  const derivedZoomCenter = currentShot?.time ?? 0;
-  const anchorZoomCenter = anchorFixture && currentShot ? currentShot.anchorTime : 0;
+
+  // Align both panels by BEEP. The X axis is "time since beep", so both
+  // BEEP markers always render at the same X position (preBeep / span)
+  // regardless of clip durations or where the buzzer sits within each
+  // clip. A correctly-snapped shot then lands at the same X as its
+  // anchor counterpart. A vertical line drawn at any X cuts through both
+  // panels at the same physical moment.
+  const anchorBeep = anchorFixture?.beep_time ?? null;
+  const secondaryBeep = fixture?.beep_time ?? null;
+
+  const axis = useMemo(() => {
+    if (
+      !anchorPeaks ||
+      !derivedPeaks ||
+      anchorBeep == null ||
+      secondaryBeep == null
+    ) {
+      return null;
+    }
+    const preBeep = Math.max(anchorBeep, secondaryBeep);
+    const postBeep = Math.max(
+      anchorPeaks.duration - anchorBeep,
+      derivedPeaks.duration - secondaryBeep,
+    );
+    return { preBeep, postBeep, span: preBeep + postBeep };
+  }, [anchorPeaks, derivedPeaks, anchorBeep, secondaryBeep]);
+
+  const xPercent = useCallback(
+    (clipTime: number, beepTime: number): string => {
+      if (!axis || axis.span <= 0) return "0%";
+      return `${((clipTime - beepTime + axis.preBeep) / axis.span) * 100}%`;
+    },
+    [axis],
+  );
+
+  // Translate clip-local time to axis-space (time-since-beep + preBeep)
+  // so Waveform's playhead, which it renders at ``(currentTime /
+  // duration) * width``, lands at the axis-correct X. Both panels read
+  // from the same axis-space playhead so a click on either side moves
+  // the playhead consistently across both.
+  const toAxisTime = useCallback(
+    (clipTime: number, beepTime: number): number => {
+      if (!axis) return 0;
+      return clipTime - beepTime + axis.preBeep;
+    },
+    [axis],
+  );
+
+  const fromAxisTime = useCallback(
+    (axisT: number, beepTime: number): number => {
+      if (!axis) return 0;
+      return axisT - axis.preBeep + beepTime;
+    },
+    [axis],
+  );
+
+  // Auto-follow current shot when the user hasn't manually scrubbed.
+  useEffect(() => {
+    if (!scrubLockedToShot) return;
+    if (currentShot?.time == null || secondaryBeep == null) return;
+    setPlayheadAxisTime(toAxisTime(currentShot.time, secondaryBeep));
+  }, [currentShot, secondaryBeep, scrubLockedToShot, toAxisTime]);
+
+  // Seek both audio elements when the playhead moves so the user can
+  // press play to hear from the same physical moment on either side.
+  useEffect(() => {
+    if (!axis) return;
+    const a = anchorAudioRef.current;
+    const s = secondaryAudioRef.current;
+    if (a && anchorBeep != null) {
+      const t = fromAxisTime(playheadAxisTime, anchorBeep);
+      if (t >= 0 && Number.isFinite(t)) a.currentTime = t;
+    }
+    if (s && secondaryBeep != null) {
+      const t = fromAxisTime(playheadAxisTime, secondaryBeep);
+      if (t >= 0 && Number.isFinite(t)) s.currentTime = t;
+    }
+  }, [playheadAxisTime, axis, anchorBeep, secondaryBeep, fromAxisTime]);
+
+  const handleScrub = useCallback((axisT: number) => {
+    setScrubLockedToShot(false);
+    setPlayheadAxisTime(axisT);
+  }, []);
+
+  // pixelsPerSecond drives Waveform's content width. ``null`` lets the
+  // component auto-fit to its viewport (zoom = 1). For >1x zoom we
+  // compute pps so contentWidth = waveWidth * zoomLevel; both panels
+  // get the same pps so they zoom in lockstep.
+  const pixelsPerSecond =
+    zoomLevel > 1 && axis && axis.span > 0 && waveWidth > 0
+      ? (waveWidth * zoomLevel) / axis.span
+      : null;
+
+  // Pad peaks at both ends so the actual content sits in the same
+  // beep-aligned region of the X axis as the markers above.
+  const padPeaks = useCallback(
+    (peaks: number[], peaksDuration: number, beep: number): number[] => {
+      if (!axis || axis.span <= 0 || peaksDuration <= 0) return peaks;
+      const peaksPerSecond = peaks.length / peaksDuration;
+      const frontPadSeconds = axis.preBeep - beep;
+      const tailPadSeconds = axis.span - frontPadSeconds - peaksDuration;
+      const front = Math.max(0, Math.round(frontPadSeconds * peaksPerSecond));
+      const tail = Math.max(0, Math.round(tailPadSeconds * peaksPerSecond));
+      return [
+        ...new Array(front).fill(0),
+        ...peaks,
+        ...new Array(tail).fill(0),
+      ];
+    },
+    [axis],
+  );
+
+  const anchorPeaksPadded = useMemo(() => {
+    if (!anchorPeaks || anchorBeep == null) return [] as number[];
+    return padPeaks(anchorPeaks.peaks, anchorPeaks.duration, anchorBeep);
+  }, [anchorPeaks, anchorBeep, padPeaks]);
+
+  const derivedPeaksPadded = useMemo(() => {
+    if (!derivedPeaks || secondaryBeep == null) return [] as number[];
+    return padPeaks(derivedPeaks.peaks, derivedPeaks.duration, secondaryBeep);
+  }, [derivedPeaks, secondaryBeep, padPeaks]);
 
   // Vertical-line shot overlays computed in % of waveform width.  Cheaper than
   // pulling in the full editable MarkerLayer; this view is read-only on the
   // anchor side and the secondary side has its own dedicated nudge controls.
   const anchorShotOverlays = useMemo(() => {
-    if (!anchorPeaks) return [] as { left: string; label: number }[];
-    return (anchorFixture?.shots ?? []).map((s) => ({
-      left: `${((s.time ?? 0) / anchorPeaks.duration) * 100}%`,
-      label: s.shot_number,
-    }));
-  }, [anchorFixture, anchorPeaks]);
+    if (!axis || anchorBeep == null) return [] as { left: string; label: number }[];
+    return (anchorFixture?.shots ?? [])
+      .filter((s) => s.time != null)
+      .map((s) => ({
+        left: xPercent(s.time as number, anchorBeep),
+        label: s.shot_number,
+      }));
+  }, [anchorFixture, axis, anchorBeep, xPercent]);
 
+  // Encode state with BOTH colour (Wong palette tokens, colour-blind safe)
+  // AND a non-colour glyph + line style so the panel still parses for
+  // anyone who can't read the hue.
   const derivedShotOverlays = useMemo(() => {
-    if (!derivedPeaks) return [] as { left: string; label: number; color: string }[];
+    if (!axis || secondaryBeep == null)
+      return [] as {
+        left: string;
+        label: string;
+        color: string;
+        dashed: boolean;
+        thick: boolean;
+      }[];
     return shots
       .filter((s) => s.time !== null)
-      .map((s) => ({
-        left: `${(s.time! / derivedPeaks.duration) * 100}%`,
-        label: s.shotNumber,
-        color:
-          s.status === "confirmed" || s.status === "nudged"
-            ? "rgb(34 197 94)"
-            : s.status === "pending"
-              ? "rgb(148 163 184)"
-              : "rgb(239 68 68)",
-      }));
-  }, [shots, derivedPeaks]);
+      .map((s) => {
+        let color = "var(--split-ok)"; // yellow; pending
+        let glyph = "";
+        let dashed = false;
+        let thick = false;
+        if (s.status === "confirmed") {
+          color = "var(--split-good)"; // green
+          glyph = "✓ "; // check
+          thick = true;
+        } else if (s.status === "nudged") {
+          color = "var(--split-good)";
+          glyph = "· "; // middle dot
+          dashed = true;
+          thick = true;
+        } else if (s.status !== "pending") {
+          // missed-detector / missed-anchor-wrong / missed-dropped
+          color = "var(--split-slow)"; // vermillion
+          glyph = "! ";
+          dashed = s.status === "missed-anchor-wrong";
+        } else {
+          glyph = "";
+        }
+        return {
+          left: xPercent(s.time as number, secondaryBeep),
+          label: `${glyph}${s.shotNumber}`,
+          color,
+          dashed,
+          thick,
+        };
+      });
+  }, [shots, axis, secondaryBeep, xPercent]);
 
   if (!fixturePath) {
     return (
@@ -402,14 +600,59 @@ export function PromoteReview() {
             {report.counts.missed > 0 && (
               <span className="text-destructive">{report.counts.missed} missed</span>
             )}
-            {report.cross_align.confidence < 1.5 && (
+            {report.cross_align.confidence != null && report.cross_align.confidence < 1.5 && (
               <Badge variant="destructive" className="text-[10px] px-1.5">
                 low align conf {report.cross_align.confidence.toFixed(2)}
+              </Badge>
+            )}
+            {report.quality?.wrong_clip_suspected && (
+              <Badge
+                variant="destructive"
+                className="text-[10px] px-1.5"
+                title={report.quality.warnings.join("\n")}
+              >
+                ⚠ wrong clip suspected
               </Badge>
             )}
           </div>
         )}
         <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1"
+            onClick={() => setZoomLevel((z) => Math.max(1, z / 2))}
+            disabled={zoomLevel <= 1}
+            title="Zoom out (both panels)"
+          >
+            <ZoomOut size={12} />
+          </Button>
+          <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-center">
+            {zoomLevel}x
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1"
+            onClick={() => setZoomLevel((z) => Math.min(32, z * 2))}
+            disabled={zoomLevel >= 32}
+            title="Zoom in (both panels)"
+          >
+            <ZoomIn size={12} />
+          </Button>
+          <Button
+            size="sm"
+            variant={scrubLockedToShot ? "outline" : "ghost"}
+            className="gap-1"
+            onClick={() => setScrubLockedToShot((v) => !v)}
+            title={
+              scrubLockedToShot
+                ? "Playhead follows the current shot (click to unlock for free scrub)"
+                : "Free-scrub mode (click to re-lock to current shot)"
+            }
+          >
+            <Crosshair size={12} />
+          </Button>
           <span className="text-xs text-muted-foreground">{pending} pending</span>
           <Button
             size="sm"
@@ -437,31 +680,84 @@ export function PromoteReview() {
         </div>
       </div>
 
+      {report?.quality?.wrong_clip_suspected && report.quality.warnings.length > 0 && (
+        <div
+          className="px-4 py-2 border-b text-xs flex flex-col gap-1"
+          style={{
+            backgroundColor: "color-mix(in oklch, var(--destructive) 8%, transparent)",
+            borderColor: "color-mix(in oklch, var(--destructive) 30%, transparent)",
+          }}
+        >
+          <div className="flex items-center gap-2 font-medium" style={{ color: "var(--destructive)" }}>
+            <AlertCircle size={14} />
+            <span>
+              This fixture looks suspect -- the secondary may not actually
+              cover this stage
+            </span>
+          </div>
+          <ul className="text-[11px] text-muted-foreground list-disc pl-6">
+            {report.quality.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {/* Waveforms -- left panel */}
-        <div className="flex flex-col flex-1 overflow-hidden border-r">
+        <div ref={waveColumnRef} className="flex flex-col flex-1 overflow-hidden border-r">
           {/* Anchor waveform (frozen) */}
           {anchorPeaks && anchorFixture && (
             <div className="flex flex-col border-b" style={{ height: "45%" }}>
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0">
-                anchor (frozen) &mdash; {anchorPath?.split("/").pop()?.replace(".json", "")}
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0 flex items-center gap-2">
+                <span>anchor (frozen) &mdash; {anchorPath?.split("/").pop()?.replace(".json", "")}</span>
+                {anchorPath && (
+                  <audio
+                    ref={anchorAudioRef}
+                    controls
+                    preload="metadata"
+                    src={`/api/fixture/audio?path=${encodeURIComponent(anchorPath)}`}
+                    className="ml-auto h-7"
+                    style={{ maxWidth: 280 }}
+                  />
+                )}
               </div>
               <div className="flex-1 relative overflow-hidden">
                 <Waveform
-                  peaks={anchorPeaks.peaks}
-                  duration={anchorPeaks.duration}
-                  currentTime={anchorZoomCenter}
-                  onScrub={() => {}}
-                  height={140}
+                  peaks={anchorPeaksPadded}
+                  duration={axis?.span ?? 1}
+                  currentTime={playheadAxisTime}
+                  onScrub={handleScrub}
+                  height={220}
+                  pixelsPerSecond={pixelsPerSecond}
                 />
                 <div className="pointer-events-none absolute inset-0">
+                  {anchorBeep != null && axis && (
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5"
+                      style={{
+                        left: xPercent(anchorBeep, anchorBeep),
+                        backgroundColor: "var(--status-warning)",
+                      }}
+                    >
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
+                        style={{ color: "var(--status-warning)" }}
+                      >
+                        BEEP
+                      </div>
+                    </div>
+                  )}
                   {anchorShotOverlays.map((m, i) => (
                     <div
                       key={`anchor-${i}`}
-                      className="absolute top-0 bottom-0 w-px bg-blue-400/70"
-                      style={{ left: m.left }}
+                      className="absolute top-0 bottom-0 w-px opacity-70"
+                      style={{ left: m.left, backgroundColor: "var(--marker-detected)" }}
                     >
-                      <div className="absolute -top-0.5 -translate-x-1/2 text-[9px] text-blue-500 bg-background/80 px-0.5 rounded">
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
+                        style={{ color: "var(--marker-detected)" }}
+                      >
                         {m.label}
                       </div>
                     </div>
@@ -474,26 +770,65 @@ export function PromoteReview() {
           {/* Secondary waveform (editable) */}
           {derivedPeaks && (
             <div className="flex flex-col" style={{ flex: 1 }}>
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0">
-                secondary &mdash; {slug}
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0 flex items-center gap-2">
+                <span>secondary &mdash; {slug}</span>
+                {fixturePath && (
+                  <audio
+                    ref={secondaryAudioRef}
+                    controls
+                    preload="metadata"
+                    src={`/api/fixture/audio?path=${encodeURIComponent(fixturePath)}`}
+                    className="ml-auto h-7"
+                    style={{ maxWidth: 280 }}
+                  />
+                )}
               </div>
               <div className="flex-1 relative overflow-hidden">
                 <Waveform
-                  peaks={derivedPeaks.peaks}
-                  duration={derivedPeaks.duration}
-                  currentTime={derivedZoomCenter}
-                  onScrub={() => {}}
-                  height={140}
+                  peaks={derivedPeaksPadded}
+                  duration={axis?.span ?? 1}
+                  currentTime={playheadAxisTime}
+                  onScrub={handleScrub}
+                  height={220}
+                  pixelsPerSecond={pixelsPerSecond}
                 />
                 <div className="pointer-events-none absolute inset-0">
+                  {secondaryBeep != null && axis && (
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5"
+                      style={{
+                        left: xPercent(secondaryBeep, secondaryBeep),
+                        backgroundColor: "var(--status-warning)",
+                      }}
+                    >
+                      <div
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
+                        style={{ color: "var(--status-warning)" }}
+                      >
+                        BEEP
+                      </div>
+                    </div>
+                  )}
                   {derivedShotOverlays.map((m, i) => (
                     <div
                       key={`shot-${i}`}
-                      className="absolute top-0 bottom-0 w-px"
-                      style={{ left: m.left, backgroundColor: m.color }}
+                      className={`absolute top-0 bottom-0 ${m.thick ? "w-0.5" : "w-px"}`}
+                      style={{
+                        left: m.left,
+                        // Solid for confirmed, dashed for nudged /
+                        // anchor-wrong, plain for pending. Encodes state
+                        // with line style so the markers parse without
+                        // depending on color alone.
+                        backgroundColor: m.dashed ? "transparent" : m.color,
+                        backgroundImage: m.dashed
+                          ? `linear-gradient(to bottom, ${m.color} 50%, transparent 50%)`
+                          : undefined,
+                        backgroundSize: m.dashed ? "1px 6px" : undefined,
+                        backgroundRepeat: m.dashed ? "repeat-y" : undefined,
+                      }}
                     >
                       <div
-                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/90 px-0.5 rounded font-medium"
                         style={{ color: m.color }}
                       >
                         {m.label}

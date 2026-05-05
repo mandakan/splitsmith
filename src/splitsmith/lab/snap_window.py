@@ -30,6 +30,7 @@ Sanity filters surface, but do not resolve, ambiguity:
 
 from __future__ import annotations
 
+import numpy as np
 from pydantic import BaseModel
 
 
@@ -118,6 +119,197 @@ def snap_anchor_shots(
                 snap_confidence=candidates[best_idx][1],
                 time_since_beep_s=time_since_beep,
                 sanity_flag="",
+            )
+        )
+
+    min_spacing_s = min_spacing_ms / 1000.0
+    for k in range(len(results) - 1):
+        a, b = results[k], results[k + 1]
+        if a.snapped_time is None or b.snapped_time is None:
+            continue
+        gap = b.snapped_time - a.snapped_time
+        if gap <= 0:
+            for r in (a, b):
+                if r.sanity_flag == "":
+                    r.sanity_flag = "monotonicity"
+        elif gap < min_spacing_s:
+            for r in (a, b):
+                if r.sanity_flag == "":
+                    r.sanity_flag = "min-spacing"
+
+    return results
+
+
+_GUIDED_ENVELOPE_SR = 1000  # 1 kHz envelope -> 1 ms snap resolution.
+
+
+def _peak_envelope(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
+    """Block-MAX of ``|audio|`` downsampled to ``target_sr``.
+
+    For ground-truth fixture creation we want the snap to land on the
+    actual amplitude peak of the transient (the gunshot impulse), not
+    on the centroid of a smoothed envelope. Hilbert + block-mean spread
+    the energy and shifted argmax away from the peak -- block-max on
+    raw ``|audio|`` preserves the loudest sample's position to within
+    one downsampled bin (1 ms at target_sr=1000).
+    """
+    if audio.ndim != 1:
+        raise ValueError("audio must be mono")
+    abs_a = np.abs(audio).astype(np.float32, copy=False)
+    block = max(1, source_sr // target_sr)
+    trimmed = (abs_a.size // block) * block
+    if trimmed == 0:
+        return np.zeros(0, dtype=np.float32)
+    return abs_a[:trimmed].reshape(-1, block).max(axis=1)
+
+
+def guided_snap_anchor_shots(
+    anchor_beep_time: float,
+    anchor_shots: list[float],
+    secondary_beep_time: float,
+    secondary_audio: np.ndarray,
+    secondary_sr: int,
+    *,
+    window_ms: float = 150.0,
+    min_spacing_ms: float = 80.0,
+    noise_floor_ratio: float = 3.0,
+    mode: str = "onset",
+    onset_threshold: float = 0.3,
+    drift_ms_per_s: float = 0.0,
+) -> list[SnapResult]:
+    """Snap anchor shots to a local feature within ``window_ms``.
+
+    The anchor + known beep math gives us a tight prior on each shot's
+    secondary clip-local time; this function refines the prior to a
+    sample-accurate ground-truth time on the secondary's audio.
+
+    Args:
+        anchor_beep_time: anchor clip-local beep time, seconds.
+        anchor_shots: anchor clip-local shot times, seconds.
+        secondary_beep_time: secondary clip-local beep time, seconds.
+        secondary_audio: mono float32 audio, full secondary clip.
+        secondary_sr: source sample rate of ``secondary_audio``.
+        window_ms: half-width of the localization window. Default 150 ms
+            is wide enough to absorb a few hundred ppm of clock drift on
+            a 30 s stage; the second pass tightens this once drift is
+            estimated.
+        min_spacing_ms: adjacent snaps closer than this get a flag.
+        noise_floor_ratio: peak amplitudes below this multiple of the
+            envelope's median get a ``low-amplitude`` sanity flag.
+        mode: ``"onset"`` (default, ground-truth-style: first sample
+            within the window where the envelope rises through
+            ``onset_threshold`` of the local peak) or ``"peak"``
+            (argmax of the envelope -- loudest 1 ms slice).
+        onset_threshold: fraction of the local peak amplitude used as
+            the rising-edge crossing threshold for onset mode.
+        drift_ms_per_s: linear drift correction applied to the prior.
+            The prediction becomes ``secondary_beep + (1 + drift_ms_per_s
+            / 1000) * (anchor_t - anchor_beep)``. Set by the second
+            pass after fitting drift on first-pass displacements.
+
+    Returns one :class:`SnapResult` per anchor shot. ``snap_confidence``
+    is the local peak amplitude (0..1-ish), ``sanity_flag`` records
+    monotonicity / spacing / amplitude issues.
+    """
+    if mode not in {"onset", "peak"}:
+        raise ValueError(f"mode must be 'onset' or 'peak', got {mode!r}")
+
+    envelope = _peak_envelope(secondary_audio, secondary_sr, _GUIDED_ENVELOPE_SR)
+    if envelope.size == 0:
+        return [
+            SnapResult(
+                shot_number=i,
+                anchor_time=anchor_t,
+                predicted_time=secondary_beep_time + (anchor_t - anchor_beep_time),
+                snapped_time=None,
+                displacement_ms=None,
+                snap_confidence=None,
+                time_since_beep_s=anchor_t - anchor_beep_time,
+                sanity_flag="no-candidate",
+            )
+            for i, anchor_t in enumerate(anchor_shots, start=1)
+        ]
+
+    duration_s = envelope.size / _GUIDED_ENVELOPE_SR
+    window_s = window_ms / 1000.0
+    median_amp = float(np.median(envelope))
+    noise_floor = median_amp * noise_floor_ratio
+    drift_factor = drift_ms_per_s / 1000.0
+
+    results: list[SnapResult] = []
+    for i, anchor_t in enumerate(anchor_shots, start=1):
+        time_since_beep = anchor_t - anchor_beep_time
+        predicted = secondary_beep_time + time_since_beep * (1.0 + drift_factor)
+
+        # Window outside the recording -> no candidate.
+        if predicted + window_s < 0 or predicted - window_s > duration_s:
+            results.append(
+                SnapResult(
+                    shot_number=i,
+                    anchor_time=anchor_t,
+                    predicted_time=predicted,
+                    snapped_time=None,
+                    displacement_ms=None,
+                    snap_confidence=None,
+                    time_since_beep_s=time_since_beep,
+                    sanity_flag="no-candidate",
+                )
+            )
+            continue
+
+        start_idx = max(0, int(round((predicted - window_s) * _GUIDED_ENVELOPE_SR)))
+        end_idx = min(envelope.size, int(round((predicted + window_s) * _GUIDED_ENVELOPE_SR)))
+        if end_idx <= start_idx:
+            results.append(
+                SnapResult(
+                    shot_number=i,
+                    anchor_time=anchor_t,
+                    predicted_time=predicted,
+                    snapped_time=None,
+                    displacement_ms=None,
+                    snap_confidence=None,
+                    time_since_beep_s=time_since_beep,
+                    sanity_flag="no-candidate",
+                )
+            )
+            continue
+
+        local = envelope[start_idx:end_idx]
+        peak_offset = int(np.argmax(local))
+        peak_amp = float(local[peak_offset])
+
+        if mode == "onset":
+            # Walk backward from the peak until the envelope falls below
+            # ``onset_threshold * peak``. That's the start of the rising
+            # edge -- the physical impulse moment, not the loudness peak.
+            threshold = peak_amp * onset_threshold
+            j = peak_offset
+            while j > 0 and local[j] >= threshold:
+                j -= 1
+            if local[j] < threshold:
+                snap_idx = start_idx + j + 1
+            else:
+                # Walked all the way to the window start without crossing
+                # threshold -- the rising edge started outside the window
+                # (previous shot's tail or a wider transient). Fall back
+                # to the peak position so we don't snap to the window edge.
+                snap_idx = start_idx + peak_offset
+        else:
+            snap_idx = start_idx + peak_offset
+
+        snap_t = snap_idx / _GUIDED_ENVELOPE_SR
+
+        sanity = "" if peak_amp >= noise_floor else "low-amplitude"
+        results.append(
+            SnapResult(
+                shot_number=i,
+                anchor_time=anchor_t,
+                predicted_time=predicted,
+                snapped_time=snap_t,
+                displacement_ms=(snap_t - predicted) * 1000.0,
+                snap_confidence=peak_amp,
+                time_since_beep_s=time_since_beep,
+                sanity_flag=sanity,
             )
         )
 
