@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import numpy as np
 from pydantic import BaseModel
-from scipy.signal import hilbert
 
 
 class SnapResult(BaseModel):
@@ -144,22 +143,24 @@ def snap_anchor_shots(
 _GUIDED_ENVELOPE_SR = 1000  # 1 kHz envelope -> 1 ms snap resolution.
 
 
-def _hilbert_envelope(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
-    """Hilbert magnitude envelope downsampled to ``target_sr``.
+def _peak_envelope(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
+    """Block-MAX of ``|audio|`` downsampled to ``target_sr``.
 
-    Cheap block-mean downsample (same approach as cross_align._envelope)
-    -- alignment doesn't need anti-aliasing precision, only the gross
-    loudness shape.
+    For ground-truth fixture creation we want the snap to land on the
+    actual amplitude peak of the transient (the gunshot impulse), not
+    on the centroid of a smoothed envelope. Hilbert + block-mean spread
+    the energy and shifted argmax away from the peak -- block-max on
+    raw ``|audio|`` preserves the loudest sample's position to within
+    one downsampled bin (1 ms at target_sr=1000).
     """
     if audio.ndim != 1:
         raise ValueError("audio must be mono")
-    env = np.abs(hilbert(audio.astype(np.float64))).astype(np.float32)
+    abs_a = np.abs(audio).astype(np.float32, copy=False)
     block = max(1, source_sr // target_sr)
-    trimmed = (env.size // block) * block
+    trimmed = (abs_a.size // block) * block
     if trimmed == 0:
         return np.zeros(0, dtype=np.float32)
-    env = env[:trimmed].reshape(-1, block).mean(axis=1)
-    return env.astype(np.float32, copy=False)
+    return abs_a[:trimmed].reshape(-1, block).max(axis=1)
 
 
 def guided_snap_anchor_shots(
@@ -200,7 +201,7 @@ def guided_snap_anchor_shots(
     is the peak amplitude (0..1-ish), ``sanity_flag`` records
     monotonicity / spacing / amplitude issues.
     """
-    envelope = _hilbert_envelope(secondary_audio, secondary_sr, _GUIDED_ENVELOPE_SR)
+    envelope = _peak_envelope(secondary_audio, secondary_sr, _GUIDED_ENVELOPE_SR)
     if envelope.size == 0:
         return [
             SnapResult(

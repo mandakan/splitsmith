@@ -53,6 +53,7 @@ interface ShotState {
   shotNumber: number;
   time: number | null; // current time in secondary clip
   anchorTime: number;
+  predictedTime: number; // secondary_beep + (anchor_time - anchor_beep)
   status: ShotStatus;
   originalSource: string;
   displacement_ms: number | null;
@@ -180,18 +181,28 @@ export function PromoteReview() {
         if (ancFix) setAnchorFixture(ancFix as StageAudit);
         if (ancPeaks) setAnchorPeaks(ancPeaks as PeaksResult);
 
+        const fixData = fix as StageAudit;
+        const ancData = (ancFix as StageAudit | undefined) ?? null;
+        const secBeep = fixData.beep_time ?? 0;
+        const ancBeep = ancData?.beep_time ?? 0;
+
         // Initialise shot state from fixture shots. Anchor link / subclass /
         // snap-promotion fields aren't in the canonical AuditShot type so we
         // cast to ``any`` and fall back to safe defaults when missing.
-        const initShots: ShotState[] = (fix as StageAudit).shots.map((s: AuditShot) => {
+        const initShots: ShotState[] = fixData.shots.map((s: AuditShot, i: number) => {
           const sx = s as unknown as Record<string, unknown>;
+          const ancShot = ancData?.shots[i];
+          const ancT = ancShot?.time ?? (sx.anchor_time as number | undefined) ?? s.time ?? 0;
+          const predicted = secBeep + (ancT - ancBeep);
           return {
             shotNumber: s.shot_number,
             time: s.time ?? null,
-            anchorTime: (sx.anchor_time as number | undefined) ?? s.time ?? 0,
+            anchorTime: ancT,
+            predictedTime: predicted,
             status: "pending",
             originalSource: (sx.source as string | undefined) ?? "promoted",
-            displacement_ms: (sx.snap_displacement_ms as number | null | undefined) ?? null,
+            displacement_ms:
+              s.time != null ? (s.time - predicted) * 1000 : null,
             sanityFlag: (sx.sanity_flag as string | undefined) ?? "",
             subclass: (sx.subclass as string | undefined) ?? "unknown",
           };
@@ -267,6 +278,13 @@ export function PromoteReview() {
       if (s.time === null) return prev;
       s.time = Math.max(0, s.time + deltaMsArg / 1000);
       s.status = "nudged";
+      // Recompute displacement from the (now-shifted) time. Amplitude
+      // sanity flag isn't recomputed here -- that needs the audio
+      // envelope, which lives on the server. We just clear it once a
+      // shot has been manually nudged so a stale "low-amplitude" badge
+      // doesn't mislead the user about the current marker position.
+      s.displacement_ms = (s.time - s.predictedTime) * 1000;
+      if (s.sanityFlag === "low-amplitude") s.sanityFlag = "";
       next[idx] = s;
       return next;
     });
