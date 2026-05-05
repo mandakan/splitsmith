@@ -70,6 +70,7 @@ DEFAULT_FIXTURES = [
     # ``scripts/extract_clap_features.py`` and
     # ``scripts/extract_audio_embeddings.py`` for these stems first to
     # pick them up.
+    "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
     "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",

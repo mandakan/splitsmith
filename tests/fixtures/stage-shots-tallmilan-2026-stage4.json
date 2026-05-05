@@ -9,126 +9,144 @@
       "candidate_number": 8,
       "time": 7.811,
       "ms_after_beep": 2811,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 2,
       "candidate_number": 9,
       "time": 8.426,
       "ms_after_beep": 3426,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 3,
       "candidate_number": 10,
       "time": 9.05,
       "ms_after_beep": 4050,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 4,
       "candidate_number": 11,
       "time": 9.631,
       "ms_after_beep": 4631,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 5,
       "candidate_number": 12,
       "time": 10.165,
       "ms_after_beep": 5165,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 6,
       "candidate_number": 13,
       "time": 10.725,
       "ms_after_beep": 5725,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 7,
       "candidate_number": 14,
       "time": 11.215,
       "ms_after_beep": 6215,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 8,
       "candidate_number": 24,
       "time": 13.864,
       "ms_after_beep": 8864,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 9,
       "candidate_number": 26,
       "time": 14.703,
       "ms_after_beep": 9703,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 10,
       "candidate_number": 27,
       "time": 15.423,
       "ms_after_beep": 10423,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 11,
       "candidate_number": 35,
       "time": 19.047,
       "ms_after_beep": 14047,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 12,
       "candidate_number": 37,
       "time": 19.934,
       "ms_after_beep": 14934,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 13,
       "candidate_number": 51,
       "time": 23.399,
       "ms_after_beep": 18399,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 14,
       "candidate_number": 53,
       "time": 24.51,
       "ms_after_beep": 19510,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 15,
       "candidate_number": 55,
       "time": 25.178,
       "ms_after_beep": 20178,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 16,
       "candidate_number": 56,
       "time": 25.876,
       "ms_after_beep": 20876,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 17,
       "candidate_number": 57,
       "time": 26.701,
       "ms_after_beep": 21701,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     },
     {
       "shot_number": 18,
       "candidate_number": 59,
       "time": 27.27,
       "ms_after_beep": 22270,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "barrel"
     }
   ],
   "audit_events": [

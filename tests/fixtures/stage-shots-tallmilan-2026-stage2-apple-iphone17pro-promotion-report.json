@@ -1,0 +1,186 @@
+{
+  "slug": "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
+  "secondary_source": "/Users/mathias/matches/tallmilan-2026/raw/IMG_3133.MOV",
+  "anchor_slug": "volumes-go-3s-dcim-camera01-vid-20260426-162417-00-048-mp4-s",
+  "cross_align": {
+    "method": "known_beeps",
+    "secondary_beep_time": 19.3304,
+    "offset_seconds": 18.8304,
+    "confidence": null,
+    "peak_correlation": 1.0
+  },
+  "snap_window_ms": 60.0,
+  "drift_ms_per_minute": 0.0,
+  "counts": {
+    "anchor_shots": 12,
+    "snapped": 12,
+    "missed": 0,
+    "monotonicity_flagged": 0,
+    "min_spacing_flagged": 0,
+    "voter_a_candidates": 32,
+    "total_candidates": 40
+  },
+  "displacement_stats": {
+    "mean_ms": -13.07,
+    "stdev_ms": 15.59,
+    "p95_ms": 10.81,
+    "min_ms": -37.18,
+    "max_ms": 26.26
+  },
+  "amplitude_stats": {
+    "median": 0.8105,
+    "p10": 0.5473,
+    "low_amplitude_shots": 0
+  },
+  "quality": {
+    "wrong_clip_suspected": false,
+    "snap_rate": 1.0,
+    "warnings": []
+  },
+  "per_shot": [
+    {
+      "shot_number": 1,
+      "anchor_time": 3.9176,
+      "predicted_time": 22.750557481386668,
+      "snapped_time": 22.744,
+      "displacement_ms": -6.557481386668229,
+      "snap_confidence": 0.5404052734375,
+      "time_since_beep_s": 3.4176,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 2,
+      "anchor_time": 7.3167,
+      "predicted_time": 26.152184542281667,
+      "snapped_time": 26.115,
+      "displacement_ms": -37.18454228166834,
+      "snap_confidence": 0.60931396484375,
+      "time_since_beep_s": 6.8167,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 3,
+      "anchor_time": 9.2916,
+      "predicted_time": 28.128552781686672,
+      "snapped_time": 28.123,
+      "displacement_ms": -5.552781686670727,
+      "snap_confidence": 0.871337890625,
+      "time_since_beep_s": 8.7916,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 4,
+      "anchor_time": 10.5843,
+      "predicted_time": 29.42221383950167,
+      "snapped_time": 29.4,
+      "displacement_ms": -22.213839501670662,
+      "snap_confidence": 0.932586669921875,
+      "time_since_beep_s": 10.0843,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 5,
+      "anchor_time": 13.037,
+      "predicted_time": 31.87673729931667,
+      "snapped_time": 31.903,
+      "displacement_ms": 26.262700683329143,
+      "snap_confidence": 0.69647216796875,
+      "time_since_beep_s": 12.537,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 6,
+      "anchor_time": 14.6365,
+      "predicted_time": 33.47742644759167,
+      "snapped_time": 33.462,
+      "displacement_ms": -15.426447591664783,
+      "snap_confidence": 0.53680419921875,
+      "time_since_beep_s": 14.1365,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 7,
+      "anchor_time": 16.0779,
+      "predicted_time": 34.91989805642167,
+      "snapped_time": 34.887,
+      "displacement_ms": -32.898056421672095,
+      "snap_confidence": 0.665924072265625,
+      "time_since_beep_s": 15.5779,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 8,
+      "anchor_time": 17.0637,
+      "predicted_time": 35.906430949431666,
+      "snapped_time": 35.896,
+      "displacement_ms": -10.430949431665226,
+      "snap_confidence": 0.831146240234375,
+      "time_since_beep_s": 16.5637,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 9,
+      "anchor_time": 20.6793,
+      "predicted_time": 39.52471896725167,
+      "snapped_time": 39.51,
+      "displacement_ms": -14.718967251674542,
+      "snap_confidence": 0.90252685546875,
+      "time_since_beep_s": 20.1793,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 10,
+      "anchor_time": 21.4821,
+      "predicted_time": 40.32811580891167,
+      "snapped_time": 40.313,
+      "displacement_ms": -15.115808911666306,
+      "snap_confidence": 0.789947509765625,
+      "time_since_beep_s": 20.9821,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 11,
+      "anchor_time": 23.2625,
+      "predicted_time": 42.10983944729167,
+      "snapped_time": 42.108,
+      "displacement_ms": -1.8394472916725135,
+      "snap_confidence": 0.862884521484375,
+      "time_since_beep_s": 22.7625,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 12,
+      "anchor_time": 25.9568,
+      "predicted_time": 44.80614252462667,
+      "snapped_time": 44.785,
+      "displacement_ms": -21.14252462667565,
+      "snap_confidence": 0.934295654296875,
+      "time_since_beep_s": 25.4568,
+      "sanity_flag": ""
+    }
+  ],
+  "warnings": [],
+  "camera": {
+    "id": "go3s",
+    "make": "Insta360",
+    "model": "GO 3S",
+    "mount": "head",
+    "position": "shooter",
+    "audio_source": "internal",
+    "agc_state": "unknown",
+    "sample_rate": 48000,
+    "bit_depth": null,
+    "audio_codec": null
+  },
+  "venue": {
+    "environment": "outdoor",
+    "surface": "unknown"
+  },
+  "gun": {
+    "calibre": "9mm",
+    "muzzle_device": "none",
+    "action": "semi-auto",
+    "power_factor": "minor"
+  },
+  "history": []
+}

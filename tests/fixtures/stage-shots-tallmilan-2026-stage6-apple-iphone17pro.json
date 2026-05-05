@@ -859,7 +859,34 @@
         "kept": true
       }
     ],
-    "labels_by_time": {}
+    "labels_by_time": {
+      "7.524": "steel_ring",
+      "11.686": "steel_ring",
+      "7.038": "movement",
+      "7.323": "steel_ring",
+      "7.622": "steel_ring",
+      "7.989": "cross_bay",
+      "8.446": "barrel_echo",
+      "8.679": "movement",
+      "10.935": "movement",
+      "11.120": "movement",
+      "11.210": "movement",
+      "12.598": "other",
+      "6.048": "handling",
+      "6.111": "handling",
+      "6.432": "movement",
+      "6.519": "movement",
+      "6.877": "movement",
+      "10.259": "movement",
+      "10.723": "movement",
+      "16.675": "movement",
+      "9.313": "cross_bay",
+      "9.545": "movement",
+      "9.917": "movement",
+      "10.843": "movement",
+      "16.072": "movement",
+      "9.041": "movement"
+    }
   },
   "audit_notes": "",
   "stage_rounds": {
