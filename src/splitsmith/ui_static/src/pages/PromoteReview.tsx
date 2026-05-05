@@ -21,10 +21,13 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Crosshair,
   ExternalLink,
   Save,
   SkipForward,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 import { Waveform } from "@/components/Waveform";
@@ -163,7 +166,33 @@ export function PromoteReview() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Shared playhead in axis space (0 .. axis.span). Drives the playhead
+  // line in BOTH waveform panels and seeks BOTH audio elements so the
+  // user can scrub once and hear/see the same physical moment on each
+  // side.
+  const [playheadAxisTime, setPlayheadAxisTime] = useState(0);
+  // Manual zoom level. 1 = panel-fit, 2x/4x/8x stretches the content
+  // proportionally on both panels in lockstep.
+  const [zoomLevel, setZoomLevel] = useState(1);
+  // Manual override flag: once the user scrubs, stop auto-following the
+  // current shot (otherwise keyboard navigation would yank scrub away).
+  const [scrubLockedToShot, setScrubLockedToShot] = useState(true);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const waveColumnRef = useRef<HTMLDivElement>(null);
+  const [waveWidth, setWaveWidth] = useState(0);
+  const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const secondaryAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const el = waveColumnRef.current;
+    if (!el) return;
+    const update = () => setWaveWidth(el.getBoundingClientRect().width);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Load fixture + anchor + report
   useEffect(() => {
@@ -372,9 +401,9 @@ export function PromoteReview() {
 
   // Translate clip-local time to axis-space (time-since-beep + preBeep)
   // so Waveform's playhead, which it renders at ``(currentTime /
-  // duration) * width``, lands at the axis-correct X. Without this the
-  // anchor and secondary playheads drift apart as the user steps
-  // through shots, even though the snap data is correct.
+  // duration) * width``, lands at the axis-correct X. Both panels read
+  // from the same axis-space playhead so a click on either side moves
+  // the playhead consistently across both.
   const toAxisTime = useCallback(
     (clipTime: number, beepTime: number): number => {
       if (!axis) return 0;
@@ -383,14 +412,50 @@ export function PromoteReview() {
     [axis],
   );
 
-  const derivedZoomCenter =
-    currentShot?.time != null && secondaryBeep != null
-      ? toAxisTime(currentShot.time, secondaryBeep)
-      : 0;
-  const anchorZoomCenter =
-    anchorFixture && currentShot && anchorBeep != null
-      ? toAxisTime(currentShot.anchorTime, anchorBeep)
-      : 0;
+  const fromAxisTime = useCallback(
+    (axisT: number, beepTime: number): number => {
+      if (!axis) return 0;
+      return axisT - axis.preBeep + beepTime;
+    },
+    [axis],
+  );
+
+  // Auto-follow current shot when the user hasn't manually scrubbed.
+  useEffect(() => {
+    if (!scrubLockedToShot) return;
+    if (currentShot?.time == null || secondaryBeep == null) return;
+    setPlayheadAxisTime(toAxisTime(currentShot.time, secondaryBeep));
+  }, [currentShot, secondaryBeep, scrubLockedToShot, toAxisTime]);
+
+  // Seek both audio elements when the playhead moves so the user can
+  // press play to hear from the same physical moment on either side.
+  useEffect(() => {
+    if (!axis) return;
+    const a = anchorAudioRef.current;
+    const s = secondaryAudioRef.current;
+    if (a && anchorBeep != null) {
+      const t = fromAxisTime(playheadAxisTime, anchorBeep);
+      if (t >= 0 && Number.isFinite(t)) a.currentTime = t;
+    }
+    if (s && secondaryBeep != null) {
+      const t = fromAxisTime(playheadAxisTime, secondaryBeep);
+      if (t >= 0 && Number.isFinite(t)) s.currentTime = t;
+    }
+  }, [playheadAxisTime, axis, anchorBeep, secondaryBeep, fromAxisTime]);
+
+  const handleScrub = useCallback((axisT: number) => {
+    setScrubLockedToShot(false);
+    setPlayheadAxisTime(axisT);
+  }, []);
+
+  // pixelsPerSecond drives Waveform's content width. ``null`` lets the
+  // component auto-fit to its viewport (zoom = 1). For >1x zoom we
+  // compute pps so contentWidth = waveWidth * zoomLevel; both panels
+  // get the same pps so they zoom in lockstep.
+  const pixelsPerSecond =
+    zoomLevel > 1 && axis && axis.span > 0 && waveWidth > 0
+      ? (waveWidth * zoomLevel) / axis.span
+      : null;
 
   // Pad peaks at both ends so the actual content sits in the same
   // beep-aligned region of the X axis as the markers above.
@@ -543,6 +608,42 @@ export function PromoteReview() {
           </div>
         )}
         <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1"
+            onClick={() => setZoomLevel((z) => Math.max(1, z / 2))}
+            disabled={zoomLevel <= 1}
+            title="Zoom out (both panels)"
+          >
+            <ZoomOut size={12} />
+          </Button>
+          <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-center">
+            {zoomLevel}x
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1"
+            onClick={() => setZoomLevel((z) => Math.min(32, z * 2))}
+            disabled={zoomLevel >= 32}
+            title="Zoom in (both panels)"
+          >
+            <ZoomIn size={12} />
+          </Button>
+          <Button
+            size="sm"
+            variant={scrubLockedToShot ? "outline" : "ghost"}
+            className="gap-1"
+            onClick={() => setScrubLockedToShot((v) => !v)}
+            title={
+              scrubLockedToShot
+                ? "Playhead follows the current shot (click to unlock for free scrub)"
+                : "Free-scrub mode (click to re-lock to current shot)"
+            }
+          >
+            <Crosshair size={12} />
+          </Button>
           <span className="text-xs text-muted-foreground">{pending} pending</span>
           <Button
             size="sm"
@@ -572,7 +673,7 @@ export function PromoteReview() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Waveforms -- left panel */}
-        <div className="flex flex-col flex-1 overflow-hidden border-r">
+        <div ref={waveColumnRef} className="flex flex-col flex-1 overflow-hidden border-r">
           {/* Anchor waveform (frozen) */}
           {anchorPeaks && anchorFixture && (
             <div className="flex flex-col border-b" style={{ height: "45%" }}>
@@ -580,6 +681,7 @@ export function PromoteReview() {
                 <span>anchor (frozen) &mdash; {anchorPath?.split("/").pop()?.replace(".json", "")}</span>
                 {anchorPath && (
                   <audio
+                    ref={anchorAudioRef}
                     controls
                     preload="metadata"
                     src={`/api/fixture/audio?path=${encodeURIComponent(anchorPath)}`}
@@ -592,9 +694,10 @@ export function PromoteReview() {
                 <Waveform
                   peaks={anchorPeaksPadded}
                   duration={axis?.span ?? 1}
-                  currentTime={anchorZoomCenter}
-                  onScrub={() => {}}
-                  height={140}
+                  currentTime={playheadAxisTime}
+                  onScrub={handleScrub}
+                  height={220}
+                  pixelsPerSecond={pixelsPerSecond}
                 />
                 <div className="pointer-events-none absolute inset-0">
                   {anchorBeep != null && axis && (
@@ -639,6 +742,7 @@ export function PromoteReview() {
                 <span>secondary &mdash; {slug}</span>
                 {fixturePath && (
                   <audio
+                    ref={secondaryAudioRef}
                     controls
                     preload="metadata"
                     src={`/api/fixture/audio?path=${encodeURIComponent(fixturePath)}`}
@@ -651,9 +755,10 @@ export function PromoteReview() {
                 <Waveform
                   peaks={derivedPeaksPadded}
                   duration={axis?.span ?? 1}
-                  currentTime={derivedZoomCenter}
-                  onScrub={() => {}}
-                  height={140}
+                  currentTime={playheadAxisTime}
+                  onScrub={handleScrub}
+                  height={220}
+                  pixelsPerSecond={pixelsPerSecond}
                 />
                 <div className="pointer-events-none absolute inset-0">
                   {secondaryBeep != null && axis && (
