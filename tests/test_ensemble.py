@@ -389,6 +389,51 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_voter_c_feature_matrix_appends_camera_class_one_hot() -> None:
+    """Issue #139: ``voter_c_feature_matrix`` appends a one-hot block.
+
+    Verifies dimensionality, default fallback, per-row class assignment,
+    and that unknown classes fall through to ``headcam`` (column 0).
+    """
+    from splitsmith.ensemble.features import (
+        CAMERA_CLASS_FEATURE_DIM,
+        camera_class_one_hot,
+    )
+
+    n = 3
+    hand = np.zeros((n, HAND_FEATURE_DIM), dtype=np.float64)
+    sims = np.zeros((n, len(CLAP_PROMPTS)), dtype=np.float32)
+    diffs = np.zeros(n, dtype=np.float32)
+
+    # Default (no camera_class) -> all rows tagged headcam (column 0).
+    x_default = voter_c_feature_matrix(hand, sims, diffs)
+    assert x_default.shape == (n, VOTER_C_FEATURE_DIM)
+    cam_block = x_default[:, -CAMERA_CLASS_FEATURE_DIM:]
+    assert np.array_equal(cam_block[:, 0], np.ones(n))
+    assert cam_block[:, 1].sum() == 0
+
+    # Single string -> broadcast to every row.
+    x_phone = voter_c_feature_matrix(hand, sims, diffs, camera_classes="handheld")
+    cam_block = x_phone[:, -CAMERA_CLASS_FEATURE_DIM:]
+    assert np.array_equal(cam_block[:, 1], np.ones(n))
+    assert cam_block[:, 0].sum() == 0
+
+    # Per-row mix.
+    x_mix = voter_c_feature_matrix(
+        hand, sims, diffs, camera_classes=["headcam", "handheld", "future-class"]
+    )
+    cam_block = x_mix[:, -CAMERA_CLASS_FEATURE_DIM:]
+    # Unknown class falls back to headcam (column 0).
+    assert cam_block[0, 0] == 1.0 and cam_block[0, 1] == 0.0
+    assert cam_block[1, 0] == 0.0 and cam_block[1, 1] == 1.0
+    assert cam_block[2, 0] == 1.0 and cam_block[2, 1] == 0.0
+
+    # Direct one-hot helper sanity.
+    only = camera_class_one_hot("handheld", 4)
+    assert only.shape == (4, CAMERA_CLASS_FEATURE_DIM)
+    assert (only[:, 1] == 1.0).all()
+
+
 def test_camera_class_from_mount_maps_known_mounts() -> None:
     from splitsmith.ensemble import (
         CAMERA_CLASS_HANDHELD,
