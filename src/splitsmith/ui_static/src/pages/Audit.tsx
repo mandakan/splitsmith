@@ -131,7 +131,7 @@ export function Audit() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
-  const [gridMode, setGridMode] = useState(false);
+  const [gridMode, setGridMode] = useState(true);
   // Stable refs used by grid-mode callbacks to avoid stale closures without
   // adding them to useCallback / useEffect dep arrays.
   const isPlayingRef = useRef(false);
@@ -310,7 +310,7 @@ export function Audit() {
     sessionEventsRef.current = [];
     isDirtyRef.current = false;
     setSaveStatus({ kind: "idle" });
-    setGridMode(false);
+    setGridMode(true);
     secondaryRefsMap.current.clear();
     secondaryBufferingSet.current.clear();
     blockedBySecondaryRef.current = false;

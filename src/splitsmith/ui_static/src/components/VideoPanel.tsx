@@ -216,65 +216,8 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       .filter((v) => v.beep_time != null && primaryBeepTime != null);
     const showToggle = syncableSecondaries.length > 0;
 
-    const primaryVideoEl = (
-      <video
-        ref={internalRef}
-        src={videoSrc}
-        preload="metadata"
-        playsInline
-        controls={false}
-        className={cn("block h-auto w-full", gridMode ? "max-h-[40vh]" : "max-h-[60vh]")}
-        data-active-path={active.path}
-        onLoadStart={() => setStatus("loading")}
-        onLoadedData={() => setStatus("ready")}
-        onCanPlay={() => setStatus("ready")}
-        onPlaying={() => setStatus("ready")}
-        onSeeked={() => setStatus("ready")}
-        onWaiting={() => setStatus("buffering")}
-        onSeeking={() => setStatus("buffering")}
-        onStalled={() => setStatus("buffering")}
-        onError={(e) => {
-          setStatus("error");
-          const code = e.currentTarget.error?.code;
-          setErrorMessage(
-            code === 4
-              ? "Source not found or unsupported"
-              : code === 2
-                ? "Network error while loading video"
-                : "Couldn't play this video",
-          );
-        }}
-      />
-    );
-
-    const primaryOverlays = (
-      <>
-        {showBufferIndicator && status !== "error" ? (
-          <div
-            role="status"
-            aria-live="polite"
-            className="absolute inset-0 flex items-center justify-center bg-black/40 text-white"
-          >
-            <div className="flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-sm">
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-              <span>{status === "loading" ? "Loading video..." : "Buffering..."}</span>
-            </div>
-          </div>
-        ) : null}
-        {status === "error" ? (
-          <div
-            role="alert"
-            className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 p-4 text-center text-white"
-          >
-            <AlertCircle className="size-6 text-destructive" aria-hidden />
-            <div className="text-sm font-medium">{errorMessage ?? "Playback error"}</div>
-            <div className="text-xs text-white/70">
-              <code>{basename(active.path)}</code> -- check the file exists in the project.
-            </div>
-          </div>
-        ) : null}
-      </>
-    );
+    // True when grid mode is active and there are secondaries to show alongside.
+    const showGrid = gridMode && syncableSecondaries.length > 0;
 
     return (
       <div className={cn("space-y-3", className)}>
@@ -317,7 +260,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 );
               })}
             </div>
-          ) : gridMode ? (
+          ) : showGrid ? (
             <span className="text-sm text-muted-foreground">
               Grid -- {syncableSecondaries.length + 1} cameras
             </span>
@@ -350,37 +293,96 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
           ) : null}
         </div>
 
-        {/* Video area: grid or single */}
-        {gridMode ? (
-          <div
-            className={cn(
-              "grid gap-2",
-              syncableSecondaries.length === 1 ? "grid-cols-2" : "grid-cols-3",
-            )}
-          >
-            <div className="relative overflow-hidden rounded-md bg-black">
+        {/*
+         * Video area. The primary <video> element is always the first child of
+         * the first grid cell so React never unmounts it when switching modes --
+         * an unmount would drop readyState and cause play() to fail silently.
+         * We vary grid-cols-* via className only; the DOM structure stays fixed.
+         */}
+        <div
+          className={cn(
+            "grid gap-2",
+            showGrid && syncableSecondaries.length >= 2
+              ? "grid-cols-3"
+              : showGrid
+              ? "grid-cols-2"
+              : "grid-cols-1",
+          )}
+        >
+          <div className="relative overflow-hidden rounded-md bg-black">
+            {showGrid ? (
               <div className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-0.5 text-xs text-white/80">
                 Primary
               </div>
-              {primaryVideoEl}
-              {primaryOverlays}
-            </div>
-            {syncableSecondaries.map((v, i) => (
-              <SecondarySlot
-                key={v.path}
-                label={`Cam ${i + 2}`}
-                src={`/api/videos/stream?path=${encodeURIComponent(v.path)}`}
-                onRef={(el) => onSecondaryRef(v.path, el)}
-                onBuffering={(b) => onSecondaryBuffering(v.path, b)}
-              />
-            ))}
+            ) : null}
+            <video
+              ref={internalRef}
+              src={videoSrc}
+              preload="metadata"
+              playsInline
+              controls={false}
+              className={cn(
+                "block h-auto w-full",
+                showGrid ? "max-h-[40vh]" : "max-h-[60vh]",
+              )}
+              data-active-path={active.path}
+              onLoadStart={() => setStatus("loading")}
+              onLoadedData={() => setStatus("ready")}
+              onCanPlay={() => setStatus("ready")}
+              onPlaying={() => setStatus("ready")}
+              onSeeked={() => setStatus("ready")}
+              onWaiting={() => setStatus("buffering")}
+              onSeeking={() => setStatus("buffering")}
+              onStalled={() => setStatus("buffering")}
+              onError={(e) => {
+                setStatus("error");
+                const code = e.currentTarget.error?.code;
+                setErrorMessage(
+                  code === 4
+                    ? "Source not found or unsupported"
+                    : code === 2
+                      ? "Network error while loading video"
+                      : "Couldn't play this video",
+                );
+              }}
+            />
+            {showBufferIndicator && status !== "error" ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-0 flex items-center justify-center bg-black/40 text-white"
+              >
+                <div className="flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-sm">
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                  <span>{status === "loading" ? "Loading video..." : "Buffering..."}</span>
+                </div>
+              </div>
+            ) : null}
+            {status === "error" ? (
+              <div
+                role="alert"
+                className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 p-4 text-center text-white"
+              >
+                <AlertCircle className="size-6 text-destructive" aria-hidden />
+                <div className="text-sm font-medium">{errorMessage ?? "Playback error"}</div>
+                <div className="text-xs text-white/70">
+                  <code>{basename(active.path)}</code> -- check the file exists in the project.
+                </div>
+              </div>
+            ) : null}
           </div>
-        ) : (
-          <div className="relative overflow-hidden rounded-md bg-black">
-            {primaryVideoEl}
-            {primaryOverlays}
-          </div>
-        )}
+          {showGrid
+            ? syncableSecondaries.map((v, i) => (
+                <SecondarySlot
+                  key={v.path}
+                  label={`Cam ${i + 2}`}
+                  src={`/api/videos/stream?path=${encodeURIComponent(v.path)}`}
+                  onRef={(el) => onSecondaryRef(v.path, el)}
+                  onBuffering={(b) => onSecondaryBuffering(v.path, b)}
+                />
+              ))
+            : null}
+        </div>
       </div>
     );
   },
