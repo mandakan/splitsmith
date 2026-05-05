@@ -14,11 +14,35 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 
+class StageRounds(BaseModel):
+    """Round count + target breakdown for a stage.
+
+    Drives the ensemble's adaptive Voter C and apriori boost (issue #103
+    + #143 follow-up): ``expected`` is the canonical "expected number of
+    shots on this stage" used to pick top-(K+slack) and to lift the
+    top-K candidates over the consensus line. ``paper_targets`` and
+    ``steel_targets`` are passive metadata for now -- surfaced in the
+    audit JSON for downstream stratified eval.
+
+    Sourced from SSI Scoreboard's ``min_rounds`` / ``paper_targets`` /
+    ``steel_targets`` per stage; populated by the project's scoreboard
+    import path.
+    """
+
+    expected: int | None = Field(
+        default=None,
+        description="Required round count from the stage card (SSI ``min_rounds``).",
+    )
+    paper_targets: int | None = Field(default=None, description="Paper-target count.")
+    steel_targets: int | None = Field(default=None, description="Steel-target count.")
+
+
 class StageData(BaseModel):
     stage_number: int
     stage_name: str
     time_seconds: float
     scorecard_updated_at: datetime
+    stage_rounds: StageRounds | None = None
 
 
 class Shot(BaseModel):

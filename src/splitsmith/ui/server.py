@@ -1386,7 +1386,14 @@ def create_app(
         project: MatchProject, ct: int, mid: int, competitor_id: int
     ) -> int:
         """Shared helper -- get_stage_times + merge_stage_times, with the
-        right error mapping. Persists the project on success."""
+        right error mapping. Persists the project on success.
+
+        Also opportunistically backfills ``stage_rounds`` from the cached
+        ``MatchData`` so existing projects pick up ``min_rounds`` /
+        target counts on the existing "refresh times" SPA action without
+        requiring a full overwrite-import that would orphan video
+        assignments.
+        """
         with _resolve_scoreboard_client() as client:
             try:
                 results = client.get_stage_times(ct, mid, competitor_id)
@@ -1397,6 +1404,15 @@ def create_app(
                     status_code=404,
                     detail=str(exc),
                 ) from exc
+            # Best-effort backfill of stage_rounds. Failure is non-fatal
+            # -- stage times are the user-visible action; rounds are an
+            # additive bonus that the next real scoreboard refresh can
+            # still cover.
+            try:
+                match_data = client.get_match(ct, mid)
+                project.merge_stage_rounds(match_data)
+            except ScoreboardError:
+                pass
         merged = project.merge_stage_times(results)
         project.save(state.project_root)
         return merged
@@ -2232,6 +2248,16 @@ def create_app(
                 "beep_time": round(beep_in_clip, 4),
                 "shots": [],
             }
+        # Carry stage_rounds (min_rounds + target breakdown) from the
+        # project state into the audit JSON so the ensemble's adaptive
+        # voter C + apriori boost can consume ``stage_rounds.expected``.
+        # Project value wins over a stale audit-JSON copy: re-running
+        # detection after a scoreboard refresh should pick up the new
+        # round count without manual edits.
+        if stg.stage_rounds is not None:
+            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(
+                mode="json", exclude_none=True
+            )
         expected_rounds: int | None = None
         sr_block = existing_json.get("stage_rounds")
         if isinstance(sr_block, dict):
