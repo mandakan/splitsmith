@@ -2066,6 +2066,140 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
+def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Issue #143: ``StageVideo.camera_mount`` flows through ``camera_class_from_mount``
+    into ``detect_shots_ensemble``. Verifies the wiring without exercising
+    the actual ensemble (which is monkeypatched).
+    """
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    primary.camera_mount = "hand"  # iPhone-style; should map to handheld class
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+
+    captured: dict = {}
+
+    def _fake_detect(audio_array, sr, beep, stage_t, runtime, **kwargs):
+        captured.update(kwargs)
+        return _fake_ensemble_result([])
+
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", _fake_detect)
+
+    resp = client.post("/api/stages/1/shot-detect")
+    assert resp.status_code == 200
+    _wait_for_job(client, resp.json()["id"])
+    assert captured.get("camera_class") == "handheld"
+
+
+def test_shot_detect_endpoint_passes_default_class_when_mount_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``camera_mount=None`` -> default class (``headcam``) reaches the ensemble."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    primary.camera_mount = None
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+
+    captured: dict = {}
+
+    def _fake_detect(audio_array, sr, beep, stage_t, runtime, **kwargs):
+        captured.update(kwargs)
+        return _fake_ensemble_result([])
+
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", _fake_detect)
+
+    resp = client.post("/api/stages/1/shot-detect")
+    assert resp.status_code == 200
+    _wait_for_job(client, resp.json()["id"])
+    # ``camera_class_from_mount(None)`` -> ``headcam`` (the default class).
+    assert captured.get("camera_class") == "headcam"
+
+
+def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
+    """PATCH /camera-mount validates against the CameraMount enum and persists."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    video_id = primary.video_id
+
+    # Override.
+    resp = client.patch(f"/api/stages/1/videos/{video_id}/camera-mount", json={"mount": "hand"})
+    assert resp.status_code == 200, resp.text
+    refreshed = MatchProject.load(project_root)
+    assert refreshed.stages[0].primary().camera_mount == "hand"
+
+    # Bad value rejected.
+    resp = client.patch(f"/api/stages/1/videos/{video_id}/camera-mount", json={"mount": "shoulder"})
+    assert resp.status_code == 400, resp.text
+
+    # Clear back to None.
+    resp = client.patch(f"/api/stages/1/videos/{video_id}/camera-mount", json={"mount": None})
+    assert resp.status_code == 200
+    refreshed = MatchProject.load(project_root)
+    assert refreshed.stages[0].primary().camera_mount is None
+
+
 def test_shot_detect_endpoint_400_when_no_beep(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"

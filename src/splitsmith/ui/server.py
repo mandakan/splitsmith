@@ -779,6 +779,20 @@ class BeepReviewRequest(BaseModel):
     reviewed: bool
 
 
+class CameraMountRequest(BaseModel):
+    """Body for PATCH /api/stages/{n}/videos/{vid}/camera-mount (#143).
+
+    Override the heuristic ``camera_mount`` stamped at register time.
+    Drives the per-camera-class threshold dispatch in the 4-voter
+    ensemble. ``mount`` accepts any fixture-schema ``CameraMount``
+    string ("head", "chest", "helmet", "belt", "hand", "gimbal",
+    "tripod", "monopod") or ``None`` to clear back to the heuristic
+    default.
+    """
+
+    mount: str | None
+
+
 class BeepSnapRequest(BaseModel):
     """Body for POST /api/stages/{n}/videos/{vid}/beep/snap.
 
@@ -2230,6 +2244,10 @@ def create_app(
 
         handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
         audio_array, sr = beep_detect.load_audio(audit.audio_path)
+        # Camera-class dispatch (issue #143). When the primary's mount
+        # is set, look up handheld vs. headcam thresholds; otherwise
+        # the ensemble falls back to the default class (headcam).
+        cam_class = ensemble_module.camera_class_from_mount(prim.camera_mount)
         result = ensemble_module.detect_shots_ensemble(
             audio_array,
             sr,
@@ -2237,6 +2255,7 @@ def create_app(
             stg.time_seconds,
             runtime,
             expected_rounds=expected_rounds,
+            camera_class=cam_class,
         )
 
         candidates: list[dict[str, Any]] = []
@@ -2734,6 +2753,33 @@ def create_app(
                 fn=lambda h, n=stage_number: _run_shot_detect(h, n),
             )
 
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.patch("/api/stages/{stage_number}/videos/{video_id}/camera-mount")
+    def set_camera_mount(stage_number: int, video_id: str, req: CameraMountRequest) -> JSONResponse:
+        """Override the heuristic ``camera_mount`` (issue #143).
+
+        Validated against the fixture-schema ``CameraMount`` enum so
+        downstream code can trust the stored value. ``None`` clears the
+        override -- the next shot-detect run will use the artifact's
+        default class instead of a per-class threshold.
+        """
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        from ..fixture_schema import CameraMount
+
+        if req.mount is not None:
+            try:
+                CameraMount(req.mount)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"unknown camera mount {req.mount!r}; expected one of "
+                        + ", ".join(m.value for m in CameraMount)
+                    ),
+                ) from exc
+        video.camera_mount = req.mount
+        project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/beep/select")
