@@ -83,11 +83,19 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import beep_detect, cross_align, report, user_config, video_probe
+from .. import coach as coach_module
+from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
-from ..config import BeepDetectConfig, Config
+from ..config import (
+    BeepDetectConfig,
+    CoachAutoClassifyConfig,
+    Config,
+    IntervalClass,
+    IntervalClassSource,
+)
 from ..fixture_schema import (
     AgcState,
     AudioSource,
@@ -904,6 +912,22 @@ class SkipStageRequest(BaseModel):
     """Body for POST /api/stages/{n}/skip. Toggles ``stage.skipped``."""
 
     skipped: bool
+
+
+class CoachShotPatchRequest(BaseModel):
+    """Body for PATCH /api/stages/{n}/shots/{shot_number}/coach (issue #161).
+
+    Each field is independently optional. Use ``clear_class`` / ``clear_note``
+    to drop a previously-set value. ``interval_class`` and
+    ``interval_class_source`` must be set together when present.
+    """
+
+    interval_class: IntervalClass | None = None
+    interval_class_source: IntervalClassSource | None = None
+    clear_class: bool = False
+    improvement_flag: bool | None = None
+    coaching_note: str | None = None
+    clear_note: bool = False
 
 
 class RemoveVideoRequest(BaseModel):
@@ -3212,6 +3236,310 @@ def create_app(
         )
         anomalies = report.detect_anomalies_structured(shots, beep_time, stg.time_seconds)
         return JSONResponse({"anomalies": [a.model_dump() for a in anomalies]})
+
+    # ----------------------------------------------------------------------
+    # Coach endpoints (#161). Read-only on shot timestamps -- all writes go
+    # to the coaching annotation fields owned by ``splitsmith.coach``.
+    # Storage is the same audit JSON Audit reads/writes. The coach is lazy:
+    # GET surfaces the current rule's verdict + a stale flag without
+    # mutating; reclassify persists auto entries; PATCH writes one shot's
+    # coach fields.
+    # ----------------------------------------------------------------------
+
+    def _video_beep_in_clip(
+        project: MatchProject,
+        stage_number: int,
+        video: StageVideo,
+    ) -> float | None:
+        """Where the beep falls inside the clip the SPA will receive
+        from ``/api/videos/stream`` for ``video``.
+
+        When a per-video trimmed MP4 exists, the beep sits at
+        ``min(beep_time, trim_pre_buffer_seconds)`` inside it (the trim
+        starts at ``max(0, beep_time - pre_buffer)``). When there's no
+        trim we fall through to the source clip and the beep is at
+        ``beep_time`` directly. Pure check: no ffmpeg, no audio
+        extraction -- the file existence + project config is enough.
+        """
+        if video.beep_time is None:
+            return None
+        trimmed = audio_helpers.trimmed_video_path(
+            state.project_root, stage_number, video, project=project
+        )
+        if trimmed.exists() and trimmed.stat().st_size > 0:
+            return min(video.beep_time, project.trim_pre_buffer_seconds)
+        return video.beep_time
+
+    def _coach_video_entries(project: MatchProject, stg: Any) -> list[dict[str, Any]]:
+        """Per-video metadata the SPA needs to seek every synced camera.
+
+        Order mirrors VideoPanel's expectation: primary first, then
+        secondaries by ``added_at``. ``beep_in_clip`` is the position
+        inside the clip the SPA will actually be playing -- the source
+        clip when no trim exists, the trimmed clip when one does.
+        """
+        primary = stg.primary()
+        secondaries = sorted(
+            (v for v in stg.videos if v.role == "secondary"),
+            key=lambda v: v.added_at,
+        )
+        ordered_videos = ([primary] if primary is not None else []) + secondaries
+        out: list[dict[str, Any]] = []
+        for v in ordered_videos:
+            out.append(
+                {
+                    "path": str(v.path),
+                    "role": v.role,
+                    "beep_in_clip": _video_beep_in_clip(project, stg.stage_number, v),
+                }
+            )
+        return out
+
+    def _load_audit_for_coach(
+        stage_number: int,
+    ) -> tuple[dict[str, Any], Path, float | None, Any, MatchProject]:
+        """Shared loader: validates the stage, reads the audit JSON,
+        returns (payload, path, primary_beep_in_clip, stage, project).
+        """
+        project = state.load()
+        try:
+            stg = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"no audit JSON yet for stage {stage_number}",
+            )
+        try:
+            payload = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+        prim = stg.primary()
+        primary_beep_in_clip = (
+            _video_beep_in_clip(project, stage_number, prim) if prim is not None else None
+        )
+        return payload, audit_file, primary_beep_in_clip, stg, project
+
+    def _coach_atomic_write(audit_file: Path, payload: dict[str, Any]) -> None:
+        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if audit_file.exists():
+                if backup.exists():
+                    backup.unlink()
+                audit_file.replace(backup)
+            tmp.replace(audit_file)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"coach write failed: {exc}") from exc
+
+    def _build_coach_response(
+        payload: dict[str, Any],
+        primary_beep_in_clip: float | None,
+        stg: Any,
+        project: MatchProject,
+        cfg: CoachAutoClassifyConfig,
+    ) -> dict[str, Any]:
+        # Coach plays the same clip the audit screen serves -- typically
+        # the project-local trimmed MP4 -- so every "absolute" time must
+        # be in the served clip's coordinate system. Anchoring on
+        # ``primary_beep_in_clip`` keeps Coach working when the source
+        # SSD is unplugged. Falls back to 0.0 when the project hasn't
+        # set a beep yet (older / partial audits).
+        clip_anchor = primary_beep_in_clip if primary_beep_in_clip is not None else 0.0
+        raw_shots = payload.get("shots") or []
+        ordered = sorted(
+            (s for s in raw_shots if isinstance(s, dict) and "ms_after_beep" in s),
+            key=lambda s: float(s.get("ms_after_beep", 0)),
+        )
+        coach_shots: list[dict[str, Any]] = []
+        prev_ms: float | None = None
+        for s in ordered:
+            ms = float(s["ms_after_beep"])
+            time_from_beep = ms / 1000.0
+            gap_s: float | None
+            if prev_ms is None:
+                gap_s = None
+                split = time_from_beep  # draw
+            else:
+                gap_s = (ms - prev_ms) / 1000.0
+                split = gap_s
+            prev_ms = ms
+            stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg)
+            reload_hint = coach_module.reload_hinted(gap_s, cfg)
+            coach_shots.append(
+                {
+                    "shot_number": int(s.get("shot_number", 0)),
+                    "ms_after_beep": int(ms),
+                    "time_from_beep": time_from_beep,
+                    # In the served clip's coordinate system: where the
+                    # SPA must seek the primary <video> for this shot.
+                    "time_absolute": clip_anchor + time_from_beep,
+                    "split": split,
+                    "interval_class": s.get("interval_class"),
+                    "interval_class_source": s.get("interval_class_source"),
+                    "improvement_flag": bool(s.get("improvement_flag", False)),
+                    "coaching_note": s.get("coaching_note"),
+                    "stale": stale,
+                    "reload_hint": reload_hint,
+                }
+            )
+        return {
+            "stage_number": stg.stage_number,
+            "stage_name": stg.stage_name,
+            # Where the beep falls in the served primary clip. Used by
+            # the SPA's beep row + as the anchor for offsetting synced
+            # secondaries (each ``videos[i].beep_in_clip`` mirrors this
+            # field for that camera's served clip).
+            "beep_time": clip_anchor,
+            "videos": _coach_video_entries(project, stg),
+            "shots": coach_shots,
+        }
+
+    @app.get("/api/stages/{stage_number}/coach")
+    def get_stage_coach(stage_number: int) -> JSONResponse:
+        """Return the per-shot coach view for a stage.
+
+        Read-only: the stored ``interval_class`` is surfaced as-is, plus a
+        ``stale`` flag indicating whether the current rule disagrees. The
+        client can call ``POST /coach/reclassify`` to persist the rule's
+        verdict onto unset/auto entries.
+        """
+        payload, _audit_file, beep_in_clip, stg, project = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        return JSONResponse(_build_coach_response(payload, beep_in_clip, stg, project, cfg))
+
+    @app.post("/api/stages/{stage_number}/coach/reclassify")
+    def reclassify_stage_coach(stage_number: int) -> JSONResponse:
+        """Force the auto-classifier to (re)write ``interval_class`` for
+        every shot whose source is unset or ``"auto"``. Manual entries are
+        preserved. Idempotent.
+        """
+        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        shots = payload.get("shots") or []
+        if not isinstance(shots, list):
+            raise HTTPException(status_code=500, detail="audit shots is not a list")
+        coach_module.classify_intervals_in_dicts(shots, cfg)
+        events = list(payload.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "coach_reclassify",
+                "payload": {"shot_count": len(shots)},
+            }
+        )
+        payload["audit_events"] = events
+        _coach_atomic_write(audit_file, payload)
+        return JSONResponse(_build_coach_response(payload, beep_in_clip, stg, project, cfg))
+
+    @app.patch("/api/stages/{stage_number}/shots/{shot_number}/coach")
+    def patch_stage_shot_coach(
+        stage_number: int,
+        shot_number: int,
+        body: CoachShotPatchRequest,
+    ) -> JSONResponse:
+        """Patch the coaching annotation fields on one shot. Returns the
+        updated coach response for the stage so the client can refresh.
+        """
+        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        shots = payload.get("shots") or []
+        if not isinstance(shots, list):
+            raise HTTPException(status_code=500, detail="audit shots is not a list")
+        target = next(
+            (
+                s
+                for s in shots
+                if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number
+            ),
+            None,
+        )
+        if target is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"shot {shot_number} not found in stage {stage_number}",
+            )
+        try:
+            coach_module.write_coach_fields(
+                target,
+                interval_class=body.interval_class,
+                interval_class_source=body.interval_class_source,
+                clear_class=body.clear_class,
+                improvement_flag=body.improvement_flag,
+                coaching_note=body.coaching_note,
+                clear_note=body.clear_note,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        events = list(payload.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "coach_patch",
+                "payload": {
+                    "shot_number": shot_number,
+                    "fields": coach_module.read_coach_fields(target),
+                },
+            }
+        )
+        payload["audit_events"] = events
+        _coach_atomic_write(audit_file, payload)
+        return JSONResponse(_build_coach_response(payload, beep_in_clip, stg, project, cfg))
+
+    @app.get("/api/stages/{stage_number}/coach/distributions")
+    def get_stage_coach_distributions(stage_number: int) -> JSONResponse:
+        """Histograms + summary stats for one stage's coach annotations.
+
+        Unset interval classes are computed in memory; nothing persists.
+        Empty classes still appear in the response with count=0 so the
+        UI can render an empty histogram without a special case.
+        """
+        payload, _audit_file, _beep_in_clip, stg, _project = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        shots = payload.get("shots") or []
+        if not isinstance(shots, list):
+            raise HTTPException(status_code=500, detail="audit shots is not a list")
+        result = coach_distributions_module.stage_distributions(
+            stage_number=stg.stage_number,
+            stage_name=stg.stage_name,
+            shots=shots,
+            config=cfg,
+        )
+        return JSONResponse(result.model_dump())
+
+    @app.get("/api/coach/distributions")
+    def get_match_coach_distributions() -> JSONResponse:
+        """Match-level distributions across every stage with an audit
+        JSON. Stages without an audit are silently skipped -- they
+        haven't been audited yet so they'd just dilute the average.
+        """
+        project = state.load()
+        cfg = CoachAutoClassifyConfig()
+        audit_dir = project.audit_path(state.project_root)
+        triples: list[tuple[int, str, list[dict[str, Any]]]] = []
+        for stg in project.stages:
+            audit_file = audit_dir / f"stage{stg.stage_number}.json"
+            if not audit_file.exists():
+                continue
+            try:
+                stage_payload = json.loads(audit_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"audit read failed for stage {stg.stage_number}: {exc}",
+                ) from exc
+            shots = stage_payload.get("shots") or []
+            if not isinstance(shots, list):
+                continue
+            triples.append((stg.stage_number, stg.stage_name, shots))
+        result = coach_distributions_module.match_distributions(stages=triples, config=cfg)
+        return JSONResponse(result.model_dump())
 
     # ----------------------------------------------------------------------
     # Fixture-review endpoints (closes #19 -- the old splitsmith.review_server

@@ -530,6 +530,130 @@ export interface AuditEvent {
   payload: Record<string, unknown>;
 }
 
+/** Coaching annotation set on a single shot (issue #159).
+ *
+ * - ``interval_class`` and ``interval_class_source`` are set together or
+ *   both null. ``manual`` survives reclassification; ``auto`` is rewritten
+ *   on every reclassify call.
+ * - ``stale=true`` means the stored class disagrees with what the rule
+ *   would assign now (typical after an Audit timestamp edit). The Coach
+ *   page surfaces a "stale" badge with click-to-accept.
+ * - ``reload_hint`` is purely UI: gap exceeds the reload-hint threshold,
+ *   prompting the user to reclassify as ``reload`` if appropriate.
+ */
+export type CoachIntervalClass =
+  | "first_shot"
+  | "split"
+  | "transition"
+  | "movement"
+  | "reload"
+  | "activation";
+export type CoachIntervalClassSource = "auto" | "manual";
+
+export interface CoachShot {
+  shot_number: number;
+  ms_after_beep: number;
+  /** Seconds from the beep. */
+  time_from_beep: number;
+  /** Seconds in the source timeline -- the value the SPA seeks the
+   *  primary video to when the user clicks this row. */
+  time_absolute: number;
+  /** Seconds since previous shot, or the draw for the first shot. */
+  split: number;
+  interval_class: CoachIntervalClass | null;
+  interval_class_source: CoachIntervalClassSource | null;
+  improvement_flag: boolean;
+  coaching_note: string | null;
+  stale: boolean;
+  reload_hint: boolean;
+}
+
+export interface CoachVideoEntry {
+  path: string;
+  role: VideoRole;
+  /** Where the beep falls in the clip the SPA actually receives from
+   *  /api/videos/stream for this video -- the trimmed clip when one
+   *  exists, the source otherwise. ``null`` for cameras without a beep
+   *  yet; those are unsyncable and the SPA leaves them disabled. */
+  beep_in_clip: number | null;
+}
+
+export interface CoachStageResponse {
+  stage_number: number;
+  stage_name: string;
+  /** Where the beep falls in the served primary clip; same coordinate
+   *  system as ``shots[i].time_absolute``. */
+  beep_time: number;
+  videos: CoachVideoEntry[];
+  shots: CoachShot[];
+}
+
+/** One bin of a Coach histogram (#163). ``lo`` inclusive, ``hi`` exclusive. */
+export interface CoachHistogramBucket {
+  lo: number;
+  hi: number;
+  count: number;
+}
+
+/** Distribution of gap-times for one ``interval_class`` across one stage
+ *  or one match. ``buckets`` only contains non-empty bins to keep the
+ *  payload small; ``count``/``mean_s``/etc. are computed over the full
+ *  set of values. */
+export interface CoachIntervalDistribution {
+  interval_class: CoachIntervalClass;
+  bucket_size_s: number;
+  buckets: CoachHistogramBucket[];
+  count: number;
+  mean_s: number | null;
+  median_s: number | null;
+  p90_s: number | null;
+}
+
+export interface CoachTopShotEntry {
+  stage_number: number;
+  stage_name: string;
+  shot_number: number;
+  interval_class: CoachIntervalClass;
+  gap_s: number;
+  coaching_note: string | null;
+  improvement_flag: boolean;
+}
+
+export interface CoachFlaggedShotEntry {
+  stage_number: number;
+  stage_name: string;
+  shot_number: number;
+  interval_class: CoachIntervalClass | null;
+  gap_s: number | null;
+  coaching_note: string | null;
+}
+
+export interface CoachStageDistributions {
+  stage_number: number;
+  stage_name: string;
+  distributions: CoachIntervalDistribution[];
+  first_shot_s: number | null;
+}
+
+export interface CoachMatchDistributions {
+  distributions: CoachIntervalDistribution[];
+  first_shot_seconds: number[];
+  top_splits: CoachTopShotEntry[];
+  top_transitions: CoachTopShotEntry[];
+  flagged_shots: CoachFlaggedShotEntry[];
+  stage_count: number;
+  shot_count: number;
+}
+
+export interface CoachShotPatch {
+  interval_class?: CoachIntervalClass | null;
+  interval_class_source?: CoachIntervalClassSource | null;
+  clear_class?: boolean;
+  improvement_flag?: boolean | null;
+  coaching_note?: string | null;
+  clear_note?: boolean;
+}
+
 export interface StageAudit {
   stage_number: number;
   stage_name: string;
@@ -1124,6 +1248,46 @@ export const api = {
       method: "PUT",
       json: payload,
     }),
+
+  /** Coach view: per-shot interval class + flags + notes (#161). The
+   *  GET is read-only; ``stale=true`` means the rule disagrees with the
+   *  stored class and the user can accept the recompute via reclassify. */
+  getStageCoach: async (stageNumber: number): Promise<CoachStageResponse | null> => {
+    try {
+      return await request<CoachStageResponse>(`/api/stages/${stageNumber}/coach`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
+
+  reclassifyStageCoach: (stageNumber: number) =>
+    request<CoachStageResponse>(`/api/stages/${stageNumber}/coach/reclassify`, {
+      method: "POST",
+    }),
+
+  patchStageShotCoach: (
+    stageNumber: number,
+    shotNumber: number,
+    patch: CoachShotPatch,
+  ) =>
+    request<CoachStageResponse>(
+      `/api/stages/${stageNumber}/shots/${shotNumber}/coach`,
+      { method: "PATCH", json: patch },
+    ),
+
+  /** Per-stage histograms + summary stats for the Coach distributions
+   *  panel (#163). Empty classes still appear with count=0 so the UI
+   *  can render an empty histogram without a special case. */
+  getStageCoachDistributions: (stageNumber: number) =>
+    request<CoachStageDistributions>(
+      `/api/stages/${stageNumber}/coach/distributions`,
+    ),
+
+  /** Match-level histograms aggregated across every stage with an audit
+   *  JSON. Stages without an audit are silently skipped server-side. */
+  getMatchCoachDistributions: () =>
+    request<CoachMatchDistributions>("/api/coach/distributions"),
 
   /** Structured anomalies for the *saved* audit JSON (issue #42).
    *

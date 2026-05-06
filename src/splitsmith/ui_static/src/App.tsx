@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { ThemeProvider } from "@/lib/theme";
 import { Audit } from "@/pages/Audit";
+import { Coach } from "@/pages/Coach";
 import { Design } from "@/pages/Design";
 import { Export } from "@/pages/Export";
 import { Home } from "@/pages/Home";
@@ -26,6 +27,8 @@ export function App() {
             <Route path="ingest" element={<Ingest />} />
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
+            <Route path="coach" element={<Coach />} />
+            <Route path="coach/:stage" element={<Coach />} />
             <Route path="export" element={<Export />} />
             <Route path="export/:stage" element={<Export />} />
             <Route path="lab" element={<Lab />} />
