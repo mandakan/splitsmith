@@ -36,6 +36,7 @@ import {
 
 import { BeepSection } from "@/components/BeepSection";
 import { FolderPicker } from "@/components/FolderPicker";
+import { MountSelect } from "@/components/MountSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,8 +49,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApiError,
+  CAMERA_MOUNTS,
   api,
   asScoreboardError,
+  type CameraMount,
   type FsProbeResponse,
   type MatchAnalysis,
   type MatchProject,
@@ -1982,9 +1985,16 @@ function StagesSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
+          <BulkMountControl
+            project={project}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onProjectUpdate={onProjectUpdate}
+          />
           <Button
             size="sm"
             variant="outline"
@@ -2034,6 +2044,103 @@ function StagesSection({
         ))}
       </div>
     </section>
+  );
+}
+
+/** Toolbar control: pick a mount, apply it to every stage's primary in one
+ *  shot. Useful for projects shot entirely with one camera type (e.g. all
+ *  iPhone-handheld for tallmilan-2025) where flipping the per-row select
+ *  on every stage would be tedious. The select doesn't fire on change --
+ *  user must click "Apply" -- so a stray click on the dropdown can't mass-
+ *  rewrite metadata. */
+function BulkMountControl({
+  project,
+  busy,
+  setBusy,
+  setError,
+  onProjectUpdate,
+}: {
+  project: MatchProject;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (p: MatchProject) => void;
+}) {
+  const [pending, setPending] = useState<CameraMount | "" | "none">("");
+  const targets = useMemo(
+    () =>
+      project.stages
+        .map((s) => {
+          const primary = s.videos.find((v) => v.role === "primary");
+          return primary ? { stage: s.stage_number, video: primary } : null;
+        })
+        .filter((x): x is { stage: number; video: StageVideo } => x !== null),
+    [project.stages],
+  );
+
+  const apply = async () => {
+    if (busy || pending === "" || targets.length === 0) return;
+    const next: CameraMount | null = pending === "none" ? null : pending;
+    const label = next ?? "auto";
+    if (
+      !window.confirm(
+        `Set primary mount to "${label}" on ${targets.length} stage${
+          targets.length === 1 ? "" : "s"
+        }?\n\nThis only updates metadata; existing shots[] are untouched. ` +
+          "Re-run shot detection afterwards to score with the new threshold class.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    let last: MatchProject | null = null;
+    try {
+      for (const t of targets) {
+        last = await api.setCameraMount(t.stage, t.video.video_id, next);
+      }
+      if (last) onProjectUpdate(last);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (targets.length === 0) return null;
+
+  return (
+    <div
+      className="flex items-center gap-1"
+      title={`Set the camera mount on every stage's primary (${targets.length} target${targets.length === 1 ? "" : "s"})`}
+    >
+      <span className="text-[11px] text-muted-foreground">Primary mount:</span>
+      <select
+        className="h-7 rounded border border-input bg-background px-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+        value={pending}
+        disabled={busy}
+        onChange={(e) => setPending(e.target.value as CameraMount | "" | "none")}
+        aria-label="Bulk-set primary mount"
+      >
+        <option value="" disabled>
+          select...
+        </option>
+        <option value="none">(auto)</option>
+        {CAMERA_MOUNTS.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy || pending === ""}
+        onClick={() => void apply()}
+      >
+        Apply to all
+      </Button>
+    </div>
   );
 }
 
@@ -2156,6 +2263,10 @@ function StageCard({
               stage={stage}
               setDragging={setDragging}
               bare
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onProjectUpdate={onProjectUpdate}
               badge={
                 <Badge
                   variant={hasConflict ? "statusWarning" : "statusInProgress"}
@@ -2197,6 +2308,10 @@ function StageCard({
               stage={stage}
               setDragging={setDragging}
               bare
+              busy={busy}
+              setBusy={setBusy}
+              setError={setError}
+              onProjectUpdate={onProjectUpdate}
               badge={<Badge variant="secondary">Secondary {idx + 1}</Badge>}
               actions={
                 <RoleActions
@@ -2259,6 +2374,10 @@ function VideoRow({
   actions,
   inlinePlayer = true,
   bare = false,
+  busy = false,
+  setBusy,
+  setError,
+  onProjectUpdate,
 }: {
   video: StageVideo;
   stage: StageEntry | null;
@@ -2271,6 +2390,13 @@ function VideoRow({
   // Drop the row's own border/background when nested inside a video panel
   // so the panel is the single visual frame for "this video + its beep".
   bare?: boolean;
+  // Threaded through so the in-row mount selector can patch the project
+  // without bubbling state changes back up to the page. Optional because
+  // the unassigned-tray version of VideoRow has no stage to target.
+  busy?: boolean;
+  setBusy?: (b: boolean) => void;
+  setError?: (msg: string | null) => void;
+  onProjectUpdate?: (p: MatchProject) => void;
 }) {
   const [meta, setMeta] = useState<FsProbeResponse | null>(null);
 
@@ -2332,6 +2458,16 @@ function VideoRow({
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {stage && setBusy && setError && onProjectUpdate ? (
+              <MountSelect
+                video={video}
+                stageNumber={stage.stage_number}
+                disabled={busy}
+                setBusy={setBusy}
+                setError={setError}
+                onProjectUpdate={onProjectUpdate}
+              />
+            ) : null}
             <Button
               size="sm"
               variant="ghost"
