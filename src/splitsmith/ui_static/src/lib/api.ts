@@ -84,7 +84,34 @@ export interface StageVideo {
    *  rather than the buzzer. Null when only one method ran. */
   beep_alignment_delta_ms: number | null;
   notes: string;
+  /** Selects the per-class threshold set used by the ensemble (issue #143):
+   *  ``head|chest|belt|helmet`` -> headcam; ``hand|tripod|monopod|gimbal``
+   *  -> handheld. Stamped heuristically from camera make at register time
+   *  and overridable via PATCH .../camera-mount. ``null`` falls back to
+   *  the artifact's default class. */
+  camera_mount: CameraMount | null;
 }
+
+export type CameraMount =
+  | "head"
+  | "chest"
+  | "belt"
+  | "helmet"
+  | "hand"
+  | "tripod"
+  | "monopod"
+  | "gimbal";
+
+export const CAMERA_MOUNTS: readonly CameraMount[] = [
+  "head",
+  "chest",
+  "belt",
+  "helmet",
+  "hand",
+  "tripod",
+  "monopod",
+  "gimbal",
+] as const;
 
 export interface StageEntry {
   stage_number: number;
@@ -795,6 +822,24 @@ export const api = {
    *  prompt then re-call with ``confirm=true``. On confirm, the existing
    *  audit JSON is renamed to ``.bak`` and detection re-runs on the new
    *  primary's audio. */
+  /** Override the heuristic camera mount on a single video. The mapping
+   *  to ensemble threshold class (handheld vs headcam) happens server-
+   *  side via ``camera_class_from_mount``. Pass ``null`` to clear the
+   *  override and fall back to the artifact's default class on the next
+   *  shot-detect run. */
+  setCameraMount: (
+    stageNumber: number,
+    videoId: string,
+    mount: CameraMount | null,
+  ) =>
+    request<MatchProject>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/camera-mount`,
+      {
+        method: "PATCH",
+        json: { mount },
+      },
+    ),
+
   swapPrimary: (videoPath: string, stageNumber: number, confirm = false) =>
     request<MatchProject>("/api/assignments/swap-primary", {
       method: "POST",

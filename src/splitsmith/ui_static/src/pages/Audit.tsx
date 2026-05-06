@@ -57,6 +57,7 @@ import {
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
+import { MountSelect } from "@/components/MountSelect";
 import { ShotStepper } from "@/components/ShotStepper";
 import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
@@ -1277,8 +1278,20 @@ export function Audit() {
                 />
               ) : null}
             </CardTitle>
-            <CardDescription>
-              Primary: <code className="text-xs">{primary.path}</code>
+            <CardDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>
+                {activeVideoIndex === 0 ? "Primary" : `Cam ${activeVideoIndex + 1}`}:{" "}
+                <code className="text-xs">{activeVideo?.path ?? primary.path}</code>
+              </span>
+              {activeVideo && stageNumber != null ? (
+                <MountSelect
+                  video={activeVideo}
+                  stageNumber={stageNumber}
+                  label="Mount"
+                  onProjectUpdate={setProject}
+                  setError={setProjectError}
+                />
+              ) : null}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
