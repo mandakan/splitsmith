@@ -85,13 +85,17 @@ export function Coach() {
 
   // Multi-camera state. VideoPanel renders both modes; Coach owns the
   // single playback source (the primary) and the secondary refs/offsets
-  // so click-to-scrub seeks every synced camera in lockstep.
+  // so click-to-scrub seeks every synced camera in lockstep. Grid is
+  // the default because side-by-side comparison is the entire point of
+  // the Coach view.
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
-  const [gridMode, setGridMode] = useState(false);
+  const [gridMode, setGridMode] = useState(true);
   const secondaryRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
-  // path -> (secondary.beep_time - primary.beep_time). When the primary
-  // sits at sourceTime T, the synced secondary should be at T + offset
-  // so the beep aligns. Recomputed whenever the videos array changes.
+  // path -> (secondary.beep_in_clip - primary.beep_in_clip). When the
+  // primary sits at clipTime T, the synced secondary should be at
+  // T + offset so both cameras show the same real-world instant.
+  // Computed in clip coords so the page works off the project-local
+  // trimmed cache; source files don't need to be reachable.
   const secondaryOffsets = useRef<Map<string, number>>(new Map());
 
   const stageNumber = useMemo(() => {
@@ -150,21 +154,27 @@ export function Coach() {
   const activeVideo = videos[activeVideoIndex] ?? primaryVideo;
   const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
 
-  // Offsets: secondaries with a beep_time can be synced; the rest stay
-  // disabled in VideoPanel's tab list. Rebuild on every videos change so
-  // a stage swap doesn't leave stale entries from the previous stage.
+  // Offsets: derive from the Coach API's per-video ``beep_in_clip``
+  // values. Each camera's served clip has its own coordinate system
+  // (trimmed clips are cut around their own beep), so the offset that
+  // keeps two clips visually aligned is
+  //   secondary.beep_in_clip - primary.beep_in_clip.
+  // Only secondaries with a beep are synced; cameras without one stay
+  // disabled in VideoPanel's tab list.
   useEffect(() => {
     const next = new Map<string, number>();
-    const primaryBeep = primaryVideo?.beep_time ?? null;
-    if (primaryBeep != null) {
-      for (const v of videos.slice(1)) {
-        if (v.beep_time != null) {
-          next.set(v.path, v.beep_time - primaryBeep);
-        }
+    const coachVideos = coach?.videos ?? [];
+    const primaryEntry = coachVideos.find((v) => v.role === "primary");
+    const primaryClipBeep = primaryEntry?.beep_in_clip ?? null;
+    if (primaryClipBeep != null) {
+      for (const v of coachVideos) {
+        if (v.role === "primary") continue;
+        if (v.beep_in_clip == null) continue;
+        next.set(v.path, v.beep_in_clip - primaryClipBeep);
       }
     }
     secondaryOffsets.current = next;
-  }, [videos, primaryVideo]);
+  }, [coach]);
 
   // Reset active tab to primary on stage swap so the user lands on the
   // headcam by default; grid stays sticky across stages because that's
@@ -204,6 +214,16 @@ export function Coach() {
   // logic Audit uses. timeupdate just keeps secondaries glued to the
   // primary if the user hits the native controls. Clamp to each
   // secondary's content range so we don't seek past a shorter clip.
+  // Also track which shot the playhead is currently inside so the table
+  // highlights and auto-scrolls along with the video -- the user expects
+  // the rows to follow as the recording plays out.
+  const coachShotsRef = useRef<CoachShot[]>([]);
+  const beepTimeRef = useRef<number>(0);
+  useEffect(() => {
+    coachShotsRef.current = coach?.shots ?? [];
+    beepTimeRef.current = coach?.beep_time ?? 0;
+  }, [coach]);
+
   const handlePrimaryTimeUpdate = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -220,6 +240,21 @@ export function Coach() {
         sv.currentTime = expected;
       }
     }
+
+    // Active-shot tracking: the row whose time_absolute most recently
+    // passed under the playhead. ``shot 0`` (beep) covers the lead-in
+    // before shot 1 fires.
+    const shots = coachShotsRef.current;
+    const t = v.currentTime;
+    let nextActive: number | null = t >= beepTimeRef.current ? 0 : null;
+    for (const s of shots) {
+      if (s.time_absolute <= t + 0.01) {
+        nextActive = s.shot_number;
+      } else {
+        break;
+      }
+    }
+    setActiveShotNumber((prev) => (prev === nextActive ? prev : nextActive));
   }, []);
 
   const handleSecondaryBuffering = useCallback(
@@ -507,6 +542,7 @@ function ShotTable({
   const [compact, setCompact] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const groups = useMemo(() => groupShots(shots), [shots]);
+  const tableRef = useRef<HTMLDivElement | null>(null);
 
   const toggleGroup = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -516,6 +552,21 @@ function ShotTable({
       return next;
     });
   }, []);
+
+  // Scroll the active row into view as playback advances. ``block: "nearest"``
+  // avoids yanking the page when the active row is already visible -- the
+  // row only moves when it would otherwise scroll out of the table.
+  useEffect(() => {
+    if (activeShotNumber == null) return;
+    const container = tableRef.current;
+    if (!container) return;
+    const row = container.querySelector<HTMLElement>(
+      `[data-active-shot="${activeShotNumber}"]`,
+    );
+    if (row) {
+      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [activeShotNumber]);
 
   return (
     <Card>
@@ -544,7 +595,7 @@ function ShotTable({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
+        <div ref={tableRef} className="max-h-[60vh] overflow-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
@@ -634,6 +685,7 @@ function BeepRow({
         active && "bg-accent",
       )}
       onClick={onClick}
+      data-active-shot={0}
       title="Seek to the start signal"
     >
       <td className="w-6 px-2 py-2"></td>
@@ -682,6 +734,7 @@ function GroupRow({
         containsActive && !expanded && "bg-accent/60",
       )}
       onClick={() => onRowClick(first)}
+      data-active-shot={containsActive && !expanded ? activeShotNumber ?? undefined : undefined}
       title="Click to seek to the first shot in the group"
     >
       <td className="w-6 px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
@@ -784,6 +837,7 @@ function ShotRow({
         indented && "bg-muted/10",
       )}
       onClick={() => onRowClick(shot)}
+      data-active-shot={active ? shot.shot_number : undefined}
     >
       <td
         className={cn(

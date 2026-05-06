@@ -92,6 +92,71 @@ def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
     assert body["shots"][3]["reload_hint"] is True
 
 
+def test_get_coach_returns_videos_with_beep_in_clip(tmp_path: Path) -> None:
+    client, _audit = _bootstrap(tmp_path)
+    resp = client.get("/api/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "videos" in body
+    assert len(body["videos"]) == 1
+    primary_entry = body["videos"][0]
+    assert primary_entry["role"] == "primary"
+    # No trimmed clip on disk in the bootstrap; beep_in_clip == beep in
+    # source so clip coords match source coords for this fixture.
+    assert primary_entry["beep_in_clip"] == pytest.approx(5.0)
+
+
+def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> None:
+    """Beep at 8 s in source + a trimmed clip on disk -> the SPA must
+    seek inside the trimmed clip, where the beep sits at min(8, 5)=5 s.
+    All shot ``time_absolute`` values follow the same anchor.
+    """
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="Trimmed Match")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="K-vallen",
+            time_seconds=30.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=8.0)],
+        )
+    ]
+    project.save(root)
+
+    audit_dir = root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "K-vallen",
+                "shots": [
+                    {"shot_number": 1, "ms_after_beep": 1500, "source": "detected"},
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    # Place a non-empty file at the trimmed-clip path so the helper
+    # detects "trim exists" without running ffmpeg.
+    trimmed_dir = project.trimmed_path(root)
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"not really a video, but non-empty")
+
+    app = create_app(project_root=root, project_name="Trimmed Match")
+    client = TestClient(app)
+    resp = client.get("/api/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Default trim_pre_buffer_seconds is 5.0; beep clamps to that.
+    assert body["beep_time"] == pytest.approx(5.0)
+    assert body["videos"][0]["beep_in_clip"] == pytest.approx(5.0)
+    assert body["shots"][0]["time_absolute"] == pytest.approx(5.0 + 1.5)
+
+
 def test_get_coach_404_when_no_audit(tmp_path: Path) -> None:
     root = tmp_path / "match"
     project = MatchProject.init(root, name="Empty")
