@@ -62,15 +62,6 @@ const CLASS_OPTIONS: { value: CoachIntervalClass; label: string }[] = [
   { value: "activation", label: "Activation" },
 ];
 
-const CLASS_VARIANT: Record<CoachIntervalClass, "default" | "secondary" | "outline"> = {
-  first_shot: "outline",
-  split: "default",
-  transition: "secondary",
-  movement: "outline",
-  reload: "outline",
-  activation: "outline",
-};
-
 export function Coach() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
@@ -82,6 +73,15 @@ export function Coach() {
   const [reclassifying, setReclassifying] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
+
+  const [listHeight, setListHeight] = useState<number | null>(null);
+  const videoCardRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      setListHeight(el.offsetHeight);
+    });
+    ro.observe(el);
+  }, []);
 
   // Multi-camera state. VideoPanel renders both modes; Coach owns the
   // single playback source (the primary) and the secondary refs/offsets
@@ -265,6 +265,32 @@ export function Coach() {
     [],
   );
 
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      void v.play().catch(() => {});
+      for (const sv of secondaryRefs.current.values()) {
+        if (sv.paused) void sv.play().catch(() => {});
+      }
+    } else {
+      v.pause();
+      for (const sv of secondaryRefs.current.values()) sv.pause();
+    }
+  }, [videoRef, secondaryRefs]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      const tag = (document.activeElement?.tagName ?? "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      e.preventDefault();
+      togglePlay();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [togglePlay]);
+
   // Load coach payload whenever the stage changes; on first hit we
   // auto-reclassify if any shot is unclassified, so the user always
   // lands on a populated table.
@@ -381,64 +407,78 @@ export function Coach() {
 
       {coach && (
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                Stage {coach.stage_number} -- {coach.stage_name}
-              </CardTitle>
-              <CardDescription>
-                Click a shot to seek every synced camera. Beep is at {coach.beep_time.toFixed(2)} s
-                in source.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {videos.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
-                  No primary video bound to this stage.
-                </div>
-              ) : (
-                <>
-                  <VideoPanel
-                    ref={videoRef}
-                    videos={videos}
-                    primaryBeepTime={primaryVideo?.beep_time ?? null}
-                    activeIndex={activeVideoIndex}
-                    onActiveIndexChange={setActiveVideoIndex}
-                    videoSrc={videoSrc}
-                    gridMode={gridMode}
-                    onGridModeToggle={() => setGridMode((g) => !g)}
-                    onSecondaryRef={handleSecondaryRef}
-                    onSecondaryBuffering={handleSecondaryBuffering}
-                    onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
-                  />
-                  <PlaybackBar
-                    videoRef={videoRef}
-                    secondaryRefs={secondaryRefs}
-                  />
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {/* Top row: video grid + condensed event list, locked to the
+              same height so the user can scrub the list while watching
+              the video without either disappearing. The event list is
+              fixed-width on lg+; on narrow viewports it stacks below. */}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:items-start">
+            <Card ref={videoCardRef} className="flex flex-col">
+              <CardHeader>
+                <CardTitle>
+                  Stage {coach.stage_number} -- {coach.stage_name}
+                </CardTitle>
+                <CardDescription>
+                  Click a shot to seek every synced camera.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex-1">
+                {videos.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
+                    No primary video bound to this stage.
+                  </div>
+                ) : (
+                  <>
+                    <VideoPanel
+                      ref={videoRef}
+                      videos={videos}
+                      primaryBeepTime={primaryVideo?.beep_time ?? null}
+                      activeIndex={activeVideoIndex}
+                      onActiveIndexChange={setActiveVideoIndex}
+                      videoSrc={videoSrc}
+                      gridMode={gridMode}
+                      onGridModeToggle={() => setGridMode((g) => !g)}
+                      onSecondaryRef={handleSecondaryRef}
+                      onSecondaryBuffering={handleSecondaryBuffering}
+                      onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
+                    />
+                    <PlaybackBar videoRef={videoRef} onTogglePlay={togglePlay} />
+                  </>
+                )}
+              </CardContent>
+            </Card>
 
-          <ShotTable
-            shots={coach.shots}
+            <CondensedShotList
+              shots={coach.shots}
+              beepTime={coach.beep_time}
+              activeShotNumber={activeShotNumber}
+              heightPx={listHeight}
+              onRowClick={seekTo}
+              onSeekToBeep={() => {
+                setActiveShotNumber(0);
+                const v = videoRef.current;
+                if (v) v.currentTime = coach.beep_time;
+                for (const [path, sv] of secondaryRefs.current) {
+                  const off = secondaryOffsets.current.get(path);
+                  if (off == null) continue;
+                  const expected = coach.beep_time + off;
+                  const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+                  if (expected < 0) continue;
+                  if (dur != null && expected > dur) continue;
+                  sv.currentTime = expected;
+                }
+              }}
+            />
+          </div>
+
+          {/* Bottom strip: full edit surface for the active event. */}
+          <ActiveShotDetail
+            shot={
+              activeShotNumber == null || activeShotNumber === 0
+                ? null
+                : coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null
+            }
+            beepActive={activeShotNumber === 0}
             beepTime={coach.beep_time}
-            activeShotNumber={activeShotNumber}
-            onRowClick={seekTo}
-            onSeekToBeep={() => {
-              setActiveShotNumber(0);
-              const v = videoRef.current;
-              if (v) v.currentTime = coach.beep_time;
-              for (const [path, sv] of secondaryRefs.current) {
-                const off = secondaryOffsets.current.get(path);
-                if (off == null) continue;
-                const expected = coach.beep_time + off;
-                const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-                if (expected < 0) continue;
-                if (dur != null && expected > dur) continue;
-                sv.currentTime = expected;
-              }
-            }}
             onPatch={patchShot}
           />
 
@@ -493,26 +533,41 @@ function StagePicker({
   );
 }
 
-function ShotTable({
+const CLASS_SHORT_LABEL: Record<CoachIntervalClass, string> = {
+  first_shot: "draw",
+  split: "split",
+  transition: "trans",
+  movement: "move",
+  reload: "reload",
+  activation: "activ",
+};
+
+const CLASS_FULL_LABEL: Record<CoachIntervalClass, string> = {
+  first_shot: "First shot (draw)",
+  split: "Split -- same position, different target",
+  transition: "Transition -- short move between positions",
+  movement: "Movement -- longer repositioning",
+  reload: "Reload",
+  activation: "Activation -- activating a target (e.g. mover)",
+};
+
+function CondensedShotList({
   shots,
   beepTime,
   activeShotNumber,
+  heightPx,
   onRowClick,
   onSeekToBeep,
-  onPatch,
 }: {
   shots: CoachShot[];
   beepTime: number;
   activeShotNumber: number | null;
+  heightPx: number | null;
   onRowClick: (s: CoachShot) => void;
   onSeekToBeep: () => void;
-  onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
 }) {
   const tableRef = useRef<HTMLDivElement | null>(null);
 
-  // Scroll the active row into view as playback advances. ``block: "nearest"``
-  // avoids yanking the page when the active row is already visible -- the
-  // row only moves when it would otherwise scroll out of the table.
   useEffect(() => {
     if (activeShotNumber == null) return;
     const container = tableRef.current;
@@ -520,47 +575,43 @@ function ShotTable({
     const row = container.querySelector<HTMLElement>(
       `[data-active-shot="${activeShotNumber}"]`,
     );
-    if (row) {
-      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }
+    if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [activeShotNumber]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Shots ({shots.length})</CardTitle>
-        <CardDescription>
-          Every shot is its own row. Class chips are inline-editable; manual
-          overrides survive reclassify.
+    <Card
+      className="flex flex-col overflow-hidden"
+      style={heightPx != null ? { height: heightPx } : undefined}
+    >
+      <CardHeader className="shrink-0 pb-2">
+        <CardTitle className="text-base">Shots ({shots.length + 1})</CardTitle>
+        <CardDescription className="text-xs">
+          Click a row to seek. Select to annotate below.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
-        <div ref={tableRef} className="max-h-[60vh] overflow-auto">
+      <CardContent className="flex-1 overflow-hidden p-0">
+        <div ref={tableRef} className="h-full overflow-auto">
           <table className="w-full text-sm">
-            <thead className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
+            <thead className="sticky top-0 border-b border-border bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="w-6 px-2 py-2"></th>
-                <th className="px-3 py-2 text-left">#</th>
-                <th className="px-3 py-2 text-right">T</th>
-                <th className="px-3 py-2 text-right">Split</th>
-                <th className="px-3 py-2 text-left">Class</th>
-                <th className="px-3 py-2 text-center">Flag</th>
-                <th className="px-3 py-2 text-left">Note</th>
+                <th className="px-2 py-1.5 text-left">#</th>
+                <th className="px-2 py-1.5 text-right">T</th>
+                <th className="px-2 py-1.5 text-right">Split</th>
+                <th className="px-2 py-1.5 text-left">Class</th>
               </tr>
             </thead>
             <tbody>
-              <BeepRow
+              <CondensedBeepRow
                 beepTime={beepTime}
                 active={activeShotNumber === 0}
                 onClick={onSeekToBeep}
               />
               {shots.map((s) => (
-                <ShotRow
+                <CondensedShotRow
                   key={s.shot_number}
                   shot={s}
                   active={s.shot_number === activeShotNumber}
-                  onRowClick={onRowClick}
-                  onPatch={onPatch}
+                  onClick={() => onRowClick(s)}
                 />
               ))}
             </tbody>
@@ -571,7 +622,7 @@ function ShotTable({
   );
 }
 
-function BeepRow({
+function CondensedBeepRow({
   beepTime,
   active,
   onClick,
@@ -588,56 +639,115 @@ function BeepRow({
       )}
       onClick={onClick}
       data-active-shot={0}
-      title="Seek to the start signal"
+      title={`Seek to the start signal (source t = ${beepTime.toFixed(3)} s)`}
     >
-      <td className="w-6 px-2 py-2"></td>
-      <td className="px-3 py-2 font-mono text-xs">
-        <Radio className="inline size-3.5 text-primary" aria-hidden /> beep
+      <td className="px-2 py-1.5 font-mono text-[11px] text-primary">
+        <Radio className="inline size-3 align-text-bottom" aria-hidden /> beep
       </td>
-      <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground">
+      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
         0.000
       </td>
-      <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground/60">
+      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground/60">
         --
       </td>
-      <td className="px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">
-        start signal
-      </td>
-      <td className="px-3 py-2"></td>
-      <td className="px-3 py-2 text-xs text-muted-foreground/70 italic">
-        source t = {beepTime.toFixed(3)} s
+      <td className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+        start
       </td>
     </tr>
   );
 }
 
-function ShotRow({
+function CondensedShotRow({
   shot,
   active,
-  onRowClick,
-  onPatch,
+  onClick,
 }: {
   shot: CoachShot;
   active: boolean;
-  onRowClick: (s: CoachShot) => void;
+  onClick: () => void;
+}) {
+  const cls = shot.interval_class;
+  return (
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
+        active && "bg-accent",
+        shot.improvement_flag && "border-l-2 border-l-amber-500/70",
+      )}
+      onClick={onClick}
+      data-active-shot={active ? shot.shot_number : undefined}
+      title={shot.coaching_note ?? undefined}
+    >
+      <td className="px-2 py-1.5 font-mono text-[11px]">{shot.shot_number}</td>
+      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px]">
+        {shot.time_from_beep.toFixed(3)}
+      </td>
+      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px]">
+        {shot.split.toFixed(3)}
+      </td>
+      <td className="px-2 py-1.5">
+        <span className="flex items-center gap-1 text-[11px]">
+          {cls ? CLASS_SHORT_LABEL[cls] : "--"}
+          {shot.stale ? (
+            <span
+              className="rounded-sm bg-amber-500/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400"
+              title="Stored class disagrees with the current rule"
+            >
+              !
+            </span>
+          ) : null}
+          {shot.coaching_note ? (
+            <span className="text-[9px] text-muted-foreground" title={shot.coaching_note}>
+              ●
+            </span>
+          ) : null}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+function ActiveShotDetail({
+  shot,
+  beepActive,
+  beepTime,
+  onPatch,
+}: {
+  shot: CoachShot | null;
+  beepActive: boolean;
+  beepTime: number;
   onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
 }) {
-  const [editingNote, setEditingNote] = useState(false);
-  const [noteDraft, setNoteDraft] = useState(shot.coaching_note ?? "");
+  const [noteDraft, setNoteDraft] = useState("");
   useEffect(() => {
-    if (!editingNote) setNoteDraft(shot.coaching_note ?? "");
-  }, [shot.coaching_note, editingNote]);
+    setNoteDraft(shot?.coaching_note ?? "");
+  }, [shot?.shot_number, shot?.coaching_note]);
 
-  const saveNote = () => {
-    setEditingNote(false);
-    const trimmed = noteDraft.trim();
-    if (trimmed === (shot.coaching_note ?? "")) return;
-    if (trimmed === "") {
-      onPatch(shot.shot_number, { clear_note: true });
-    } else {
-      onPatch(shot.shot_number, { coaching_note: trimmed });
-    }
-  };
+  if (beepActive) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <Radio className="inline size-4 align-text-bottom text-primary" /> Start signal
+          </CardTitle>
+          <CardDescription>
+            Source time: {beepTime.toFixed(3)} s. Click a shot row to edit it.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+  if (!shot) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardDescription>
+            Click an event in the list to flag, classify, or annotate it.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   const onClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -651,134 +761,134 @@ function ShotRow({
     });
   };
 
-  const onAcceptStale = () => {
-    onPatch(shot.shot_number, { clear_class: true });
+  const saveNote = () => {
+    const trimmed = noteDraft.trim();
+    if (trimmed === (shot.coaching_note ?? "")) return;
+    if (trimmed === "") {
+      onPatch(shot.shot_number, { clear_note: true });
+    } else {
+      onPatch(shot.shot_number, { coaching_note: trimmed });
+    }
   };
 
   return (
-    <tr
-      className={cn(
-        "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
-        active && "bg-accent",
-      )}
-      onClick={() => onRowClick(shot)}
-      data-active-shot={active ? shot.shot_number : undefined}
-    >
-      <td className="w-6 px-2 py-2"></td>
-      <td className="px-3 py-2 font-mono text-xs">{shot.shot_number}</td>
-      <td className="px-3 py-2 text-right font-mono tabular-nums">
-        {shot.time_from_beep.toFixed(3)}
-      </td>
-      <td className="px-3 py-2 text-right font-mono tabular-nums">
-        {shot.split.toFixed(3)}
-      </td>
-      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-1.5">
-          <select
-            className="rounded-md border border-border bg-background px-2 py-1 text-xs"
-            value={shot.interval_class ?? ""}
-            onChange={onClassChange}
-          >
-            <option value="" disabled>
-              -- unset --
-            </option>
-            {CLASS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-baseline gap-3">
+          <span>Shot {shot.shot_number}</span>
+          <span className="font-mono text-sm font-normal tabular-nums text-muted-foreground">
+            T {shot.time_from_beep.toFixed(3)} s · split {shot.split.toFixed(3)} s
+          </span>
+        </CardTitle>
+        <CardDescription>
+          Edits round-trip through the audit JSON; manual classifications survive reclassify.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-[auto_auto_1fr]">
+        <div className="space-y-1">
+          <label className="text-xs uppercase tracking-wide text-muted-foreground">Class</label>
+          <div className="flex items-center gap-2">
+            <select
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              value={shot.interval_class ?? ""}
+              onChange={onClassChange}
+            >
+              <option value="" disabled>
+                -- unset --
               </option>
-            ))}
-            {shot.interval_class_source === "manual" ? (
-              <option value="_auto">Reset to auto</option>
+              {CLASS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+              {shot.interval_class_source === "manual" ? (
+                <option value="_auto">Reset to auto</option>
+              ) : null}
+            </select>
+            {shot.interval_class && shot.interval_class_source === "auto" ? (
+              <Badge variant="outline" className="text-[10px]">
+                auto
+              </Badge>
             ) : null}
-          </select>
-          {shot.interval_class && shot.interval_class_source === "auto" ? (
-            <Badge variant={CLASS_VARIANT[shot.interval_class]} className="text-[10px]">
-              auto
-            </Badge>
-          ) : null}
-          {shot.interval_class && shot.interval_class_source === "manual" ? (
-            <Badge variant="default" className="text-[10px]">
-              manual
-            </Badge>
-          ) : null}
-          {shot.stale ? (
-            <button
-              type="button"
-              onClick={onAcceptStale}
-              className="rounded-md border border-amber-500/60 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
-              title="The rule disagrees with the stored class. Click to accept the recompute."
-            >
-              stale
-            </button>
-          ) : null}
-          {shot.reload_hint && shot.interval_class !== "reload" ? (
-            <span
-              className="text-[10px] text-muted-foreground"
-              title="Gap is large enough that this might be a reload"
-            >
-              reload?
-            </span>
+            {shot.interval_class && shot.interval_class_source === "manual" ? (
+              <Badge variant="default" className="text-[10px]">
+                manual
+              </Badge>
+            ) : null}
+            {shot.stale ? (
+              <button
+                type="button"
+                onClick={() => onPatch(shot.shot_number, { clear_class: true })}
+                className="rounded-md border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+                title="Rule disagrees with the stored class. Click to accept the recompute."
+              >
+                Accept rule
+              </button>
+            ) : null}
+            {shot.reload_hint && shot.interval_class !== "reload" ? (
+              <span
+                className="text-xs text-muted-foreground"
+                title="Long gap -- could be a reload"
+              >
+                reload?
+              </span>
+            ) : null}
+          </div>
+          {shot.interval_class ? (
+            <p className="text-xs text-muted-foreground">{CLASS_FULL_LABEL[shot.interval_class]}</p>
           ) : null}
         </div>
-      </td>
-      <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          onClick={() => onPatch(shot.shot_number, { improvement_flag: !shot.improvement_flag })}
-          className={cn(
-            "inline-flex size-7 items-center justify-center rounded-md border transition-colors",
-            shot.improvement_flag
-              ? "border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-              : "border-transparent text-muted-foreground hover:bg-accent",
-          )}
-          title={shot.improvement_flag ? "Unflag" : "Flag for improvement"}
-        >
-          <Flag className="size-4" />
-        </button>
-      </td>
-      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-        {editingNote ? (
+
+        <div className="space-y-1">
+          <label className="text-xs uppercase tracking-wide text-muted-foreground">
+            Improvement
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              onPatch(shot.shot_number, { improvement_flag: !shot.improvement_flag })
+            }
+            className={cn(
+              "flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors",
+              shot.improvement_flag
+                ? "border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "border-border bg-background text-muted-foreground hover:bg-accent",
+            )}
+          >
+            <Flag className="size-4" />
+            {shot.improvement_flag ? "Flagged" : "Flag"}
+          </button>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs uppercase tracking-wide text-muted-foreground">Note</label>
           <input
-            autoFocus
-            className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            placeholder="What to remember about this shot"
             value={noteDraft}
             onChange={(e) => setNoteDraft(e.target.value)}
             onBlur={saveNote}
             onKeyDown={(e) => {
-              if (e.key === "Enter") saveNote();
+              if (e.key === "Enter") e.currentTarget.blur();
               if (e.key === "Escape") {
                 setNoteDraft(shot.coaching_note ?? "");
-                setEditingNote(false);
+                e.currentTarget.blur();
               }
             }}
           />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditingNote(true)}
-            className="block w-full truncate rounded-md px-1 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
-            title={shot.coaching_note ?? "Add a note"}
-          >
-            {shot.coaching_note || (
-              <span className="italic text-muted-foreground/60">add note...</span>
-            )}
-          </button>
-        )}
-      </td>
-    </tr>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-// Minimal playback control: play/pause + a current-time display. The
-// shot table is the primary scrub UX; this just lets the user roll the
-// video forward to watch a sequence between two clicks. Seeking via the
-// shot rows already pauses-via-implicit by setting currentTime.
+// Minimal playback control: play/pause + a current-time display.
 function PlaybackBar({
   videoRef,
-  secondaryRefs,
+  onTogglePlay,
 }: {
   videoRef: React.RefObject<HTMLVideoElement | null>;
-  secondaryRefs: React.RefObject<Map<string, HTMLVideoElement>>;
+  onTogglePlay: () => void;
 }) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -813,31 +923,9 @@ function PlaybackBar({
     // the effect deliberately on each run.
   }, [videoRef, videoRef.current]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) {
-      void v.play().catch(() => {});
-      // Start synced secondaries too. Each one was offset by the
-      // primary timeupdate handler; just call .play() so they roll.
-      const refs = secondaryRefs.current;
-      if (refs) {
-        for (const sv of refs.values()) {
-          if (sv.paused) void sv.play().catch(() => {});
-        }
-      }
-    } else {
-      v.pause();
-      const refs = secondaryRefs.current;
-      if (refs) {
-        for (const sv of refs.values()) sv.pause();
-      }
-    }
-  }, [videoRef, secondaryRefs]);
-
   return (
     <div className="mt-3 flex items-center gap-3">
-      <Button type="button" variant="outline" size="sm" onClick={togglePlay}>
+      <Button type="button" variant="outline" size="sm" onClick={onTogglePlay}>
         {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
         {playing ? "Pause" : "Play"}
       </Button>
