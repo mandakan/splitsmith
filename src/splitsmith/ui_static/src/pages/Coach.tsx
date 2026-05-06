@@ -19,8 +19,17 @@
  * shots appear at the same scrub position across every camera.
  */
 
-import { ClipboardCheck, Flag, Pause, Play, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronRight,
+  ClipboardCheck,
+  Flag,
+  Layers,
+  Pause,
+  Play,
+  Radio,
+  RefreshCw,
+} from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { VideoPanel } from "@/components/VideoPanel";
@@ -378,8 +387,23 @@ export function Coach() {
 
           <ShotTable
             shots={coach.shots}
+            beepTime={coach.beep_time}
             activeShotNumber={activeShotNumber}
             onRowClick={seekTo}
+            onSeekToBeep={() => {
+              setActiveShotNumber(0);
+              const v = videoRef.current;
+              if (v) v.currentTime = coach.beep_time;
+              for (const [path, sv] of secondaryRefs.current) {
+                const off = secondaryOffsets.current.get(path);
+                if (off == null) continue;
+                const expected = coach.beep_time + off;
+                const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+                if (expected < 0) continue;
+                if (dur != null && expected > dur) continue;
+                sv.currentTime = expected;
+              }
+            }}
             onPatch={patchShot}
           />
         </div>
@@ -432,30 +456,99 @@ function StagePicker({
   );
 }
 
+// Group consecutive shots that share a class so a long "array on one
+// target" doesn't fill the table with 6 visually identical split rows.
+// First-shot is always its own group. We only collapse groups of >= 2;
+// a singleton transition stays on its own row.
+interface ShotGroup {
+  key: string;
+  cls: CoachIntervalClass | null;
+  shots: CoachShot[];
+}
+
+function groupShots(shots: CoachShot[]): ShotGroup[] {
+  const groups: ShotGroup[] = [];
+  for (const s of shots) {
+    const last = groups[groups.length - 1];
+    if (
+      last &&
+      last.cls === s.interval_class &&
+      // Never merge across first_shot -- it's a stage-level event, not
+      // a coachable interval to be grouped.
+      s.interval_class !== "first_shot"
+    ) {
+      last.shots.push(s);
+    } else {
+      groups.push({
+        key: `${s.interval_class ?? "_"}-${s.shot_number}`,
+        cls: s.interval_class,
+        shots: [s],
+      });
+    }
+  }
+  return groups;
+}
+
 function ShotTable({
   shots,
+  beepTime,
   activeShotNumber,
   onRowClick,
+  onSeekToBeep,
   onPatch,
 }: {
   shots: CoachShot[];
+  beepTime: number;
   activeShotNumber: number | null;
   onRowClick: (s: CoachShot) => void;
+  onSeekToBeep: () => void;
   onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
 }) {
+  const [compact, setCompact] = useState(true);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const groups = useMemo(() => groupShots(shots), [shots]);
+
+  const toggleGroup = useCallback((key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Shots ({shots.length})</CardTitle>
-        <CardDescription>
-          Class chips are inline-editable. Manual stays sticky across reclassify.
-        </CardDescription>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <CardTitle>Shots ({shots.length})</CardTitle>
+            <CardDescription>
+              Class chips are inline-editable. Manual stays sticky across reclassify.
+            </CardDescription>
+          </div>
+          <Button
+            type="button"
+            variant={compact ? "default" : "outline"}
+            size="sm"
+            onClick={() => setCompact((c) => !c)}
+            title={
+              compact
+                ? "Show every shot individually"
+                : "Collapse runs of same-class shots (e.g. arrays of splits)"
+            }
+          >
+            <Layers className="size-4" />
+            {compact ? "Compact" : "Detail"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
+                <th className="w-6 px-2 py-2"></th>
                 <th className="px-3 py-2 text-left">#</th>
                 <th className="px-3 py-2 text-right">T</th>
                 <th className="px-3 py-2 text-right">Split</th>
@@ -465,15 +558,58 @@ function ShotTable({
               </tr>
             </thead>
             <tbody>
-              {shots.map((s) => (
-                <ShotRow
-                  key={s.shot_number}
-                  shot={s}
-                  active={s.shot_number === activeShotNumber}
-                  onRowClick={onRowClick}
-                  onPatch={onPatch}
-                />
-              ))}
+              <BeepRow
+                beepTime={beepTime}
+                active={activeShotNumber === 0}
+                onClick={onSeekToBeep}
+              />
+              {compact
+                ? groups.map((g) => {
+                    const isOpen = expanded.has(g.key);
+                    if (g.shots.length < 2) {
+                      return (
+                        <ShotRow
+                          key={g.key}
+                          shot={g.shots[0]}
+                          active={g.shots[0].shot_number === activeShotNumber}
+                          onRowClick={onRowClick}
+                          onPatch={onPatch}
+                        />
+                      );
+                    }
+                    return (
+                      <Fragment key={g.key}>
+                        <GroupRow
+                          group={g}
+                          expanded={isOpen}
+                          activeShotNumber={activeShotNumber}
+                          onToggle={() => toggleGroup(g.key)}
+                          onRowClick={onRowClick}
+                        />
+                        {isOpen
+                          ? g.shots.map((s) => (
+                              <ShotRow
+                                key={s.shot_number}
+                                shot={s}
+                                indented
+                                active={s.shot_number === activeShotNumber}
+                                onRowClick={onRowClick}
+                                onPatch={onPatch}
+                              />
+                            ))
+                          : null}
+                      </Fragment>
+                    );
+                  })
+                : shots.map((s) => (
+                    <ShotRow
+                      key={s.shot_number}
+                      shot={s}
+                      active={s.shot_number === activeShotNumber}
+                      onRowClick={onRowClick}
+                      onPatch={onPatch}
+                    />
+                  ))}
             </tbody>
           </table>
         </div>
@@ -482,14 +618,128 @@ function ShotTable({
   );
 }
 
+function BeepRow({
+  beepTime,
+  active,
+  onClick,
+}: {
+  beepTime: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-border/50 bg-muted/20 transition-colors hover:bg-accent/40",
+        active && "bg-accent",
+      )}
+      onClick={onClick}
+      title="Seek to the start signal"
+    >
+      <td className="w-6 px-2 py-2"></td>
+      <td className="px-3 py-2 font-mono text-xs">
+        <Radio className="inline size-3.5 text-primary" aria-hidden /> beep
+      </td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground">
+        0.000
+      </td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums text-muted-foreground/60">
+        --
+      </td>
+      <td className="px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+        start signal
+      </td>
+      <td className="px-3 py-2"></td>
+      <td className="px-3 py-2 text-xs text-muted-foreground/70 italic">
+        source t = {beepTime.toFixed(3)} s
+      </td>
+    </tr>
+  );
+}
+
+function GroupRow({
+  group,
+  expanded,
+  activeShotNumber,
+  onToggle,
+  onRowClick,
+}: {
+  group: ShotGroup;
+  expanded: boolean;
+  activeShotNumber: number | null;
+  onToggle: () => void;
+  onRowClick: (s: CoachShot) => void;
+}) {
+  const first = group.shots[0];
+  const last = group.shots[group.shots.length - 1];
+  const totalSplit = group.shots.reduce((acc, s) => acc + s.split, 0);
+  const containsActive = group.shots.some((s) => s.shot_number === activeShotNumber);
+  const label = group.cls ? CLASS_LABELS[group.cls] : "unset";
+  return (
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
+        containsActive && !expanded && "bg-accent/60",
+      )}
+      onClick={() => onRowClick(first)}
+      title="Click to seek to the first shot in the group"
+    >
+      <td className="w-6 px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Collapse group" : "Expand group"}
+        >
+          <ChevronRight
+            className={cn("size-4 transition-transform", expanded && "rotate-90")}
+          />
+        </button>
+      </td>
+      <td className="px-3 py-2 font-mono text-xs">
+        {first.shot_number}-{last.shot_number}
+      </td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">
+        {first.time_from_beep.toFixed(3)}
+      </td>
+      <td className="px-3 py-2 text-right font-mono tabular-nums">
+        {totalSplit.toFixed(3)}
+      </td>
+      <td className="px-3 py-2">
+        <Badge variant={group.cls ? CLASS_VARIANT[group.cls] : "outline"}>
+          {label} x{group.shots.length}
+        </Badge>
+      </td>
+      <td className="px-3 py-2"></td>
+      <td className="px-3 py-2 text-xs text-muted-foreground italic">
+        click to seek -- expand to edit individual shots
+      </td>
+    </tr>
+  );
+}
+
+const CLASS_LABELS: Record<CoachIntervalClass, string> = {
+  first_shot: "First shot",
+  split: "Splits",
+  transition: "Transitions",
+  movement: "Movements",
+  reload: "Reloads",
+  activation: "Activations",
+};
+
 function ShotRow({
   shot,
   active,
+  indented = false,
   onRowClick,
   onPatch,
 }: {
   shot: CoachShot;
   active: boolean;
+  /** True when rendered as a child of an expanded group; renders with a
+   *  faint left rail so the visual hierarchy reads at a glance. */
+  indented?: boolean;
   onRowClick: (s: CoachShot) => void;
   onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
 }) {
@@ -531,9 +781,16 @@ function ShotRow({
       className={cn(
         "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
         active && "bg-accent",
+        indented && "bg-muted/10",
       )}
       onClick={() => onRowClick(shot)}
     >
+      <td
+        className={cn(
+          "w-6 px-2 py-2",
+          indented && "border-l-2 border-border/40",
+        )}
+      ></td>
       <td className="px-3 py-2 font-mono text-xs">{shot.shot_number}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums">
         {shot.time_from_beep.toFixed(3)}

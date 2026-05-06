@@ -5,10 +5,12 @@ import {
   FlaskConical,
   FolderInput,
   Home,
+  PanelLeftClose,
+  PanelLeftOpen,
   Palette,
   Repeat,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
@@ -32,6 +34,8 @@ const BASE_NAV: NavItem[] = [
 ];
 const LAB_NAV: NavItem = { to: "/lab", label: "Lab", icon: FlaskConical };
 
+const SIDEBAR_COLLAPSE_KEY = "splitsmith.appshell.sidebarCollapsed";
+
 export function AppShell() {
   const { pathname } = useLocation();
   // /review is fixture-only: no project context, the project tabs would
@@ -39,6 +43,31 @@ export function AppShell() {
   // Hide the sidebar entirely so the screen reads as a single-purpose
   // tool instead of "audit screen with broken navigation".
   const fixtureMode = pathname.startsWith("/review");
+
+  // Sidebar collapse state. Persisted in localStorage so the user's
+  // choice survives page reloads. Pages that benefit from the extra
+  // horizontal width (Coach grid mode, Audit waveform on a narrow
+  // monitor) collapse once and stay collapsed.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage may be unavailable (private mode); preference
+        // stays in-memory for the session, which is fine.
+      }
+      return next;
+    });
+  }, []);
 
   // Server-side feature flags. ``lab`` defaults off and is opt-in via
   // ``splitsmith ui --lab``; if the fetch fails we hide the Lab nav,
@@ -80,10 +109,36 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {fixtureMode ? null : (
-        <aside className="flex w-60 flex-col border-r border-border bg-card">
-          <div className="flex h-14 items-center gap-2 px-4 font-semibold tracking-tight">
-            <Crosshair className="size-5 text-primary" />
-            splitsmith
+        <aside
+          className={cn(
+            "flex flex-col border-r border-border bg-card transition-[width] duration-150",
+            sidebarCollapsed ? "w-14" : "w-60",
+          )}
+        >
+          <div
+            className={cn(
+              "flex h-14 items-center gap-2 px-3 font-semibold tracking-tight",
+              sidebarCollapsed && "justify-center px-2",
+            )}
+          >
+            <Crosshair className="size-5 shrink-0 text-primary" />
+            {sidebarCollapsed ? null : <span>splitsmith</span>}
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className={cn(
+                "ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                sidebarCollapsed && "ml-0",
+              )}
+            >
+              {sidebarCollapsed ? (
+                <PanelLeftOpen className="size-4" aria-hidden />
+              ) : (
+                <PanelLeftClose className="size-4" aria-hidden />
+              )}
+            </button>
           </div>
           <nav className="flex flex-1 flex-col gap-0.5 p-2">
             {nav.map(({ to, label, icon: Icon, end }) => (
@@ -91,34 +146,38 @@ export function AppShell() {
                 key={to}
                 to={to}
                 end={end}
+                title={sidebarCollapsed ? label : undefined}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    sidebarCollapsed && "justify-center px-0",
                     isActive
                       ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                   )
                 }
               >
-                <Icon className="size-4" />
-                {label}
+                <Icon className="size-4 shrink-0" />
+                {sidebarCollapsed ? null : <span>{label}</span>}
               </NavLink>
             ))}
           </nav>
           <div className="border-t border-border p-2">
             <NavLink
               to="/_design"
+              title={sidebarCollapsed ? "Design system" : undefined}
               className={({ isActive }) =>
                 cn(
                   "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                  sidebarCollapsed && "justify-center px-0",
                   isActive
                     ? "bg-accent text-accent-foreground font-medium"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )
               }
             >
-              <Palette className="size-4" />
-              Design system
+              <Palette className="size-4 shrink-0" />
+              {sidebarCollapsed ? null : <span>Design system</span>}
             </NavLink>
           </div>
         </aside>
