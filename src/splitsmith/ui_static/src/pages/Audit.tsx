@@ -1080,6 +1080,14 @@ export function Audit() {
           setLoopMode((v) => !v);
           return;
         }
+        if ((e.key === "Delete" || e.key === "Backspace") && focusedMarkerId) {
+          const target = markers.find((x) => x.id === focusedMarkerId) ?? null;
+          if (target?.kind === "manual") {
+            e.preventDefault();
+            handleMarkerDelete(target);
+          }
+          return;
+        }
         if (e.key === "k" || e.key === "K") {
           // Keep / reject toggle for the current shot. Lets the user step
           // through shots with M and decide each one without reaching for
