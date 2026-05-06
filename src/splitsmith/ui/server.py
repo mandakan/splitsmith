@@ -83,11 +83,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import beep_detect, cross_align, report, user_config, video_probe
+from .. import coach as coach_module
 from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
-from ..config import BeepDetectConfig, Config
+from ..config import (
+    BeepDetectConfig,
+    CoachAutoClassifyConfig,
+    Config,
+    IntervalClass,
+    IntervalClassSource,
+)
 from ..fixture_schema import (
     AgcState,
     AudioSource,
@@ -904,6 +911,22 @@ class SkipStageRequest(BaseModel):
     """Body for POST /api/stages/{n}/skip. Toggles ``stage.skipped``."""
 
     skipped: bool
+
+
+class CoachShotPatchRequest(BaseModel):
+    """Body for PATCH /api/stages/{n}/shots/{shot_number}/coach (issue #161).
+
+    Each field is independently optional. Use ``clear_class`` / ``clear_note``
+    to drop a previously-set value. ``interval_class`` and
+    ``interval_class_source`` must be set together when present.
+    """
+
+    interval_class: IntervalClass | None = None
+    interval_class_source: IntervalClassSource | None = None
+    clear_class: bool = False
+    improvement_flag: bool | None = None
+    coaching_note: str | None = None
+    clear_note: bool = False
 
 
 class RemoveVideoRequest(BaseModel):
@@ -3212,6 +3235,193 @@ def create_app(
         )
         anomalies = report.detect_anomalies_structured(shots, beep_time, stg.time_seconds)
         return JSONResponse({"anomalies": [a.model_dump() for a in anomalies]})
+
+    # ----------------------------------------------------------------------
+    # Coach endpoints (#161). Read-only on shot timestamps -- all writes go
+    # to the coaching annotation fields owned by ``splitsmith.coach``.
+    # Storage is the same audit JSON Audit reads/writes. The coach is lazy:
+    # GET surfaces the current rule's verdict + a stale flag without
+    # mutating; reclassify persists auto entries; PATCH writes one shot's
+    # coach fields.
+    # ----------------------------------------------------------------------
+
+    def _load_audit_for_coach(stage_number: int) -> tuple[dict[str, Any], Path, float, Any]:
+        """Shared loader: validates the stage, reads the audit JSON,
+        returns (payload, path, beep_time_in_source, stage).
+        """
+        project = state.load()
+        try:
+            stg = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"no audit JSON yet for stage {stage_number}",
+            )
+        try:
+            payload = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+        prim = stg.primary()
+        beep_in_source = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
+        return payload, audit_file, beep_in_source, stg
+
+    def _coach_atomic_write(audit_file: Path, payload: dict[str, Any]) -> None:
+        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if audit_file.exists():
+                if backup.exists():
+                    backup.unlink()
+                audit_file.replace(backup)
+            tmp.replace(audit_file)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"coach write failed: {exc}") from exc
+
+    def _build_coach_response(
+        payload: dict[str, Any],
+        beep_in_source: float,
+        stg: Any,
+        cfg: CoachAutoClassifyConfig,
+    ) -> dict[str, Any]:
+        raw_shots = payload.get("shots") or []
+        ordered = sorted(
+            (s for s in raw_shots if isinstance(s, dict) and "ms_after_beep" in s),
+            key=lambda s: float(s.get("ms_after_beep", 0)),
+        )
+        coach_shots: list[dict[str, Any]] = []
+        prev_ms: float | None = None
+        for s in ordered:
+            ms = float(s["ms_after_beep"])
+            time_from_beep = ms / 1000.0
+            gap_s: float | None
+            if prev_ms is None:
+                gap_s = None
+                split = time_from_beep  # draw
+            else:
+                gap_s = (ms - prev_ms) / 1000.0
+                split = gap_s
+            prev_ms = ms
+            stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg)
+            reload_hint = coach_module.reload_hinted(gap_s, cfg)
+            coach_shots.append(
+                {
+                    "shot_number": int(s.get("shot_number", 0)),
+                    "ms_after_beep": int(ms),
+                    "time_from_beep": time_from_beep,
+                    "time_absolute": beep_in_source + time_from_beep,
+                    "split": split,
+                    "interval_class": s.get("interval_class"),
+                    "interval_class_source": s.get("interval_class_source"),
+                    "improvement_flag": bool(s.get("improvement_flag", False)),
+                    "coaching_note": s.get("coaching_note"),
+                    "stale": stale,
+                    "reload_hint": reload_hint,
+                }
+            )
+        return {
+            "stage_number": stg.stage_number,
+            "stage_name": stg.stage_name,
+            "beep_time": beep_in_source,
+            "shots": coach_shots,
+        }
+
+    @app.get("/api/stages/{stage_number}/coach")
+    def get_stage_coach(stage_number: int) -> JSONResponse:
+        """Return the per-shot coach view for a stage.
+
+        Read-only: the stored ``interval_class`` is surfaced as-is, plus a
+        ``stale`` flag indicating whether the current rule disagrees. The
+        client can call ``POST /coach/reclassify`` to persist the rule's
+        verdict onto unset/auto entries.
+        """
+        payload, _audit_file, beep_in_source, stg = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        return JSONResponse(_build_coach_response(payload, beep_in_source, stg, cfg))
+
+    @app.post("/api/stages/{stage_number}/coach/reclassify")
+    def reclassify_stage_coach(stage_number: int) -> JSONResponse:
+        """Force the auto-classifier to (re)write ``interval_class`` for
+        every shot whose source is unset or ``"auto"``. Manual entries are
+        preserved. Idempotent.
+        """
+        payload, audit_file, beep_in_source, stg = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        shots = payload.get("shots") or []
+        if not isinstance(shots, list):
+            raise HTTPException(status_code=500, detail="audit shots is not a list")
+        coach_module.classify_intervals_in_dicts(shots, cfg)
+        events = list(payload.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "coach_reclassify",
+                "payload": {"shot_count": len(shots)},
+            }
+        )
+        payload["audit_events"] = events
+        _coach_atomic_write(audit_file, payload)
+        return JSONResponse(_build_coach_response(payload, beep_in_source, stg, cfg))
+
+    @app.patch("/api/stages/{stage_number}/shots/{shot_number}/coach")
+    def patch_stage_shot_coach(
+        stage_number: int,
+        shot_number: int,
+        body: CoachShotPatchRequest,
+    ) -> JSONResponse:
+        """Patch the coaching annotation fields on one shot. Returns the
+        updated coach response for the stage so the client can refresh.
+        """
+        payload, audit_file, beep_in_source, stg = _load_audit_for_coach(stage_number)
+        cfg = CoachAutoClassifyConfig()
+        shots = payload.get("shots") or []
+        if not isinstance(shots, list):
+            raise HTTPException(status_code=500, detail="audit shots is not a list")
+        target = next(
+            (
+                s
+                for s in shots
+                if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number
+            ),
+            None,
+        )
+        if target is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"shot {shot_number} not found in stage {stage_number}",
+            )
+        try:
+            coach_module.write_coach_fields(
+                target,
+                interval_class=body.interval_class,
+                interval_class_source=body.interval_class_source,
+                clear_class=body.clear_class,
+                improvement_flag=body.improvement_flag,
+                coaching_note=body.coaching_note,
+                clear_note=body.clear_note,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        events = list(payload.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "coach_patch",
+                "payload": {
+                    "shot_number": shot_number,
+                    "fields": coach_module.read_coach_fields(target),
+                },
+            }
+        )
+        payload["audit_events"] = events
+        _coach_atomic_write(audit_file, payload)
+        return JSONResponse(_build_coach_response(payload, beep_in_source, stg, cfg))
 
     # ----------------------------------------------------------------------
     # Fixture-review endpoints (closes #19 -- the old splitsmith.review_server
