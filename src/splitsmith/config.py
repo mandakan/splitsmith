@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Pipeline data structures
@@ -45,6 +45,18 @@ class StageData(BaseModel):
     stage_rounds: StageRounds | None = None
 
 
+IntervalClass = Literal[
+    "first_shot",
+    "split",
+    "transition",
+    "movement",
+    "reload",
+    "activation",
+]
+
+IntervalClassSource = Literal["auto", "manual"]
+
+
 class Shot(BaseModel):
     shot_number: int
     time_absolute: float
@@ -53,6 +65,24 @@ class Shot(BaseModel):
     peak_amplitude: float
     confidence: float = Field(ge=0.0, le=1.0)
     notes: str = ""
+
+    # Coaching annotations (issue #159). All optional so old audit JSONs
+    # load unchanged; the Coach page populates them on first open via the
+    # auto-classifier (#160). interval_class_source is required whenever
+    # interval_class is set, so we can preserve manual overrides across
+    # re-classification.
+    interval_class: IntervalClass | None = None
+    interval_class_source: IntervalClassSource | None = None
+    improvement_flag: bool = False
+    coaching_note: str | None = None
+
+    @model_validator(mode="after")
+    def _coach_annotations_consistent(self) -> Shot:
+        if self.interval_class is not None and self.interval_class_source is None:
+            raise ValueError("interval_class_source must be set when interval_class is set")
+        if self.interval_class is None and self.interval_class_source is not None:
+            raise ValueError("interval_class_source must be unset when interval_class is unset")
+        return self
 
 
 class StageAnalysis(BaseModel):
