@@ -568,10 +568,23 @@ export interface CoachShot {
   reload_hint: boolean;
 }
 
+export interface CoachVideoEntry {
+  path: string;
+  role: VideoRole;
+  /** Where the beep falls in the clip the SPA actually receives from
+   *  /api/videos/stream for this video -- the trimmed clip when one
+   *  exists, the source otherwise. ``null`` for cameras without a beep
+   *  yet; those are unsyncable and the SPA leaves them disabled. */
+  beep_in_clip: number | null;
+}
+
 export interface CoachStageResponse {
   stage_number: number;
   stage_name: string;
+  /** Where the beep falls in the served primary clip; same coordinate
+   *  system as ``shots[i].time_absolute``. */
   beep_time: number;
+  videos: CoachVideoEntry[];
   shots: CoachShot[];
 }
 
