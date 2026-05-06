@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Final, get_args
 
-from .config import IntervalClass, IntervalClassSource
+from .config import CoachAutoClassifyConfig, IntervalClass, IntervalClassSource, Shot
 
 COACH_INTERVAL_CLASSES: Final[tuple[str, ...]] = get_args(IntervalClass)
 COACH_INTERVAL_CLASS_SOURCES: Final[tuple[str, ...]] = get_args(IntervalClassSource)
@@ -122,3 +122,132 @@ def write_coach_fields(
             shot[FIELD_COACHING_NOTE] = coaching_note
 
     return shot
+
+
+# ---------------------------------------------------------------------------
+# Auto-classifier (#160). The rule is purely a function of the gap to the
+# previous shot (or "first shot" for index 0). Manual classifications are
+# always preserved; auto-classifications are recomputed every call so a
+# timing edit reflows automatically.
+# ---------------------------------------------------------------------------
+
+
+def _classify_gap(gap_s: float | None, config: CoachAutoClassifyConfig) -> IntervalClass:
+    """Map a gap to the auto-class. ``None`` means "this is shot 1"."""
+    if gap_s is None:
+        return "first_shot"
+    if gap_s <= config.split_max_s:
+        return "split"
+    if gap_s <= config.transition_max_s:
+        return "transition"
+    return "movement"
+
+
+def reload_hinted(gap_s: float | None, config: CoachAutoClassifyConfig) -> bool:
+    """True when the auto-class is movement *and* the gap exceeds the
+    reload-hint threshold. UI surfaces a "could be reload?" badge.
+    """
+    if gap_s is None:
+        return False
+    return gap_s > config.reload_hint_min_s
+
+
+def classify_intervals_in_dicts(
+    shots: list[dict[str, Any]],
+    config: CoachAutoClassifyConfig,
+) -> list[dict[str, Any]]:
+    """Apply the auto-classifier to a list of audit-JSON shot dicts.
+
+    Mutates ``shots`` in place and returns it. Walks in time order (by
+    ``ms_after_beep``, falling back to ``shot_number`` then list index).
+    Shots whose ``interval_class_source`` is ``"manual"`` are left
+    untouched. Shots with ``"auto"`` or no source are (re)written to the
+    rule's verdict with ``source="auto"``.
+
+    Required per-shot fields: ``ms_after_beep`` (number, milliseconds
+    from the beep). Shots without it are skipped (no class is written).
+    """
+    indexed = list(enumerate(shots))
+    indexed.sort(key=_sort_key)
+    prev_ms: float | None = None
+    for _orig_idx, shot in indexed:
+        ms = shot.get("ms_after_beep")
+        if ms is None:
+            prev_ms = None
+            continue
+        gap_s: float | None
+        if prev_ms is None:
+            gap_s = None  # first shot in the stage
+        else:
+            gap_s = (float(ms) - prev_ms) / 1000.0
+        prev_ms = float(ms)
+
+        if shot.get(FIELD_INTERVAL_CLASS_SOURCE) == "manual":
+            continue
+
+        new_class = _classify_gap(gap_s, config)
+        write_coach_fields(
+            shot,
+            interval_class=new_class,
+            interval_class_source="auto",
+        )
+    return shots
+
+
+def classify_intervals_in_models(
+    shots: list[Shot],
+    config: CoachAutoClassifyConfig,
+) -> list[Shot]:
+    """Pydantic equivalent of :func:`classify_intervals_in_dicts`.
+
+    Returns a new list of Shot instances; the inputs are not mutated.
+    Walks in ``time_from_beep`` order (matching the dict path's behaviour).
+    """
+    indexed = sorted(enumerate(shots), key=lambda p: (p[1].time_from_beep, p[1].shot_number))
+    new_classes: dict[int, tuple[IntervalClass | None, IntervalClassSource | None]] = {}
+    prev_t: float | None = None
+    for orig_idx, shot in indexed:
+        t = shot.time_from_beep
+        gap_s = None if prev_t is None else (t - prev_t)
+        prev_t = t
+        if shot.interval_class_source == "manual":
+            new_classes[orig_idx] = (shot.interval_class, "manual")
+        else:
+            new_classes[orig_idx] = (_classify_gap(gap_s, config), "auto")
+    out: list[Shot] = []
+    for i, shot in enumerate(shots):
+        cls, src = new_classes[i]
+        out.append(shot.model_copy(update={"interval_class": cls, "interval_class_source": src}))
+    return out
+
+
+def is_classification_stale(
+    shot: dict[str, Any] | Shot,
+    *,
+    gap_s: float | None,
+    config: CoachAutoClassifyConfig,
+) -> bool:
+    """Return True iff the stored auto-classification disagrees with what
+    the rule would assign now. Computed on read; never persisted.
+
+    For ``manual`` shots the stale flag is also surfaced (the rule's
+    verdict differs from the user's pick) so the UI can show a hint, but
+    the caller decides whether to act on it. For shots with no class
+    set, returns False.
+    """
+    if isinstance(shot, Shot):
+        cls = shot.interval_class
+    else:
+        cls = shot.get(FIELD_INTERVAL_CLASS)
+    if cls is None:
+        return False
+    return _classify_gap(gap_s, config) != cls
+
+
+def _sort_key(pair: tuple[int, dict[str, Any]]) -> tuple[float, int, int]:
+    orig_idx, shot = pair
+    ms = shot.get("ms_after_beep")
+    ms_key = float(ms) if isinstance(ms, (int, float)) else float("inf")
+    sn = shot.get("shot_number")
+    sn_key = int(sn) if isinstance(sn, (int, float)) else orig_idx
+    return (ms_key, sn_key, orig_idx)

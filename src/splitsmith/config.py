@@ -326,12 +326,31 @@ class OutputConfig(BaseModel):
     trim_audit_encoder: str = "auto"
 
 
+class CoachAutoClassifyConfig(BaseModel):
+    """Gap-time thresholds for the Coach interval auto-classifier (#160).
+
+    The auto-classifier only ever assigns ``first_shot``, ``split``,
+    ``transition``, or ``movement``. ``reload`` and ``activation`` are
+    user-only overrides -- the rule cannot reliably distinguish them
+    from movement without target metadata or hand cues.
+    """
+
+    # gap <= split_max_s -> "split"
+    split_max_s: float = Field(default=0.50, gt=0.0)
+    # split_max_s < gap <= transition_max_s -> "transition"
+    transition_max_s: float = Field(default=1.00, gt=0.0)
+    # transition_max_s < gap -> "movement". The UI surfaces a "could be
+    # reload?" hint when the gap exceeds reload_hint_min_s.
+    reload_hint_min_s: float = Field(default=2.50, gt=0.0)
+
+
 class Config(BaseModel):
     beep_detect: BeepDetectConfig = Field(default_factory=BeepDetectConfig)
     shot_detect: ShotDetectConfig = Field(default_factory=ShotDetectConfig)
     shot_refine: ShotRefineConfig = Field(default_factory=ShotRefineConfig)
     video_match: VideoMatchConfig = Field(default_factory=VideoMatchConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
 
     @classmethod
     def load(cls, path: Path | None) -> Config:
