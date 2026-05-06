@@ -8,18 +8,22 @@
  * audit JSON so Audit and Coach see each other's writes.
  *
  * Click any shot row -> the primary video seeks to that shot's source
- * time. Stale badges surface auto-classifications whose stored class
- * disagrees with the current rule (typical after an Audit timestamp
- * edit); click to accept the recompute.
+ * time and every synced secondary follows. Stale badges surface
+ * auto-classifications whose stored class disagrees with the current
+ * rule (typical after an Audit timestamp edit); click to accept the
+ * recompute.
  *
- * Video grid + secondaries are deferred to a follow-up; this v1 plays
- * the primary only.
+ * Multi-camera: VideoPanel handles the tab/grid layout. Coach owns the
+ * single playback source (primary) and offsets each secondary by
+ * ``(secondary.beep_time - primary.beep_time)`` so the beep aligns and
+ * shots appear at the same scrub position across every camera.
  */
 
-import { ClipboardCheck, Flag, RefreshCw } from "lucide-react";
+import { ClipboardCheck, Flag, Pause, Play, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { VideoPanel } from "@/components/VideoPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,6 +74,17 @@ export function Coach() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
 
+  // Multi-camera state. VideoPanel renders both modes; Coach owns the
+  // single playback source (the primary) and the secondary refs/offsets
+  // so click-to-scrub seeks every synced camera in lockstep.
+  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
+  const [gridMode, setGridMode] = useState(false);
+  const secondaryRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  // path -> (secondary.beep_time - primary.beep_time). When the primary
+  // sits at sourceTime T, the synced secondary should be at T + offset
+  // so the beep aligns. Recomputed whenever the videos array changes.
+  const secondaryOffsets = useRef<Map<string, number>>(new Map());
+
   const stageNumber = useMemo(() => {
     if (!stageParam) return null;
     const n = Number.parseInt(stageParam, 10);
@@ -109,12 +124,102 @@ export function Coach() {
     return project.stages.find((s) => s.stage_number === stageNumber) ?? null;
   }, [project, stageNumber]);
 
-  const primaryVideo = useMemo<StageVideo | null>(() => {
-    if (!stage) return null;
-    return stage.videos.find((v) => v.role === "primary") ?? null;
+  // VideoPanel expects [primary, ...secondaries]. Sort secondaries by
+  // added_at to match Audit's tab order so the user's mental model of
+  // "Cam 2 / Cam 3" stays stable across pages.
+  const videos = useMemo<StageVideo[]>(() => {
+    if (!stage) return [];
+    const primary = stage.videos.find((v) => v.role === "primary");
+    const secondaries = stage.videos
+      .filter((v) => v.role === "secondary")
+      .slice()
+      .sort((a, b) => a.added_at.localeCompare(b.added_at));
+    return primary ? [primary, ...secondaries] : [...secondaries];
   }, [stage]);
 
-  const videoSrc = primaryVideo ? api.videoStreamUrl(primaryVideo.path) : "";
+  const primaryVideo = videos[0] ?? null;
+  const activeVideo = videos[activeVideoIndex] ?? primaryVideo;
+  const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
+
+  // Offsets: secondaries with a beep_time can be synced; the rest stay
+  // disabled in VideoPanel's tab list. Rebuild on every videos change so
+  // a stage swap doesn't leave stale entries from the previous stage.
+  useEffect(() => {
+    const next = new Map<string, number>();
+    const primaryBeep = primaryVideo?.beep_time ?? null;
+    if (primaryBeep != null) {
+      for (const v of videos.slice(1)) {
+        if (v.beep_time != null) {
+          next.set(v.path, v.beep_time - primaryBeep);
+        }
+      }
+    }
+    secondaryOffsets.current = next;
+  }, [videos, primaryVideo]);
+
+  // Reset active tab to primary on stage swap so the user lands on the
+  // headcam by default; grid stays sticky across stages because that's
+  // usually the workflow ("compare these two angles for every shot").
+  useEffect(() => {
+    setActiveVideoIndex(0);
+  }, [stageNumber]);
+
+  const handleSecondaryRef = useCallback(
+    (path: string, el: HTMLVideoElement | null) => {
+      if (el) {
+        secondaryRefs.current.set(path, el);
+        const off = secondaryOffsets.current.get(path);
+        const v = videoRef.current;
+        if (off != null && v != null) {
+          const target = v.currentTime + off;
+          if (el.readyState >= 1) {
+            el.currentTime = target;
+          } else {
+            el.addEventListener(
+              "loadedmetadata",
+              () => {
+                el.currentTime = target;
+              },
+              { once: true },
+            );
+          }
+        }
+      } else {
+        secondaryRefs.current.delete(path);
+      }
+    },
+    [],
+  );
+
+  // Coach is paused-by-default review; we don't need the play/pause loop
+  // logic Audit uses. timeupdate just keeps secondaries glued to the
+  // primary if the user hits the native controls. Clamp to each
+  // secondary's content range so we don't seek past a shorter clip.
+  const handlePrimaryTimeUpdate = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    for (const [path, sv] of secondaryRefs.current) {
+      const off = secondaryOffsets.current.get(path);
+      if (off == null) continue;
+      const expected = v.currentTime + off;
+      const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+      if (expected < 0) continue;
+      if (dur != null && expected > dur) continue;
+      // Only re-seek when drift exceeds ~80 ms; cheap timeupdate firings
+      // would otherwise cause continuous re-seeks during native playback.
+      if (Math.abs(sv.currentTime - expected) > 0.08) {
+        sv.currentTime = expected;
+      }
+    }
+  }, []);
+
+  const handleSecondaryBuffering = useCallback(
+    (_path: string, _buffering: boolean) => {
+      // Coach doesn't surface a panel-level buffering state -- the
+      // SecondarySlot's own overlay is enough for review.
+    },
+    [],
+  );
 
   // Load coach payload whenever the stage changes; on first hit we
   // auto-reclassify if any shot is unclassified, so the user always
@@ -172,6 +277,15 @@ export function Coach() {
     if (v) {
       v.currentTime = shot.time_absolute;
     }
+    for (const [path, sv] of secondaryRefs.current) {
+      const off = secondaryOffsets.current.get(path);
+      if (off == null) continue;
+      const expected = shot.time_absolute + off;
+      const dur = Number.isFinite(sv.duration) ? sv.duration : null;
+      if (expected < 0) continue;
+      if (dur != null && expected > dur) continue;
+      sv.currentTime = expected;
+    }
   }, []);
 
   const patchShot = useCallback(
@@ -222,29 +336,42 @@ export function Coach() {
       ) : null}
 
       {coach && (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
+        <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>
                 Stage {coach.stage_number} -- {coach.stage_name}
               </CardTitle>
               <CardDescription>
-                Click a shot to seek the video. Beep is at {coach.beep_time.toFixed(2)} s in source.
+                Click a shot to seek every synced camera. Beep is at {coach.beep_time.toFixed(2)} s
+                in source.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {videoSrc ? (
-                <video
-                  ref={videoRef}
-                  src={videoSrc}
-                  controls
-                  preload="metadata"
-                  className="aspect-video w-full rounded-md bg-black"
-                />
-              ) : (
+              {videos.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
                   No primary video bound to this stage.
                 </div>
+              ) : (
+                <>
+                  <VideoPanel
+                    ref={videoRef}
+                    videos={videos}
+                    primaryBeepTime={primaryVideo?.beep_time ?? null}
+                    activeIndex={activeVideoIndex}
+                    onActiveIndexChange={setActiveVideoIndex}
+                    videoSrc={videoSrc}
+                    gridMode={gridMode}
+                    onGridModeToggle={() => setGridMode((g) => !g)}
+                    onSecondaryRef={handleSecondaryRef}
+                    onSecondaryBuffering={handleSecondaryBuffering}
+                    onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
+                  />
+                  <PlaybackBar
+                    videoRef={videoRef}
+                    secondaryRefs={secondaryRefs}
+                  />
+                </>
               )}
             </CardContent>
           </Card>
@@ -509,4 +636,96 @@ function ShotRow({
       </td>
     </tr>
   );
+}
+
+// Minimal playback control: play/pause + a current-time display. The
+// shot table is the primary scrub UX; this just lets the user roll the
+// video forward to watch a sequence between two clicks. Seeking via the
+// shot rows already pauses-via-implicit by setting currentTime.
+function PlaybackBar({
+  videoRef,
+  secondaryRefs,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  secondaryRefs: React.RefObject<Map<string, HTMLVideoElement>>;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState<number | null>(null);
+
+  // Subscribe to playback state on the primary so the toggle button
+  // reflects what the user sees. Re-binds on ref churn (stage switch).
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onTime = () => setCurrentTime(v.currentTime);
+    const onMeta = () => {
+      setDuration(Number.isFinite(v.duration) ? v.duration : null);
+      setCurrentTime(v.currentTime);
+    };
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("loadedmetadata", onMeta);
+    if (v.readyState >= 1) onMeta();
+    return () => {
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("loadedmetadata", onMeta);
+    };
+    // The ref identity is stable but the underlying element swaps on
+    // tab change; tying the effect to `videoRef.current` keeps the
+    // listeners pointed at the live element. Reading `.current` inside
+    // the effect deliberately on each run.
+  }, [videoRef, videoRef.current]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      void v.play().catch(() => {});
+      // Start synced secondaries too. Each one was offset by the
+      // primary timeupdate handler; just call .play() so they roll.
+      const refs = secondaryRefs.current;
+      if (refs) {
+        for (const sv of refs.values()) {
+          if (sv.paused) void sv.play().catch(() => {});
+        }
+      }
+    } else {
+      v.pause();
+      const refs = secondaryRefs.current;
+      if (refs) {
+        for (const sv of refs.values()) sv.pause();
+      }
+    }
+  }, [videoRef, secondaryRefs]);
+
+  return (
+    <div className="mt-3 flex items-center gap-3">
+      <Button type="button" variant="outline" size="sm" onClick={togglePlay}>
+        {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+        {playing ? "Pause" : "Play"}
+      </Button>
+      <div className="font-mono text-xs tabular-nums text-muted-foreground">
+        {formatTime(currentTime)}
+        {duration != null ? ` / ${formatTime(duration)}` : ""}
+      </div>
+    </div>
+  );
+}
+
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00.000";
+  const mins = Math.floor(seconds / 60);
+  const rest = seconds - mins * 60;
+  const wholeSec = Math.floor(rest);
+  const ms = Math.round((rest - wholeSec) * 1000);
+  const mm = String(mins).padStart(2, "0");
+  const ss = String(wholeSec).padStart(2, "0");
+  const mmm = String(ms).padStart(3, "0");
+  return `${mm}:${ss}.${mmm}`;
 }
