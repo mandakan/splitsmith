@@ -588,6 +588,63 @@ export interface CoachStageResponse {
   shots: CoachShot[];
 }
 
+/** One bin of a Coach histogram (#163). ``lo`` inclusive, ``hi`` exclusive. */
+export interface CoachHistogramBucket {
+  lo: number;
+  hi: number;
+  count: number;
+}
+
+/** Distribution of gap-times for one ``interval_class`` across one stage
+ *  or one match. ``buckets`` only contains non-empty bins to keep the
+ *  payload small; ``count``/``mean_s``/etc. are computed over the full
+ *  set of values. */
+export interface CoachIntervalDistribution {
+  interval_class: CoachIntervalClass;
+  bucket_size_s: number;
+  buckets: CoachHistogramBucket[];
+  count: number;
+  mean_s: number | null;
+  median_s: number | null;
+  p90_s: number | null;
+}
+
+export interface CoachTopShotEntry {
+  stage_number: number;
+  stage_name: string;
+  shot_number: number;
+  interval_class: CoachIntervalClass;
+  gap_s: number;
+  coaching_note: string | null;
+  improvement_flag: boolean;
+}
+
+export interface CoachFlaggedShotEntry {
+  stage_number: number;
+  stage_name: string;
+  shot_number: number;
+  interval_class: CoachIntervalClass | null;
+  gap_s: number | null;
+  coaching_note: string | null;
+}
+
+export interface CoachStageDistributions {
+  stage_number: number;
+  stage_name: string;
+  distributions: CoachIntervalDistribution[];
+  first_shot_s: number | null;
+}
+
+export interface CoachMatchDistributions {
+  distributions: CoachIntervalDistribution[];
+  first_shot_seconds: number[];
+  top_splits: CoachTopShotEntry[];
+  top_transitions: CoachTopShotEntry[];
+  flagged_shots: CoachFlaggedShotEntry[];
+  stage_count: number;
+  shot_count: number;
+}
+
 export interface CoachShotPatch {
   interval_class?: CoachIntervalClass | null;
   interval_class_source?: CoachIntervalClassSource | null;
@@ -1218,6 +1275,19 @@ export const api = {
       `/api/stages/${stageNumber}/shots/${shotNumber}/coach`,
       { method: "PATCH", json: patch },
     ),
+
+  /** Per-stage histograms + summary stats for the Coach distributions
+   *  panel (#163). Empty classes still appear with count=0 so the UI
+   *  can render an empty histogram without a special case. */
+  getStageCoachDistributions: (stageNumber: number) =>
+    request<CoachStageDistributions>(
+      `/api/stages/${stageNumber}/coach/distributions`,
+    ),
+
+  /** Match-level histograms aggregated across every stage with an audit
+   *  JSON. Stages without an audit are silently skipped server-side. */
+  getMatchCoachDistributions: () =>
+    request<CoachMatchDistributions>("/api/coach/distributions"),
 
   /** Structured anomalies for the *saved* audit JSON (issue #42).
    *

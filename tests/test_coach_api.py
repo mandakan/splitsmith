@@ -157,6 +157,34 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
     assert body["shots"][0]["time_absolute"] == pytest.approx(5.0 + 1.5)
 
 
+def test_get_stage_distributions(tmp_path: Path) -> None:
+    client, _audit = _bootstrap(tmp_path)
+    resp = client.get("/api/stages/1/coach/distributions")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["stage_number"] == 1
+    classes = {d["interval_class"] for d in body["distributions"]}
+    assert classes == {"split", "transition", "movement", "reload"}
+    by_class = {d["interval_class"]: d for d in body["distributions"]}
+    assert by_class["split"]["count"] == 1
+    assert by_class["transition"]["count"] == 1
+    assert by_class["movement"]["count"] == 1
+    assert by_class["reload"]["count"] == 0
+    assert body["first_shot_s"] == pytest.approx(1.5)
+
+
+def test_get_match_distributions_aggregates(tmp_path: Path) -> None:
+    client, _audit = _bootstrap(tmp_path)
+    resp = client.get("/api/coach/distributions")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["stage_count"] == 1
+    by_class = {d["interval_class"]: d for d in body["distributions"]}
+    assert by_class["split"]["count"] == 1
+    assert by_class["transition"]["count"] == 1
+    assert body["first_shot_seconds"] == pytest.approx([1.5])
+
+
 def test_get_coach_404_when_no_audit(tmp_path: Path) -> None:
     root = tmp_path / "match"
     project = MatchProject.init(root, name="Empty")

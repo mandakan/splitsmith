@@ -20,16 +20,14 @@
  */
 
 import {
-  ChevronRight,
   ClipboardCheck,
   Flag,
-  Layers,
   Pause,
   Play,
   Radio,
   RefreshCw,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { VideoPanel } from "@/components/VideoPanel";
@@ -45,8 +43,10 @@ import {
 import {
   api,
   type CoachIntervalClass,
+  type CoachIntervalDistribution,
   type CoachShot,
   type CoachShotPatch,
+  type CoachStageDistributions,
   type CoachStageResponse,
   type MatchProject,
   type StageVideo,
@@ -441,6 +441,8 @@ export function Coach() {
             }}
             onPatch={patchShot}
           />
+
+          {stageNumber != null ? <DistributionsPanel stageNumber={stageNumber} /> : null}
         </div>
       )}
 
@@ -491,39 +493,6 @@ function StagePicker({
   );
 }
 
-// Group consecutive shots that share a class so a long "array on one
-// target" doesn't fill the table with 6 visually identical split rows.
-// First-shot is always its own group. We only collapse groups of >= 2;
-// a singleton transition stays on its own row.
-interface ShotGroup {
-  key: string;
-  cls: CoachIntervalClass | null;
-  shots: CoachShot[];
-}
-
-function groupShots(shots: CoachShot[]): ShotGroup[] {
-  const groups: ShotGroup[] = [];
-  for (const s of shots) {
-    const last = groups[groups.length - 1];
-    if (
-      last &&
-      last.cls === s.interval_class &&
-      // Never merge across first_shot -- it's a stage-level event, not
-      // a coachable interval to be grouped.
-      s.interval_class !== "first_shot"
-    ) {
-      last.shots.push(s);
-    } else {
-      groups.push({
-        key: `${s.interval_class ?? "_"}-${s.shot_number}`,
-        cls: s.interval_class,
-        shots: [s],
-      });
-    }
-  }
-  return groups;
-}
-
 function ShotTable({
   shots,
   beepTime,
@@ -539,19 +508,7 @@ function ShotTable({
   onSeekToBeep: () => void;
   onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
 }) {
-  const [compact, setCompact] = useState(true);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const groups = useMemo(() => groupShots(shots), [shots]);
   const tableRef = useRef<HTMLDivElement | null>(null);
-
-  const toggleGroup = useCallback((key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
 
   // Scroll the active row into view as playback advances. ``block: "nearest"``
   // avoids yanking the page when the active row is already visible -- the
@@ -571,28 +528,11 @@ function ShotTable({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <CardTitle>Shots ({shots.length})</CardTitle>
-            <CardDescription>
-              Class chips are inline-editable. Manual stays sticky across reclassify.
-            </CardDescription>
-          </div>
-          <Button
-            type="button"
-            variant={compact ? "default" : "outline"}
-            size="sm"
-            onClick={() => setCompact((c) => !c)}
-            title={
-              compact
-                ? "Show every shot individually"
-                : "Collapse runs of same-class shots (e.g. arrays of splits)"
-            }
-          >
-            <Layers className="size-4" />
-            {compact ? "Compact" : "Detail"}
-          </Button>
-        </div>
+        <CardTitle>Shots ({shots.length})</CardTitle>
+        <CardDescription>
+          Every shot is its own row. Class chips are inline-editable; manual
+          overrides survive reclassify.
+        </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
         <div ref={tableRef} className="max-h-[60vh] overflow-auto">
@@ -614,53 +554,15 @@ function ShotTable({
                 active={activeShotNumber === 0}
                 onClick={onSeekToBeep}
               />
-              {compact
-                ? groups.map((g) => {
-                    const isOpen = expanded.has(g.key);
-                    if (g.shots.length < 2) {
-                      return (
-                        <ShotRow
-                          key={g.key}
-                          shot={g.shots[0]}
-                          active={g.shots[0].shot_number === activeShotNumber}
-                          onRowClick={onRowClick}
-                          onPatch={onPatch}
-                        />
-                      );
-                    }
-                    return (
-                      <Fragment key={g.key}>
-                        <GroupRow
-                          group={g}
-                          expanded={isOpen}
-                          activeShotNumber={activeShotNumber}
-                          onToggle={() => toggleGroup(g.key)}
-                          onRowClick={onRowClick}
-                        />
-                        {isOpen
-                          ? g.shots.map((s) => (
-                              <ShotRow
-                                key={s.shot_number}
-                                shot={s}
-                                indented
-                                active={s.shot_number === activeShotNumber}
-                                onRowClick={onRowClick}
-                                onPatch={onPatch}
-                              />
-                            ))
-                          : null}
-                      </Fragment>
-                    );
-                  })
-                : shots.map((s) => (
-                    <ShotRow
-                      key={s.shot_number}
-                      shot={s}
-                      active={s.shot_number === activeShotNumber}
-                      onRowClick={onRowClick}
-                      onPatch={onPatch}
-                    />
-                  ))}
+              {shots.map((s) => (
+                <ShotRow
+                  key={s.shot_number}
+                  shot={s}
+                  active={s.shot_number === activeShotNumber}
+                  onRowClick={onRowClick}
+                  onPatch={onPatch}
+                />
+              ))}
             </tbody>
           </table>
         </div>
@@ -709,90 +611,14 @@ function BeepRow({
   );
 }
 
-function GroupRow({
-  group,
-  expanded,
-  activeShotNumber,
-  onToggle,
-  onRowClick,
-}: {
-  group: ShotGroup;
-  expanded: boolean;
-  activeShotNumber: number | null;
-  onToggle: () => void;
-  onRowClick: (s: CoachShot) => void;
-}) {
-  const first = group.shots[0];
-  const last = group.shots[group.shots.length - 1];
-  const totalSplit = group.shots.reduce((acc, s) => acc + s.split, 0);
-  const containsActive = group.shots.some((s) => s.shot_number === activeShotNumber);
-  const label = group.cls ? CLASS_LABELS[group.cls] : "unset";
-  return (
-    <tr
-      className={cn(
-        "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
-        containsActive && !expanded && "bg-accent/60",
-      )}
-      onClick={() => onRowClick(first)}
-      data-active-shot={containsActive && !expanded ? activeShotNumber ?? undefined : undefined}
-      title="Click to seek to the first shot in the group"
-    >
-      <td className="w-6 px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-        <button
-          type="button"
-          onClick={onToggle}
-          className="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
-          aria-expanded={expanded}
-          aria-label={expanded ? "Collapse group" : "Expand group"}
-        >
-          <ChevronRight
-            className={cn("size-4 transition-transform", expanded && "rotate-90")}
-          />
-        </button>
-      </td>
-      <td className="px-3 py-2 font-mono text-xs">
-        {first.shot_number}-{last.shot_number}
-      </td>
-      <td className="px-3 py-2 text-right font-mono tabular-nums">
-        {first.time_from_beep.toFixed(3)}
-      </td>
-      <td className="px-3 py-2 text-right font-mono tabular-nums">
-        {totalSplit.toFixed(3)}
-      </td>
-      <td className="px-3 py-2">
-        <Badge variant={group.cls ? CLASS_VARIANT[group.cls] : "outline"}>
-          {label} x{group.shots.length}
-        </Badge>
-      </td>
-      <td className="px-3 py-2"></td>
-      <td className="px-3 py-2 text-xs text-muted-foreground italic">
-        click to seek -- expand to edit individual shots
-      </td>
-    </tr>
-  );
-}
-
-const CLASS_LABELS: Record<CoachIntervalClass, string> = {
-  first_shot: "First shot",
-  split: "Splits",
-  transition: "Transitions",
-  movement: "Movements",
-  reload: "Reloads",
-  activation: "Activations",
-};
-
 function ShotRow({
   shot,
   active,
-  indented = false,
   onRowClick,
   onPatch,
 }: {
   shot: CoachShot;
   active: boolean;
-  /** True when rendered as a child of an expanded group; renders with a
-   *  faint left rail so the visual hierarchy reads at a glance. */
-  indented?: boolean;
   onRowClick: (s: CoachShot) => void;
   onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
 }) {
@@ -834,17 +660,11 @@ function ShotRow({
       className={cn(
         "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
         active && "bg-accent",
-        indented && "bg-muted/10",
       )}
       onClick={() => onRowClick(shot)}
       data-active-shot={active ? shot.shot_number : undefined}
     >
-      <td
-        className={cn(
-          "w-6 px-2 py-2",
-          indented && "border-l-2 border-border/40",
-        )}
-      ></td>
+      <td className="w-6 px-2 py-2"></td>
       <td className="px-3 py-2 font-mono text-xs">{shot.shot_number}</td>
       <td className="px-3 py-2 text-right font-mono tabular-nums">
         {shot.time_from_beep.toFixed(3)}
@@ -1039,4 +859,119 @@ function formatTime(seconds: number): string {
   const ss = String(wholeSec).padStart(2, "0");
   const mmm = String(ms).padStart(3, "0");
   return `${mm}:${ss}.${mmm}`;
+}
+
+// ---------------------------------------------------------------------------
+// Distributions panel (#163)
+// ---------------------------------------------------------------------------
+
+function DistributionsPanel({ stageNumber }: { stageNumber: number }) {
+  const [data, setData] = useState<CoachStageDistributions | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setError(null);
+    api
+      .getStageCoachDistributions(stageNumber)
+      .then((d) => {
+        if (alive) setData(d);
+      })
+      .catch((err) => {
+        if (alive) setError(String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [stageNumber]);
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Distributions</CardTitle>
+          <CardDescription>{error}</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+  if (!data) return null;
+  // Splits + transitions are the coachable bread-and-butter; movement
+  // and reload distributions usually have a handful of values per stage
+  // and read better at the match level. Show the top two here, defer
+  // the rest to the (future) match view (#162 / #163 follow-up).
+  const focus = data.distributions.filter(
+    (d) => d.interval_class === "split" || d.interval_class === "transition",
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Distributions</CardTitle>
+        <CardDescription>
+          {data.first_shot_s != null
+            ? `Draw: ${data.first_shot_s.toFixed(3)} s. Histograms below cover splits + transitions for this stage.`
+            : "Histograms cover splits + transitions for this stage."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        {focus.map((d) => (
+          <Histogram key={d.interval_class} dist={d} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Histogram({ dist }: { dist: CoachIntervalDistribution }) {
+  const maxCount = Math.max(0, ...dist.buckets.map((b) => b.count));
+  const label =
+    dist.interval_class === "split"
+      ? "Splits"
+      : dist.interval_class === "transition"
+        ? "Transitions"
+        : dist.interval_class === "movement"
+          ? "Movements"
+          : dist.interval_class === "reload"
+            ? "Reloads"
+            : dist.interval_class;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          n={dist.count}
+          {dist.mean_s != null ? ` · mean ${dist.mean_s.toFixed(3)} s` : ""}
+          {dist.median_s != null ? ` · med ${dist.median_s.toFixed(3)} s` : ""}
+          {dist.p90_s != null ? ` · p90 ${dist.p90_s.toFixed(3)} s` : ""}
+        </span>
+      </div>
+      {dist.count === 0 ? (
+        <div className="rounded-md border border-dashed border-border p-4 text-xs text-muted-foreground">
+          No values on this stage.
+        </div>
+      ) : (
+        <div className="space-y-1 font-mono text-[11px]">
+          {dist.buckets.map((b) => {
+            const w = maxCount > 0 ? (b.count / maxCount) * 100 : 0;
+            return (
+              <div key={`${b.lo}-${b.hi}`} className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-right tabular-nums text-muted-foreground">
+                  {b.lo.toFixed(2)}-{b.hi.toFixed(2)} s
+                </span>
+                <div className="flex-1">
+                  <div
+                    className="h-3 rounded-sm bg-primary/70"
+                    style={{ width: `${w}%` }}
+                  />
+                </div>
+                <span className="w-6 text-right tabular-nums text-muted-foreground">
+                  {b.count}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
