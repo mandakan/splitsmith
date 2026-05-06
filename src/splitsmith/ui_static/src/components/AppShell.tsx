@@ -1,4 +1,5 @@
 import {
+  ClipboardCheck,
   Crosshair,
   FileBarChart,
   FlaskConical,
@@ -26,6 +27,7 @@ const BASE_NAV: NavItem[] = [
   { to: "/", label: "Overview", icon: Home, end: true },
   { to: "/ingest", label: "Ingest", icon: FolderInput },
   { to: "/audit", label: "Audit", icon: Crosshair },
+  { to: "/coach", label: "Coach", icon: ClipboardCheck },
   { to: "/export", label: "Export", icon: FileBarChart },
 ];
 const LAB_NAV: NavItem = { to: "/lab", label: "Lab", icon: FlaskConical };
