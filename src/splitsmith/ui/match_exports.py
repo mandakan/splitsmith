@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .. import fcpxml_gen
+from .. import composition, fcpxml_gen
 from ..config import OutputConfig
 from .exports import audit_shots_to_engine_shots
 
@@ -214,13 +214,13 @@ def export_match(
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     output_path = exports_dir / f"{_slugify(request.project_name)}-match.fcpxml"
+    # Match export goes through the composition IR (issue #194). The bridge
+    # renderer lowers back to ``generate_match_fcpxml`` so the output stays
+    # byte-identical to the pre-IR path; future renderer work (transitions,
+    # titles, FCP7 XML, ffmpeg) replaces the bridge piece by piece.
+    comp = composition.from_stage_compositions(compositions, project_name=request.project_name)
     try:
-        fcpxml_gen.generate_match_fcpxml(
-            stages=compositions,
-            output_path=output_path,
-            project_name=request.project_name,
-            config=config,
-        )
+        composition.render_fcpxml(comp, output_path=output_path, config=config)
     except (ValueError, FileNotFoundError) as exc:
         raise MatchExportError(str(exc)) from exc
 
