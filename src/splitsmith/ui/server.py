@@ -4338,16 +4338,13 @@ def create_app(
             overlay_missing = req.include_overlay and not overlay_target.exists()
 
             needs_per_stage = (
-                not trimmed_path.exists()
-                or not secondary_trims_present
-                or overlay_missing
+                not trimmed_path.exists() or not secondary_trims_present or overlay_missing
             )
             if needs_per_stage:
                 handle.update(
                     progress=0.02 + idx * per_stage_share,
                     message=(
-                        f"Stage {stage_number} ({idx + 1} of {n}): "
-                        "running per-stage export..."
+                        f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."
                     ),
                 )
                 # Build the secondaries list for the per-stage exporter --
@@ -4473,9 +4470,7 @@ def create_app(
             }
         )
         anom_word = "anomaly" if len(result.anomalies) == 1 else "anomalies"
-        anom_suffix = (
-            f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
-        )
+        anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
         handle.update(
             progress=1.0,
             message=(

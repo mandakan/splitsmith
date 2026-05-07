@@ -4778,6 +4778,4 @@ def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
     assert resp.status_code == 424
     detail = resp.json()["detail"]
     # _ensure_source_reachable returns structured detail with a code.
-    assert (
-        detail.get("code") == "source_unreachable" if isinstance(detail, dict) else False
-    ), detail
+    assert detail.get("code") == "source_unreachable" if isinstance(detail, dict) else False, detail
