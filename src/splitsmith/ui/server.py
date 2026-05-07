@@ -10,6 +10,8 @@ Endpoints (locked v1 surface):
   POST /api/videos/scan             -- register videos (folder or explicit paths)
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
   POST /api/videos/remove           -- remove a registered video + cleanup caches
+  GET  /api/project/cleanup/plan    -- preview disk-cleanup plan
+  POST /api/project/cleanup         -- apply disk-cleanup (refuses while jobs run)
   POST /api/assignments/move        -- set role / unassign / move between stages
   POST /api/project/settings        -- update raw/audio/trimmed/exports dir overrides
   GET  /api/fs/probe?path=...       -- probe + thumbnail one source file on demand
@@ -83,6 +85,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import beep_detect, cross_align, report, user_config, video_probe
+from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
@@ -538,6 +541,22 @@ class AppState:
         return MatchProject.load(self._project_root)
 
 
+def _any_active_job(state: AppState) -> Job | None:
+    """Return the first PENDING/RUNNING job, or None.
+
+    Used by destructive endpoints (cleanup) to refuse running while
+    workers are mid-flight. ``find_active`` on the registry is
+    kind-scoped; this helper scans every kind so a beep job blocks a
+    cleanup just as a trim does.
+    """
+    from .jobs import JobStatus
+
+    for job in state.jobs.list():
+        if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
+            return job
+    return None
+
+
 # Module-level cache for the 4-voter ensemble runtime (issue #31). Heavy
 # (CLAP ~600 MB, PANN ~80 MB), so it is loaded on the first shot-detect
 # call and reused for subsequent calls. The threading lock guards against
@@ -950,6 +969,17 @@ class CoachShotPatchRequest(BaseModel):
     improvement_flag: bool | None = None
     coaching_note: str | None = None
     clear_note: bool = False
+
+
+class CleanupRequest(BaseModel):
+    """Body for POST /api/project/cleanup.
+
+    The server re-plans server-side from this list rather than trusting a
+    client-supplied path list -- a malicious or buggy client cannot ask
+    us to delete arbitrary files outside the project's known buckets.
+    """
+
+    categories: list[cleanup_module.CleanupCategory]
 
 
 class RemoveVideoRequest(BaseModel):
@@ -3942,6 +3972,65 @@ def create_app(
             {
                 "project": project.model_dump(mode="json"),
                 "plan": plan.model_dump(mode="json"),
+            }
+        )
+
+    @app.get("/api/project/cleanup/plan")
+    def cleanup_plan(
+        categories: str = Query("", description="Comma-separated category list."),
+    ) -> JSONResponse:
+        """Preview a cleanup plan without deleting anything.
+
+        Empty / unknown categories yield an empty plan rather than 400 so
+        the SPA can debounce-fetch as the user toggles checkboxes
+        without worrying about partial selections.
+        """
+        project = state.load()
+        cats: set[cleanup_module.CleanupCategory] = set()
+        for token in categories.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                cats.add(cleanup_module.CleanupCategory(token))
+            except ValueError:
+                # Skip unknown categories silently; the SPA only sends
+                # known ones, and a stale tab shouldn't crash here.
+                continue
+        plan = cleanup_module.plan_cleanup(project, state.project_root, cats)
+        return JSONResponse(plan.model_dump(mode="json"))
+
+    @app.post("/api/project/cleanup")
+    def cleanup_apply(req: CleanupRequest) -> JSONResponse:
+        """Apply a cleanup. Refuses while jobs are pending or running.
+
+        Re-plans server-side: the client only sends categories, never
+        paths. Any active job is treated as a hard block (409) -- mid-
+        flight ffmpeg writes into ``trimmed/`` or audit JSON saves into
+        ``audit/`` would race with the deletes and corrupt state.
+        """
+        active = _any_active_job(state)
+        if active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "jobs_active",
+                    "message": (
+                        f"Job '{active.kind}' is still {active.status}; "
+                        "cancel or wait for it to finish before cleaning up."
+                    ),
+                    "job_id": active.id,
+                    "kind": active.kind,
+                },
+            )
+        project = state.load()
+        cats = set(req.categories)
+        plan = cleanup_module.plan_cleanup(project, state.project_root, cats)
+        result = cleanup_module.apply_cleanup(plan, root=state.project_root)
+        return JSONResponse(
+            {
+                "plan": plan.model_dump(mode="json"),
+                "result": result.model_dump(mode="json"),
             }
         )
 

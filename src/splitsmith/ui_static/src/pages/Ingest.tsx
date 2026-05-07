@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 
 import { BeepSection } from "@/components/BeepSection";
+import { CleanupDialog } from "@/components/CleanupDialog";
 import { FolderPicker } from "@/components/FolderPicker";
 import { MountSelect } from "@/components/MountSelect";
 import { Badge } from "@/components/ui/badge";
@@ -1349,6 +1350,7 @@ function SettingsSection({
   onProjectUpdate: (p: MatchProject) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [pickerFor, setPickerFor] = useState<
     null | "raw" | "audio" | "trimmed" | "exports" | "probes" | "thumbs"
   >(null);
@@ -1516,8 +1518,27 @@ function SettingsSection({
             disabled={busy}
             onCommit={(seconds) => void update({ trim_post_buffer_seconds: seconds } as never)}
           />
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <div className="text-sm">
+              <div className="font-medium">Reclaim disk space</div>
+              <div className="text-xs text-muted-foreground">
+                Delete generated artifacts (caches, exports, trimmed clips). Sources are never touched.
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setCleanupOpen(true)}
+            >
+              <Trash2 className="size-4" />
+              Clean up...
+            </Button>
+          </div>
         </CardContent>
       ) : null}
+      {cleanupOpen ? <CleanupDialog onClose={() => setCleanupOpen(false)} /> : null}
     </Card>
   );
 }

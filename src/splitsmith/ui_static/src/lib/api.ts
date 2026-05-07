@@ -497,6 +497,44 @@ export interface RemoveVideoResponse {
   plan: RemovalPlan;
 }
 
+export type CleanupCategory =
+  | "caches"
+  | "exports-light"
+  | "exports-overlays"
+  | "exports-trims"
+  | "audit-trims"
+  | "audio"
+  | "audit-data";
+
+export interface CleanupItem {
+  path: string;
+  size_bytes: number;
+  category: CleanupCategory;
+}
+
+export interface CleanupTotals {
+  file_count: number;
+  bytes: number;
+}
+
+export interface CleanupPlan {
+  items: CleanupItem[];
+  totals_by_category: Partial<Record<CleanupCategory, CleanupTotals>>;
+  total_bytes: number;
+  total_file_count: number;
+}
+
+export interface CleanupResult {
+  deleted: string[];
+  failed: [string, string][];
+  bytes_freed: number;
+}
+
+export interface CleanupApplyResponse {
+  plan: CleanupPlan;
+  result: CleanupResult;
+}
+
 /** One sidebar bookmark in the FolderPicker. ``kind`` lets the SPA
  *  group entries (Recent / Home / Removable & network) and pick the
  *  right icon. Mirrors ``splitsmith.ui.server.SuggestedStart``. */
@@ -860,6 +898,19 @@ export const api = {
     request<RemoveVideoResponse>("/api/videos/remove", {
       method: "POST",
       json: { video_path: videoPath, reset_audit: resetAudit },
+    }),
+
+  getCleanupPlan: (categories: CleanupCategory[]) => {
+    const qs = categories.length
+      ? `?categories=${encodeURIComponent(categories.join(","))}`
+      : "";
+    return request<CleanupPlan>(`/api/project/cleanup/plan${qs}`);
+  },
+
+  applyCleanup: (categories: CleanupCategory[]) =>
+    request<CleanupApplyResponse>("/api/project/cleanup", {
+      method: "POST",
+      json: { categories },
     }),
 
   importScoreboard: (data: unknown, overwrite = false) =>

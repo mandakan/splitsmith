@@ -4779,3 +4779,131 @@ def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
     detail = resp.json()["detail"]
     # _ensure_source_reachable returns structured detail with a code.
     assert detail.get("code") == "source_unreachable" if isinstance(detail, dict) else False, detail
+
+
+
+# ---------------------------------------------------------------------------
+# Disk cleanup endpoints
+# ---------------------------------------------------------------------------
+
+
+def _seed_cleanup_project(tmp_path: Path) -> tuple[TestClient, Path]:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="Cleanup")
+
+    audio = project.audio_path(root)
+    audio.mkdir(parents=True, exist_ok=True)
+    (audio / "stage1_primary.wav").write_bytes(b"\x00" * 1024)
+
+    exp = project.exports_path(root)
+    exp.mkdir(parents=True, exist_ok=True)
+    (exp / "stage1_one_overlay.mov").write_bytes(b"\x00" * 4096)
+
+    audit = project.audit_path(root)
+    audit.mkdir(parents=True, exist_ok=True)
+    (audit / "stage1.json").write_text("{}")
+
+    app = create_app(project_root=root, project_name="Cleanup")
+    return TestClient(app), root
+
+
+def test_cleanup_plan_returns_per_category_totals(tmp_path: Path) -> None:
+    client, _ = _seed_cleanup_project(tmp_path)
+    resp = client.get("/api/project/cleanup/plan", params={"categories": "audio,exports-overlays"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_file_count"] == 2
+    assert body["total_bytes"] == 1024 + 4096
+    by_cat = body["totals_by_category"]
+    assert by_cat["audio"]["file_count"] == 1
+    assert by_cat["exports-overlays"]["bytes"] == 4096
+
+
+def test_cleanup_plan_empty_categories_yields_empty_plan(tmp_path: Path) -> None:
+    client, _ = _seed_cleanup_project(tmp_path)
+    resp = client.get("/api/project/cleanup/plan", params={"categories": ""})
+    assert resp.status_code == 200
+    assert resp.json()["total_file_count"] == 0
+
+
+def test_cleanup_plan_unknown_category_silently_dropped(tmp_path: Path) -> None:
+    client, _ = _seed_cleanup_project(tmp_path)
+    resp = client.get(
+        "/api/project/cleanup/plan",
+        params={"categories": "audio,bogus-category"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["total_file_count"] == 1
+
+
+def test_cleanup_apply_deletes_and_returns_result(tmp_path: Path) -> None:
+    client, root = _seed_cleanup_project(tmp_path)
+    resp = client.post(
+        "/api/project/cleanup",
+        json={"categories": ["audio", "exports-overlays"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["result"]["bytes_freed"] == 1024 + 4096
+    assert len(body["result"]["deleted"]) == 2
+    assert not (root / "audio" / "stage1_primary.wav").exists()
+    assert not (root / "exports" / "stage1_one_overlay.mov").exists()
+    # Audit JSON survives unless explicitly requested
+    assert (root / "audit" / "stage1.json").exists()
+
+
+def test_cleanup_apply_audit_data_destructive(tmp_path: Path) -> None:
+    client, root = _seed_cleanup_project(tmp_path)
+    resp = client.post("/api/project/cleanup", json={"categories": ["audit-data"]})
+    assert resp.status_code == 200
+    assert not (root / "audit" / "stage1.json").exists()
+
+
+def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
+    """When a job is still PENDING/RUNNING the endpoint returns 409."""
+    from splitsmith.ui.jobs import JobStatus
+
+    client, _ = _seed_cleanup_project(tmp_path)
+    state = client.app.state.splitsmith_state
+
+    # Submit a job that blocks until we release it; the endpoint sees
+    # status RUNNING during that window.
+    started = threading.Event()
+    release = threading.Event()
+
+    def worker(_handle):  # type: ignore[no-untyped-def]
+        started.set()
+        release.wait(timeout=5.0)
+
+    state.jobs.submit(kind="test_block", fn=worker)
+    assert started.wait(timeout=2.0)
+
+    try:
+        resp = client.post("/api/project/cleanup", json={"categories": ["audio"]})
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["code"] == "jobs_active"
+    finally:
+        release.set()
+
+    # Wait until the registry flips it to terminal state.
+    deadline_attempts = 0
+    while deadline_attempts < 100:
+        snap = state.jobs.list()
+        if all(j.status not in (JobStatus.PENDING, JobStatus.RUNNING) for j in snap):
+            break
+        deadline_attempts += 1
+        import time as _time
+        _time.sleep(0.02)
+
+    # And once the job finishes, the endpoint goes through.
+    resp = client.post("/api/project/cleanup", json={"categories": ["audio"]})
+    assert resp.status_code == 200
+
+
+def test_cleanup_endpoints_409_when_no_project_bound(tmp_path: Path) -> None:
+    """Picker-mode (no bound project) -> both endpoints return 409 no_project."""
+    app = create_app()  # unbound
+    client = TestClient(app)
+    assert client.get("/api/project/cleanup/plan?categories=audio").status_code == 409
+    assert client.post("/api/project/cleanup", json={"categories": ["audio"]}).status_code == 409
