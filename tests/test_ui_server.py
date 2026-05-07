@@ -4781,7 +4781,6 @@ def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
     assert detail.get("code") == "source_unreachable" if isinstance(detail, dict) else False, detail
 
 
-
 # ---------------------------------------------------------------------------
 # Disk cleanup endpoints
 # ---------------------------------------------------------------------------
@@ -4894,6 +4893,7 @@ def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
             break
         deadline_attempts += 1
         import time as _time
+
         _time.sleep(0.02)
 
     # And once the job finishes, the endpoint goes through.

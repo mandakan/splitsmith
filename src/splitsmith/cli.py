@@ -603,9 +603,7 @@ def clean(
         "--all",
         help="Everything except --include-audit. Combine with --include-audit to wipe audit too.",
     ),
-    yes: bool = typer.Option(
-        False, "--yes", help="Actually delete. Omit for a dry-run preview."
-    ),
+    yes: bool = typer.Option(False, "--yes", help="Actually delete. Omit for a dry-run preview."),
 ) -> None:
     """Reclaim disk space from a match project.
 

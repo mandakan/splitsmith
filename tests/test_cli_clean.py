@@ -74,9 +74,7 @@ def test_clean_all_yes_deletes_safe_categories_only(tmp_path: Path) -> None:
 def test_clean_include_audit_yes_wipes_audit_too(tmp_path: Path) -> None:
     root = _seed_project(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(
-        app, ["clean", str(root), "--all", "--include-audit", "--yes"]
-    )
+    result = runner.invoke(app, ["clean", str(root), "--all", "--include-audit", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert not (root / "audit" / "stage1.json").exists()
     assert (root / "raw" / "source.mp4").exists()
@@ -101,9 +99,7 @@ def test_clean_not_a_project_errors(tmp_path: Path) -> None:
 def test_clean_specific_category_only(tmp_path: Path) -> None:
     root = _seed_project(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(
-        app, ["clean", str(root), "--exports-overlays", "--yes"]
-    )
+    result = runner.invoke(app, ["clean", str(root), "--exports-overlays", "--yes"])
     assert result.exit_code == 0
     # Overlay gone, everything else preserved
     assert not (root / "exports" / "stage1_one_overlay.mov").exists()
