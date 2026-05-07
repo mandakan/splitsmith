@@ -407,6 +407,377 @@ def generate_fcpxml(
     _tag_source_application(output_path)
 
 
+@dataclass(frozen=True)
+class StageComposition:
+    """One stage's contribution to a stitched match-export FCPXML (issue #170).
+
+    Each stage is a self-contained piece: trimmed primary + optional secondaries
+    + optional overlay + per-stage shots and beep offset. ``head_pad_seconds`` /
+    ``tail_pad_seconds`` are how much footage to keep before the beep / after the
+    final shot; the composer trims the rest at FCPXML level (no re-encoding).
+    Both pads are clamped to what's actually present in the trimmed clip:
+    head_trim = max(0, beep_offset - head_pad), tail_trim = max(0, available -
+    tail_pad), so the function is safe to call with pads larger than the trim
+    actually contains (the result is "use everything that's there").
+    """
+
+    stage_name: str
+    video_path: Path
+    video: VideoMetadata
+    shots: list[Shot]
+    beep_offset_seconds: float
+    head_pad_seconds: float
+    tail_pad_seconds: float
+    overlay_path: Path | None = None
+    overlay_video: VideoMetadata | None = None
+    secondaries: tuple[SecondaryClip, ...] = ()
+
+
+def generate_match_fcpxml(
+    *,
+    stages: list[StageComposition],
+    output_path: Path,
+    project_name: str,
+    config: OutputConfig,
+) -> None:
+    """Write a stitched FCPXML with N stages back-to-back on the spine.
+
+    Each stage carries its own primary + secondaries + overlay + markers. The
+    composer trims at FCPXML level by adjusting the primary's ``start`` and
+    ``duration`` -- no ffmpeg invocation. Cumulative spine offsets keep the
+    stages contiguous; secondary head-slip math is generalised to handle
+    head-trimmed primaries (every cam's beep stays frame-aligned with the
+    primary's beep regardless of trim).
+
+    Frame-rate mixing across stages is out of scope for v1: all stages must
+    share a frame rate (raises ValueError otherwise).
+    """
+    if not stages:
+        raise ValueError("generate_match_fcpxml requires at least one stage")
+    for stage in stages:
+        if not stage.video_path.exists():
+            raise FileNotFoundError(f"video not found: {stage.video_path}")
+
+    base = stages[0].video
+    for stage in stages[1:]:
+        if (
+            stage.video.frame_rate_num != base.frame_rate_num
+            or stage.video.frame_rate_den != base.frame_rate_den
+        ):
+            raise ValueError(
+                "mixed frame rates across stages are not supported "
+                f"(stage 0: {base.frame_rate_num}/{base.frame_rate_den}, "
+                f"stage with {stage.video_path.name}: "
+                f"{stage.video.frame_rate_num}/{stage.video.frame_rate_den})"
+            )
+
+    frame_duration = Fraction(base.frame_rate_den, base.frame_rate_num)
+    fd_num = base.frame_rate_den
+    fd_den = base.frame_rate_num
+    fd_seconds = float(frame_duration)
+    frame_duration_str = _frame_aligned_str(1, fd_num, fd_den)
+
+    fcpxml = ET.Element("fcpxml", {"version": config.fcpxml_version})
+    resources = ET.SubElement(fcpxml, "resources")
+    format_id = "r1"
+    ET.SubElement(
+        resources,
+        "format",
+        {
+            "id": format_id,
+            "name": _format_name(base),
+            "frameDuration": frame_duration_str,
+            "width": str(base.width),
+            "height": str(base.height),
+            "colorSpace": "1-1-1 (Rec. 709)",
+        },
+    )
+
+    # Per-stage resource + spine plan. Resource IDs are allocated globally in
+    # declaration order: r2 = stage 0 primary, then its secondaries, then its
+    # overlay, then stage 1's primary, etc. Connected-clip lanes reset per
+    # stage (each stage's overlay sits above that stage's secondaries only).
+    resource_counter = 1  # r1 already used by format
+
+    @dataclass
+    class _StagePlan:
+        stage: StageComposition
+        primary_id: str
+        primary_duration_frames: int
+        head_trim_frames: int
+        effective_duration_frames: int
+        # cam, asset_id, sec_dur_in_parent_frames
+        usable_secondaries: list[tuple[SecondaryClip, str, int]]
+        overlay_asset_id: str | None
+        overlay_duration_frames: int  # in parent frame units; 0 when no overlay
+
+    plans: list[_StagePlan] = []
+
+    for stage in stages:
+        stage_frame_duration = Fraction(stage.video.frame_rate_den, stage.video.frame_rate_num)
+        primary_duration_frames = int(
+            round(stage.video.duration_seconds / float(stage_frame_duration))
+        )
+
+        # Determine actual head and tail available in the trimmed file.
+        # head_avail = beep_offset (the trim's pre-buffer; may be < trim_buffer
+        # when the cam beep landed within the pre-buffer of the source).
+        # tail_avail = source_duration - last_shot_clip_local. With no shots,
+        # treat the beep as the last event (degenerate case for action cuts).
+        head_avail = max(0.0, stage.beep_offset_seconds)
+        if stage.shots:
+            last_shot_local = stage.beep_offset_seconds + max(s.time_from_beep for s in stage.shots)
+        else:
+            last_shot_local = stage.beep_offset_seconds
+        tail_avail = max(0.0, stage.video.duration_seconds - last_shot_local)
+
+        head_trim_seconds = max(0.0, head_avail - stage.head_pad_seconds)
+        tail_trim_seconds = max(0.0, tail_avail - stage.tail_pad_seconds)
+        head_trim_frames = int(round(head_trim_seconds / fd_seconds))
+        tail_trim_frames = int(round(tail_trim_seconds / fd_seconds))
+        effective_duration_frames = primary_duration_frames - head_trim_frames - tail_trim_frames
+        if effective_duration_frames <= 0:
+            raise ValueError(
+                f"stage {stage.stage_name!r} would have non-positive effective duration "
+                f"after trim ({effective_duration_frames} frames); reduce head/tail pad "
+                "or check the trimmed clip length"
+            )
+
+        resource_counter += 1
+        primary_id = f"r{resource_counter}"
+
+        usable_secondaries: list[tuple[SecondaryClip, str, int]] = []
+        for sec in stage.secondaries:
+            if not sec.video_path.exists():
+                continue
+            resource_counter += 1
+            sec_id = f"r{resource_counter}"
+            sec_dur_in_parent_frames = int(round(sec.video.duration_seconds / fd_seconds))
+            usable_secondaries.append((sec, sec_id, sec_dur_in_parent_frames))
+
+        overlay_asset_id: str | None = None
+        overlay_duration_frames = 0
+        if stage.overlay_path is not None and stage.overlay_path.exists():
+            resource_counter += 1
+            overlay_asset_id = f"r{resource_counter}"
+            overlay_meta = stage.overlay_video if stage.overlay_video is not None else stage.video
+            overlay_duration_frames = int(round(overlay_meta.duration_seconds / fd_seconds))
+
+        plans.append(
+            _StagePlan(
+                stage=stage,
+                primary_id=primary_id,
+                primary_duration_frames=primary_duration_frames,
+                head_trim_frames=head_trim_frames,
+                effective_duration_frames=effective_duration_frames,
+                usable_secondaries=usable_secondaries,
+                overlay_asset_id=overlay_asset_id,
+                overlay_duration_frames=overlay_duration_frames,
+            )
+        )
+
+    # Emit assets in the same order resource IDs were assigned so the XML
+    # reads top-to-bottom in stage order.
+    for plan in plans:
+        primary_asset = ET.SubElement(
+            resources,
+            "asset",
+            {
+                "id": plan.primary_id,
+                "name": plan.stage.video_path.stem,
+                "start": "0s",
+                "duration": _frame_aligned_str(plan.primary_duration_frames, fd_num, fd_den),
+                "hasVideo": "1",
+                "hasAudio": "1",
+                "format": format_id,
+                "videoSources": "1",
+                "audioSources": "1",
+                "audioChannels": "2",
+            },
+        )
+        ET.SubElement(
+            primary_asset,
+            "media-rep",
+            {"kind": "original-media", "src": plan.stage.video_path.resolve().as_uri()},
+        )
+        for sec, sec_id, _sec_dur_in_parent_frames in plan.usable_secondaries:
+            sec_asset = ET.SubElement(
+                resources,
+                "asset",
+                {
+                    "id": sec_id,
+                    "name": sec.video_path.stem,
+                    "start": "0s",
+                    "duration": _frame_aligned_str(
+                        int(
+                            round(
+                                sec.video.duration_seconds
+                                / float(
+                                    Fraction(sec.video.frame_rate_den, sec.video.frame_rate_num)
+                                )
+                            )
+                        ),
+                        sec.video.frame_rate_den,
+                        sec.video.frame_rate_num,
+                    ),
+                    "hasVideo": "1",
+                    "hasAudio": "1",
+                    "format": format_id,
+                    "videoSources": "1",
+                    "audioSources": "1",
+                    "audioChannels": "2",
+                },
+            )
+            ET.SubElement(
+                sec_asset,
+                "media-rep",
+                {"kind": "original-media", "src": sec.video_path.resolve().as_uri()},
+            )
+        if plan.overlay_asset_id is not None and plan.stage.overlay_path is not None:
+            overlay_asset = ET.SubElement(
+                resources,
+                "asset",
+                {
+                    "id": plan.overlay_asset_id,
+                    "name": plan.stage.overlay_path.stem,
+                    "start": "0s",
+                    "duration": _frame_aligned_str(plan.overlay_duration_frames, fd_num, fd_den),
+                    "hasVideo": "1",
+                    "hasAudio": "0",
+                    "format": format_id,
+                    "videoSources": "1",
+                },
+            )
+            ET.SubElement(
+                overlay_asset,
+                "media-rep",
+                {"kind": "original-media", "src": plan.stage.overlay_path.resolve().as_uri()},
+            )
+
+    library = ET.SubElement(fcpxml, "library")
+    event = ET.SubElement(library, "event", {"name": "splitsmith"})
+    project = ET.SubElement(event, "project", {"name": project_name})
+    total_duration_frames = sum(plan.effective_duration_frames for plan in plans)
+    sequence = ET.SubElement(
+        project,
+        "sequence",
+        {
+            "format": format_id,
+            "duration": _frame_aligned_str(total_duration_frames, fd_num, fd_den),
+            "tcStart": "0s",
+            "tcFormat": "NDF",
+            "audioLayout": "stereo",
+            "audioRate": "48k",
+        },
+    )
+    spine = ET.SubElement(sequence, "spine")
+
+    cumulative_offset_frames = 0
+    for plan in plans:
+        stage = plan.stage
+        head_trim_seconds = plan.head_trim_frames * fd_seconds
+        eff_duration_str = _frame_aligned_str(plan.effective_duration_frames, fd_num, fd_den)
+        primary_clip = ET.SubElement(
+            spine,
+            "asset-clip",
+            {
+                "ref": plan.primary_id,
+                "offset": _frame_aligned_str(cumulative_offset_frames, fd_num, fd_den),
+                "name": stage.stage_name,
+                "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
+                "duration": eff_duration_str,
+                "format": format_id,
+            },
+        )
+
+        # Secondary cam connected clips. Lane=1..N (per stage). Beep
+        # alignment generalises the single-stage formula: with the primary's
+        # ``start`` shifted forward by head_trim, the secondary needs to
+        # arrive at the timeline at primary_local_beep = (beep_offset -
+        # head_trim) instead of beep_offset. So delta = (beep_offset -
+        # head_trim) - sec_beep, expressed in frames; a non-negative delta
+        # places the cam later in the parent's local time, a negative delta
+        # skips into the cam's own media.
+        for lane_idx, (sec, sec_id, sec_dur_in_parent_frames) in enumerate(
+            plan.usable_secondaries, start=1
+        ):
+            delta_frames = round(
+                ((stage.beep_offset_seconds - head_trim_seconds) - sec.beep_offset_seconds)
+                / fd_seconds
+            )
+            if delta_frames >= 0:
+                sec_offset_str = _frame_aligned_str(delta_frames, fd_num, fd_den)
+                sec_start_str = "0s"
+            else:
+                sec_offset_str = "0s"
+                sec_start_str = _frame_aligned_str(-delta_frames, fd_num, fd_den)
+            ET.SubElement(
+                primary_clip,
+                "asset-clip",
+                {
+                    "ref": sec_id,
+                    "lane": str(lane_idx),
+                    "offset": sec_offset_str,
+                    "name": sec.label,
+                    "start": sec_start_str,
+                    "duration": _frame_aligned_str(sec_dur_in_parent_frames, fd_num, fd_den),
+                    "format": format_id,
+                },
+            )
+
+        if plan.overlay_asset_id is not None:
+            overlay_lane = len(plan.usable_secondaries) + 1
+            # Overlay was rendered to mirror the primary frame-for-frame, so
+            # to stay in sync after head_trim its ``start`` skips into the
+            # overlay's own media by the same number of frames. ``duration``
+            # matches the primary's effective duration so the overlay covers
+            # the visible window without overhang.
+            ET.SubElement(
+                primary_clip,
+                "asset-clip",
+                {
+                    "ref": plan.overlay_asset_id,
+                    "lane": str(overlay_lane),
+                    "offset": "0s",
+                    "name": "Splitsmith overlay",
+                    "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
+                    "duration": eff_duration_str,
+                    "format": format_id,
+                },
+            )
+
+        # Markers. Each shot's clip-local source-media time stays the marker
+        # ``start``; FCP only renders markers within [primary.start,
+        # primary.start + duration], so we drop shots outside that window
+        # here for a clean XML.
+        head_trim_seconds_for_window = head_trim_seconds
+        eff_end_seconds = head_trim_seconds_for_window + plan.effective_duration_frames * fd_seconds
+        for shot in stage.shots:
+            clip_local_seconds = stage.beep_offset_seconds + shot.time_from_beep
+            if not head_trim_seconds_for_window <= clip_local_seconds < eff_end_seconds:
+                continue
+            frames = round(clip_local_seconds / fd_seconds)
+            ET.SubElement(
+                primary_clip,
+                "marker",
+                {
+                    "start": _frame_aligned_str(frames, fd_num, fd_den),
+                    "duration": frame_duration_str,
+                    "value": _marker_label(shot, config.split_color_thresholds),
+                },
+            )
+
+        cumulative_offset_frames += plan.effective_duration_frames
+
+    ET.indent(fcpxml, space="    ")
+    tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
+    decl_end = tree_bytes.index(b"?>") + 2
+    output_path.write_bytes(
+        tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :]
+    )
+    _tag_source_application(output_path)
+
+
 def _tag_source_application(path: Path) -> None:
     """Tag the FCPXML file with ``kMDItemCreator`` so FCP's import dialog
     shows ``Splitsmith`` instead of ``application "(null)"`` (issue #41).

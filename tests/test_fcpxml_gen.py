@@ -25,7 +25,9 @@ from splitsmith.config import (
 )
 from splitsmith.fcpxml_gen import (
     FFprobeError,
+    StageComposition,
     generate_fcpxml,
+    generate_match_fcpxml,
     probe_video,
     split_color_band,
 )
@@ -610,6 +612,449 @@ def test_probe_video_raises_on_unparseable(tmp_path: Path) -> None:
 
     with pytest.raises(FFprobeError, match="unparseable"):
         probe_video(video, runner=garbage)
+
+
+# --- generate_match_fcpxml -------------------------------------------------
+
+
+def _make_video(tmp_path: Path, name: str) -> Path:
+    p = tmp_path / name
+    p.write_bytes(b"")
+    return p
+
+
+def test_match_fcpxml_single_stage_no_shrink_matches_single_export(tmp_path: Path) -> None:
+    """A 1-stage call with pads >= the actual head/tail should leave the
+    timeline structurally identical to ``generate_fcpxml`` for the same
+    inputs. We compare attribute-by-attribute rather than literal bytes
+    because the asset-clip name maps to ``stage_name`` here vs ``project_name``
+    there -- the issue spec calls out "modulo project_name"."""
+    video = _make_video(tmp_path, "stage1.mp4")
+    out_old = tmp_path / "old.fcpxml"
+    out_new = tmp_path / "new.fcpxml"
+    shots = [
+        _shot(1, time_from_beep=1.42, split=1.42),
+        _shot(2, time_from_beep=1.63, split=0.21),
+    ]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=shots,
+        beep_offset_seconds=5.0,
+        output_path=out_old,
+        project_name="stage1",
+        config=OutputConfig(),
+    )
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=shots,
+                beep_offset_seconds=5.0,
+                head_pad_seconds=10.0,  # > beep_offset -> no head trim
+                tail_pad_seconds=20.0,  # > available tail -> no tail trim
+            )
+        ],
+        output_path=out_new,
+        project_name="stage1",
+        config=OutputConfig(),
+    )
+    old = ET.fromstring(out_old.read_bytes())
+    new = ET.fromstring(out_new.read_bytes())
+
+    assert old.attrib == new.attrib
+    # format
+    fmt_old = old.find("./resources/format")
+    fmt_new = new.find("./resources/format")
+    assert fmt_old is not None and fmt_new is not None
+    assert fmt_old.attrib == fmt_new.attrib
+    # asset (just the primary in this single-stage no-overlay case)
+    assets_old = old.findall("./resources/asset")
+    assets_new = new.findall("./resources/asset")
+    assert len(assets_old) == len(assets_new) == 1
+    assert assets_old[0].attrib == assets_new[0].attrib
+    # spine asset-clip
+    clip_old = old.find("./library/event/project/sequence/spine/asset-clip")
+    clip_new = new.find("./library/event/project/sequence/spine/asset-clip")
+    assert clip_old is not None and clip_new is not None
+    for key in ("ref", "offset", "start", "duration", "format"):
+        assert clip_old.attrib[key] == clip_new.attrib[key], key
+    # markers byte-for-byte
+    markers_old = clip_old.findall("marker")
+    markers_new = clip_new.findall("marker")
+    assert len(markers_old) == len(markers_new) == 2
+    for m_old, m_new in zip(markers_old, markers_new, strict=True):
+        assert m_old.attrib == m_new.attrib
+
+
+def test_match_fcpxml_two_stages_back_to_back(tmp_path: Path) -> None:
+    """Two stages with no shrink: spine has two asset-clips, second's offset
+    equals first's effective duration. Sequence duration is the sum."""
+    v1 = _make_video(tmp_path, "stage1.mp4")
+    v2 = _make_video(tmp_path, "stage2.mp4")
+    out = tmp_path / "match.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=v1,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=10.0,
+                tail_pad_seconds=20.0,
+            ),
+            StageComposition(
+                stage_name="stage2",
+                video_path=v2,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=2.0, split=2.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=10.0,
+                tail_pad_seconds=20.0,
+            ),
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert len(spine_clips) == 2
+    assert spine_clips[0].attrib["offset"] == "0s"
+    assert spine_clips[0].attrib["start"] == "0s"
+    assert spine_clips[0].attrib["duration"] == "600/30s"
+    assert spine_clips[0].attrib["name"] == "stage1"
+    assert spine_clips[1].attrib["offset"] == "600/30s"
+    assert spine_clips[1].attrib["start"] == "0s"
+    assert spine_clips[1].attrib["duration"] == "600/30s"
+    assert spine_clips[1].attrib["name"] == "stage2"
+    seq = root.find("./library/event/project/sequence")
+    assert seq is not None
+    assert seq.attrib["duration"] == "1200/30s"
+    assert root.find("./library/event/project").attrib["name"] == "match"
+
+
+def test_match_fcpxml_action_cut_padding_trims_each_stage(tmp_path: Path) -> None:
+    """head_pad=0.5, tail_pad=1.0 against a 20s synthetic clip with beep at
+    5s and last shot at 1.5s after beep:
+      - head_trim = beep_offset - head_pad = 5.0 - 0.5 = 4.5s = 135 frames
+      - tail_avail = 20 - (5 + 1.5) = 13.5s
+      - tail_trim = 13.5 - 1.0 = 12.5s = 375 frames
+      - eff_duration = 600 - 135 - 375 = 90 frames = 3.0s
+    Stage 1 starts on the spine at 90/30s."""
+    v1 = _make_video(tmp_path, "stage1.mp4")
+    v2 = _make_video(tmp_path, "stage2.mp4")
+    out = tmp_path / "match.fcpxml"
+    shots = [
+        _shot(1, time_from_beep=1.0, split=1.0),
+        _shot(2, time_from_beep=1.5, split=0.5),
+    ]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name=name,
+                video_path=path,
+                video=_meta_30fps(),
+                shots=shots,
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+            )
+            for name, path in (("stage1", v1), ("stage2", v2))
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert spine_clips[0].attrib["start"] == "135/30s"
+    assert spine_clips[0].attrib["duration"] == "90/30s"
+    assert spine_clips[0].attrib["offset"] == "0s"
+    assert spine_clips[1].attrib["start"] == "135/30s"
+    assert spine_clips[1].attrib["duration"] == "90/30s"
+    assert spine_clips[1].attrib["offset"] == "90/30s"
+    seq = root.find("./library/event/project/sequence")
+    assert seq is not None
+    assert seq.attrib["duration"] == "180/30s"
+
+
+def test_match_fcpxml_drops_markers_outside_trimmed_window(tmp_path: Path) -> None:
+    """Shots whose clip-local time falls outside [head_trim, head_trim +
+    eff_duration] are dropped. With head_pad=0.5, tail_pad=1.0 and a beep at
+    5s the visible window is [4.5s, 7.5s]. The pre-beep shot at -0.6s lands
+    at clip-local 4.4s (dropped); 0.4s past beep -> 5.4s (kept); 1.5s past
+    beep -> 6.5s (kept; this is the latest shot so tail_avail is computed
+    off it)."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "v.fcpxml"
+    shots = [
+        _shot(1, time_from_beep=-0.6, split=0.0),
+        _shot(2, time_from_beep=0.4, split=1.0),
+        _shot(3, time_from_beep=1.5, split=1.1),
+    ]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=shots,
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//spine/asset-clip/marker")
+    assert len(markers) == 2
+    assert "Shot 2" in markers[0].attrib["value"]
+    assert "Shot 3" in markers[1].attrib["value"]
+
+
+def test_match_fcpxml_secondary_alignment_with_head_trim(tmp_path: Path) -> None:
+    """Secondary cam stays beep-aligned even after the primary's head is
+    trimmed. With head_pad=0.5 the primary's beep moves to local 0.5s; the
+    cam (same beep_offset=5.0) needs to skip 4.5s into its own media so its
+    beep also lands at local 0.5s."""
+    primary = _make_video(tmp_path, "primary.mp4")
+    secondary = _make_video(tmp_path, "secondary.mp4")
+    out = tmp_path / "v.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=primary,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=20.0,  # no tail trim (we want a long visible window for the cam)
+                secondaries=(
+                    fcpxml_mod.SecondaryClip(
+                        video_path=secondary,
+                        video=_meta_30fps(),
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                    ),
+                ),
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    cam_clip = root.find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    assert cam_clip.attrib["offset"] == "0s"
+    # delta = (5.0 - 4.5) - 5.0 = -4.5s -> sec_start = 4.5s = 135 frames
+    assert cam_clip.attrib["start"] == "135/30s"
+
+
+def test_match_fcpxml_per_stage_overlay_lane_isolation(tmp_path: Path) -> None:
+    """Stage 0 has overlay + secondary, stage 1 has neither. Resource IDs
+    are unique across stages and lanes are isolated per stage (stage 1's
+    primary clip has no nested clips)."""
+    v1 = _make_video(tmp_path, "stage1.mp4")
+    v2 = _make_video(tmp_path, "stage2.mp4")
+    cam = _make_video(tmp_path, "cam.mp4")
+    overlay = _make_video(tmp_path, "stage1_overlay.mov")
+    out = tmp_path / "match.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=v1,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=10.0,
+                tail_pad_seconds=20.0,
+                overlay_path=overlay,
+                overlay_video=_meta_30fps(),
+                secondaries=(
+                    fcpxml_mod.SecondaryClip(
+                        video_path=cam,
+                        video=_meta_30fps(),
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                    ),
+                ),
+            ),
+            StageComposition(
+                stage_name="stage2",
+                video_path=v2,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=2.0, split=2.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=10.0,
+                tail_pad_seconds=20.0,
+            ),
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    assets = root.findall("./resources/asset")
+    # stage1 primary + cam + overlay + stage2 primary = 4
+    assert len(assets) == 4
+    asset_ids = [a.attrib["id"] for a in assets]
+    assert asset_ids == ["r2", "r3", "r4", "r5"]
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert len(spine_clips) == 2
+    nested_in_stage1 = spine_clips[0].findall("asset-clip")
+    nested_in_stage2 = spine_clips[1].findall("asset-clip")
+    # stage 1: cam (lane=1) + overlay (lane=2) = 2 nested clips
+    assert {c.attrib["lane"] for c in nested_in_stage1} == {"1", "2"}
+    # stage 2: nothing nested
+    assert nested_in_stage2 == []
+
+
+def test_match_fcpxml_overlay_skips_into_media_when_head_trimmed(tmp_path: Path) -> None:
+    """The overlay was rendered to mirror the primary frame-for-frame, so
+    after head_trim it must skip the same amount into its own media to stay
+    in sync. Its duration also shrinks to match the primary's effective
+    duration."""
+    video = _make_video(tmp_path, "v.mp4")
+    overlay = _make_video(tmp_path, "v_overlay.mov")
+    out = tmp_path / "v.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=1.5, split=1.5)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+                overlay_path=overlay,
+                overlay_video=_meta_30fps(),
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    overlay_clip = root.find(".//spine/asset-clip/asset-clip")
+    assert overlay_clip is not None
+    # head_trim = 4.5s = 135 frames; eff_duration = 90 frames
+    assert overlay_clip.attrib["start"] == "135/30s"
+    assert overlay_clip.attrib["duration"] == "90/30s"
+    assert overlay_clip.attrib["lane"] == "1"
+
+
+def test_match_fcpxml_raises_on_mixed_frame_rates(tmp_path: Path) -> None:
+    v1 = _make_video(tmp_path, "stage1.mp4")
+    v2 = _make_video(tmp_path, "stage2.mp4")
+    out = tmp_path / "match.fcpxml"
+    with pytest.raises(ValueError, match="mixed frame rates"):
+        generate_match_fcpxml(
+            stages=[
+                StageComposition(
+                    stage_name="stage1",
+                    video_path=v1,
+                    video=_meta_30fps(),
+                    shots=[],
+                    beep_offset_seconds=5.0,
+                    head_pad_seconds=5.0,
+                    tail_pad_seconds=5.0,
+                ),
+                StageComposition(
+                    stage_name="stage2",
+                    video_path=v2,
+                    video=_meta_2997(),
+                    shots=[],
+                    beep_offset_seconds=5.0,
+                    head_pad_seconds=5.0,
+                    tail_pad_seconds=5.0,
+                ),
+            ],
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+        )
+
+
+def test_match_fcpxml_raises_on_empty_stages(tmp_path: Path) -> None:
+    out = tmp_path / "match.fcpxml"
+    with pytest.raises(ValueError, match="at least one stage"):
+        generate_match_fcpxml(
+            stages=[],
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+        )
+
+
+def test_match_fcpxml_raises_on_missing_video(tmp_path: Path) -> None:
+    out = tmp_path / "match.fcpxml"
+    with pytest.raises(FileNotFoundError):
+        generate_match_fcpxml(
+            stages=[
+                StageComposition(
+                    stage_name="stage1",
+                    video_path=tmp_path / "missing.mp4",
+                    video=_meta_30fps(),
+                    shots=[],
+                    beep_offset_seconds=5.0,
+                    head_pad_seconds=5.0,
+                    tail_pad_seconds=5.0,
+                )
+            ],
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+        )
+
+
+def test_match_fcpxml_raises_when_pads_collapse_duration(tmp_path: Path) -> None:
+    """If head_pad + tail_pad math leaves nothing visible, the function
+    refuses rather than emitting a zero-duration clip."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "match.fcpxml"
+    # 20s clip, beep at 0.001s, no shots, head_pad 0, tail_pad 0:
+    # head_trim ~= 0, tail_avail = 20 - 0.001 = ~20, tail_trim ~= 20 ->
+    # effective ~ 0. Use a stage where the shot pushes tail_avail to 0.
+    # Simplest forced collapse: video.duration = 0.001s -> primary_duration
+    # rounds to 0 frames -> negative effective duration.
+    tiny_meta = VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=0.001,
+        frame_rate_num=30,
+        frame_rate_den=1,
+    )
+    with pytest.raises(ValueError, match="non-positive effective duration"):
+        generate_match_fcpxml(
+            stages=[
+                StageComposition(
+                    stage_name="v",
+                    video_path=video,
+                    video=tiny_meta,
+                    shots=[],
+                    beep_offset_seconds=0.0,
+                    head_pad_seconds=0.0,
+                    tail_pad_seconds=0.0,
+                )
+            ],
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+        )
+
+
+# --- probe_video -----------------------------------------------------------
 
 
 @pytest.mark.integration
