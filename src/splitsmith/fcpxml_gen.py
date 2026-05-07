@@ -22,13 +22,42 @@ from __future__ import annotations
 import json
 import plistlib
 import subprocess
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from typing import Literal
 from xml.etree import ElementTree as ET
 
 from .config import OutputConfig, Shot, SplitColorThresholds, VideoMetadata
+
+PipCorner = Literal["top-right", "top-left", "bottom-right", "bottom-left"]
+
+# Corner cycle order when PiP is requested without an explicit per-cam corner.
+# Top-right first because that's where the user typically wants the headcam-
+# vs-handheld layout to land for an IPSC stage view.
+_PIP_CORNER_CYCLE: tuple[PipCorner, ...] = (
+    "top-right",
+    "top-left",
+    "bottom-right",
+    "bottom-left",
+)
+
+
+@dataclass(frozen=True)
+class PipPlacement:
+    """Picture-in-picture placement for a secondary cam (#193).
+
+    ``scale`` is a uniform multiplier applied to the cam's native size
+    (assumes the cam's resolution roughly matches the sequence -- if not,
+    the user can nudge the resulting transform in FCP). ``margin_pct`` is
+    the inset from the sequence edge expressed as a percentage of the
+    sequence width / height (so it scales sensibly across resolutions).
+    """
+
+    corner: PipCorner = "top-right"
+    scale: float = 0.25
+    margin_pct: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -41,12 +70,100 @@ class SecondaryClip:
     this cam's trim -- typically equal to the project's ``pre_buffer_seconds``,
     but may be less if the cam's beep landed within the pre-buffer of the
     file (a short head wipes some of the pre-roll).
+
+    ``pip`` (issue #193): when set, the renderer adds an ``<adjust-transform>``
+    that scales and positions the cam as a corner inset over the primary.
+    ``None`` keeps today's full-frame stacked layout.
     """
 
     video_path: Path
     video: VideoMetadata
     beep_offset_seconds: float
     label: str = "Secondary cam"
+    pip: PipPlacement | None = None
+
+
+def apply_pip_corner_cycle(
+    secondaries: Iterable[SecondaryClip],
+    *,
+    default: PipPlacement | None = None,
+) -> tuple[SecondaryClip, ...]:
+    """Return ``secondaries`` with auto-assigned PiP corners (issue #193).
+
+    Cams that already carry an explicit ``pip`` keep theirs unchanged. Cams
+    without one get ``default`` (or are left alone if ``default`` is None),
+    with corners rotated through ``_PIP_CORNER_CYCLE`` in input order so a
+    multi-cam stage lands one cam per visible corner. ``scale`` /
+    ``margin_pct`` are inherited from ``default``.
+    """
+    out: list[SecondaryClip] = []
+    cycle_idx = 0
+    for sec in secondaries:
+        if sec.pip is not None or default is None:
+            out.append(sec)
+            continue
+        corner = _PIP_CORNER_CYCLE[cycle_idx % len(_PIP_CORNER_CYCLE)]
+        cycle_idx += 1
+        out.append(replace(sec, pip=replace(default, corner=corner)))
+    return tuple(out)
+
+
+def _pip_transform_attrs(
+    pip: PipPlacement,
+    *,
+    sequence_width: int,
+    sequence_height: int,
+) -> dict[str, str]:
+    """Compute ``<adjust-transform>`` attribute values for ``pip``.
+
+    FCPXML position is in pixels relative to the sequence centre with +Y
+    up. For a clip scaled by ``S``, half-extents are ``halfW*S`` /
+    ``halfH*S``; the corner placement keeps ``margin_pct`` of the sequence
+    width/height between the clip edge and the sequence edge.
+    """
+    half_w = sequence_width / 2.0
+    half_h = sequence_height / 2.0
+    clip_half_w = half_w * pip.scale
+    clip_half_h = half_h * pip.scale
+    margin_x = sequence_width * (pip.margin_pct / 100.0)
+    margin_y = sequence_height * (pip.margin_pct / 100.0)
+
+    if pip.corner in ("top-right", "bottom-right"):
+        x = half_w - clip_half_w - margin_x
+    else:
+        x = -(half_w - clip_half_w - margin_x)
+    if pip.corner in ("top-right", "top-left"):
+        y = half_h - clip_half_h - margin_y
+    else:
+        y = -(half_h - clip_half_h - margin_y)
+
+    return {
+        "scale": f"{pip.scale:g} {pip.scale:g}",
+        "position": f"{x:g} {y:g}",
+    }
+
+
+def _attach_pip_transform(
+    asset_clip: ET.Element,
+    pip: PipPlacement | None,
+    *,
+    sequence_width: int,
+    sequence_height: int,
+) -> None:
+    """Insert ``<adjust-transform>`` on ``asset_clip`` when ``pip`` is set.
+
+    The transform must precede any ``<marker>`` / nested clip children per
+    FCPXML element ordering. Secondary connected clips are leaves today, so
+    appending is fine; the explicit ``insert(0, ...)`` keeps the contract
+    correct if a future change adds children to a secondary clip.
+    """
+    if pip is None:
+        return
+    attrs = _pip_transform_attrs(
+        pip, sequence_width=sequence_width, sequence_height=sequence_height
+    )
+    transform = ET.Element("adjust-transform", attrs)
+    asset_clip.insert(0, transform)
 
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -378,7 +495,7 @@ def generate_fcpxml(
         else:
             sec_offset_str = "0s"
             sec_start_str = _frame_aligned_str(-delta_frames, fd_num, fd_den)
-        ET.SubElement(
+        sec_clip = ET.SubElement(
             asset_clip,
             "asset-clip",
             {
@@ -390,6 +507,12 @@ def generate_fcpxml(
                 "duration": sec_duration_parent_str,
                 "format": format_id,
             },
+        )
+        _attach_pip_transform(
+            sec_clip,
+            sec.pip,
+            sequence_width=video.width,
+            sequence_height=video.height,
         )
 
     if use_overlay and overlay_duration_str is not None:
@@ -774,7 +897,7 @@ def generate_match_fcpxml(
             else:
                 sec_offset_frames = plan.head_trim_frames
                 sec_start_frames = -delta_frames
-            ET.SubElement(
+            sec_clip = ET.SubElement(
                 primary_clip,
                 "asset-clip",
                 {
@@ -786,6 +909,12 @@ def generate_match_fcpxml(
                     "duration": _frame_aligned_str(sec_dur_in_parent_frames, fd_num, fd_den),
                     "format": format_id,
                 },
+            )
+            _attach_pip_transform(
+                sec_clip,
+                sec.pip,
+                sequence_width=base.width,
+                sequence_height=base.height,
             )
 
         if plan.overlay_asset_id is not None:

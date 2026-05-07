@@ -18,10 +18,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from .. import fcpxml_gen
 from ..config import OutputConfig
 from .exports import audit_shots_to_engine_shots
+
+PipLayout = Literal["stacked", "pip-corners"]
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,11 @@ class MatchExportRequestData:
     include_secondaries: bool
     include_overlay: bool
     project_name: str
+    # Issue #193. ``"stacked"`` keeps today's full-frame stacked layout
+    # (every secondary covers the one below). ``"pip-corners"`` adds an
+    # ``<adjust-transform>`` to each secondary so they land in rotating
+    # corners (TR -> TL -> BR -> BL) at 25% scale with a 2% inset.
+    pip_layout: PipLayout = "stacked"
 
 
 @dataclass(frozen=True)
@@ -182,6 +190,13 @@ def export_match(
                     f"{stage_input.overlay_path} -- dropped"
                 )
 
+        if request.pip_layout == "pip-corners" and secondaries:
+            laid_out = fcpxml_gen.apply_pip_corner_cycle(
+                secondaries, default=fcpxml_gen.PipPlacement()
+            )
+        else:
+            laid_out = tuple(secondaries)
+
         compositions.append(
             fcpxml_gen.StageComposition(
                 stage_name=stage_input.stage_name,
@@ -193,7 +208,7 @@ def export_match(
                 tail_pad_seconds=request.tail_pad_seconds,
                 overlay_path=overlay_path,
                 overlay_video=overlay_video,
-                secondaries=tuple(secondaries),
+                secondaries=laid_out,
             )
         )
 

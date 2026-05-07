@@ -1198,6 +1198,13 @@ function MatchExportDialog({
   const [headPad, setHeadPad] = useState<number>(PADDING_PRESETS.full.head);
   const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
   const [includeSecondaries, setIncludeSecondaries] = useState(true);
+  // Issue #193. ``stacked`` mirrors today's behaviour (every secondary
+  // covers the one below at full frame). ``pip-corners`` adds an FCPXML
+  // adjust-transform to each cam so they land in rotating corners at 25%
+  // scale, ready for review without manual sizing in FCP.
+  const [pipLayout, setPipLayout] = useState<"stacked" | "pip-corners">(
+    "stacked",
+  );
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1248,6 +1255,7 @@ function MatchExportDialog({
         head_pad_seconds: headPad,
         tail_pad_seconds: tailPad,
         include_secondaries: includeSecondaries,
+        pip_layout: pipLayout,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1433,6 +1441,27 @@ function MatchExportDialog({
                 />
                 Include secondary cams
               </label>
+              {includeSecondaries && anySelectedStageHasSecondaries && (
+                <label
+                  className="ml-6 flex items-center gap-1.5"
+                  title="Stacked: cams cover the primary at full size (today's default). PiP corners: each cam lands as a 25% inset in a rotating corner so the headcam stays visible."
+                >
+                  Layout
+                  <select
+                    className="rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                    value={pipLayout}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setPipLayout(
+                        e.target.value as "stacked" | "pip-corners",
+                      )
+                    }
+                  >
+                    <option value="stacked">Stacked full-frame</option>
+                    <option value="pip-corners">PiP corners</option>
+                  </select>
+                </label>
+              )}
               <label className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
