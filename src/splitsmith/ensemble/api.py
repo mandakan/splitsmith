@@ -96,19 +96,64 @@ class EnsembleResult(BaseModel):
 
 @dataclass
 class EnsembleRuntime:
-    """Loaded heavy state. Build once via ``load_ensemble_runtime``; reuse."""
+    """Loaded heavy state. Build once via ``load_ensemble_runtime``; reuse.
+
+    Voter D's backbone is selected by ``calibration.voter_d_backend``.
+    The runtime carries both ``pann`` and ``beats`` slots so a stub can
+    populate either without re-typing the dataclass; ``compute_voter_d_probs``
+    routes to the matching one. Whichever backend is inactive stays
+    ``None`` to avoid loading both models on startup.
+    """
 
     calibration: EnsembleCalibration
     voter_c_model: Any
     clap: feat.ClapRuntime
-    pann: feat.PannRuntime
+    pann: feat.PannRuntime | None = None
+    beats: feat.BeatsRuntime | None = None
     # Track the prompt list the calibration was built against so we can
     # warn if the on-package CLAP prompt bank ever drifts.
     expected_prompts: tuple[str, ...] = field(default_factory=tuple)
 
 
+def compute_voter_d_probs(
+    audio: np.ndarray,
+    sample_rate: int,
+    candidate_times: np.ndarray,
+    runtime: EnsembleRuntime,
+) -> np.ndarray:
+    """Dispatch Voter D inference to the calibrated backbone.
+
+    Reads ``runtime.calibration.voter_d_backend`` and routes to the
+    matching feature extractor. Raises a clear error when the matching
+    runtime slot wasn't populated (e.g. the artifact says ``beats`` but
+    only ``runtime.pann`` was loaded), so a misconfigured runtime fails
+    loudly rather than silently scoring zeros.
+    """
+    backend = runtime.calibration.voter_d_backend
+    if backend == feat.VOTER_D_BACKEND_PANN:
+        if runtime.pann is None:
+            raise RuntimeError(
+                "calibration says voter_d_backend='pann' but EnsembleRuntime.pann is None"
+            )
+        return feat.compute_pann_gunshot_probs(audio, sample_rate, candidate_times, runtime.pann)
+    if backend == feat.VOTER_D_BACKEND_BEATS:
+        if runtime.beats is None:
+            raise RuntimeError(
+                "calibration says voter_d_backend='beats' but EnsembleRuntime.beats is None"
+            )
+        return feat.compute_beats_gunshot_probs(audio, sample_rate, candidate_times, runtime.beats)
+    raise ValueError(
+        f"unknown voter_d_backend {backend!r}; expected one of {feat.VALID_VOTER_D_BACKENDS}"
+    )
+
+
 def load_ensemble_runtime() -> EnsembleRuntime:
-    """Materialise calibration + heavy models. Slow first-call (model downloads)."""
+    """Materialise calibration + heavy models. Slow first-call (model downloads).
+
+    The Voter D backbone follows ``calibration.voter_d_backend``; only
+    the active backbone is loaded. To switch backbones, rebuild
+    artifacts with ``scripts/build_ensemble_artifacts.py --voter-d-backend ...``.
+    """
     calibration = load_calibration()
     voter_c_model = load_voter_c_model()
     if tuple(calibration.clap_prompts) != feat.CLAP_PROMPTS:
@@ -118,12 +163,23 @@ def load_ensemble_runtime() -> EnsembleRuntime:
             "scripts/build_ensemble_artifacts.py."
         )
     clap = feat.load_clap_runtime()
-    pann = feat.load_pann_runtime()
+    pann: feat.PannRuntime | None = None
+    beats: feat.BeatsRuntime | None = None
+    if calibration.voter_d_backend == feat.VOTER_D_BACKEND_PANN:
+        pann = feat.load_pann_runtime()
+    elif calibration.voter_d_backend == feat.VOTER_D_BACKEND_BEATS:
+        beats = feat.load_beats_runtime()
+    else:
+        raise RuntimeError(
+            f"unknown voter_d_backend {calibration.voter_d_backend!r} in calibration; "
+            f"expected one of {feat.VALID_VOTER_D_BACKENDS}"
+        )
     return EnsembleRuntime(
         calibration=calibration,
         voter_c_model=voter_c_model,
         clap=clap,
         pann=pann,
+        beats=beats,
         expected_prompts=tuple(calibration.clap_prompts),
     )
 
@@ -185,7 +241,7 @@ def detect_shots_ensemble(
     )
     clap_sims = feat.compute_clap_similarities(audio, sample_rate, times, runtime.clap)
     clap_diff = feat.clap_diff_from_similarities(clap_sims)
-    gunshot_prob = feat.compute_pann_gunshot_probs(audio, sample_rate, times, runtime.pann)
+    gunshot_prob = compute_voter_d_probs(audio, sample_rate, times, runtime)
     voter_c_x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, camera_classes=camera_class)
     score_c = runtime.voter_c_model.predict_proba(voter_c_x)[:, 1].astype(np.float64)
 

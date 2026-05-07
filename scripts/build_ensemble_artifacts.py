@@ -48,6 +48,11 @@ from splitsmith.ensemble.calibration import (
     DEFAULT_CAMERA_CLASS,
     camera_class_from_mount,
 )
+from splitsmith.ensemble.features import (
+    VALID_VOTER_D_BACKENDS,
+    VOTER_D_BACKEND_BEATS,
+    VOTER_D_BACKEND_PANN,
+)
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
@@ -130,17 +135,62 @@ def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[
     return labels
 
 
+def _voter_d_cache_path(fixture: str, backend: str) -> Path:
+    """Return the per-fixture Voter D probability cache for ``backend``.
+
+    Backends share the cache schema: an .npz with a ``gunshot_prob``
+    column (and any other backend-specific arrays) per detected
+    candidate, in the same order ``detect_shots`` emitted them. Adding a
+    new backend means: (1) sibling cache file via this helper, (2)
+    extractor script that writes the same schema, (3) a branch in
+    ``api.compute_voter_d_probs``.
+    """
+    if backend == VOTER_D_BACKEND_PANN:
+        return CACHE_DIR / f"{fixture}_pann.npz"
+    if backend == VOTER_D_BACKEND_BEATS:
+        return CACHE_DIR / f"{fixture}_beats.npz"
+    raise ValueError(
+        f"unknown voter_d_backend {backend!r}; expected one of {VALID_VOTER_D_BACKENDS}"
+    )
+
+
+def _voter_d_extractor_hint(backend: str) -> str:
+    """User-facing extractor name for the missing-cache error."""
+    if backend == VOTER_D_BACKEND_PANN:
+        return "extract_audio_embeddings.py"
+    if backend == VOTER_D_BACKEND_BEATS:
+        return "extract_beats_embeddings.py"
+    return "<no extractor>"
+
+
+def _voter_d_full_cache_path(fixture: str, backend: str) -> Path:
+    """Wide-window sibling of ``_voter_d_cache_path`` (used by mining)."""
+    if backend == VOTER_D_BACKEND_PANN:
+        return CACHE_DIR / f"{fixture}_pann_full.npz"
+    if backend == VOTER_D_BACKEND_BEATS:
+        return CACHE_DIR / f"{fixture}_beats_full.npz"
+    raise ValueError(
+        f"unknown voter_d_backend {backend!r}; expected one of {VALID_VOTER_D_BACKENDS}"
+    )
+
+
 def _build_universe(
     fixtures: list[str],
     tolerance_ms: float,
     *,
+    voter_d_backend: str = VOTER_D_BACKEND_PANN,
     log: Callable[[str], None] = print,
 ):
-    """Per-fixture: detect at max recall, label, slot CLAP+PANN signals.
+    """Per-fixture: detect at max recall, label, slot CLAP + Voter D signals.
 
     Each universe row carries a ``camera_class`` tag derived from the
     fixture's ``camera.mount`` so the calibrator can stratify per-voter
     thresholds without re-reading the fixture JSONs.
+
+    ``voter_d_backend`` selects which cache file supplies Voter D's
+    per-candidate gunshot probability. PANN reads ``_pann.npz``; BEATs
+    (issue #179) reads ``_beats.npz``. Schema is shared (see
+    ``_voter_d_cache_path``).
     """
     universe = []
     for fix in fixtures:
@@ -150,14 +200,14 @@ def _build_universe(
         truth_path = FIXTURES_DIR / f"{fix}.json"
         wav_path = FIXTURES_DIR / f"{fix}.wav"
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann.npz"
+        voter_d_path = _voter_d_cache_path(fix, voter_d_backend)
         if not truth_path.exists() or not wav_path.exists():
             log(f"  skip {fix}: missing fixture files")
             continue
-        if not clap_path.exists() or not pann_path.exists():
+        if not clap_path.exists() or not voter_d_path.exists():
             log(
-                f"  skip {fix}: CLAP/PANN cache missing -- run "
-                "extract_clap_features.py + extract_audio_embeddings.py "
+                f"  skip {fix}: CLAP / Voter-D ({voter_d_backend}) cache missing "
+                f"-- run extract_clap_features.py + {_voter_d_extractor_hint(voter_d_backend)} "
                 "for this stem to include it."
             )
             continue
@@ -186,10 +236,13 @@ def _build_universe(
         sims = clap["text_sims"]
         clap_diff = feat.clap_diff_from_similarities(sims)
 
-        pann = np.load(pann_path)
-        if pann["gunshot_prob"].shape[0] != len(shots):
-            raise SystemExit(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
-        gunshot_prob = pann["gunshot_prob"]
+        voter_d_cache = np.load(voter_d_path)
+        if voter_d_cache["gunshot_prob"].shape[0] != len(shots):
+            raise SystemExit(
+                f"{fix}: Voter-D ({voter_d_backend}) cache stale; "
+                f"re-run {_voter_d_extractor_hint(voter_d_backend)} --force"
+            )
+        gunshot_prob = voter_d_cache["gunshot_prob"]
 
         times = np.array(cand_t, dtype=np.float64)
         confidences = np.array([s.confidence for s in shots], dtype=np.float64)
@@ -278,6 +331,7 @@ def _load_mined_negatives(
     n_pos_by_fixture: dict[str, int],
     *,
     cap_ratio: float,
+    voter_d_backend: str = VOTER_D_BACKEND_PANN,
     log: Callable[[str], None],
 ) -> tuple[list[dict], dict]:
     """Materialise mined-negative training rows aligned to full-mode caches.
@@ -314,8 +368,8 @@ def _load_mined_negatives(
         sidecar_path = FULL_DIR / f"{fix}_full.json"
         wav_path = FULL_DIR / f"{fix}_full.wav"
         clap_path = CACHE_DIR / f"{fix}_clap_full.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann_full.npz"
-        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path, pann_path)):
+        voter_d_full_path = _voter_d_full_cache_path(fix, voter_d_backend)
+        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path, voter_d_full_path)):
             skipped.append(fix)
             continue
 
@@ -336,13 +390,13 @@ def _load_mined_negatives(
         )
 
         clap = np.load(clap_path, allow_pickle=True)
-        pann = np.load(pann_path)
+        voter_d_full = np.load(voter_d_full_path)
         clap_times = clap["times"].astype(np.float64)
-        if clap_times.shape != pann["gunshot_prob"].shape:
+        if clap_times.shape != voter_d_full["gunshot_prob"].shape:
             raise SystemExit(
-                f"{fix}: full CLAP and PANN caches disagree on candidate count "
-                f"({clap_times.shape[0]} vs {pann['gunshot_prob'].shape[0]}); "
-                "rebuild both with --full --force."
+                f"{fix}: full CLAP and Voter-D ({voter_d_backend}) caches disagree on "
+                f"candidate count ({clap_times.shape[0]} vs "
+                f"{voter_d_full['gunshot_prob'].shape[0]}); rebuild both with --full --force."
             )
         prompts_in_cache = [str(p) for p in clap["prompts"].tolist()]
         if tuple(prompts_in_cache) != feat.CLAP_PROMPTS:
@@ -352,7 +406,7 @@ def _load_mined_negatives(
             )
         sims = clap["text_sims"]
         clap_diffs = feat.clap_diff_from_similarities(sims)
-        gunshot_probs = pann["gunshot_prob"]
+        gunshot_probs = voter_d_full["gunshot_prob"]
 
         # Map mined times -> full-cache row indices. Same WAV + same config in
         # mine_negatives and the --full extractors, so an exact (or sub-ms)
@@ -497,6 +551,7 @@ def build_artifacts(
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
     use_mined_negatives: bool = False,
     phone_upweight: float = DEFAULT_PHONE_UPWEIGHT,
+    voter_d_backend: str = VOTER_D_BACKEND_PANN,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -504,10 +559,22 @@ def build_artifacts(
     Importable so the production UI's "Rebuild calibration" button can
     drive the same code path as the CLI. Logs progress through ``log``;
     returns the calibration dict that was written.
+
+    ``voter_d_backend`` selects which Voter D backbone the per-voter
+    threshold is calibrated against and which extractor cache is read
+    (``_pann.npz`` vs ``_beats.npz``). Voter C's GBDT does not depend on
+    Voter D's probability, so swapping backends does not invalidate
+    ``voter_c_gbdt.joblib`` and the model file is rewritten with the
+    same training set either way. The artifact records the active
+    backend so ``load_ensemble_runtime`` knows which model to materialise.
     """
+    if voter_d_backend not in VALID_VOTER_D_BACKENDS:
+        raise SystemExit(
+            f"unknown voter_d_backend {voter_d_backend!r}; expected one of {VALID_VOTER_D_BACKENDS}"
+        )
     fixtures = list(fixtures) if fixtures else list(DEFAULT_FIXTURES)
-    log(f"Calibrating ensemble over {len(fixtures)} fixture(s)...")
-    universe = _build_universe(fixtures, tolerance_ms, log=log)
+    log(f"Calibrating ensemble over {len(fixtures)} fixture(s) [Voter D = {voter_d_backend}]...")
+    universe = _build_universe(fixtures, tolerance_ms, voter_d_backend=voter_d_backend, log=log)
     n_total = len(universe)
     n_pos = sum(c["label"] for c in universe)
     log(
@@ -526,7 +593,10 @@ def build_artifacts(
     n_pos_by_fixture = Counter(c["fixture"] for c in universe if c["label"] == 1)
     if use_mined_negatives:
         mined_rows, mining_provenance = _load_mined_negatives(
-            n_pos_by_fixture, cap_ratio=mining_cap_ratio, log=log
+            n_pos_by_fixture,
+            cap_ratio=mining_cap_ratio,
+            voter_d_backend=voter_d_backend,
+            log=log,
         )
     else:
         mined_rows, mining_provenance = [], {
@@ -650,6 +720,7 @@ def build_artifacts(
         "voter_b_threshold": default_thresholds["voter_b_threshold"],
         "voter_c_threshold": default_thresholds["voter_c_threshold"],
         "voter_d_threshold": default_thresholds["voter_d_threshold"],
+        "voter_d_backend": voter_d_backend,
         "voter_c_target_recall": target_recall,
         "tolerance_ms": tolerance_ms,
         "clap_prompts_shot": list(feat.CLAP_PROMPTS_SHOT),
@@ -706,6 +777,18 @@ def main() -> None:
             "threshold drops and FP count rises in threshold-only eval."
         ),
     )
+    p.add_argument(
+        "--voter-d-backend",
+        choices=list(VALID_VOTER_D_BACKENDS),
+        default=VOTER_D_BACKEND_PANN,
+        help=(
+            "Voter D backbone to calibrate against (issue #179). 'pann' "
+            "(default) reads tests/fixtures/.cache/{stem}_pann.npz; "
+            "'beats' reads {stem}_beats.npz. The selection is recorded "
+            "in the shipped calibration JSON so the runtime loader knows "
+            "which model to materialise."
+        ),
+    )
     args = p.parse_args()
     build_artifacts(
         fixtures=args.fixture or None,
@@ -714,6 +797,7 @@ def main() -> None:
         mining_cap_ratio=args.mining_cap_ratio,
         use_mined_negatives=args.with_mining,
         phone_upweight=args.phone_upweight,
+        voter_d_backend=args.voter_d_backend,
     )
 
 
