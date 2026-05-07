@@ -1210,9 +1210,9 @@ function MatchExportDialog({
   // DaVinci Resolve import; coverage matches the FCPXML renderer for
   // primary / secondaries / PiP / overlay / markers, with transitions and
   // titles deferred per #195 / #196.
-  const [outputFormat, setOutputFormat] = useState<"fcpxml" | "fcp7xml">(
-    "fcpxml",
-  );
+  const [outputFormat, setOutputFormat] = useState<
+    "fcpxml" | "fcp7xml" | "mp4"
+  >("fcpxml");
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1492,12 +1492,13 @@ function MatchExportDialog({
                   disabled={busy}
                   onChange={(e) =>
                     setOutputFormat(
-                      e.target.value as "fcpxml" | "fcp7xml",
+                      e.target.value as "fcpxml" | "fcp7xml" | "mp4",
                     )
                   }
                 >
                   <option value="fcpxml">FCPXML (Final Cut Pro)</option>
                   <option value="fcp7xml">FCP7 XML (Premiere / DaVinci)</option>
+                  <option value="mp4">MP4 (baked, ffmpeg)</option>
                 </select>
               </label>
             </div>

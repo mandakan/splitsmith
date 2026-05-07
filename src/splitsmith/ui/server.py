@@ -945,8 +945,10 @@ class MatchExportRequest(BaseModel):
     pip_layout: Literal["stacked", "pip-corners"] = "stacked"
     # Issue #197. ``"fcpxml"`` writes Final Cut Pro 1.10 (the default).
     # ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml ``.xml``
-    # importable into Premiere Pro and DaVinci Resolve.
-    output_format: Literal["fcpxml", "fcp7xml"] = "fcpxml"
+    # importable into Premiere Pro and DaVinci Resolve. Issue #174:
+    # ``"mp4"`` bakes the stitched composition into a single MP4 via
+    # ffmpeg (overlays / PiP burned in, no NLE needed).
+    output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml"
 
 
 class RevealRequest(BaseModel):
