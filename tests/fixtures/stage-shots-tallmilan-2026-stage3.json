@@ -477,5 +477,6 @@
   "shooter": {
     "id": "self"
   },
-  "event_id": "tallmilan-2026:3:self"
+  "event_id": "tallmilan-2026:3:self",
+  "source_video": "/Volumes/GO 3S/DCIM/Camera01/VID_20260426_165837_00_049.mp4"
 }
