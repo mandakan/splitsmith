@@ -25,6 +25,7 @@ from . import (
     beep_detect,
     csv_gen,
     fcpxml_gen,
+    overlay_render,
     report,
     shot_detect,
     shot_refine,
@@ -694,6 +695,64 @@ def fcpxml(
         output_path=output,
         project_name=project_name or video.stem,
         config=config.output,
+    )
+    console.print(f"[green]Wrote[/] {output}")
+
+
+@app.command()
+def overlay(
+    audit_path: Path = typer.Option(
+        ..., "--audit", help="Audited stage JSON (e.g. <project>/audit/stage<N>.json)."
+    ),
+    video: Path = typer.Option(
+        ..., "--video", help="Trimmed video the overlay must mirror frame-for-frame."
+    ),
+    output: Path = typer.Option(..., "--output", help="Output overlay MOV (alpha)."),
+    beep_offset: float = typer.Option(
+        5.0, "--beep-offset", help="Seconds from start of trimmed video to the beep."
+    ),
+    codec: str = typer.Option(
+        "auto",
+        "--codec",
+        help=(
+            "Encoder: 'auto' (HEVC w/ alpha on macOS, ProRes 4444 elsewhere), "
+            "'hevc-alpha' (smallest, macOS only), or 'prores-4444' (largest, "
+            "cross-platform / archival)."
+        ),
+    ),
+    max_height: int | None = typer.Option(
+        None,
+        "--max-height",
+        help=(
+            "Cap output height (aspect preserved). FCPXML emits a separate "
+            "format so FCP scales it back up."
+        ),
+    ),
+    max_fps: float | None = typer.Option(
+        None, "--max-fps", help="Cap output frame rate. Source rate kept when below cap."
+    ),
+    font_name: str | None = typer.Option(
+        None, "--font", help=f"Preset font: {', '.join(overlay_render.available_font_names())}."
+    ),
+) -> None:
+    """Render an alpha overlay MOV for an audited stage.
+
+    The overlay drops onto V2 in FCP as a connected clip; the renderer
+    mirrors the trimmed clip's resolution / fps / duration unless capped.
+    """
+    if codec not in overlay_render.OVERLAY_CODECS:
+        raise typer.BadParameter(
+            f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}"
+        )
+    overlay_render.render_overlay(
+        audit_path=audit_path,
+        trimmed_video_path=video,
+        output_path=output,
+        beep_offset_seconds=beep_offset,
+        codec=codec,  # type: ignore[arg-type]
+        max_height=max_height,
+        max_fps=max_fps,
+        font_name=font_name,
     )
     console.print(f"[green]Wrote[/] {output}")
 

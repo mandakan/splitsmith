@@ -427,6 +427,15 @@ export interface ExportOverview {
   stages: StageExportStatus[];
 }
 
+/** Encoder for the alpha overlay MOV.
+ *  - ``"auto"``: ``hevc-alpha`` on macOS w/ VideoToolbox, otherwise
+ *    ``prores-4444``. Default; produces the smallest file the host can
+ *    write without losing alpha.
+ *  - ``"hevc-alpha"``: ~10-20x smaller than ProRes 4444 for sparse-text
+ *    overlays. macOS only; FCP imports natively.
+ *  - ``"prores-4444"``: cross-platform / archival. Largest files. */
+export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
+
 export interface ExportStageRequestPayload {
   write_trim?: boolean;
   write_csv?: boolean;
@@ -435,6 +444,15 @@ export interface ExportStageRequestPayload {
   /** Render the per-frame PIL + ffmpeg overlay MOV (issue #45). Defaults
    *  off because it's the slowest writer; opt in per stage. */
   write_overlay?: boolean;
+  /** Encoder for the overlay MOV. Defaults to ``"auto"``. */
+  overlay_codec?: OverlayCodec;
+  /** Cap overlay output height (aspect preserved). FCPXML emits a
+   *  separate ``<format>`` so FCP scales the smaller overlay across the
+   *  timeline. ``null`` / undefined matches source. */
+  overlay_max_height?: number | null;
+  /** Cap overlay output frame rate. Source rate is kept when below the
+   *  cap. ``null`` / undefined matches source. */
+  overlay_max_fps?: number | null;
   /** Allowlist of secondary ``video_id``s to include in the multi-cam
    *  FCPXML / per-cam trims (issue #54). Omit (or pass ``null``) to keep
    *  the legacy "every secondary with a beep" default; pass ``[]`` to
@@ -466,6 +484,12 @@ export interface MatchExportRequestPayload {
   tail_pad_seconds?: number;
   include_secondaries?: boolean;
   include_overlay?: boolean;
+  /** Forwarded to the per-stage overlay re-render. The match handler
+   *  treats any non-default value as "force re-render" so a stale
+   *  overlay on disk doesn't shadow the dialog's format choice. */
+  overlay_codec?: OverlayCodec;
+  overlay_max_height?: number | null;
+  overlay_max_fps?: number | null;
   /** Defaults to the bound project's name. Slugified for the output
    *  filename: ``<slug>-match.fcpxml``. */
   project_name?: string | null;
@@ -1404,6 +1428,16 @@ export const api = {
         write_fcpxml: opts.write_fcpxml ?? true,
         write_report: opts.write_report ?? true,
         write_overlay: opts.write_overlay ?? false,
+        overlay_codec: opts.overlay_codec ?? "auto",
+        // Forward ``null`` to keep "match source" but only attach the key
+        // when the caller set something explicit, so the server's defaults
+        // remain authoritative when the UI doesn't care.
+        ...(opts.overlay_max_height !== undefined
+          ? { overlay_max_height: opts.overlay_max_height }
+          : {}),
+        ...(opts.overlay_max_fps !== undefined
+          ? { overlay_max_fps: opts.overlay_max_fps }
+          : {}),
         // ``undefined`` => omit (server picks the legacy "all cams with a
         // beep" default); ``null`` / ``[]`` are forwarded as-is so the
         // caller can explicitly exclude all secondaries.
@@ -1428,6 +1462,13 @@ export const api = {
         tail_pad_seconds: payload.tail_pad_seconds ?? 5.0,
         include_secondaries: payload.include_secondaries ?? true,
         include_overlay: payload.include_overlay ?? true,
+        overlay_codec: payload.overlay_codec ?? "auto",
+        ...(payload.overlay_max_height !== undefined
+          ? { overlay_max_height: payload.overlay_max_height }
+          : {}),
+        ...(payload.overlay_max_fps !== undefined
+          ? { overlay_max_fps: payload.overlay_max_fps }
+          : {}),
         ...(payload.project_name !== undefined
           ? { project_name: payload.project_name }
           : {}),

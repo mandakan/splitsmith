@@ -887,10 +887,17 @@ class ExportStageRequest(BaseModel):
     write_fcpxml: bool = True
     write_report: bool = True
     # Pre-rendered alpha overlay MOV (issue #45). Defaults False because
-    # the render is per-frame PIL + ffmpeg ProRes 4444 -- non-trivially
-    # slower than the other writers. The Analysis & Export checkbox
-    # opts-in per stage.
+    # the render is per-frame PIL + ffmpeg -- non-trivially slower than
+    # the other writers. The Analysis & Export checkbox opts-in per stage.
     write_overlay: bool = False
+    # Overlay format knobs (issue #45 follow-up). Defaults match the
+    # legacy ProRes 4444 path on platforms without VideoToolbox; on macOS
+    # ``"auto"`` switches to ``hevc-alpha`` (~10-20x smaller). Resolution
+    # and fps caps are off by default to preserve frame-for-frame parity
+    # with the source clip.
+    overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
+    overlay_max_height: int | None = None
+    overlay_max_fps: float | None = None
     # Multi-cam selection (issue #54). Allowlist of secondary
     # ``video_id``s to ride the FCPXML / get their own lossless trim. The
     # default ``None`` means "include every secondary with a beep" -- the
@@ -919,6 +926,12 @@ class MatchExportRequest(BaseModel):
     tail_pad_seconds: float = 5.0
     include_secondaries: bool = True
     include_overlay: bool = True
+    # Overlay format knobs forwarded to per-stage re-renders. Match the
+    # single-stage defaults so a match export with no overlay edits is
+    # byte-comparable with the per-stage export.
+    overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
+    overlay_max_height: int | None = None
+    overlay_max_fps: float | None = None
     project_name: str | None = None
 
 
@@ -4254,6 +4267,9 @@ def create_app(
                     write_fcpxml=req.write_fcpxml,
                     write_report=req.write_report,
                     write_overlay=req.write_overlay,
+                    overlay_codec=req.overlay_codec,
+                    overlay_max_height=req.overlay_max_height,
+                    overlay_max_fps=req.overlay_max_fps,
                 ),
                 audit_path=audit_file,
                 exports_dir=exports_dir,
@@ -4424,7 +4440,18 @@ def create_app(
                 (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists()
                 for vid in wanted_secondary_ids
             )
-            overlay_missing = req.include_overlay and not overlay_target.exists()
+            # Treat any non-default overlay format option as "force re-render"
+            # so the dialog's codec / max-height / max-fps choices actually
+            # apply when a stale overlay sits on disk. With all defaults we
+            # keep the legacy "skip if present" behaviour for fast re-stitching.
+            overlay_format_overridden = (
+                req.overlay_codec != "auto"
+                or req.overlay_max_height is not None
+                or req.overlay_max_fps is not None
+            )
+            overlay_missing = req.include_overlay and (
+                not overlay_target.exists() or overlay_format_overridden
+            )
 
             needs_per_stage = (
                 not trimmed_path.exists() or not secondary_trims_present or overlay_missing
@@ -4468,6 +4495,9 @@ def create_app(
                             write_fcpxml=True,
                             write_report=True,
                             write_overlay=req.include_overlay,
+                            overlay_codec=req.overlay_codec,
+                            overlay_max_height=req.overlay_max_height,
+                            overlay_max_fps=req.overlay_max_fps,
                         ),
                         audit_path=audit_dir / f"stage{stage_number}.json",
                         exports_dir=exports_dir,

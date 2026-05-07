@@ -323,6 +323,7 @@ def test_render_overlay_pipes_rgba_frames_and_writes_output(
         output_path=output,
         beep_offset_seconds=0.0,
         probe=_meta_30fps(duration=1.0),  # 30 frames
+        codec="prores-4444",  # explicit so the test is host-independent
     )
 
     assert result == output
@@ -378,6 +379,7 @@ def test_render_overlay_raises_when_ffmpeg_returns_nonzero(
             output_path=tmp_path / "overlay.mov",
             beep_offset_seconds=0.0,
             probe=_meta_30fps(duration=0.1),
+            codec="prores-4444",
         )
 
 
@@ -407,6 +409,7 @@ def test_render_overlay_writes_real_prores_4444_alpha(tmp_path: Path) -> None:
         output_path=output,
         beep_offset_seconds=0.0,
         probe=_meta_30fps(duration=0.5),  # 15 frames
+        codec="prores-4444",  # this test asserts the prores path specifically
     )
 
     assert output.exists() and output.stat().st_size > 0
@@ -431,3 +434,222 @@ def test_render_overlay_writes_real_prores_4444_alpha(tmp_path: Path) -> None:
     assert info["codec_name"] == "prores"
     assert "yuva" in info["pix_fmt"]  # alpha channel present
     assert info["width"] == 320 and info["height"] == 180
+
+
+# --- format options ---------------------------------------------------------
+
+
+def _capture_render_cmd(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    audit_path: Path,
+    output: Path,
+    probe: VideoMetadata,
+    **kwargs: Any,
+) -> tuple[list[str], int]:
+    """Run :func:`render_overlay` with a stub Popen, returning the cmd
+    that would have been invoked and the bytes piped to ffmpeg's stdin."""
+    captured: dict[str, Any] = {"bytes": 0, "cmd": []}
+
+    class StubStdin:
+        def write(self, data: bytes) -> int:
+            captured["bytes"] += len(data)
+            return len(data)
+
+        def close(self) -> None:
+            return None
+
+    class StubStderr:
+        def read(self) -> bytes:
+            return b""
+
+    class StubProc:
+        def __init__(self, *, stdin: Any, stderr: Any) -> None:
+            self.stdin = stdin
+            self.stderr = stderr
+
+        def wait(self) -> int:
+            output.write_bytes(b"")
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    def fake_popen(cmd: list[str], **_: Any) -> StubProc:
+        captured["cmd"] = cmd
+        return StubProc(stdin=StubStdin(), stderr=StubStderr())
+
+    monkeypatch.setattr(overlay_render.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
+
+    overlay_render.render_overlay(
+        audit_path=audit_path,
+        trimmed_video_path=audit_path.parent / "trim.mp4",
+        output_path=output,
+        beep_offset_seconds=0.0,
+        probe=probe,
+        **kwargs,
+    )
+    return captured["cmd"], captured["bytes"]
+
+
+def _write_audit(tmp_path: Path) -> Path:
+    audit = tmp_path / "stage1.json"
+    audit.write_text(
+        json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 100}]}),
+        encoding="utf-8",
+    )
+    return audit
+
+
+def test_codec_hevc_alpha_emits_videotoolbox_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asking for ``hevc-alpha`` produces a ``hevc_videotoolbox`` cmd
+    with ``hvc1`` tagging and yuva420p (the only alpha pix-fmt the
+    encoder accepts)."""
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=0.1),
+        codec="hevc-alpha",
+    )
+    assert "hevc_videotoolbox" in cmd
+    assert "yuva420p" in cmd
+    # ``hvc1`` tag matters for FCP / QuickTime import.
+    assert "hvc1" in cmd
+    assert "-alpha_quality" in cmd
+    assert "prores_ks" not in cmd
+
+
+def test_codec_auto_falls_back_to_prores_off_darwin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``auto`` resolves to ``prores-4444`` when the host isn't macOS,
+    so non-Mac CI doesn't try to call ``hevc_videotoolbox``."""
+    monkeypatch.setattr(overlay_render.platform, "system", lambda: "Linux")
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=0.1),
+        codec="auto",
+    )
+    assert "prores_ks" in cmd
+    assert "hevc_videotoolbox" not in cmd
+
+
+def test_codec_auto_picks_hevc_on_darwin_with_videotoolbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On macOS with VideoToolbox advertised, ``auto`` switches to
+    ``hevc-alpha`` -- the size win that motivated the option."""
+    monkeypatch.setattr(overlay_render.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        overlay_render, "_ffmpeg_supports_encoder", lambda _bin, enc: enc == "hevc_videotoolbox"
+    )
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=0.1),
+        codec="auto",
+    )
+    assert "hevc_videotoolbox" in cmd
+    assert "prores_ks" not in cmd
+
+
+def test_codec_unknown_raises(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    with pytest.raises(overlay_render.OverlayRenderError, match="unknown overlay codec"):
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=tmp_path / "overlay.mov",
+            beep_offset_seconds=0.0,
+            probe=_meta_30fps(duration=0.1),
+            codec="bogus",  # type: ignore[arg-type]
+        )
+
+
+def test_max_height_downscales_canvas_aspect_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Capping height shrinks the canvas (and therefore the bytes piped
+    to ffmpeg) while keeping the aspect ratio."""
+    # 1920x1080 source -> cap at 720 -> 1280x720.
+    probe = VideoMetadata(
+        width=1920, height=1080, duration_seconds=0.1, frame_rate_num=30, frame_rate_den=1
+    )
+    cmd, byte_count = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=probe,
+        codec="prores-4444",
+        max_height=720,
+    )
+    # ``-s WxH`` argument follows ``-s`` in the cmd.
+    s_idx = cmd.index("-s")
+    assert cmd[s_idx + 1] == "1280x720"
+    # 3 frames @ 30fps for 0.1s -> 3 * 1280 * 720 * 4 bytes.
+    assert byte_count == 3 * 1280 * 720 * 4
+
+
+def test_max_height_above_source_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cap larger than the source height never upscales."""
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=0.1),  # 320x180
+        codec="prores-4444",
+        max_height=4000,
+    )
+    s_idx = cmd.index("-s")
+    assert cmd[s_idx + 1] == "320x180"
+
+
+def test_max_fps_caps_frame_count_and_rate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Capping fps drops the frame count and quotes the rate as a rational."""
+    probe = VideoMetadata(
+        width=320, height=180, duration_seconds=1.0, frame_rate_num=60, frame_rate_den=1
+    )
+    cmd, byte_count = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=probe,
+        codec="prores-4444",
+        max_fps=30,
+    )
+    # 60fps capped at 30 -> 30/1 (clean integer divisor preserved).
+    assert "30/1" in cmd
+    # 1.0s @ 30 fps = 30 frames.
+    assert byte_count == 30 * 320 * 180 * 4
+
+
+def test_max_fps_above_source_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cap above the source fps preserves the source rational unchanged."""
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=0.1),  # 30/1
+        codec="prores-4444",
+        max_fps=120,
+    )
+    assert "30/1" in cmd
+
+
+def test_capped_frame_rate_keeps_rational_for_29_97() -> None:
+    """``60000/1001`` capped at 30 -> ``30000/1001`` (integer divisor)."""
+    num, den = overlay_render._capped_frame_rate(60000, 1001, 30)
+    assert (num, den) == (30000, 1001)
+
+
+def test_scaled_dimensions_forces_even() -> None:
+    """Even output dims keep yuv420 / yuv444 chroma alignment happy."""
+    w, h = overlay_render._scaled_dimensions(1921, 1081, 720)
+    assert w % 2 == 0 and h % 2 == 0

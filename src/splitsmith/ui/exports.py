@@ -22,6 +22,7 @@ from typing import Any
 
 from .. import csv_gen, fcpxml_gen, overlay_render, report, trim
 from ..config import Config, ReportFiles, Shot, StageAnalysis, StageData
+from ..overlay_render import OverlayCodec
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,15 @@ class StageExportRequest:
     write_fcpxml: bool = True
     write_report: bool = True
     write_overlay: bool = False
+    # Overlay format knobs (issue #45 follow-up). ``overlay_codec="auto"``
+    # picks ``hevc-alpha`` on macOS w/ VideoToolbox (~10-20x smaller than
+    # ProRes 4444 for sparse-text overlays), else ``prores-4444``.
+    # ``overlay_max_height`` / ``overlay_max_fps`` cap the overlay's
+    # geometry / frame rate; the FCPXML emits a dedicated format element
+    # so FCP scales the smaller overlay across the timeline.
+    overlay_codec: OverlayCodec = "auto"
+    overlay_max_height: int | None = None
+    overlay_max_fps: float | None = None
 
 
 @dataclass(frozen=True)
@@ -352,6 +362,9 @@ def export_stage(
                     trimmed_video_path=mirror_target,
                     output_path=overlay_target,
                     beep_offset_seconds=pre_buffer_seconds,
+                    codec=request.overlay_codec,
+                    max_height=request.overlay_max_height,
+                    max_fps=request.overlay_max_fps,
                 )
                 overlay_path = overlay_target
             except (overlay_render.OverlayRenderError, OSError) as exc:
@@ -430,6 +443,17 @@ def export_stage(
                 # Beep offset within the lossless trim: the trim cut at
                 # ``beep_time - pre_buffer`` from source, so the beep lives
                 # ``pre_buffer`` seconds into the clip.
+                # Probe the overlay so the FCPXML can emit a dedicated
+                # ``<format>`` for it when its dims/fps differ from the
+                # primary. ffprobe failures fall back to "assume mirrors
+                # source" -- the overlay still ships, FCP just won't auto-
+                # scale it.
+                overlay_meta: fcpxml_gen.VideoMetadata | None = None
+                if fcp_overlay_path is not None:
+                    try:
+                        overlay_meta = fcpxml_gen.probe_video(fcp_overlay_path)
+                    except fcpxml_gen.FFprobeError:
+                        overlay_meta = None
                 fcpxml_gen.generate_fcpxml(
                     video_path=fcp_video,
                     video=meta,
@@ -439,6 +463,7 @@ def export_stage(
                     project_name=base,
                     config=config.output,
                     overlay_path=fcp_overlay_path,
+                    overlay_video=overlay_meta,
                     secondaries=fcp_secondaries or None,
                 )
             except (fcpxml_gen.FFprobeError, OSError) as exc:
