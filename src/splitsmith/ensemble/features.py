@@ -18,7 +18,10 @@ prompt strings were used so loading checks the bank still matches.
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import librosa
@@ -56,6 +59,28 @@ CLAP_WINDOW_S = 1.0  # 1 s window centred on each candidate
 PANN_SR = 32000  # PANN CNN14 native rate
 PANN_WINDOW_S = 1.0
 PANN_GUNSHOT_CLASS_INDEX = 427  # AudioSet ontology
+
+# BEATs (Microsoft, 2022) -- alternative Voter D backbone. Native sample
+# rate is 16 kHz vs PANN's 32 kHz. The checkpoint isn't bundled (Microsoft
+# hosts the .pt directly); point ``SPLITSMITH_BEATS_CHECKPOINT`` at a
+# downloaded checkpoint, or pass ``checkpoint_path=`` explicitly to
+# ``load_beats_runtime``.
+#
+# BEATs uses its OWN class-index ordering (in the checkpoint's
+# ``label_dict``), NOT the canonical AudioSet csv ordering PANN uses.
+# ``Gunshot, gunfire`` is at index 79 in the iter3+ AS2M cpt2 build (not
+# 427 like PANN). The loader resolves the index dynamically from the
+# checkpoint's label_dict by mid; ``BEATS_GUNSHOT_CLASS_INDEX_DEFAULT``
+# is the fallback only used when the lookup fails.
+BEATS_SR = 16000
+BEATS_WINDOW_S = 1.0
+BEATS_GUNSHOT_CLASS_INDEX_DEFAULT = 79
+BEATS_GUNSHOT_AUDIOSET_MID = "/m/032s66"  # Gunshot, gunfire
+BEATS_CHECKPOINT_ENV = "SPLITSMITH_BEATS_CHECKPOINT"
+
+VOTER_D_BACKEND_PANN = "pann"
+VOTER_D_BACKEND_BEATS = "beats"
+VALID_VOTER_D_BACKENDS: tuple[str, ...] = (VOTER_D_BACKEND_PANN, VOTER_D_BACKEND_BEATS)
 
 _HAND_FEATURE_NAMES: tuple[str, ...] = (
     "peak_amp",
@@ -149,6 +174,31 @@ class PannRuntime:
     """Pre-loaded PANN audio tagger."""
 
     tagger: Any
+
+
+@dataclass
+class BeatsRuntime:
+    """Pre-loaded BEATs audio tagger.
+
+    ``model`` is the loaded ``BEATs`` instance from microsoft/unilm
+    (or any object exposing a compatible ``extract_features`` /
+    ``predict_logits`` surface; ``compute_beats_gunshot_probs`` keys on
+    a callable ``predict_probs(batch_tensor) -> probs_tensor`` that the
+    loader installs as a thin adapter over whichever upstream API the
+    installed BEATs build provides). ``device`` is forwarded so callers
+    that mock the runtime can skip torch entirely.
+
+    ``gunshot_class_index`` is resolved from the checkpoint's
+    ``label_dict`` rather than hardcoded -- BEATs ships its own class
+    ordering (``Gunshot, gunfire`` is index 79 in the iter3+ AS2M cpt2
+    build, not 427 like the canonical AudioSet csv used by PANN). The
+    loader looks up the AudioSet machine-id ``/m/032s66`` and falls
+    back to a sensible default if the field is absent.
+    """
+
+    model: Any
+    device: str = "cpu"
+    gunshot_class_index: int = 79
 
 
 def _slice_window(audio: np.ndarray, sr: int, t: float, win_s: float) -> np.ndarray:
@@ -412,6 +462,142 @@ def compute_pann_gunshot_probs(
     clipwise, _embedding = runtime.tagger.inference(batch)
     clipwise = np.asarray(clipwise, dtype=np.float32)
     return clipwise[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
+
+
+def load_beats_runtime(
+    checkpoint_path: Path | str | None = None, device: str = "cpu"
+) -> BeatsRuntime:
+    """Load the Microsoft BEATs audio tagger.
+
+    BEATs is not packaged on PyPI as of this writing; the loader expects
+    the official microsoft/unilm BEATs codebase to be importable as
+    ``beats`` (e.g. ``pip install -e <unilm>/beats``) and a checkpoint
+    ``.pt`` to be on disk. The checkpoint location is resolved in this
+    order:
+
+    1. The ``checkpoint_path`` argument.
+    2. The ``SPLITSMITH_BEATS_CHECKPOINT`` environment variable.
+
+    The loader attaches a ``predict_probs(batch_tensor) -> probs_tensor``
+    adapter that the inference helper keys on, so callers don't need to
+    track the upstream API differences between BEATs releases.
+
+    First call is slow (~360 MB checkpoint); reuse the returned runtime.
+    """
+    resolved = checkpoint_path or os.environ.get(BEATS_CHECKPOINT_ENV)
+    if not resolved:
+        raise RuntimeError(
+            "BEATs checkpoint not provided. Pass ``checkpoint_path=`` to "
+            f"``load_beats_runtime`` or set ``{BEATS_CHECKPOINT_ENV}`` to "
+            "a downloaded BEATs .pt file (see microsoft/unilm/beats)."
+        )
+    ckpt = Path(resolved)
+    if not ckpt.exists():
+        raise FileNotFoundError(
+            f"BEATs checkpoint not found at {ckpt}. Download a checkpoint "
+            "from microsoft/unilm/beats and point ``checkpoint_path`` / "
+            f"``{BEATS_CHECKPOINT_ENV}`` at the .pt file."
+        )
+
+    try:
+        import torch
+
+        # Defer the BEATs import; it lives in microsoft/unilm and isn't
+        # on PyPI. The repo is vendored under ``third_party/beats/`` --
+        # surface that dir on sys.path so ``import beats`` resolves
+        # without the user having to set PYTHONPATH manually.
+        repo_root = Path(__file__).resolve().parents[3]
+        vendor_root = repo_root / "third_party"
+        if vendor_root.is_dir() and str(vendor_root) not in sys.path:
+            sys.path.insert(0, str(vendor_root))
+
+        from beats.BEATs import BEATs, BEATsConfig  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover -- only hit when BEATs isn't installed
+        raise RuntimeError(
+            "BEATs is not importable. Vendor microsoft/unilm/beats into "
+            "``third_party/beats/`` (or pip install it) and install "
+            "``torch`` + ``torchaudio``, then retry."
+        ) from exc
+
+    state = torch.load(str(ckpt), map_location=device, weights_only=False)
+    cfg = BEATsConfig(state["cfg"])
+    model = BEATs(cfg)
+    model.load_state_dict(state["model"])
+    model.eval()
+    model.to(device)
+
+    # Track whether the loaded checkpoint is a finetuned model. The
+    # finetuned BEATs (e.g. ``BEATs_iter3_plus_AS2M.pt``) already applies
+    # ``sigmoid`` inside ``extract_features`` and returns class
+    # probabilities; the pretraining checkpoints have no predictor head
+    # and return raw encoder features instead. Only the finetuned path
+    # is useful for Voter D, but the wrapper checks anyway so a stray
+    # un-finetuned checkpoint produces a clear error rather than
+    # nonsense gunshot probs.
+    finetuned = bool(getattr(cfg, "finetuned_model", False))
+    if not finetuned:
+        raise RuntimeError(
+            f"BEATs checkpoint at {ckpt} is not a finetuned model "
+            "(no predictor head). Voter D needs an AudioSet-finetuned "
+            "checkpoint such as ``BEATs_iter3_plus_AS2M.pt``."
+        )
+
+    @torch.no_grad()
+    def _predict_probs(batch: torch.Tensor) -> torch.Tensor:
+        # ``extract_features`` on a finetuned BEATs already applies
+        # sigmoid to the predictor logits and returns shape
+        # ``(B, n_classes)``. Returning the probs directly keeps Voter
+        # D's signal scaled the same way as PANN's clipwise probabilities.
+        probs, _padding_mask = model.extract_features(batch, padding_mask=None)
+        return probs
+
+    model.predict_probs = _predict_probs  # type: ignore[attr-defined]
+
+    # Resolve the gunshot class index from the checkpoint's label_dict.
+    # BEATs uses its own class ordering (gunshot is at 79 in iter3+ AS2M
+    # cpt2), not the canonical AudioSet csv ordering PANN uses (427).
+    label_dict = state.get("label_dict")
+    gunshot_idx = BEATS_GUNSHOT_CLASS_INDEX_DEFAULT
+    if isinstance(label_dict, dict):
+        for idx, mid in label_dict.items():
+            if str(mid) == BEATS_GUNSHOT_AUDIOSET_MID:
+                gunshot_idx = int(idx)
+                break
+    return BeatsRuntime(model=model, device=device, gunshot_class_index=gunshot_idx)
+
+
+def compute_beats_gunshot_probs(
+    audio: np.ndarray,
+    sample_rate: int,
+    candidate_times: np.ndarray,
+    runtime: BeatsRuntime,
+) -> np.ndarray:
+    """Per-candidate ``Gunshot, gunfire`` class probability via BEATs, shape ``(N,)``.
+
+    Mirrors ``compute_pann_gunshot_probs`` so the Voter D dispatcher can
+    route between backends without per-call branching beyond runtime
+    selection. Audio is resampled to ``BEATS_SR``; per-candidate windows
+    are sliced from the resampled stream.
+    """
+    if not len(candidate_times):
+        return np.zeros(0, dtype=np.float32)
+
+    import torch
+
+    if sample_rate != BEATS_SR:
+        beats_audio = librosa.resample(
+            audio.astype(np.float32), orig_sr=sample_rate, target_sr=BEATS_SR
+        )
+    else:
+        beats_audio = audio.astype(np.float32)
+    batch = np.stack(
+        [_slice_window(beats_audio, BEATS_SR, float(t), BEATS_WINDOW_S) for t in candidate_times],
+        axis=0,
+    )
+    batch_t = torch.from_numpy(batch).to(runtime.device)
+    probs_t = runtime.model.predict_probs(batch_t)
+    probs = probs_t.detach().cpu().numpy().astype(np.float32)
+    return probs[:, runtime.gunshot_class_index].astype(np.float32)
 
 
 def voter_c_feature_matrix(

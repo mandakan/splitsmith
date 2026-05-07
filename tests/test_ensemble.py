@@ -528,6 +528,186 @@ def test_calibration_thresholds_for_legacy_artifact_synthesizes_single_class() -
     assert th.voter_c_threshold == 0.42
 
 
+# ---------------------------------------------------------------------------
+# Voter D backbone selection (issue #179)
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_defaults_voter_d_backend_to_pann() -> None:
+    """Existing artifacts (no ``voter_d_backend`` field) load as PANN."""
+    cal = EnsembleCalibration(
+        voter_a_floor=0.05,
+        voter_b_threshold=0.0,
+        voter_c_threshold=0.5,
+        voter_d_threshold=0.0,
+        voter_c_target_recall=0.95,
+        tolerance_ms=75.0,
+        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
+        clap_prompts=list(CLAP_PROMPTS),
+        calibration_fixtures=["legacy"],
+        n_calibration_candidates=1,
+        n_calibration_positives=1,
+        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
+        built_at="1970-01-01T00:00:00Z",
+    )
+    assert cal.voter_d_backend == "pann"
+
+
+def test_compute_voter_d_dispatches_to_active_backend(monkeypatch) -> None:
+    """Dispatcher routes to PANN by default; switching the calibration
+    field flips it to BEATs without touching any other field."""
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    runtime = _build_stub_runtime()
+    audio = np.zeros(48_000, dtype=np.float32)
+    times = np.array([0.5, 0.7, 0.9])
+
+    pann_calls: list[int] = []
+    beats_calls: list[int] = []
+
+    def _pann(audio_, sr_, times_, runtime_):
+        pann_calls.append(len(times_))
+        return np.full(len(times_), 0.11, dtype=np.float32)
+
+    def _beats(audio_, sr_, times_, runtime_):
+        beats_calls.append(len(times_))
+        return np.full(len(times_), 0.22, dtype=np.float32)
+
+    monkeypatch.setattr(ensemble_features, "compute_pann_gunshot_probs", _pann)
+    monkeypatch.setattr(ensemble_features, "compute_beats_gunshot_probs", _beats)
+
+    # Default: voter_d_backend='pann' on the stub calibration.
+    out_pann = ensemble_api.compute_voter_d_probs(audio, 48_000, times, runtime)
+    assert pann_calls == [3] and beats_calls == []
+    assert np.allclose(out_pann, 0.11)
+
+    # Flip to BEATs and provide a stub runtime slot. PANN must NOT be
+    # called again; BEATs must.
+    runtime.calibration = runtime.calibration.model_copy(update={"voter_d_backend": "beats"})
+
+    @dataclass
+    class _StubBeatsRuntime:
+        device: str = "cpu"
+
+    runtime.beats = _StubBeatsRuntime()  # type: ignore[assignment]
+    out_beats = ensemble_api.compute_voter_d_probs(audio, 48_000, times, runtime)
+    assert pann_calls == [3] and beats_calls == [3]
+    assert np.allclose(out_beats, 0.22)
+
+
+def test_compute_voter_d_raises_when_active_runtime_slot_missing() -> None:
+    """If calibration says BEATs but ``runtime.beats is None`` the dispatcher
+    fails loudly rather than silently scoring zeros."""
+    from splitsmith.ensemble import api as ensemble_api
+
+    runtime = _build_stub_runtime()
+    runtime.calibration = runtime.calibration.model_copy(update={"voter_d_backend": "beats"})
+    # runtime.beats is left None.
+    with pytest.raises(RuntimeError, match="EnsembleRuntime.beats is None"):
+        ensemble_api.compute_voter_d_probs(
+            np.zeros(48_000, dtype=np.float32), 48_000, np.array([0.5]), runtime
+        )
+
+
+def test_compute_voter_d_rejects_unknown_backend() -> None:
+    from splitsmith.ensemble import api as ensemble_api
+
+    runtime = _build_stub_runtime()
+    runtime.calibration = runtime.calibration.model_copy(update={"voter_d_backend": "wishful"})
+    with pytest.raises(ValueError, match="unknown voter_d_backend 'wishful'"):
+        ensemble_api.compute_voter_d_probs(
+            np.zeros(48_000, dtype=np.float32), 48_000, np.array([0.5]), runtime
+        )
+
+
+def test_detect_shots_ensemble_routes_through_dispatcher_for_beats(monkeypatch) -> None:
+    """End-to-end: ``detect_shots_ensemble`` honours voter_d_backend='beats'.
+
+    Verifies the BEATs path is exercised through the dispatcher and the
+    PANN path stays cold even when ``runtime.pann`` is populated (a
+    misconfigured runtime carrying both should still call the active
+    backend only).
+    """
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    @dataclass
+    class _StubBeatsRuntime:
+        device: str = "cpu"
+
+    runtime = _build_stub_runtime()
+    runtime.calibration = runtime.calibration.model_copy(update={"voter_d_backend": "beats"})
+    runtime.beats = _StubBeatsRuntime()  # type: ignore[assignment]
+
+    pann_calls: list[int] = []
+    beats_calls: list[int] = []
+
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=0.4,
+            confidence=0.6,
+            notes="",
+        )
+        for i in range(3)
+    ]
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: (pann_calls.append(len(times)) or np.zeros(len(times))),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_beats_gunshot_probs",
+        lambda audio, sr, times, runtime: (
+            beats_calls.append(len(times)) or np.full(len(times), 0.9, dtype=np.float32)
+        ),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    result = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+    )
+    assert pann_calls == []
+    assert beats_calls == [3]
+    # All voters pass on the stub; consensus default 3-of-4 keeps everyone.
+    assert all(c.kept for c in result.candidates)
+
+
+def test_load_beats_runtime_errors_clearly_when_checkpoint_missing(tmp_path, monkeypatch) -> None:
+    """Loader gives an actionable error when no checkpoint is provided.
+
+    Sandbox-friendly: doesn't import ``beats`` or ``torch`` until after
+    the checkpoint check, so this passes regardless of whether the
+    optional BEATs install is present.
+    """
+    from splitsmith.ensemble import features as ensemble_features
+
+    monkeypatch.delenv(ensemble_features.BEATS_CHECKPOINT_ENV, raising=False)
+    with pytest.raises(RuntimeError, match="BEATs checkpoint not provided"):
+        ensemble_features.load_beats_runtime()
+
+    missing = tmp_path / "nope.pt"
+    with pytest.raises(FileNotFoundError, match="BEATs checkpoint not found"):
+        ensemble_features.load_beats_runtime(checkpoint_path=missing)
+
+
 def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
     """A handheld-class detection picks up the handheld voter A floor.
 

@@ -110,8 +110,19 @@ class EnsembleCalibration(BaseModel):
     )
     voter_d_threshold: float = Field(
         description=(
-            "PANN ``Gunshot, gunfire`` class-probability threshold. "
-            "Calibrated to the minimum value across labelled positives."
+            "Gunshot-class probability threshold for Voter D. The "
+            "backend that produced this threshold is named in "
+            "``voter_d_backend``; calibration is to the minimum value "
+            "across labelled positives regardless of backend."
+        ),
+    )
+    voter_d_backend: str = Field(
+        default="pann",
+        description=(
+            "Voter D backbone the threshold was calibrated against. "
+            "``'pann'`` (default, byte-identical to pre-experiment "
+            "behaviour) or ``'beats'`` (issue #179 evaluation). "
+            "Loader uses this to pick which model to materialise."
         ),
     )
     voter_c_target_recall: float = Field(
