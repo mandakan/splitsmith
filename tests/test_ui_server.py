@@ -4626,3 +4626,136 @@ def test_promote_against_fixture_endpoint_validates_anchor_exists(
     )
     assert resp.status_code == 404
     assert "anchor fixture not found" in resp.json()["detail"]
+
+
+# --- /api/match/export (issue #171) ---------------------------------------
+
+
+def _seed_match_export_project(tmp_path: Path, *, stage_count: int = 2) -> tuple[TestClient, Path]:
+    """Seed a project with N stages, each having a primary + beep_time +
+    audit JSON + lossless trim ready for match export.
+    """
+    import json as _json
+
+    from splitsmith.ui.project import MatchProject, StageEntry
+
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="Match Export Test")
+    client = TestClient(app)
+    project = MatchProject.load(project_root)
+    project.stages = []
+    for n in range(1, stage_count + 1):
+        project.stages.append(
+            StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=10.0)
+        )
+        src = project_root / "raw" / f"VID{n}.mp4"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_bytes(b"\x00")
+        video = project.register_video(src, project_root)
+        project.assign_video(video.path, to_stage_number=n, role="primary")
+        primary = project.stages[n - 1].primary()
+        assert primary is not None
+        primary.beep_time = 5.0
+    project.save(project_root)
+
+    audit_dir = project_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    exports_dir = project_root / "exports"
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    for n in range(1, stage_count + 1):
+        (audit_dir / f"stage{n}.json").write_text(
+            _json.dumps(
+                {
+                    "stage_number": n,
+                    "stage_name": f"Stage {n}",
+                    "stage_time_seconds": 10.0,
+                    "beep_time": 5.0,
+                    "shots": [{"shot_number": 1, "ms_after_beep": 500}],
+                    "_candidates_pending_audit": {"candidates": []},
+                }
+            ),
+            encoding="utf-8",
+        )
+        slug = f"stage{n}_stage-{n}"
+        (exports_dir / f"{slug}_trimmed.mp4").write_bytes(b"")
+    return client, project_root
+
+
+def _stub_match_export_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import fcpxml_gen as fcpxml_mod
+    from splitsmith.config import VideoMetadata
+
+    def fake(_path: Path) -> VideoMetadata:
+        return VideoMetadata(
+            width=1920,
+            height=1080,
+            duration_seconds=20.0,
+            frame_rate_num=30,
+            frame_rate_den=1,
+        )
+
+    monkeypatch.setattr(fcpxml_mod, "probe_video", fake)
+
+
+def test_match_export_endpoint_writes_fcpxml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, project_root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+
+    resp = client.post(
+        "/api/match/export",
+        json={
+            "stage_numbers": [1, 2],
+            "head_pad_seconds": 0.5,
+            "tail_pad_seconds": 1.0,
+            "include_secondaries": True,
+            "include_overlay": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["stage_count"] == 2
+    assert Path(body["fcpxml_path"]).exists()
+    assert Path(body["fcpxml_path"]).name.endswith("-match.fcpxml")
+    # Per stage: 20s clip, beep@5s, last shot at 0.5s past beep -> head_trim
+    # = 5.0 - 0.5 = 4.5s; tail_trim = (20 - 5.5) - 1.0 = 13.5s; eff = 2.0s.
+    # Two stages -> 4.0s total.
+    assert body["duration_seconds"] == pytest.approx(4.0, abs=0.1)
+
+
+def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    resp = client.post("/api/match/export", json={"stage_numbers": []})
+    assert resp.status_code == 400
+    assert "stage_numbers cannot be empty" in resp.json()["detail"]
+
+
+def test_match_export_endpoint_400_on_padding_above_buffer(tmp_path: Path) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    resp = client.post(
+        "/api/match/export",
+        json={"stage_numbers": [1], "head_pad_seconds": 99.0},
+    )
+    assert resp.status_code == 400
+    assert "head_pad_seconds" in resp.json()["detail"]
+
+
+def test_match_export_endpoint_400_on_unknown_stage(tmp_path: Path) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    resp = client.post("/api/match/export", json={"stage_numbers": [99]})
+    assert resp.status_code == 400
+    assert "stage 99 not found" in resp.json()["detail"]
+
+
+def test_match_export_endpoint_400_when_trim_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    # Remove the trim that the seed helper wrote.
+    (project_root / "exports" / "stage1_stage-1_trimmed.mp4").unlink()
+
+    resp = client.post("/api/match/export", json={"stage_numbers": [1]})
+    assert resp.status_code == 400
+    assert "lossless trim missing" in resp.json()["detail"]

@@ -106,6 +106,7 @@ from ..fixture_schema import (
 )
 from . import audio as audio_helpers
 from . import exports as export_helpers
+from . import match_exports as match_export_helpers
 from .jobs import Job, JobCancelled, JobHandle, JobRegistry
 from .project import (
     VIDEO_EXTENSIONS,
@@ -879,6 +880,27 @@ class ExportStageRequest(BaseModel):
     # stage). Cams without a beep are still skipped regardless of selection
     # since they can't be sync-aligned.
     secondary_video_ids: list[str] | None = None
+
+
+class MatchExportRequest(BaseModel):
+    """Body for POST /api/match/export (issue #171).
+
+    Stitches the listed stages into one FCPXML, in the order given. Each
+    stage must already have a lossless trim + audit shots (run the per-stage
+    export first); the match export composes from those without re-encoding.
+    ``head_pad_seconds`` / ``tail_pad_seconds`` are the visible padding
+    around the beep / final shot per stage and are clamped server-side to
+    the project's pre/post buffer settings (default 5.0s) -- exceeding the
+    cap returns 400. ``project_name`` defaults to the bound project's name
+    when omitted.
+    """
+
+    stage_numbers: list[int]
+    head_pad_seconds: float = 5.0
+    tail_pad_seconds: float = 5.0
+    include_secondaries: bool = True
+    include_overlay: bool = True
+    project_name: str | None = None
 
 
 class RevealRequest(BaseModel):
@@ -4187,6 +4209,133 @@ def create_app(
             word = "anomaly" if n == 1 else "anomalies"
             summary += f" ({n} {word} -- see report.txt)"
         handle.update(progress=1.0, message=f"Done: {summary}")
+
+    @app.post("/api/match/export")
+    def export_match(req: MatchExportRequest) -> JSONResponse:
+        """Stitch N stages into one FCPXML (issue #171).
+
+        Synchronous: the work is just XML composition + a few ffprobes, so
+        we don't queue a job. The response carries the output path and the
+        total timeline duration so the SPA can show "exported N stages
+        (M:SS)" without re-stating the file.
+
+        Validation: 400 on stage selection mismatch, missing trim/audit, or
+        out-of-range padding; 404 when no project is bound.
+        """
+        from . import exports as exports_mod
+
+        project = state.load()
+        if not req.stage_numbers:
+            raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
+
+        # Padding cap: clamp at the project's pre/post buffer. Exceeding
+        # the cap is a 400 with a precise message, not a silent clamp --
+        # the user's slider in #172 already enforces the same bound, so a
+        # value above it is a real bug worth surfacing.
+        max_head = project.trim_pre_buffer_seconds
+        max_tail = project.trim_post_buffer_seconds
+        if not 0.0 <= req.head_pad_seconds <= max_head:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"head_pad_seconds={req.head_pad_seconds} out of range; "
+                    f"must be in [0.0, {max_head}] (project trim_pre_buffer)"
+                ),
+            )
+        if not 0.0 <= req.tail_pad_seconds <= max_tail:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"tail_pad_seconds={req.tail_pad_seconds} out of range; "
+                    f"must be in [0.0, {max_tail}] (project trim_post_buffer)"
+                ),
+            )
+
+        stages_input: list[match_export_helpers.MatchStageInput] = []
+        exports_dir = project.exports_path(state.project_root)
+        audit_dir = project.audit_path(state.project_root)
+        for stage_number in req.stage_numbers:
+            try:
+                stage = project.stage(stage_number)
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"stage {stage_number} not found in project",
+                ) from exc
+            primary = stage.primary()
+            if primary is None or primary.beep_time is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"stage {stage_number} has no primary or no beep yet; "
+                        "finish ingest + audit before match export"
+                    ),
+                )
+            base = f"stage{stage_number}_{exports_mod._slugify(stage.stage_name)}"
+            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+            audit_path = audit_dir / f"stage{stage_number}.json"
+            overlay_path = exports_dir / f"{base}_overlay.mov"
+
+            # Per-cam clip-local beep offset matches the per-stage exporter:
+            # ``min(pre_buffer, beep_time_in_source)`` so short heads (cam beep
+            # within the pre-buffer) align correctly.
+            secondaries: list[match_export_helpers.MatchSecondaryInput] = []
+            for sv in stage.videos:
+                if sv.role != "secondary":
+                    continue
+                if sv.beep_time is None:
+                    continue
+                sec_clip_beep = min(project.trim_pre_buffer_seconds, sv.beep_time)
+                secondaries.append(
+                    match_export_helpers.MatchSecondaryInput(
+                        video_id=sv.video_id,
+                        trimmed_path=exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4",
+                        beep_offset_seconds=sec_clip_beep,
+                        label=f"Cam {sv.video_id}",
+                    )
+                )
+
+            primary_clip_beep = min(project.trim_pre_buffer_seconds, primary.beep_time)
+            stages_input.append(
+                match_export_helpers.MatchStageInput(
+                    stage_number=stage_number,
+                    stage_name=stage.stage_name,
+                    audit_path=audit_path,
+                    trimmed_path=trimmed_path,
+                    beep_offset_seconds=primary_clip_beep,
+                    secondaries=tuple(secondaries),
+                    overlay_path=overlay_path,
+                )
+            )
+
+        project_name = req.project_name or project.name or "match"
+        request_data = match_export_helpers.MatchExportRequestData(
+            stage_numbers=tuple(req.stage_numbers),
+            head_pad_seconds=req.head_pad_seconds,
+            tail_pad_seconds=req.tail_pad_seconds,
+            include_secondaries=req.include_secondaries,
+            include_overlay=req.include_overlay,
+            project_name=project_name,
+        )
+
+        try:
+            result = match_export_helpers.export_match(
+                stages=stages_input,
+                request=request_data,
+                exports_dir=exports_dir,
+                config=Config().output,
+            )
+        except match_export_helpers.MatchExportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return JSONResponse(
+            {
+                "fcpxml_path": str(result.fcpxml_path),
+                "stage_count": result.stage_count,
+                "duration_seconds": result.duration_seconds,
+                "anomalies": result.anomalies,
+            }
+        )
 
     @app.post("/api/files/reveal")
     def reveal_file(req: RevealRequest) -> JSONResponse:
