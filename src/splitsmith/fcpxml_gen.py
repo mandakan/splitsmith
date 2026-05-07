@@ -690,14 +690,15 @@ def generate_match_fcpxml(
             },
         )
 
-        # Secondary cam connected clips. Lane=1..N (per stage). Beep
-        # alignment generalises the single-stage formula: with the primary's
-        # ``start`` shifted forward by head_trim, the secondary needs to
-        # arrive at the timeline at primary_local_beep = (beep_offset -
-        # head_trim) instead of beep_offset. So delta = (beep_offset -
-        # head_trim) - sec_beep, expressed in frames; a non-negative delta
-        # places the cam later in the parent's local time, a negative delta
-        # skips into the cam's own media.
+        # Secondary cam connected clips. Lane=1..N (per stage). The parent's
+        # ``offset`` on a connected clip is in the parent's source-time
+        # coordinates -- offset=0s would land at parent_source=0, which is
+        # ``head_trim`` seconds *before* the parent's visible spine start.
+        # So every connected-clip offset is biased by ``head_trim_frames``
+        # to anchor at the parent's visible start. Beep alignment then
+        # follows from delta = (beep_offset - head_trim) - sec_beep in
+        # frames; a non-negative delta places the cam later in the parent's
+        # local time, a negative delta skips into the cam's own media.
         for lane_idx, (sec, sec_id, sec_dur_in_parent_frames) in enumerate(
             plan.usable_secondaries, start=1
         ):
@@ -706,20 +707,20 @@ def generate_match_fcpxml(
                 / fd_seconds
             )
             if delta_frames >= 0:
-                sec_offset_str = _frame_aligned_str(delta_frames, fd_num, fd_den)
-                sec_start_str = "0s"
+                sec_offset_frames = plan.head_trim_frames + delta_frames
+                sec_start_frames = 0
             else:
-                sec_offset_str = "0s"
-                sec_start_str = _frame_aligned_str(-delta_frames, fd_num, fd_den)
+                sec_offset_frames = plan.head_trim_frames
+                sec_start_frames = -delta_frames
             ET.SubElement(
                 primary_clip,
                 "asset-clip",
                 {
                     "ref": sec_id,
                     "lane": str(lane_idx),
-                    "offset": sec_offset_str,
+                    "offset": _frame_aligned_str(sec_offset_frames, fd_num, fd_den),
                     "name": sec.label,
-                    "start": sec_start_str,
+                    "start": _frame_aligned_str(sec_start_frames, fd_num, fd_den),
                     "duration": _frame_aligned_str(sec_dur_in_parent_frames, fd_num, fd_den),
                     "format": format_id,
                 },
@@ -728,19 +729,20 @@ def generate_match_fcpxml(
         if plan.overlay_asset_id is not None:
             overlay_lane = len(plan.usable_secondaries) + 1
             # Overlay was rendered to mirror the primary frame-for-frame, so
-            # to stay in sync after head_trim its ``start`` skips into the
-            # overlay's own media by the same number of frames. ``duration``
-            # matches the primary's effective duration so the overlay covers
-            # the visible window without overhang.
+            # ``start`` skips into the overlay's own media by head_trim to
+            # stay in sync. ``offset`` is also head_trim (parent-source-time
+            # of the parent's visible start) so the overlay anchors at the
+            # primary's visible start instead of head_trim seconds earlier.
+            head_trim_str = _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den)
             ET.SubElement(
                 primary_clip,
                 "asset-clip",
                 {
                     "ref": plan.overlay_asset_id,
                     "lane": str(overlay_lane),
-                    "offset": "0s",
+                    "offset": head_trim_str,
                     "name": "Splitsmith overlay",
-                    "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
+                    "start": head_trim_str,
                     "duration": eff_duration_str,
                     "format": format_id,
                 },

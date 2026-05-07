@@ -854,8 +854,10 @@ def test_match_fcpxml_secondary_alignment_with_head_trim(tmp_path: Path) -> None
     root = ET.fromstring(out.read_bytes())
     cam_clip = root.find(".//spine/asset-clip/asset-clip")
     assert cam_clip is not None
-    assert cam_clip.attrib["offset"] == "0s"
-    # delta = (5.0 - 4.5) - 5.0 = -4.5s -> sec_start = 4.5s = 135 frames
+    # Connected-clip offset is in the parent's source-time, so it must be
+    # bumped by head_trim (135 frames) to anchor at the parent's visible
+    # start. delta = (5.0 - 4.5) - 5.0 = -4.5s -> sec_start = 4.5s = 135.
+    assert cam_clip.attrib["offset"] == "135/30s"
     assert cam_clip.attrib["start"] == "135/30s"
 
 
@@ -948,7 +950,10 @@ def test_match_fcpxml_overlay_skips_into_media_when_head_trimmed(tmp_path: Path)
     root = ET.fromstring(out.read_bytes())
     overlay_clip = root.find(".//spine/asset-clip/asset-clip")
     assert overlay_clip is not None
-    # head_trim = 4.5s = 135 frames; eff_duration = 90 frames
+    # head_trim = 4.5s = 135 frames; eff_duration = 90 frames. ``offset``
+    # is in the parent's source-time, so it matches ``start`` (head_trim)
+    # to anchor the overlay at the parent's visible spine start.
+    assert overlay_clip.attrib["offset"] == "135/30s"
     assert overlay_clip.attrib["start"] == "135/30s"
     assert overlay_clip.attrib["duration"] == "90/30s"
     assert overlay_clip.attrib["lane"] == "1"
