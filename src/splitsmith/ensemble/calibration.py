@@ -74,6 +74,16 @@ class ClassThresholds(BaseModel):
     voter_b_threshold: float
     voter_c_threshold: float
     voter_d_threshold: float
+    voter_e_threshold: float | None = Field(
+        default=None,
+        description=(
+            "CLIP visual probe ``P(shot)`` threshold for Voter E (issue "
+            "#183). ``None`` means Voter E was not calibrated for this "
+            "camera class -- the runtime skips it for this class. Picked "
+            "via leave-one-fixture-out CV on shots vs cross_bay frames "
+            "at ``voter_e_target_recall``."
+        ),
+    )
     n_calibration_candidates: int
     n_calibration_positives: int
     calibration_fixtures: list[str]
@@ -114,10 +124,27 @@ class EnsembleCalibration(BaseModel):
             "Calibrated to the minimum value across labelled positives."
         ),
     )
+    voter_e_threshold: float | None = Field(
+        default=None,
+        description=(
+            "Default-class CLIP visual-probe threshold for Voter E "
+            "(issue #183). ``None`` on artifacts that pre-date Voter E or "
+            "where the default class had no shots-vs-cross_bay calibration."
+        ),
+    )
     voter_c_target_recall: float = Field(
         ge=0.0,
         le=1.0,
         description="Target recall used when picking voter C's threshold.",
+    )
+    voter_e_target_recall: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Target recall used when picking Voter E's threshold from CV "
+            "held-out probe scores. ``None`` on pre-Voter-E artifacts."
+        ),
     )
     tolerance_ms: float = Field(
         description=(
@@ -148,6 +175,29 @@ class EnsembleCalibration(BaseModel):
             "Number of features the GBDT classifier expects: hand-crafted "
             "features + per-prompt CLAP similarities + the CLAP "
             "shot/not-shot differential."
+        ),
+    )
+    voter_e_clip_model_id: str | None = Field(
+        default=None,
+        description=(
+            "HuggingFace model ID for the CLIP backbone used by Voter E. "
+            "Captured at calibration time so the runtime can detect drift."
+        ),
+    )
+    voter_e_frame_offsets: list[float] | None = Field(
+        default=None,
+        description=(
+            "Frame offsets (in seconds) used when extracting the per-"
+            "candidate CLIP image embeddings for Voter E. v0 = (0.0,); "
+            "multi-frame variants (#184) extend this."
+        ),
+    )
+    voter_e_probe_artifact: str | None = Field(
+        default=None,
+        description=(
+            "Filename of the Voter E probe head joblib in package data, "
+            "e.g. ``voter_e_visual_probe.joblib``. ``None`` on artifacts "
+            "that pre-date Voter E."
         ),
     )
     built_at: str = Field(
@@ -189,6 +239,7 @@ class EnsembleCalibration(BaseModel):
                 voter_b_threshold=self.voter_b_threshold,
                 voter_c_threshold=self.voter_c_threshold,
                 voter_d_threshold=self.voter_d_threshold,
+                voter_e_threshold=self.voter_e_threshold,
                 n_calibration_candidates=self.n_calibration_candidates,
                 n_calibration_positives=self.n_calibration_positives,
                 calibration_fixtures=list(self.calibration_fixtures),
@@ -206,6 +257,7 @@ class EnsembleCalibration(BaseModel):
 _DATA_PACKAGE = "splitsmith.data"
 _CALIBRATION_FILENAME = "ensemble_calibration.json"
 _VOTER_C_MODEL_FILENAME = "voter_c_gbdt.joblib"
+DEFAULT_VOTER_E_PROBE_FILENAME = "voter_e_visual_probe.joblib"
 
 
 def load_calibration() -> EnsembleCalibration:
@@ -222,5 +274,23 @@ def load_voter_c_model() -> Any:
     resource = files(_DATA_PACKAGE).joinpath(_VOTER_C_MODEL_FILENAME)
     # joblib needs a real filesystem path, so materialise via as_file (which
     # is a no-op when the package is laid out on disk).
+    with as_file(resource) as path:
+        return joblib.load(path)
+
+
+def load_voter_e_probe(filename: str | None = None) -> Any | None:
+    """Load the serialised Voter E linear probe head, or ``None`` if absent.
+
+    Returns ``None`` (rather than raising) when the artifact has not been
+    built yet -- callers use that signal to skip wiring Voter E and fall
+    back to the 4-voter behaviour. The filename comes from the
+    ``voter_e_probe_artifact`` field of the calibration.
+    """
+    import joblib
+
+    name = filename or DEFAULT_VOTER_E_PROBE_FILENAME
+    resource = files(_DATA_PACKAGE).joinpath(name)
+    if not resource.is_file():
+        return None
     with as_file(resource) as path:
         return joblib.load(path)

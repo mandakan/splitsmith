@@ -1,9 +1,11 @@
 {
   "voter_a_floor": 0.01847127532497797,
-  "voter_b_threshold": 0.03676433116197586,
-  "voter_c_threshold": 0.23368319568561985,
-  "voter_d_threshold": 0.00018919698777608573,
+  "voter_b_threshold": 0.14829593896865845,
+  "voter_c_threshold": 0.03243937078722151,
+  "voter_d_threshold": 0.0012177228927612305,
+  "voter_e_threshold": 0.41888933109192744,
   "voter_c_target_recall": 0.95,
+  "voter_e_target_recall": 0.95,
   "tolerance_ms": 75.0,
   "clap_prompts_shot": [
     "a single gunshot at close range",
@@ -24,97 +26,63 @@
     "a metallic clang from a steel target falling"
   ],
   "calibration_fixtures": [
-    "stage-shots-tallmilan-2026-stage3",
-    "stage-shots-blacksmith-2026-stage7",
     "stage-shots-blacksmith-2026-stage1",
     "stage-shots-blacksmith-2026-stage2",
     "stage-shots-blacksmith-2026-stage3",
     "stage-shots-blacksmith-2026-stage5",
     "stage-shots-blacksmith-2026-stage6",
     "stage-shots-blacksmith-2026-stage8",
-    "stage-shots-tallmilan-2026-stage2",
-    "stage-shots-tallmilan-2026-stage7",
-    "stage-shots-tallmilan-2026-stage4",
     "stage-shots-tallmilan-2026-stage5",
-    "stage-shots-tallmilan-2026-stage6",
-    "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage8-apple-iphone17pro"
+    "stage-shots-tallmilan-2026-stage6"
   ],
-  "n_calibration_candidates": 1436,
-  "n_calibration_positives": 442,
+  "n_calibration_candidates": 605,
+  "n_calibration_positives": 155,
   "voter_c_feature_dim": 30,
-  "built_at": "2026-05-05T17:43:42.241034+00:00",
+  "voter_e_clip_model_id": "openai/clip-vit-base-patch32",
+  "voter_e_frame_offsets": [
+    0.0
+  ],
+  "voter_e_probe_artifact": "voter_e_visual_probe.joblib",
+  "built_at": "2026-05-07T14:38:43.424842+00:00",
   "default_camera_class": "headcam",
   "thresholds_by_camera_class": {
-    "handheld": {
-      "voter_a_floor": 0.014766008911448754,
-      "voter_b_threshold": 0.19692590832710266,
-      "voter_c_threshold": 0.6019218260273177,
-      "voter_d_threshold": 0.003342473180964589,
-      "n_calibration_candidates": 424,
-      "n_calibration_positives": 199,
-      "calibration_fixtures": [
-        "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
-        "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
-        "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
-        "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
-        "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
-        "stage-shots-blacksmith-2026-stage8-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage7-apple-iphone17pro"
-      ]
-    },
     "headcam": {
       "voter_a_floor": 0.01847127532497797,
-      "voter_b_threshold": 0.03676433116197586,
-      "voter_c_threshold": 0.23368319568561985,
-      "voter_d_threshold": 0.00018919698777608573,
-      "n_calibration_candidates": 1012,
-      "n_calibration_positives": 243,
+      "voter_b_threshold": 0.14829593896865845,
+      "voter_c_threshold": 0.03243937078722151,
+      "voter_d_threshold": 0.0012177228927612305,
+      "n_calibration_candidates": 605,
+      "n_calibration_positives": 155,
       "calibration_fixtures": [
         "stage-shots-blacksmith-2026-stage1",
         "stage-shots-blacksmith-2026-stage2",
         "stage-shots-blacksmith-2026-stage3",
         "stage-shots-blacksmith-2026-stage5",
         "stage-shots-blacksmith-2026-stage6",
-        "stage-shots-blacksmith-2026-stage7",
         "stage-shots-blacksmith-2026-stage8",
-        "stage-shots-tallmilan-2026-stage2",
-        "stage-shots-tallmilan-2026-stage3",
-        "stage-shots-tallmilan-2026-stage4",
         "stage-shots-tallmilan-2026-stage5",
-        "stage-shots-tallmilan-2026-stage6",
-        "stage-shots-tallmilan-2026-stage7"
-      ]
+        "stage-shots-tallmilan-2026-stage6"
+      ],
+      "voter_e_threshold": 0.41888933109192744
     }
   },
   "voter_c_metrics_by_camera_class": {
-    "handheld": {
-      "voter_c_precision_cv": 0.9645,
-      "voter_c_recall_cv": 0.9548,
-      "voter_c_f1_cv": 0.9596,
-      "voter_c_tp": 190,
-      "voter_c_fp": 7,
-      "voter_c_fn": 9
-    },
     "headcam": {
-      "voter_c_precision_cv": 0.8462,
-      "voter_c_recall_cv": 0.9506,
-      "voter_c_f1_cv": 0.8953,
-      "voter_c_tp": 231,
-      "voter_c_fp": 42,
-      "voter_c_fn": 12
+      "voter_c_precision_cv": 0.7957,
+      "voter_c_recall_cv": 0.9548,
+      "voter_c_f1_cv": 0.868,
+      "voter_c_tp": 148,
+      "voter_c_fp": 38,
+      "voter_c_fn": 7
     }
+  },
+  "voter_e_provenance": {
+    "n_visual_candidates": 909,
+    "n_visual_skipped_missing_video": 2,
+    "missing_video_fixtures": [
+      "stage-shots-tallmilan-2026-stage3",
+      "stage-shots-tallmilan-2026-stage4"
+    ]
   },
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": []

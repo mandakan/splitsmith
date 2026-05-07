@@ -9,6 +9,7 @@ the per-candidate universe voter A produces.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -17,8 +18,14 @@ from pydantic import BaseModel, Field
 from ..config import ShotDetectConfig
 from ..shot_detect import detect_shots
 from . import features as feat
+from . import visual as vis
 from . import voters
-from .calibration import EnsembleCalibration, load_calibration, load_voter_c_model
+from .calibration import (
+    EnsembleCalibration,
+    load_calibration,
+    load_voter_c_model,
+    load_voter_e_probe,
+)
 from .tta import compute_tta_agreement
 
 
@@ -56,6 +63,24 @@ class EnsembleConfig(BaseModel):
             "holds recall at 100 % while suppressing 278 / 281 FPs."
         ),
     )
+    enable_voter_e: bool = Field(
+        default=False,
+        description=(
+            "Issue #183: run Voter E (CLIP visual probe) when a video "
+            "path and source-beep timestamp are provided. Off by default "
+            "for the first release until field-tested. Requires a built "
+            "Voter E probe artifact in package data."
+        ),
+    )
+    e_required: bool = Field(
+        default=False,
+        description=(
+            "When True, require Voter E to say yes for a candidate to be "
+            "kept (in addition to ``c_required`` and consensus). Acts as "
+            "a precision veto, mirroring ``c_required``. Only takes "
+            "effect when ``enable_voter_e`` is also True."
+        ),
+    )
 
 
 class EnsembleCandidate(BaseModel):
@@ -75,12 +100,28 @@ class EnsembleCandidate(BaseModel):
     vote_b: int
     vote_c: int
     vote_d: int
+    vote_e: int = Field(
+        default=0,
+        description=(
+            "1 when Voter E (CLIP visual probe, issue #183) accepts the "
+            "candidate. Always 0 when Voter E is disabled or not "
+            "calibrated for this camera class."
+        ),
+    )
     vote_total: int
     apriori_boost: float
     ensemble_score: float
     score_c: float
     clap_diff: float
     gunshot_prob: float
+    voter_e_signal: float = Field(
+        default=0.0,
+        description=(
+            "CLIP probe ``P(shot)`` for the candidate's frame. 0.0 when "
+            "Voter E is disabled or not run for this candidate's camera "
+            "class."
+        ),
+    )
     kept: bool = Field(
         description="True when this candidate is part of the consensus shots set.",
     )
@@ -105,10 +146,16 @@ class EnsembleRuntime:
     # Track the prompt list the calibration was built against so we can
     # warn if the on-package CLAP prompt bank ever drifts.
     expected_prompts: tuple[str, ...] = field(default_factory=tuple)
+    visual: vis.VisualRuntime | None = None
 
 
-def load_ensemble_runtime() -> EnsembleRuntime:
-    """Materialise calibration + heavy models. Slow first-call (model downloads)."""
+def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
+    """Materialise calibration + heavy models. Slow first-call (model downloads).
+
+    ``with_voter_e`` controls whether the CLIP visual model is loaded
+    eagerly. Default ``True``; falls back to a runtime without Voter E
+    when the probe artifact is missing or the calibration predates it.
+    """
     calibration = load_calibration()
     voter_c_model = load_voter_c_model()
     if tuple(calibration.clap_prompts) != feat.CLAP_PROMPTS:
@@ -119,12 +166,23 @@ def load_ensemble_runtime() -> EnsembleRuntime:
         )
     clap = feat.load_clap_runtime()
     pann = feat.load_pann_runtime()
+
+    visual: vis.VisualRuntime | None = None
+    if with_voter_e and calibration.voter_e_probe_artifact:
+        probe = load_voter_e_probe(calibration.voter_e_probe_artifact)
+        if probe is not None:
+            visual = vis.load_visual_runtime(
+                probe,
+                model_id=calibration.voter_e_clip_model_id or vis.CLIP_VISUAL_MODEL_ID,
+            )
+
     return EnsembleRuntime(
         calibration=calibration,
         voter_c_model=voter_c_model,
         clap=clap,
         pann=pann,
         expected_prompts=tuple(calibration.clap_prompts),
+        visual=visual,
     )
 
 
@@ -138,6 +196,8 @@ def detect_shots_ensemble(
     expected_rounds: int | None = None,
     ensemble_config: EnsembleConfig | None = None,
     camera_class: str | None = None,
+    video_path: Path | None = None,
+    source_beep_time: float | None = None,
 ) -> EnsembleResult:
     """Run all four voters over the same per-candidate universe.
 
@@ -156,6 +216,13 @@ def detect_shots_ensemble(
     calibration (issue #137). ``None`` falls back to the artifact's
     default class -- for existing projects that's ``headcam``, byte-
     identical to pre-#137 behaviour.
+
+    ``video_path`` + ``source_beep_time`` enable Voter E (issue #183)
+    when ``ensemble_config.enable_voter_e`` is True and ``runtime.visual``
+    is loaded. ``video_path`` is the source video file; ``source_beep_time``
+    is the beep timestamp inside that file (the same value the audit
+    clip's ``beep_in_clip`` is anchored to). Both are optional -- without
+    them the ensemble runs without Voter E exactly as before.
     """
     cfg = ensemble_config or EnsembleConfig()
     cal = runtime.calibration
@@ -197,6 +264,32 @@ def detect_shots_ensemble(
         vc = voters.vote_c_global(score_c, thresholds.voter_c_threshold)
     vd = voters.vote_d(gunshot_prob, thresholds.voter_d_threshold)
 
+    voter_e_signal = np.zeros(n, dtype=np.float32)
+    ve = np.zeros(n, dtype=np.int64)
+    voter_e_active = (
+        cfg.enable_voter_e
+        and runtime.visual is not None
+        and video_path is not None
+        and source_beep_time is not None
+        and thresholds.voter_e_threshold is not None
+    )
+    if voter_e_active:
+        source_times = vis.candidate_times_in_source(
+            times,
+            audit_beep_in_clip=beep_time,
+            source_beep_time=float(source_beep_time),
+        )
+        offsets = (
+            tuple(cal.voter_e_frame_offsets)
+            if cal.voter_e_frame_offsets
+            else vis.DEFAULT_FRAME_OFFSETS
+        )
+        features = vis.compute_visual_features(
+            Path(video_path), source_times, runtime.visual, frame_offsets=offsets
+        )
+        voter_e_signal = vis.score_visual_candidates(features, runtime.visual)
+        ve = voters.vote_e(voter_e_signal, float(thresholds.voter_e_threshold))
+
     vote_total = va + vb + vc + vd
     boost = voters.apriori_boost(confidences, expected_rounds, cfg.apriori_boost)
     ensemble_score = vote_total.astype(np.float64) + boost
@@ -207,6 +300,8 @@ def detect_shots_ensemble(
         vote_c=vc,
         c_required=cfg.c_required,
     )
+    if voter_e_active and cfg.e_required:
+        keep_mask = keep_mask & ve.astype(bool)
 
     candidates: list[EnsembleCandidate] = []
     for i in range(n):
@@ -221,12 +316,14 @@ def detect_shots_ensemble(
                 vote_b=int(vb[i]),
                 vote_c=int(vc[i]),
                 vote_d=int(vd[i]),
+                vote_e=int(ve[i]),
                 vote_total=int(vote_total[i]),
                 apriori_boost=float(boost[i]),
                 ensemble_score=round(float(ensemble_score[i]), 2),
                 score_c=round(float(score_c[i]), 4),
                 clap_diff=round(float(clap_diff[i]), 4),
                 gunshot_prob=round(float(gunshot_prob[i]), 4),
+                voter_e_signal=round(float(voter_e_signal[i]), 4),
                 kept=bool(keep_mask[i]),
             )
         )

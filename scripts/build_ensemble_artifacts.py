@@ -39,13 +39,16 @@ from pathlib import Path
 import joblib
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
 
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
+from splitsmith.ensemble import visual as vis
 from splitsmith.ensemble.calibration import (
     DEFAULT_CAMERA_CLASS,
+    DEFAULT_VOTER_E_PROBE_FILENAME,
     camera_class_from_mount,
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
@@ -487,6 +490,230 @@ def _train_voter_c(universe: list[dict], target_recall: float, *, phone_upweight
 
 
 DEFAULT_PHONE_UPWEIGHT: float = 4.0
+DEFAULT_VOTER_E_TARGET_RECALL: float = 0.95
+VISUAL_CACHE_SUFFIX = "_visual.npz"
+
+
+def _resolve_subclass(audit_json: dict, time_s: float, tol_ms: float = 25.0) -> str | None:
+    """Map a candidate's time to its audit-JSON subclass label, if any.
+
+    ``labels_by_time`` keys are stringified times of the original audit
+    candidates; we round to milliseconds and pick the closest within
+    ``tol_ms``. ``None`` for unlabeled candidates (typical for the
+    positive shots and any negatives the user did not classify).
+    """
+    block = (audit_json.get("_candidates_pending_audit") or {}).get("labels_by_time") or {}
+    if not block:
+        return None
+    items = []
+    for k, v in block.items():
+        try:
+            items.append((float(k), str(v)))
+        except (TypeError, ValueError):
+            continue
+    if not items:
+        return None
+    diffs = [(abs(t - time_s) * 1000.0, lbl) for t, lbl in items]
+    diffs.sort(key=lambda x: x[0])
+    return diffs[0][1] if diffs[0][0] <= tol_ms else None
+
+
+def _visual_cache_path(fixture: str) -> Path:
+    return CACHE_DIR / f"{fixture}{VISUAL_CACHE_SUFFIX}"
+
+
+def _build_visual_universe(
+    fixtures: list[str],
+    tolerance_ms: float,
+    *,
+    rebuild: bool = False,
+    log: Callable[[str], None] = print,
+) -> tuple[list[dict], list[str]]:
+    """Compute CLIP image embeddings + labels for Voter E calibration.
+
+    Each row mirrors the structure of ``_build_universe`` rows but adds
+    ``embedding`` (the CLIP image feature, possibly multi-frame
+    concatenated) and ``subclass`` (from the audit JSON's
+    ``labels_by_time``). Returns ``(rows, missing_video_fixtures)`` --
+    the second value lists fixtures that were skipped because their
+    ``source_video`` could not be resolved (e.g. USB unmounted), so the
+    caller can warn without aborting.
+
+    Heavy work (frame extraction + CLIP forward pass) is cached per
+    fixture under ``tests/fixtures/.cache/{fix}_visual.npz``.
+    """
+    visual_runtime: vis.VisualRuntime | None = None
+
+    def _ensure_runtime() -> vis.VisualRuntime:
+        nonlocal visual_runtime
+        if visual_runtime is None:
+            log("  loading CLIP backbone for Voter E embeddings...")
+            visual_runtime = vis.load_visual_runtime(probe=None)
+        return visual_runtime
+
+    rows: list[dict] = []
+    skipped_no_video: list[str] = []
+    for fix in fixtures:
+        if fix in WRONG_CLIP_FIXTURES:
+            continue
+        truth_path = FIXTURES_DIR / f"{fix}.json"
+        wav_path = FIXTURES_DIR / f"{fix}.wav"
+        if not truth_path.exists() or not wav_path.exists():
+            continue
+        truth = json.loads(truth_path.read_text())
+        camera_block = truth.get("camera") or {}
+        cam_class = camera_class_from_mount(camera_block.get("mount"))
+        # v0 limit: only build Voter E features for the default class
+        # (head-mounted Go 3S). Multi-mount support is deferred to #186.
+        if cam_class != DEFAULT_CAMERA_CLASS:
+            continue
+
+        source_video_str = truth.get("source_video") or ""
+        window = truth.get("fixture_window_in_source") or [0.0, 0.0]
+        if not source_video_str:
+            skipped_no_video.append(fix)
+            continue
+        source_video = Path(source_video_str)
+        if not source_video.exists():
+            skipped_no_video.append(fix)
+            continue
+
+        cache_path = _visual_cache_path(fix)
+        embeddings: np.ndarray | None = None
+        cand_times: np.ndarray | None = None
+        labels: np.ndarray | None = None
+        subclasses: list[str | None] | None = None
+        if not rebuild and cache_path.exists():
+            try:
+                cached = np.load(cache_path, allow_pickle=True)
+                embeddings = cached["embeddings"]
+                cand_times = cached["candidate_times"]
+                labels = cached["labels"]
+                sub_arr = cached["subclasses"]
+                subclasses = [None if s == "" else str(s) for s in sub_arr.tolist()]
+            except (KeyError, ValueError, EOFError):
+                embeddings = None
+
+        if embeddings is None:
+            audio, sr = load_audio(wav_path)
+            cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
+            shots = detect_shots(
+                audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg
+            )
+            if not shots:
+                continue
+            cand_t = np.array([s.time_absolute for s in shots], dtype=np.float64)
+            label_list = _label(cand_t.tolist(), truth.get("shots", []), tolerance_ms)
+            sub_list = [_resolve_subclass(truth, float(t)) for t in cand_t]
+            source_times = vis.candidate_times_in_source(
+                cand_t,
+                audit_beep_in_clip=float(truth["beep_time"]),
+                source_beep_time=float(window[0]) + float(truth["beep_time"]),
+            )
+            try:
+                embeds = vis.compute_visual_features(
+                    source_video, source_times, _ensure_runtime()
+                )
+            except Exception as exc:
+                log(f"  skip {fix}: visual feature extraction failed -- {exc}")
+                continue
+            embeddings = embeds.astype(np.float32)
+            cand_times = cand_t
+            labels = np.array(label_list, dtype=np.int64)
+            subclasses = sub_list
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(
+                cache_path,
+                embeddings=embeddings,
+                candidate_times=cand_times,
+                labels=labels,
+                subclasses=np.array(["" if s is None else s for s in subclasses]),
+            )
+            log(f"  cached {fix}: {embeddings.shape[0]} candidates, dim={embeddings.shape[1]}")
+        else:
+            log(f"  reused cache {fix}: {embeddings.shape[0]} candidates")
+
+        for i in range(embeddings.shape[0]):
+            rows.append(
+                {
+                    "fixture": fix,
+                    "camera_class": cam_class,
+                    "time": float(cand_times[i]),
+                    "label": int(labels[i]),
+                    "subclass": subclasses[i] if subclasses else None,
+                    "embedding": embeddings[i],
+                }
+            )
+
+    return rows, skipped_no_video
+
+
+def _train_voter_e(
+    visual_universe: list[dict],
+    target_recall: float,
+    *,
+    log: Callable[[str], None] = print,
+) -> tuple[Any | None, float | None]:
+    """Train logistic regression on shots vs cross_bay; pick CV threshold.
+
+    Returns ``(probe, threshold)`` or ``(None, None)`` when the corpus is
+    too sparse to train a useful head. Threshold is picked from leave-
+    one-fixture-out CV scores on the binary subset, then the final probe
+    is fit on the full binary subset.
+    """
+    if not visual_universe:
+        log("  Voter E: empty visual universe, skipping")
+        return None, None
+
+    binary = [
+        row
+        for row in visual_universe
+        if row["label"] == 1 or row.get("subclass") == "cross_bay"
+    ]
+    if len(binary) < 20 or sum(1 for r in binary if r["label"] == 1) < 5:
+        log(
+            f"  Voter E: insufficient binary corpus "
+            f"(n={len(binary)}, pos={sum(1 for r in binary if r['label'] == 1)}); "
+            "skipping"
+        )
+        return None, None
+
+    fixtures = sorted({row["fixture"] for row in binary})
+    fixture_idx = {f: i for i, f in enumerate(fixtures)}
+    X = np.stack([row["embedding"] for row in binary], axis=0).astype(np.float32)
+    y = np.array([row["label"] for row in binary], dtype=np.int64)
+    groups = np.array([fixture_idx[row["fixture"]] for row in binary], dtype=np.int64)
+
+    cv_probs = np.full(len(binary), np.nan, dtype=np.float64)
+    for held in range(len(fixtures)):
+        train_mask = groups != held
+        test_mask = groups == held
+        if train_mask.sum() < 10 or y[train_mask].sum() == 0 or (
+            y[train_mask] == 0
+        ).sum() == 0:
+            continue
+        clf = LogisticRegression(
+            C=1.0, max_iter=1000, class_weight="balanced", solver="lbfgs"
+        )
+        clf.fit(X[train_mask], y[train_mask])
+        cv_probs[test_mask] = clf.predict_proba(X[test_mask])[:, 1]
+    if np.isnan(cv_probs).any():
+        # Drop folds that didn't produce held-out scores (degenerate train splits).
+        valid = ~np.isnan(cv_probs)
+        cv_probs = cv_probs[valid]
+        y = y[valid]
+    threshold = _threshold_for_recall(cv_probs.astype(np.float64), y, target_recall)
+
+    final = LogisticRegression(
+        C=1.0, max_iter=1000, class_weight="balanced", solver="lbfgs"
+    )
+    final.fit(X, y)
+    log(
+        f"  Voter E: trained on {len(binary)} samples "
+        f"({int(y.sum())} shots / {len(binary) - int(y.sum())} cross_bay), "
+        f"threshold={threshold:.4f} at target_recall={target_recall:.2f}"
+    )
+    return final, float(threshold)
 
 
 def build_artifacts(
@@ -497,6 +724,9 @@ def build_artifacts(
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
     use_mined_negatives: bool = False,
     phone_upweight: float = DEFAULT_PHONE_UPWEIGHT,
+    voter_e: bool = True,
+    voter_e_target_recall: float = DEFAULT_VOTER_E_TARGET_RECALL,
+    rebuild_visual: bool = False,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -624,6 +854,34 @@ def build_artifacts(
     if not thresholds_by_class:
         raise SystemExit("no camera class produced calibrated thresholds; need >= 1 positive")
 
+    # Voter E (issue #183): train CLIP visual probe head on the head-mounted
+    # corpus and merge per-class thresholds back in. Fully optional -- if
+    # source videos can't be reached or training is disabled, the build
+    # succeeds without Voter E and the runtime falls back to 4 voters.
+    voter_e_probe = None
+    voter_e_threshold: float | None = None
+    voter_e_provenance: dict[str, Any] = {}
+    if voter_e:
+        log("Voter E: building visual universe...")
+        visual_universe, missing_video = _build_visual_universe(
+            fixtures, tolerance_ms, rebuild=rebuild_visual, log=log
+        )
+        if missing_video:
+            log(
+                "  skipped (source_video unreachable): "
+                + ", ".join(sorted(missing_video))
+            )
+        voter_e_probe, voter_e_threshold = _train_voter_e(
+            visual_universe, target_recall=voter_e_target_recall, log=log
+        )
+        voter_e_provenance = {
+            "n_visual_candidates": len(visual_universe),
+            "n_visual_skipped_missing_video": len(missing_video),
+            "missing_video_fixtures": sorted(missing_video),
+        }
+        if voter_e_probe is not None and DEFAULT_CAMERA_CLASS in thresholds_by_class:
+            thresholds_by_class[DEFAULT_CAMERA_CLASS]["voter_e_threshold"] = voter_e_threshold
+
     # Default-class top-level fields. Existing code paths that haven't
     # migrated to ``thresholds_for(camera_class)`` keep reading the
     # default class -- byte-identical to today for headcam projects.
@@ -644,13 +902,16 @@ def build_artifacts(
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     cal_path = DATA_DIR / "ensemble_calibration.json"
     model_path = DATA_DIR / "voter_c_gbdt.joblib"
+    voter_e_path = DATA_DIR / DEFAULT_VOTER_E_PROBE_FILENAME
 
     cal = {
         "voter_a_floor": default_thresholds["voter_a_floor"],
         "voter_b_threshold": default_thresholds["voter_b_threshold"],
         "voter_c_threshold": default_thresholds["voter_c_threshold"],
         "voter_d_threshold": default_thresholds["voter_d_threshold"],
+        "voter_e_threshold": default_thresholds.get("voter_e_threshold"),
         "voter_c_target_recall": target_recall,
+        "voter_e_target_recall": voter_e_target_recall if voter_e_probe is not None else None,
         "tolerance_ms": tolerance_ms,
         "clap_prompts_shot": list(feat.CLAP_PROMPTS_SHOT),
         "clap_prompts": list(feat.CLAP_PROMPTS),
@@ -658,14 +919,21 @@ def build_artifacts(
         "n_calibration_candidates": n_total,
         "n_calibration_positives": int(n_pos),
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
+        "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
+        "voter_e_frame_offsets": list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None,
+        "voter_e_probe_artifact": DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "default_camera_class": default_cls,
         "thresholds_by_camera_class": thresholds_by_class,
         "voter_c_metrics_by_camera_class": metrics_by_class,
+        "voter_e_provenance": voter_e_provenance,
         **mining_provenance,
     }
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
     joblib.dump(clf, model_path)
+    if voter_e_probe is not None:
+        joblib.dump(voter_e_probe, voter_e_path)
+        log(f"Wrote {voter_e_path}")
     log(f"Wrote {cal_path}")
     log(f"Wrote {model_path}")
     return cal
@@ -706,6 +974,34 @@ def main() -> None:
             "threshold drops and FP count rises in threshold-only eval."
         ),
     )
+    p.add_argument(
+        "--no-voter-e",
+        dest="voter_e",
+        action="store_false",
+        default=True,
+        help=(
+            "Skip Voter E (CLIP visual probe) calibration. Useful when the "
+            "source videos are not mounted or when iterating on the audio "
+            "voters only."
+        ),
+    )
+    p.add_argument(
+        "--voter-e-target-recall",
+        type=float,
+        default=DEFAULT_VOTER_E_TARGET_RECALL,
+        help=(
+            "Target recall for Voter E threshold selection (default 0.95). "
+            "Lower values produce a stricter precision veto."
+        ),
+    )
+    p.add_argument(
+        "--rebuild-visual",
+        action="store_true",
+        help=(
+            "Force re-extraction of CLIP image embeddings for Voter E, "
+            "ignoring tests/fixtures/.cache/{fix}_visual.npz."
+        ),
+    )
     args = p.parse_args()
     build_artifacts(
         fixtures=args.fixture or None,
@@ -714,6 +1010,9 @@ def main() -> None:
         mining_cap_ratio=args.mining_cap_ratio,
         use_mined_negatives=args.with_mining,
         phone_upweight=args.phone_upweight,
+        voter_e=args.voter_e,
+        voter_e_target_recall=args.voter_e_target_recall,
+        rebuild_visual=args.rebuild_visual,
     )
 
 

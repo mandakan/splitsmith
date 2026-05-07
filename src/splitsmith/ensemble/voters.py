@@ -73,6 +73,17 @@ def vote_d(gunshot_prob: np.ndarray, voter_d_threshold: float) -> np.ndarray:
     return (gunshot_prob >= voter_d_threshold).astype(np.int64)
 
 
+def vote_e(probe_score: np.ndarray, voter_e_threshold: float) -> np.ndarray:
+    """Pass when the CLIP visual probe's ``P(shot)`` clears the threshold.
+
+    Mirrors :func:`vote_d`. Voter E is calibrated to a target recall
+    (default 0.95) on the labeled corpus -- it's a precision veto, not
+    a recall preserver. Candidates with ``probe_score < voter_e_threshold``
+    fail Voter E.
+    """
+    return (probe_score >= voter_e_threshold).astype(np.int64)
+
+
 def apriori_boost(
     confidences: np.ndarray,
     expected_rounds: int | None,
