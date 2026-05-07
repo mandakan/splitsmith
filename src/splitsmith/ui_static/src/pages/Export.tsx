@@ -112,27 +112,14 @@ export function Export() {
     void reload();
   }, [reload]);
 
-  if (!project && !error) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-7 w-1/3" />
-        <Skeleton className="h-32" />
-      </div>
-    );
-  }
-
-  const total = (overview?.stages ?? []).filter((s) => !s.skipped).length;
-  const ready = (overview?.stages ?? []).filter(
-    (s) => !s.skipped && s.ready_to_export,
-  ).length;
-  const exported = (overview?.stages ?? []).filter(
-    (s) => !s.skipped && s.has_exports,
-  ).length;
-
   // A stage is eligible for the match export when the per-stage exporter
   // already produced its lossless trim + the audit has shots. We use the
   // overview's ``has_exports`` proxy for that since it lights up only after
   // a successful Generate.
+  //
+  // All match-export hooks live ABOVE the early-return below so the hook
+  // order is stable across the loading -> loaded transition (React rules
+  // of hooks: every render must call the same hooks in the same order).
   const matchEligibleStageNumbers = useMemo(
     () =>
       (overview?.stages ?? [])
@@ -176,6 +163,23 @@ export function Export() {
         .filter((n) => selectedForMatch.has(n)),
     [overview, selectedForMatch],
   );
+
+  if (!project && !error) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-7 w-1/3" />
+        <Skeleton className="h-32" />
+      </div>
+    );
+  }
+
+  const total = (overview?.stages ?? []).filter((s) => !s.skipped).length;
+  const ready = (overview?.stages ?? []).filter(
+    (s) => !s.skipped && s.ready_to_export,
+  ).length;
+  const exported = (overview?.stages ?? []).filter(
+    (s) => !s.skipped && s.has_exports,
+  ).length;
 
   const headPadCap = project?.trim_pre_buffer_seconds ?? 5.0;
   const tailPadCap = project?.trim_post_buffer_seconds ?? 5.0;
