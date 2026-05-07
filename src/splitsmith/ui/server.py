@@ -603,9 +603,7 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
         with _ENSEMBLE_RUNTIME_LOCK:
             if _ENSEMBLE_RUNTIME is None:
                 with_voter_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
-                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(
-                    with_voter_e=with_voter_e
-                )
+                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(with_voter_e=with_voter_e)
     return _ENSEMBLE_RUNTIME
 
 

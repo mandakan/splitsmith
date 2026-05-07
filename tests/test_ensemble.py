@@ -471,9 +471,7 @@ def test_detect_shots_ensemble_skips_voter_e_when_disabled(monkeypatch) -> None:
     assert all(c.voter_e_signal == 0.0 for c in result.candidates)
 
 
-def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(
-    monkeypatch, tmp_path
-) -> None:
+def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, tmp_path) -> None:
     """When ``enable_voter_e`` and ``e_required`` are both True and the
     visual probe rejects two of four candidates, those two are dropped
     from the consensus shots set even though all four pass A/B/C/D."""
@@ -497,9 +495,7 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(
     # Mirror the threshold into the per-class block so thresholds_for() picks it up.
     if cal.thresholds_by_camera_class:
         for cls, t in cal.thresholds_by_camera_class.items():
-            cal.thresholds_by_camera_class[cls] = t.model_copy(
-                update={"voter_e_threshold": 0.5}
-            )
+            cal.thresholds_by_camera_class[cls] = t.model_copy(update={"voter_e_threshold": 0.5})
     runtime.calibration = cal
 
     fake_shots = [
@@ -563,9 +559,7 @@ def test_candidate_times_in_source_anchors_on_beep() -> None:
     from splitsmith.ensemble.visual import candidate_times_in_source
 
     clip_times = np.array([0.5, 1.5, 3.0])
-    out = candidate_times_in_source(
-        clip_times, audit_beep_in_clip=0.5, source_beep_time=22.0
-    )
+    out = candidate_times_in_source(clip_times, audit_beep_in_clip=0.5, source_beep_time=22.0)
     # clip_t - audit_beep_in_clip + source_beep_time
     assert out.tolist() == [22.0, 23.0, 24.5]
 

@@ -100,9 +100,7 @@ def _video_fingerprint(video_path: Path) -> str:
     return hashlib.sha1(raw).hexdigest()[:16]
 
 
-def _frame_path(
-    cache_dir: Path, fingerprint: str, time_s: float, offset_s: float
-) -> Path:
+def _frame_path(cache_dir: Path, fingerprint: str, time_s: float, offset_s: float) -> Path:
     time_ms = int(round(time_s * 1000))
     offset_ms = int(round(offset_s * 1000))
     return cache_dir / fingerprint / f"t{time_ms:09d}_o{offset_ms:+05d}.jpg"
@@ -211,9 +209,7 @@ def compute_visual_features(
     return flat.reshape(n, n_offsets * CLIP_VISUAL_EMBED_DIM)
 
 
-def score_visual_candidates(
-    features: np.ndarray, runtime: VisualRuntime
-) -> np.ndarray:
+def score_visual_candidates(features: np.ndarray, runtime: VisualRuntime) -> np.ndarray:
     """Predict ``P(shot)`` per candidate from CLIP image embeddings.
 
     Returns shape ``(N,)`` ``float32``. ``runtime.probe`` is expected to
