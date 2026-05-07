@@ -31,6 +31,9 @@ from . import (
     trim,
     video_match,
 )
+from . import (
+    cleanup as cleanup_mod,
+)
 from .config import (
     CompetitorStages,
     Config,
@@ -39,6 +42,7 @@ from .config import (
     StageAnalysis,
     StageData,
 )
+from .ui.project import MatchProject
 
 app = typer.Typer(
     name="splitsmith",
@@ -566,6 +570,96 @@ def audit_apply(
 
 
 @app.command()
+def clean(
+    project: Path = typer.Argument(..., help="Match-project root directory."),
+    caches: bool = typer.Option(
+        False, "--caches", help="Thumbnails, ffprobes, scoreboard cache, waveform peaks."
+    ),
+    exports_light: bool = typer.Option(
+        False, "--exports-light", help="CSV / FCPXML / report.txt under exports/."
+    ),
+    exports_overlays: bool = typer.Option(
+        False, "--exports-overlays", help="Pre-rendered overlay MOVs under exports/ (large)."
+    ),
+    exports_trims: bool = typer.Option(
+        False, "--exports-trims", help="Lossless trimmed MP4s under exports/ (large)."
+    ),
+    audit_trims: bool = typer.Option(
+        False, "--audit-trims", help="Audit-mode short-GOP trims under trimmed/ (large)."
+    ),
+    audio: bool = typer.Option(
+        False, "--audio", help="Extracted WAVs under audio/ (medium; re-extracted by detection)."
+    ),
+    include_audit: bool = typer.Option(
+        False,
+        "--include-audit",
+        help=(
+            "Also delete per-stage audit JSONs and .bak backups. DESTRUCTIVE: "
+            "loses your shot-audit work for the project."
+        ),
+    ),
+    all_: bool = typer.Option(
+        False,
+        "--all",
+        help="Everything except --include-audit. Combine with --include-audit to wipe audit too.",
+    ),
+    yes: bool = typer.Option(False, "--yes", help="Actually delete. Omit for a dry-run preview."),
+) -> None:
+    """Reclaim disk space from a match project.
+
+    Default is dry-run: prints the plan and exits without deleting. Pass
+    ``--yes`` to apply. The original source video files (and the
+    symlinks under ``raw/``) are never touched. ``project.json`` is
+    never touched.
+    """
+    if not project.exists() or not (project / "project.json").exists():
+        raise typer.BadParameter(f"not a match project: {project}")
+    proj = MatchProject.load(project)
+
+    selected: set[cleanup_mod.CleanupCategory] = set()
+    flag_pairs: list[tuple[bool, cleanup_mod.CleanupCategory]] = [
+        (caches, cleanup_mod.CleanupCategory.CACHES),
+        (exports_light, cleanup_mod.CleanupCategory.EXPORTS_LIGHT),
+        (exports_overlays, cleanup_mod.CleanupCategory.EXPORTS_OVERLAYS),
+        (exports_trims, cleanup_mod.CleanupCategory.EXPORTS_TRIMS),
+        (audit_trims, cleanup_mod.CleanupCategory.AUDIT_TRIMS),
+        (audio, cleanup_mod.CleanupCategory.AUDIO),
+    ]
+    for flag, cat in flag_pairs:
+        if flag:
+            selected.add(cat)
+    if all_:
+        selected |= cleanup_mod.SAFE_CATEGORIES
+    if include_audit:
+        selected.add(cleanup_mod.CleanupCategory.AUDIT_DATA)
+
+    if not selected:
+        raise typer.BadParameter(
+            "select at least one category (e.g. --caches, --exports-overlays, --all). "
+            "Run with --help for the full list."
+        )
+
+    plan = cleanup_mod.plan_cleanup(proj, project, selected)
+    _print_cleanup_plan(plan, selected)
+
+    if not yes:
+        console.print("\n[dim]Dry run.[/] Re-run with [bold]--yes[/] to delete.")
+        return
+
+    result = cleanup_mod.apply_cleanup(plan, root=project)
+    freed_mb = result.bytes_freed / (1024 * 1024)
+    console.print(
+        f"\n[green]Deleted {len(result.deleted)} file(s)[/], freed [bold]{freed_mb:.1f} MB[/]."
+    )
+    if result.failed:
+        console.print(f"[yellow]{len(result.failed)} failed:[/]")
+        for path, err in result.failed[:10]:
+            console.print(f"  [yellow]- {path}: {err}[/]")
+        if len(result.failed) > 10:
+            console.print(f"  [dim]... and {len(result.failed) - 10} more[/]")
+
+
+@app.command()
 def fcpxml(
     csv_path: Path = typer.Option(..., "--csv", help="Splits CSV (possibly hand-edited)."),
     video: Path = typer.Option(..., "--video", help="Trimmed video the markers anchor to."),
@@ -848,6 +942,36 @@ def _print_match_diagnostics(match) -> None:
             console.print(f"  stage {stage_num}: {names}")
     if match.orphan_videos:
         console.print(f"[yellow]Orphan videos:[/] {[p.name for p in match.orphan_videos]}")
+
+
+_CATEGORY_LABELS: dict[cleanup_mod.CleanupCategory, str] = {
+    cleanup_mod.CleanupCategory.CACHES: "Caches (thumbs, probes, scoreboard, peaks)",
+    cleanup_mod.CleanupCategory.EXPORTS_LIGHT: "Light exports (CSV / FCPXML / report)",
+    cleanup_mod.CleanupCategory.EXPORTS_OVERLAYS: "Overlay MOVs",
+    cleanup_mod.CleanupCategory.EXPORTS_TRIMS: "Lossless trims",
+    cleanup_mod.CleanupCategory.AUDIT_TRIMS: "Audit-mode trims",
+    cleanup_mod.CleanupCategory.AUDIO: "Extracted audio",
+    cleanup_mod.CleanupCategory.AUDIT_DATA: "Audit JSON + backups (DESTRUCTIVE)",
+}
+
+
+def _print_cleanup_plan(
+    plan: cleanup_mod.CleanupPlan,
+    selected: set[cleanup_mod.CleanupCategory],
+) -> None:
+    table = Table(title=f"{plan.total_file_count} files / {plan.total_bytes / (1024*1024):.1f} MB")
+    table.add_column("Category")
+    table.add_column("Files", justify="right")
+    table.add_column("Size", justify="right")
+    for cat in cleanup_mod.CleanupCategory:
+        if cat not in selected:
+            continue
+        totals = plan.totals_by_category.get(cat)
+        if totals is None:
+            continue
+        size_mb = totals.bytes / (1024 * 1024)
+        table.add_row(_CATEGORY_LABELS[cat], str(totals.file_count), f"{size_mb:.1f} MB")
+    console.print(table)
 
 
 def _print_files_summary(files: ReportFiles) -> None:
