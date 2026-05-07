@@ -572,6 +572,59 @@ def generate_fcpxml(
     _tag_source_application(output_path)
 
 
+TransitionKind = Literal["cross-dissolve", "dip-to-color"]
+
+# FCP's built-in transitions live under .motn templates with stable
+# names; emitting an ``<effect>`` resource that points at one of these
+# uids lets FCP resolve the transition without splitsmith bundling any
+# Motion files. Both have shipped unchanged for years -- if Apple ever
+# renames either, the FCPXML import will surface a missing-effect
+# warning and the user re-picks the transition manually.
+_TRANSITION_EFFECT_UIDS: dict[TransitionKind, str] = {
+    "cross-dissolve": (
+        ".../Transitions.localized/Dissolves.localized/"
+        "Cross Dissolve.localized/Cross Dissolve.motn"
+    ),
+    "dip-to-color": (
+        ".../Transitions.localized/Dissolves.localized/"
+        "Dip to Color Dissolve.localized/Dip to Color Dissolve.motn"
+    ),
+}
+
+_TRANSITION_NAMES: dict[TransitionKind, str] = {
+    "cross-dissolve": "Cross Dissolve",
+    "dip-to-color": "Dip to Color Dissolve",
+}
+
+
+@dataclass(frozen=True)
+class StageTransition:
+    """A transition between two consecutive stages on the spine (issue #195).
+
+    ``after_stage_index`` is the index of the stage the transition
+    sits *after* (so a transition with ``after_stage_index=0``
+    crossfades from ``stages[0]`` into ``stages[1]``). Each stage may
+    have at most one transition following it; multiple ``StageTransition``s
+    targeting the same index raises.
+
+    ``duration_seconds`` is the transition's total length; FCPXML
+    centres the transition on the cut point so each adjacent stage's
+    visible window must contain at least ``duration_seconds / 2`` of
+    material -- the exporter validates this and raises a clear error
+    otherwise.
+
+    ``color`` only applies to ``"dip-to-color"`` and accepts any FCP
+    colour string (e.g. ``"0 0 0 1"`` for opaque black). When omitted
+    FCP uses its default (black) -- explicit colour is a follow-up
+    when templating lands.
+    """
+
+    after_stage_index: int
+    kind: TransitionKind = "cross-dissolve"
+    duration_seconds: float = 0.5
+    color: str | None = None
+
+
 @dataclass(frozen=True)
 class StageComposition:
     """One stage's contribution to a stitched match-export FCPXML (issue #170).
@@ -604,6 +657,7 @@ def generate_match_fcpxml(
     output_path: Path,
     project_name: str,
     config: OutputConfig,
+    transitions: list[StageTransition] | None = None,
 ) -> None:
     """Write a stitched FCPXML with N stages back-to-back on the spine.
 
@@ -616,12 +670,36 @@ def generate_match_fcpxml(
 
     Frame-rate mixing across stages is out of scope for v1: all stages must
     share a frame rate (raises ValueError otherwise).
+
+    ``transitions`` (issue #195): optional list of ``StageTransition``s
+    that crossfade between consecutive stages. Each transition is
+    centred on its stage boundary (offset = end_of_prev - duration/2,
+    duration = transition.duration); each adjacent stage must have at
+    least ``duration / 2`` of effective material to overlap or the
+    exporter raises ``ValueError``. ``None`` keeps today's hard-cut
+    layout.
     """
     if not stages:
         raise ValueError("generate_match_fcpxml requires at least one stage")
     for stage in stages:
         if not stage.video_path.exists():
             raise FileNotFoundError(f"video not found: {stage.video_path}")
+    transitions = list(transitions or ())
+    seen_indices: set[int] = set()
+    for t in transitions:
+        if t.after_stage_index in seen_indices:
+            raise ValueError(f"duplicate transition after stage index {t.after_stage_index}")
+        if not 0 <= t.after_stage_index < len(stages) - 1:
+            raise ValueError(
+                f"transition.after_stage_index={t.after_stage_index} is out of "
+                f"range for {len(stages)} stages (must be in 0..{len(stages) - 2})"
+            )
+        if t.duration_seconds <= 0:
+            raise ValueError(
+                f"transition after stage {t.after_stage_index} has non-positive "
+                f"duration ({t.duration_seconds:g}s)"
+            )
+        seen_indices.add(t.after_stage_index)
 
     base = stages[0].video
     for stage in stages[1:]:
@@ -848,6 +926,45 @@ def generate_match_fcpxml(
                 {"kind": "original-media", "src": plan.stage.overlay_path.resolve().as_uri()},
             )
 
+    # Transition effect resources (issue #195). One ``<effect>`` per
+    # unique transition kind used; transitions on the spine reference
+    # these via ``<filter-video ref="...">``. Validate the per-stage
+    # half-duration constraint before emitting so a bad combination
+    # surfaces as a clear error rather than as broken FCPXML.
+    transition_effect_ids: dict[TransitionKind, str] = {}
+    for trans in transitions:
+        trans_frames = round(trans.duration_seconds / fd_seconds)
+        half_frames = trans_frames // 2
+        prev_plan = plans[trans.after_stage_index]
+        next_plan = plans[trans.after_stage_index + 1]
+        if half_frames > prev_plan.effective_duration_frames:
+            raise ValueError(
+                f"transition after stage {prev_plan.stage.stage_name!r} "
+                f"({trans.duration_seconds:g}s) exceeds the available material "
+                f"({prev_plan.effective_duration_frames * fd_seconds:.3f}s); "
+                "increase the stage's tail pad or shorten the transition"
+            )
+        if half_frames > next_plan.effective_duration_frames:
+            raise ValueError(
+                f"transition before stage {next_plan.stage.stage_name!r} "
+                f"({trans.duration_seconds:g}s) exceeds the available material "
+                f"({next_plan.effective_duration_frames * fd_seconds:.3f}s); "
+                "increase the stage's head pad or shorten the transition"
+            )
+        if trans.kind not in transition_effect_ids:
+            resource_counter += 1
+            effect_id = f"r{resource_counter}"
+            ET.SubElement(
+                resources,
+                "effect",
+                {
+                    "id": effect_id,
+                    "name": _TRANSITION_NAMES[trans.kind],
+                    "uid": _TRANSITION_EFFECT_UIDS[trans.kind],
+                },
+            )
+            transition_effect_ids[trans.kind] = effect_id
+
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
@@ -866,8 +983,10 @@ def generate_match_fcpxml(
     )
     spine = ET.SubElement(sequence, "spine")
 
+    transitions_by_index: dict[int, StageTransition] = {t.after_stage_index: t for t in transitions}
+
     cumulative_offset_frames = 0
-    for plan in plans:
+    for stage_idx, plan in enumerate(plans):
         stage = plan.stage
         head_trim_seconds = plan.head_trim_frames * fd_seconds
         eff_duration_str = _frame_aligned_str(plan.effective_duration_frames, fd_num, fd_den)
@@ -967,6 +1086,33 @@ def generate_match_fcpxml(
                     "duration": frame_duration_str,
                     "value": _marker_label(shot, config.split_color_thresholds),
                 },
+            )
+
+        # Stage-boundary transition (issue #195). Centred on the cut
+        # point: transition offset = end_of_prev - duration/2,
+        # duration = transition.duration. Both adjacent stages keep
+        # their full effective_duration on the spine; FCPXML's
+        # transition straddles the boundary by half its duration on
+        # each side and FCP cross-fades using each side's overlap
+        # material.
+        next_transition = transitions_by_index.get(stage_idx)
+        if next_transition is not None:
+            tdur_frames = round(next_transition.duration_seconds / fd_seconds)
+            stage_end = cumulative_offset_frames + plan.effective_duration_frames
+            t_offset = stage_end - tdur_frames // 2
+            transition_el = ET.SubElement(
+                spine,
+                "transition",
+                {
+                    "name": _TRANSITION_NAMES[next_transition.kind],
+                    "offset": _frame_aligned_str(t_offset, fd_num, fd_den),
+                    "duration": _frame_aligned_str(tdur_frames, fd_num, fd_den),
+                },
+            )
+            ET.SubElement(
+                transition_el,
+                "filter-video",
+                {"ref": transition_effect_ids[next_transition.kind]},
             )
 
         cumulative_offset_frames += plan.effective_duration_frames

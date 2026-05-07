@@ -503,6 +503,15 @@ export interface MatchExportRequestPayload {
    *  the stitched composition into a single ffmpeg-encoded MP4
    *  (overlays / PiP burned in, no NLE needed). */
   output_format?: "fcpxml" | "fcp7xml" | "mp4";
+  /** Issue #195. Uniform transition between every consecutive stage
+   *  pair. ``"none"`` keeps today's hard cuts. Only FCPXML supports
+   *  transitions today; selecting one with FCP7 XML or MP4 surfaces
+   *  an anomaly note and falls back to hard cuts. */
+  transition_kind?: "none" | "cross-dissolve" | "dip-to-color";
+  /** Total transition length in seconds; ignored when
+   *  ``transition_kind`` is ``"none"``. Each adjacent stage's effective
+   *  window must contain at least half this value of material. */
+  transition_duration_seconds?: number;
 }
 
 export interface MatchExportResult {

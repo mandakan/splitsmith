@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith import composition, fcp7xml_render
+from splitsmith import composition, fcp7xml_render, fcpxml_gen
 from splitsmith.config import OutputConfig, Shot, VideoMetadata
 from splitsmith.fcpxml_gen import (
     PipPlacement,
@@ -208,6 +208,41 @@ def test_fcpxml_2997fps_validates(tmp_path: Path) -> None:
         output_path=out,
         project_name="v",
         config=OutputConfig(),
+    )
+    validate_against_dtd(out, dtd=fcpxml_dtd_path())
+
+
+@fcpxml_dtd
+def test_fcpxml_match_with_transitions_validates(tmp_path: Path) -> None:
+    """Transitions emit ``<transition>`` + ``<filter-video>`` referencing
+    a new ``<effect>`` resource. DTD validation catches missing
+    required attributes (``effect.uid``, ``filter-video.ref``) that
+    structural assertions might miss."""
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    primary_c = _make_video(tmp_path, "c.mp4")
+    out = tmp_path / "match.fcpxml"
+    stages = [
+        StageComposition(
+            stage_name=name,
+            video_path=p,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        )
+        for name, p in (("A", primary_a), ("B", primary_b), ("C", primary_c))
+    ]
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        transitions=[
+            fcpxml_gen.StageTransition(after_stage_index=0, kind="cross-dissolve"),
+            fcpxml_gen.StageTransition(after_stage_index=1, kind="dip-to-color"),
+        ],
     )
     validate_against_dtd(out, dtd=fcpxml_dtd_path())
 

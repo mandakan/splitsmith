@@ -149,13 +149,23 @@ TransitionKind = Literal["cross-dissolve", "dip-to-color"]
 
 @dataclass(frozen=True)
 class Transition:
-    """Stage-boundary transition (placeholder until #195 lands).
+    """Stage-boundary transition (issue #195).
 
     ``from_stage_index`` / ``to_stage_index`` are positions in
-    ``Composition.stages``; consecutive indices only for v1.
+    ``Composition.stages``; consecutive indices only for v1
+    (``to_stage_index == from_stage_index + 1`` -- enforced by the
+    FCPXML emitter, ignored by other renderers until they grow
+    transition support).
+
     ``duration_seconds`` is split half-before / half-after the boundary
-    per FCPXML semantics. Renderers that don't support a given ``kind``
-    fall back to the closest supported transition and warn.
+    per FCPXML semantics. The exporter validates that each adjacent
+    stage's effective window contains at least ``duration_seconds / 2``
+    of material before emitting the timeline.
+
+    The FCPXML renderer (this PR) emits ``cross-dissolve`` and
+    ``dip-to-color`` via FCP's built-in motion templates. The FCP7 XML
+    and ffmpeg renderers ignore transitions for now -- they'll grow
+    support in follow-up PRs.
     """
 
     from_stage_index: int
@@ -223,6 +233,7 @@ def from_stage_compositions(
     stages: SequenceProto[fcpxml_gen.StageComposition],
     *,
     project_name: str,
+    transitions: SequenceProto[Transition] = (),
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -231,6 +242,11 @@ def from_stage_compositions(
     same width/height for a single shared sequence (FCP scales mismatched
     cams within a stage via per-cam formats; mismatched primaries across
     stages would need cross-fps timeline support which is out of scope).
+
+    ``transitions`` (issue #195): optional stage-boundary transitions
+    that the FCPXML renderer emits between consecutive stages. Each
+    transition's ``from_stage_index`` / ``to_stage_index`` must point at
+    valid stage positions; v1 only accepts consecutive pairs.
     """
     if not stages:
         raise ValueError("Composition requires at least one stage")
@@ -290,6 +306,7 @@ def from_stage_compositions(
         project_name=project_name,
         sequence=seq,
         stages=tuple(ir_stages),
+        transitions=tuple(transitions),
     )
 
 
@@ -411,10 +428,15 @@ def render_fcpxml(
     so transitions / titles / new renderers can reach the wire.
     """
     legacy_stages = to_stage_compositions(composition)
-    if len(legacy_stages) == 1 and composition.intro is None and composition.outro is None:
-        # Single stage with no intro/outro mirrors today's per-stage path.
-        # Use generate_fcpxml so the file is byte-identical to a
-        # single-stage export.
+    if (
+        len(legacy_stages) == 1
+        and composition.intro is None
+        and composition.outro is None
+        and not composition.transitions
+    ):
+        # Single stage with no intro/outro/transitions mirrors today's
+        # per-stage path. Use generate_fcpxml so the file is byte-
+        # identical to a single-stage export.
         stage = legacy_stages[0]
         fcpxml_gen.generate_fcpxml(
             video_path=stage.video_path,
@@ -434,7 +456,33 @@ def render_fcpxml(
         output_path=output_path,
         project_name=composition.project_name,
         config=config,
+        transitions=_lower_transitions(composition.transitions),
     )
+
+
+def _lower_transitions(
+    transitions: tuple[Transition, ...],
+) -> list[fcpxml_gen.StageTransition]:
+    """Lower IR transitions to ``fcpxml_gen.StageTransition`` for the
+    legacy emitter. v1: only consecutive transitions
+    (``to_index == from_index + 1``) are accepted."""
+    out: list[fcpxml_gen.StageTransition] = []
+    for t in transitions:
+        if t.to_stage_index != t.from_stage_index + 1:
+            raise ValueError(
+                "non-consecutive transitions are not supported "
+                f"(from_stage_index={t.from_stage_index}, "
+                f"to_stage_index={t.to_stage_index})"
+            )
+        out.append(
+            fcpxml_gen.StageTransition(
+                after_stage_index=t.from_stage_index,
+                kind=t.kind,
+                duration_seconds=t.duration_seconds,
+                color=t.color,
+            )
+        )
+    return out
 
 
 __all__ = [

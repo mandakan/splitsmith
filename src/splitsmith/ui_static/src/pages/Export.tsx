@@ -1213,6 +1213,14 @@ function MatchExportDialog({
   const [outputFormat, setOutputFormat] = useState<
     "fcpxml" | "fcp7xml" | "mp4"
   >("fcpxml");
+  // Issue #195. ``"none"`` is today's hard-cut stitch. Cross-dissolve
+  // is the most-used transition in IPSC match recaps; dip-to-color is
+  // for stylised cuts. Only FCPXML emits transitions today.
+  const [transitionKind, setTransitionKind] = useState<
+    "none" | "cross-dissolve" | "dip-to-color"
+  >("none");
+  const [transitionDurationSeconds, setTransitionDurationSeconds] =
+    useState<number>(0.5);
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1265,6 +1273,8 @@ function MatchExportDialog({
         include_secondaries: includeSecondaries,
         pip_layout: pipLayout,
         output_format: outputFormat,
+        transition_kind: transitionKind,
+        transition_duration_seconds: transitionDurationSeconds,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1501,6 +1511,52 @@ function MatchExportDialog({
                   <option value="mp4">MP4 (baked, ffmpeg)</option>
                 </select>
               </label>
+              <label
+                className="flex items-center gap-1.5"
+                title="Cross-dissolve / dip-to-color between consecutive stages. FCPXML only; FCP7 XML still hard-cuts."
+              >
+                Transition
+                <select
+                  className="rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                  value={transitionKind}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setTransitionKind(
+                      e.target.value as
+                        | "none"
+                        | "cross-dissolve"
+                        | "dip-to-color",
+                    )
+                  }
+                >
+                  <option value="none">None (hard cuts)</option>
+                  <option value="cross-dissolve">Cross dissolve</option>
+                  <option value="dip-to-color">Dip to color</option>
+                </select>
+              </label>
+              {transitionKind !== "none" && (
+                <label
+                  className="flex items-center gap-1.5"
+                  title="Total transition length. Each adjacent stage's effective window must contain at least half this value."
+                >
+                  Duration
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={3.0}
+                    step={0.1}
+                    className="w-16 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                    value={transitionDurationSeconds}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (!Number.isNaN(v) && v > 0)
+                        setTransitionDurationSeconds(v);
+                    }}
+                  />
+                  s
+                </label>
+              )}
             </div>
             {includeOverlay ? (
               <OverlayFormatPanel

@@ -1373,6 +1373,230 @@ def test_match_fcpxml_secondary_pip_uses_sequence_dims(tmp_path: Path) -> None:
     assert transform.attrib == expected
 
 
+# --- stage transitions (issue #195) ---------------------------------------
+
+
+def _two_stage_match(tmp_path: Path) -> tuple[Path, Path, Path]:
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    out = tmp_path / "match.fcpxml"
+    return primary_a, primary_b, out
+
+
+def _basic_match_stages(primary_a: Path, primary_b: Path) -> list[fcpxml_mod.StageComposition]:
+    return [
+        fcpxml_mod.StageComposition(
+            stage_name="A",
+            video_path=primary_a,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        ),
+        fcpxml_mod.StageComposition(
+            stage_name="B",
+            video_path=primary_b,
+            video=_meta_30fps(),
+            shots=[_shot(1, 0.8, 0.8)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        ),
+    ]
+
+
+def test_match_with_transition_emits_effect_resource(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        transitions=[
+            fcpxml_mod.StageTransition(
+                after_stage_index=0, kind="cross-dissolve", duration_seconds=0.5
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    effects = root.findall("./resources/effect")
+    assert len(effects) == 1
+    assert effects[0].attrib["name"] == "Cross Dissolve"
+    assert effects[0].attrib["uid"].endswith("Cross Dissolve.motn")
+    transition = root.find(".//spine/transition")
+    assert transition is not None
+    assert transition.attrib["name"] == "Cross Dissolve"
+    filter_video = transition.find("filter-video")
+    assert filter_video is not None
+    assert filter_video.attrib["ref"] == effects[0].attrib["id"]
+
+
+def test_transition_offset_centred_on_boundary(tmp_path: Path) -> None:
+    """Transition at duration=0.5s @ 30fps -> 15 frames; centred on the
+    cut means offset = stage_A.end - 15 // 2 = stage_A.end - 7."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        transitions=[
+            fcpxml_mod.StageTransition(
+                after_stage_index=0, kind="cross-dissolve", duration_seconds=0.5
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    # 20s clip, beep=5, last shot at +1.0s -> tail_avail=14s, tail_pad=5
+    # trims 9s. Effective = 20 - 0 - 9 = 11s = 330 frames. Transition
+    # duration = 15 frames; half = 7. Offset = 330 - 7 = 323.
+    transition = root.find(".//spine/transition")
+    assert transition is not None
+    assert transition.attrib["offset"] == "323/30s"
+    assert transition.attrib["duration"] == "15/30s"
+
+
+def test_dip_to_color_uses_separate_effect(tmp_path: Path) -> None:
+    """A different transition kind allocates its own ``<effect>``;
+    same kind on multiple boundaries reuses one."""
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    primary_c = _make_video(tmp_path, "c.mp4")
+    out = tmp_path / "match.fcpxml"
+    stages = [
+        fcpxml_mod.StageComposition(
+            stage_name=name,
+            video_path=p,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        )
+        for name, p in (("A", primary_a), ("B", primary_b), ("C", primary_c))
+    ]
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        transitions=[
+            fcpxml_mod.StageTransition(after_stage_index=0, kind="cross-dissolve"),
+            fcpxml_mod.StageTransition(after_stage_index=1, kind="dip-to-color"),
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    effects = {e.attrib["name"]: e for e in root.findall("./resources/effect")}
+    assert set(effects) == {"Cross Dissolve", "Dip to Color Dissolve"}
+    transitions = root.findall(".//spine/transition")
+    assert [t.attrib["name"] for t in transitions] == [
+        "Cross Dissolve",
+        "Dip to Color Dissolve",
+    ]
+
+
+def test_transition_too_long_for_adjacent_stage_raises(tmp_path: Path) -> None:
+    """A transition longer than 2x either stage's effective window is
+    rejected so the user sees a clear error rather than malformed
+    FCPXML."""
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    out = tmp_path / "match.fcpxml"
+    stages = [
+        fcpxml_mod.StageComposition(
+            stage_name="A",
+            video_path=primary_a,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=0.05,
+            tail_pad_seconds=0.05,
+        ),
+        fcpxml_mod.StageComposition(
+            stage_name="B",
+            video_path=primary_b,
+            video=_meta_30fps(),
+            shots=[_shot(1, 0.8, 0.8)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        ),
+    ]
+    with pytest.raises(ValueError, match="exceeds the available material"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            transitions=[
+                fcpxml_mod.StageTransition(
+                    after_stage_index=0,
+                    kind="cross-dissolve",
+                    duration_seconds=5.0,
+                )
+            ],
+        )
+
+
+def test_transition_index_out_of_range_raises(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    with pytest.raises(ValueError, match="out of range"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            transitions=[fcpxml_mod.StageTransition(after_stage_index=1, kind="cross-dissolve")],
+        )
+
+
+def test_duplicate_transitions_raise(tmp_path: Path) -> None:
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    primary_c = _make_video(tmp_path, "c.mp4")
+    out = tmp_path / "match.fcpxml"
+    stages = [
+        fcpxml_mod.StageComposition(
+            stage_name=name,
+            video_path=p,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        )
+        for name, p in (("A", primary_a), ("B", primary_b), ("C", primary_c))
+    ]
+    with pytest.raises(ValueError, match="duplicate transition"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            transitions=[
+                fcpxml_mod.StageTransition(after_stage_index=0),
+                fcpxml_mod.StageTransition(after_stage_index=0),
+            ],
+        )
+
+
+def test_no_transitions_emits_unchanged_spine(tmp_path: Path) -> None:
+    """The default path (no transitions) emits the same spine as
+    before -- absence of transitions must not change the output."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages, output_path=out, project_name="match", config=OutputConfig()
+    )
+    root = ET.fromstring(out.read_bytes())
+    assert root.find(".//spine/transition") is None
+    assert root.find("./resources/effect") is None
+
+
 # --- probe_video -----------------------------------------------------------
 
 

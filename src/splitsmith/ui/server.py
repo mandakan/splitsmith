@@ -949,6 +949,12 @@ class MatchExportRequest(BaseModel):
     # ``"mp4"`` bakes the stitched composition into a single MP4 via
     # ffmpeg (overlays / PiP burned in, no NLE needed).
     output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml"
+    # Issue #195. Uniform transition between every consecutive stage
+    # pair, or ``"none"`` for hard cuts. Currently only the FCPXML
+    # renderer emits transitions; FCP7 / MP4 surface a "transitions
+    # ignored" anomaly when set together with those formats.
+    transition_kind: Literal["none", "cross-dissolve", "dip-to-color"] = "none"
+    transition_duration_seconds: float = 0.5
 
 
 class RevealRequest(BaseModel):
@@ -4598,6 +4604,8 @@ def create_app(
             project_name=project_name,
             pip_layout=req.pip_layout,
             output_format=req.output_format,
+            transition_kind=req.transition_kind,
+            transition_duration_seconds=req.transition_duration_seconds,
         )
         try:
             result = match_export_helpers.export_match(
