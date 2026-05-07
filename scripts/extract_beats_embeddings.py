@@ -42,7 +42,6 @@ from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble.features import (
     BEATS_CHECKPOINT_ENV,
-    BEATS_GUNSHOT_CLASS_INDEX,
     BEATS_SR,
     BEATS_WINDOW_S,
     load_beats_runtime,
@@ -153,7 +152,7 @@ def extract_for_fixture(name: str, *, force: bool, beats_runtime, full: bool = F
     batch_t = torch.from_numpy(batch).to(beats_runtime.device)
     probs_t = beats_runtime.model.predict_probs(batch_t)
     clipwise = probs_t.detach().cpu().numpy().astype(np.float32)
-    gunshot_prob = clipwise[:, BEATS_GUNSHOT_CLASS_INDEX]
+    gunshot_prob = clipwise[:, beats_runtime.gunshot_class_index]
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(
