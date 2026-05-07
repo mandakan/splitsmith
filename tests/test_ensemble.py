@@ -478,7 +478,6 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(
     visual probe rejects two of four candidates, those two are dropped
     from the consensus shots set even though all four pass A/B/C/D."""
     from splitsmith.ensemble import api as ensemble_api
-    from splitsmith.ensemble import calibration as ensemble_calibration
     from splitsmith.ensemble import features as ensemble_features
     from splitsmith.ensemble import visual as ensemble_visual
 
