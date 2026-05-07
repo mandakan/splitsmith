@@ -4212,18 +4212,19 @@ def create_app(
 
     @app.post("/api/match/export")
     def export_match(req: MatchExportRequest) -> JSONResponse:
-        """Stitch N stages into one FCPXML (issue #171).
+        """Stitch N stages into one FCPXML (issue #171, #172).
 
-        Synchronous: the work is just XML composition + a few ffprobes, so
-        we don't queue a job. The response carries the output path and the
-        total timeline duration so the SPA can show "exported N stages
-        (M:SS)" without re-stating the file.
+        Job-queued: per-stage trims (and optional overlays) can take
+        minutes for a real match, so the response is a Job snapshot the
+        SPA polls via ``/api/jobs/{id}``. The worker re-runs any missing
+        per-stage exports before invoking the match composer, so the user
+        doesn't have to click Generate on each stage first -- "Export
+        match" is a one-stop button.
 
-        Validation: 400 on stage selection mismatch, missing trim/audit, or
-        out-of-range padding; 404 when no project is bound.
+        Validation up-front (404 on unbound project, 400 on empty
+        selection / unknown stage / missing primary or beep / padding out
+        of range) so the SPA shows a clear error before queueing.
         """
-        from . import exports as exports_mod
-
         project = state.load()
         if not req.stage_numbers:
             raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
@@ -4251,9 +4252,10 @@ def create_app(
                 ),
             )
 
-        stages_input: list[match_export_helpers.MatchStageInput] = []
-        exports_dir = project.exports_path(state.project_root)
-        audit_dir = project.audit_path(state.project_root)
+        # Pre-flight stage validations. Loaded once here so a bad
+        # selection 400s before we queue a worker. The audit-shots check
+        # happens in the worker (it reads the JSON anyway) so we don't
+        # double-parse.
         for stage_number in req.stage_numbers:
             try:
                 stage = project.stage(stage_number)
@@ -4271,21 +4273,154 @@ def create_app(
                         "finish ingest + audit before match export"
                     ),
                 )
-            base = f"stage{stage_number}_{exports_mod._slugify(stage.stage_name)}"
+            # Source-reachability matters because the worker may have to
+            # produce missing trims via ffmpeg. Surface up-front rather
+            # than letting the worker fail mid-flight.
+            if not project.resolve_video_path(state.project_root, primary.path).exists():
+                _ensure_source_reachable(
+                    stage_number,
+                    project.resolve_video_path(state.project_root, primary.path),
+                )
+
+        existing = state.jobs.find_active(kind="match_export")
+        if existing is not None:
+            return JSONResponse(existing.model_dump(mode="json"))
+        job = state.jobs.submit(
+            kind="match_export",
+            fn=lambda h, r=req: _run_match_export(h, r),
+        )
+        return JSONResponse(job.model_dump(mode="json"))
+
+    def _run_match_export(handle: JobHandle, req: MatchExportRequest) -> None:
+        """Worker for /api/match/export. Re-runs the per-stage exporter for
+        any selected stage missing its lossless trim, then composes the
+        match FCPXML.
+        """
+        from ..config import StageData as EngineStageData
+        from . import exports as exports_mod
+
+        handle.update(progress=0.02, message="Loading project...")
+        proj = state.load()
+        exports_dir = proj.exports_path(state.project_root)
+        audit_dir = proj.audit_path(state.project_root)
+
+        n = len(req.stage_numbers)
+        # Reserve the last 10% for the match compose step; the rest is
+        # split evenly across per-stage trims (the dominant wall time).
+        # Stages that already have a trim skip ahead within their slice
+        # instead of contributing to the wait.
+        per_stage_share = 0.85 / max(1, n)
+
+        for idx, stage_number in enumerate(req.stage_numbers):
+            handle.check_cancel()
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None or prim.beep_time is None:
+                raise RuntimeError(f"stage {stage_number}: primary or beep disappeared mid-flight")
+
+            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+            overlay_target = exports_dir / f"{base}_overlay.mov"
+
+            # Decide what's missing. The match composer needs the
+            # lossless trim + per-cam trims (when include_secondaries) +
+            # optional overlay. Re-run the per-stage exporter for any
+            # stage where any required artefact isn't on disk.
+            wanted_secondary_ids: set[str] = set()
+            if req.include_secondaries:
+                for sv in stg.videos:
+                    if sv.role == "secondary" and sv.beep_time is not None:
+                        wanted_secondary_ids.add(sv.video_id)
+            secondary_trims_present = all(
+                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists()
+                for vid in wanted_secondary_ids
+            )
+            overlay_missing = req.include_overlay and not overlay_target.exists()
+
+            needs_per_stage = (
+                not trimmed_path.exists() or not secondary_trims_present or overlay_missing
+            )
+            if needs_per_stage:
+                handle.update(
+                    progress=0.02 + idx * per_stage_share,
+                    message=(
+                        f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."
+                    ),
+                )
+                # Build the secondaries list for the per-stage exporter --
+                # mirrors the single-stage endpoint's logic.
+                secondaries_in: list[export_helpers.SecondaryExport] = []
+                if req.include_secondaries:
+                    for sv in stg.videos:
+                        if sv.role != "secondary" or sv.beep_time is None:
+                            continue
+                        sec_source = proj.resolve_video_path(state.project_root, sv.path)
+                        secondaries_in.append(
+                            export_helpers.SecondaryExport(
+                                video_id=sv.video_id,
+                                source_path=sec_source,
+                                beep_time_in_source=sv.beep_time,
+                                label=f"Cam {sv.video_id}",
+                            )
+                        )
+                source_video = proj.resolve_video_path(state.project_root, prim.path)
+                engine_stage = EngineStageData(
+                    stage_number=stg.stage_number,
+                    stage_name=stg.stage_name,
+                    time_seconds=stg.time_seconds,
+                    scorecard_updated_at=stg.scorecard_updated_at,
+                )
+                try:
+                    export_helpers.export_stage(
+                        request=export_helpers.StageExportRequest(
+                            stage_number=stage_number,
+                            write_trim=True,
+                            write_csv=True,
+                            write_fcpxml=True,
+                            write_report=True,
+                            write_overlay=req.include_overlay,
+                        ),
+                        audit_path=audit_dir / f"stage{stage_number}.json",
+                        exports_dir=exports_dir,
+                        source_video_path=source_video if source_video.exists() else None,
+                        stage_data=engine_stage,
+                        beep_time_in_source=prim.beep_time,
+                        pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                        post_buffer_seconds=proj.trim_post_buffer_seconds,
+                        config=Config(),
+                        secondaries=secondaries_in,
+                    )
+                except export_helpers.StageExportError as exc:
+                    raise RuntimeError(f"stage {stage_number}: {exc}") from exc
+            else:
+                handle.update(
+                    progress=0.02 + idx * per_stage_share,
+                    message=(
+                        f"Stage {stage_number} ({idx + 1} of {n}): "
+                        "trim already present; skipping"
+                    ),
+                )
+
+        handle.check_cancel()
+        handle.update(progress=0.92, message="Stitching match FCPXML...")
+
+        # Re-load the project: the per-stage worker writes processed flags
+        # via project.save() side-effects, so a fresh load picks those up.
+        proj = state.load()
+        stages_input: list[match_export_helpers.MatchStageInput] = []
+        for stage_number in req.stage_numbers:
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            assert prim is not None and prim.beep_time is not None
+            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
             trimmed_path = exports_dir / f"{base}_trimmed.mp4"
             audit_path = audit_dir / f"stage{stage_number}.json"
             overlay_path = exports_dir / f"{base}_overlay.mov"
-
-            # Per-cam clip-local beep offset matches the per-stage exporter:
-            # ``min(pre_buffer, beep_time_in_source)`` so short heads (cam beep
-            # within the pre-buffer) align correctly.
             secondaries: list[match_export_helpers.MatchSecondaryInput] = []
-            for sv in stage.videos:
-                if sv.role != "secondary":
+            for sv in stg.videos:
+                if sv.role != "secondary" or sv.beep_time is None:
                     continue
-                if sv.beep_time is None:
-                    continue
-                sec_clip_beep = min(project.trim_pre_buffer_seconds, sv.beep_time)
+                sec_clip_beep = min(proj.trim_pre_buffer_seconds, sv.beep_time)
                 secondaries.append(
                     match_export_helpers.MatchSecondaryInput(
                         video_id=sv.video_id,
@@ -4294,12 +4429,11 @@ def create_app(
                         label=f"Cam {sv.video_id}",
                     )
                 )
-
-            primary_clip_beep = min(project.trim_pre_buffer_seconds, primary.beep_time)
+            primary_clip_beep = min(proj.trim_pre_buffer_seconds, prim.beep_time)
             stages_input.append(
                 match_export_helpers.MatchStageInput(
                     stage_number=stage_number,
-                    stage_name=stage.stage_name,
+                    stage_name=stg.stage_name,
                     audit_path=audit_path,
                     trimmed_path=trimmed_path,
                     beep_offset_seconds=primary_clip_beep,
@@ -4308,7 +4442,7 @@ def create_app(
                 )
             )
 
-        project_name = req.project_name or project.name or "match"
+        project_name = req.project_name or proj.name or "match"
         request_data = match_export_helpers.MatchExportRequestData(
             stage_numbers=tuple(req.stage_numbers),
             head_pad_seconds=req.head_pad_seconds,
@@ -4317,7 +4451,6 @@ def create_app(
             include_overlay=req.include_overlay,
             project_name=project_name,
         )
-
         try:
             result = match_export_helpers.export_match(
                 stages=stages_input,
@@ -4326,15 +4459,24 @@ def create_app(
                 config=Config().output,
             )
         except match_export_helpers.MatchExportError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise RuntimeError(str(exc)) from exc
 
-        return JSONResponse(
+        handle.set_result(
             {
                 "fcpxml_path": str(result.fcpxml_path),
                 "stage_count": result.stage_count,
                 "duration_seconds": result.duration_seconds,
                 "anomalies": result.anomalies,
             }
+        )
+        anom_word = "anomaly" if len(result.anomalies) == 1 else "anomalies"
+        anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
+        handle.update(
+            progress=1.0,
+            message=(
+                f"Done: {result.stage_count} stages, "
+                f"{result.duration_seconds:.1f}s{anom_suffix}"
+            ),
         )
 
     @app.post("/api/files/reveal")

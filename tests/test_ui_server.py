@@ -4700,7 +4700,7 @@ def _stub_match_export_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_match_export_endpoint_writes_fcpxml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client, project_root = _seed_match_export_project(tmp_path)
+    client, _ = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
 
     resp = client.post(
@@ -4710,18 +4710,26 @@ def test_match_export_endpoint_writes_fcpxml(
             "head_pad_seconds": 0.5,
             "tail_pad_seconds": 1.0,
             "include_secondaries": True,
-            "include_overlay": True,
+            # Trims are pre-staged but no overlay, so disable to keep the
+            # worker on the "skip per-stage exporter" branch (otherwise it
+            # would try to render an overlay via ffmpeg).
+            "include_overlay": False,
         },
     )
     assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["stage_count"] == 2
-    assert Path(body["fcpxml_path"]).exists()
-    assert Path(body["fcpxml_path"]).name.endswith("-match.fcpxml")
+    job = resp.json()
+    assert job["kind"] == "match_export"
+    final = _wait_for_job(client, job["id"])
+    assert final["status"] == "succeeded", final
+    result = final["result"]
+    assert result is not None
+    assert result["stage_count"] == 2
+    assert Path(result["fcpxml_path"]).exists()
+    assert Path(result["fcpxml_path"]).name.endswith("-match.fcpxml")
     # Per stage: 20s clip, beep@5s, last shot at 0.5s past beep -> head_trim
     # = 5.0 - 0.5 = 4.5s; tail_trim = (20 - 5.5) - 1.0 = 13.5s; eff = 2.0s.
     # Two stages -> 4.0s total.
-    assert body["duration_seconds"] == pytest.approx(4.0, abs=0.1)
+    assert result["duration_seconds"] == pytest.approx(4.0, abs=0.1)
 
 
 def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> None:
@@ -4748,14 +4756,26 @@ def test_match_export_endpoint_400_on_unknown_stage(tmp_path: Path) -> None:
     assert "stage 99 not found" in resp.json()["detail"]
 
 
-def test_match_export_endpoint_400_when_trim_missing(
+def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Source video missing AND no pre-staged trim -> the job fails (not
+    the endpoint). Pre-flight catches reachability up-front: the source is
+    ``project_root/raw/VID1.mp4`` which the seed helper writes, so to
+    simulate a missing source we delete it after seeding and remove the
+    pre-staged trim. The endpoint's source-reachability check then 424s."""
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     _stub_match_export_probe(monkeypatch)
-    # Remove the trim that the seed helper wrote.
     (project_root / "exports" / "stage1_stage-1_trimmed.mp4").unlink()
-
-    resp = client.post("/api/match/export", json={"stage_numbers": [1]})
-    assert resp.status_code == 400
-    assert "lossless trim missing" in resp.json()["detail"]
+    # Make the source unreachable by removing the underlying file (the
+    # symlink in raw/ stays). The endpoint pre-flight surfaces this as a
+    # structured 424.
+    (project_root / "raw" / "VID1.mp4").unlink()
+    resp = client.post(
+        "/api/match/export",
+        json={"stage_numbers": [1], "include_overlay": False},
+    )
+    assert resp.status_code == 424
+    detail = resp.json()["detail"]
+    # _ensure_source_reachable returns structured detail with a code.
+    assert detail.get("code") == "source_unreachable" if isinstance(detail, dict) else False, detail

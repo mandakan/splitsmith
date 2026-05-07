@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Film,
   FileBarChart,
   FileText,
   FolderOpen,
@@ -45,6 +46,7 @@ import {
   asSourceUnreachable,
   type ExportOverview,
   type Job,
+  type MatchExportResult,
   type MatchProject,
   type SecondaryExportStatus,
   type StageAudit,
@@ -52,10 +54,45 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+type PaddingPreset = "full" | "action" | "highlight" | "custom";
+
+const PADDING_PRESETS: Record<
+  Exclude<PaddingPreset, "custom">,
+  { label: string; head: number; tail: number; help: string }
+> = {
+  full: {
+    label: "Full",
+    head: 5.0,
+    tail: 5.0,
+    help: "Matches the per-stage export defaults (5s before beep, 5s after final shot).",
+  },
+  action: {
+    label: "Action cut",
+    head: 0.5,
+    tail: 1.0,
+    help: "Tight: 0.5s before beep, 1s after final shot. Best for a fast-moving match reel.",
+  },
+  highlight: {
+    label: "Highlight",
+    head: 1.5,
+    tail: 2.0,
+    help: "Mid: 1.5s before beep, 2s after final shot. Room to read the body before the draw.",
+  },
+};
+
 export function Export() {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Match-export multi-select. A stage qualifies for inclusion only when
+  // it's already exported (lossless trim + audit shots present); otherwise
+  // the match-export endpoint would 400. The dialog reads ``selectedForMatch``
+  // and the trim-buffer caps from the project settings.
+  const [selectedForMatch, setSelectedForMatch] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [matchDialogOpen, setMatchDialogOpen] = useState(false);
+  const [matchResult, setMatchResult] = useState<MatchExportResult | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -75,6 +112,65 @@ export function Export() {
     void reload();
   }, [reload]);
 
+  // A stage is eligible for the match export once its audit is complete
+  // (primary + beep + shots) AND its source video is reachable -- the
+  // worker may need to (re-)trim, which requires the source on disk.
+  // We exclude unreachable stages here rather than letting the endpoint
+  // 424 on submit; the row's StatusBadge already flags "Source missing"
+  // so the user can see why a stage is greyed out.
+  //
+  // All match-export hooks live ABOVE the early-return below so the hook
+  // order is stable across the loading -> loaded transition (React rules
+  // of hooks: every render must call the same hooks in the same order).
+  const matchEligibleStageNumbers = useMemo(
+    () =>
+      (overview?.stages ?? [])
+        .filter(
+          (s) =>
+            !s.skipped &&
+            s.ready_to_export &&
+            s.source_reachable !== false,
+        )
+        .map((s) => s.stage_number),
+    [overview],
+  );
+  const eligibleSet = useMemo(
+    () => new Set(matchEligibleStageNumbers),
+    [matchEligibleStageNumbers],
+  );
+  // Drop any selections whose stage stopped being eligible (re-run cleared
+  // exports, stage skipped, etc) so the banner count and dialog stay
+  // truthful.
+  useEffect(() => {
+    setSelectedForMatch((prev) => {
+      const next = new Set<number>();
+      for (const n of prev) {
+        if (eligibleSet.has(n)) next.add(n);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [eligibleSet]);
+
+  const toggleSelection = useCallback(
+    (stageNumber: number, checked: boolean) => {
+      setSelectedForMatch((prev) => {
+        const next = new Set(prev);
+        if (checked) next.add(stageNumber);
+        else next.delete(stageNumber);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const orderedSelection = useMemo(
+    () =>
+      (overview?.stages ?? [])
+        .map((s) => s.stage_number)
+        .filter((n) => selectedForMatch.has(n)),
+    [overview, selectedForMatch],
+  );
+
   if (!project && !error) {
     return (
       <div className="space-y-3">
@@ -91,6 +187,9 @@ export function Export() {
   const exported = (overview?.stages ?? []).filter(
     (s) => !s.skipped && s.has_exports,
   ).length;
+
+  const headPadCap = project?.trim_pre_buffer_seconds ?? 5.0;
+  const tailPadCap = project?.trim_post_buffer_seconds ?? 5.0;
 
   return (
     <div className="space-y-6">
@@ -138,6 +237,104 @@ export function Export() {
         </CardHeader>
       </Card>
 
+      {matchEligibleStageNumbers.length > 0 ? (
+        <div className="sticky top-0 z-10 -mx-4 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div>
+              <strong>{selectedForMatch.size}</strong> of{" "}
+              {matchEligibleStageNumbers.length} eligible stage
+              {matchEligibleStageNumbers.length === 1 ? "" : "s"} selected
+              {selectedForMatch.size === 0 ? " -- pick stages to stitch" : ""}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  selectedForMatch.size === matchEligibleStageNumbers.length
+                }
+                onClick={() =>
+                  setSelectedForMatch(new Set(matchEligibleStageNumbers))
+                }
+                title="Select every audited stage"
+              >
+                Select all
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={selectedForMatch.size === 0}
+                onClick={() => setSelectedForMatch(new Set())}
+              >
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                disabled={selectedForMatch.size < 2}
+                onClick={() => setMatchDialogOpen(true)}
+                title={
+                  selectedForMatch.size >= 2
+                    ? "Stitch the selected stages into one FCPXML (auto-runs missing per-stage trims)"
+                    : "Select 2+ stages to enable"
+                }
+              >
+                <Film className="size-4" />
+                Export match...
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {matchResult ? (
+        <Card>
+          <CardContent className="pt-6 text-sm">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="size-4 text-status-complete" />
+                  Match export written ({matchResult.stage_count} stages,{" "}
+                  {matchResult.duration_seconds.toFixed(1)}s)
+                </div>
+                <div className="font-mono text-xs text-muted-foreground">
+                  {matchResult.fcpxml_path}
+                </div>
+                {matchResult.anomalies.length > 0 ? (
+                  <ul className="ml-4 list-disc text-xs text-status-warning">
+                    {matchResult.anomalies.map((a, i) => (
+                      <li key={i}>{a}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void api
+                      .revealFile(matchResult.fcpxml_path)
+                      .catch((e) =>
+                        setError(e instanceof Error ? e.message : String(e)),
+                      );
+                  }}
+                >
+                  <FolderOpen className="size-4" />
+                  Reveal in Finder
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setMatchResult(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <div className="space-y-3">
         {(overview?.stages ?? []).map((row) => (
           <StageRow
@@ -145,9 +342,27 @@ export function Export() {
             row={row}
             onChanged={reload}
             onError={setError}
+            matchEligible={eligibleSet.has(row.stage_number)}
+            matchSelected={selectedForMatch.has(row.stage_number)}
+            onToggleMatchSelection={toggleSelection}
           />
         ))}
       </div>
+
+      {matchDialogOpen ? (
+        <MatchExportDialog
+          stageNumbers={orderedSelection}
+          headPadCap={headPadCap}
+          tailPadCap={tailPadCap}
+          defaultProjectName={project?.name ?? "match"}
+          stages={overview?.stages ?? []}
+          onCancel={() => setMatchDialogOpen(false)}
+          onSuccess={(result) => {
+            setMatchDialogOpen(false);
+            setMatchResult(result);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -156,10 +371,16 @@ function StageRow({
   row,
   onChanged,
   onError,
+  matchEligible,
+  matchSelected,
+  onToggleMatchSelection,
 }: {
   row: StageExportStatus;
   onChanged: () => Promise<void>;
   onError: (msg: string | null) => void;
+  matchEligible: boolean;
+  matchSelected: boolean;
+  onToggleMatchSelection: (stageNumber: number, checked: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -170,6 +391,23 @@ function StageRow({
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-1 size-4 accent-primary"
+              checked={matchSelected}
+              disabled={!matchEligible}
+              title={
+                matchEligible
+                  ? "Include this stage in a match export (any missing trim is produced automatically)"
+                  : row.source_reachable === false
+                    ? "Source video is not reachable -- reconnect external storage or re-link on Ingest"
+                    : "Finish the audit first -- shot detection must produce at least one shot"
+              }
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) =>
+                onToggleMatchSelection(row.stage_number, e.target.checked)
+              }
+            />
             {expanded ? (
               <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             ) : (
@@ -807,6 +1045,328 @@ function StageShotTable({
         <ExternalLink className="size-3" />
         Notes save on blur or Enter; flow into the next CSV regen.
       </p>
+    </div>
+  );
+}
+
+function MatchExportDialog({
+  stageNumbers,
+  headPadCap,
+  tailPadCap,
+  defaultProjectName,
+  stages,
+  onCancel,
+  onSuccess,
+}: {
+  stageNumbers: number[];
+  headPadCap: number;
+  tailPadCap: number;
+  defaultProjectName: string;
+  stages: StageExportStatus[];
+  onCancel: () => void;
+  onSuccess: (result: MatchExportResult) => void;
+}) {
+  // Default to "Full" -- mirrors the per-stage export's defaults so the
+  // user has to opt in to a tighter cut.
+  const [preset, setPreset] = useState<PaddingPreset>("full");
+  const [headPad, setHeadPad] = useState<number>(PADDING_PRESETS.full.head);
+  const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
+  const [includeSecondaries, setIncludeSecondaries] = useState(true);
+  // Overlay defaults off because the per-frame PIL + ffmpeg ProRes 4444
+  // render is the slowest writer; opt in per export. Mirrors the per-
+  // stage Generate's default.
+  const [includeOverlay, setIncludeOverlay] = useState(false);
+  const [projectName, setProjectName] = useState(defaultProjectName);
+  const [job, setJob] = useState<Job | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const busy = job?.status === "pending" || job?.status === "running";
+
+  const choosePreset = (next: PaddingPreset) => {
+    setPreset(next);
+    if (next !== "custom") {
+      const cfg = PADDING_PRESETS[next];
+      // Cap presets at the project's pre/post buffer in case it was
+      // configured below the preset's nominal value.
+      setHeadPad(Math.min(cfg.head, headPadCap));
+      setTailPad(Math.min(cfg.tail, tailPadCap));
+    }
+  };
+
+  // Any flag that has at least one stage in the selection covers it. If
+  // none of the selected stages have e.g. a secondary, the toggle is
+  // disabled (the matching backend would silently ignore an empty list,
+  // but it reads better to grey it out).
+  const anySelectedStageHasSecondaries = stages
+    .filter((s) => stageNumbers.includes(s.stage_number))
+    .some((s) => s.secondaries.length > 0);
+
+  const submit = async () => {
+    // Errors during submit live inline in the dialog so the user sees
+    // them in context. Page-level ``onError`` is reserved for failures
+    // that occur after the dialog has closed (or that the user explicitly
+    // dismisses by closing the dialog).
+    setDialogError(null);
+    try {
+      const submitted = await api.exportMatch({
+        stage_numbers: stageNumbers,
+        head_pad_seconds: headPad,
+        tail_pad_seconds: tailPad,
+        include_secondaries: includeSecondaries,
+        include_overlay: includeOverlay,
+        project_name: projectName,
+      });
+      setJob(submitted);
+      const final = await api.pollJob(submitted.id, setJob);
+      if (final.status === "failed") {
+        setDialogError(final.error ?? "Match export failed");
+        return;
+      }
+      if (final.status === "cancelled") {
+        setDialogError("Match export cancelled");
+        return;
+      }
+      const result = final.result as
+        | {
+            fcpxml_path: string;
+            stage_count: number;
+            duration_seconds: number;
+            anomalies: string[];
+          }
+        | null;
+      if (!result) {
+        setDialogError("Match export finished without a result payload");
+        return;
+      }
+      onSuccess(result);
+    } catch (e) {
+      const unreachable = asSourceUnreachable(e);
+      if (unreachable) {
+        setDialogError(unreachable.message);
+      } else {
+        setDialogError(
+          e instanceof ApiError
+            ? `Match export failed: ${e.detail}`
+            : e instanceof Error
+              ? e.message
+              : String(e),
+        );
+      }
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="match-export-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
+      onClick={onCancel}
+    >
+      <Card
+        className="w-full max-w-xl shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CardHeader>
+          <CardTitle id="match-export-title" className="flex items-center gap-2">
+            <Film className="size-5" />
+            Export match
+          </CardTitle>
+          <CardDescription>
+            Stitches {stageNumbers.length} stage
+            {stageNumbers.length === 1 ? "" : "s"} into one FCPXML in stage
+            order. Composes from existing trims; no re-encoding.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <section className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Padding
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(PADDING_PRESETS) as Array<keyof typeof PADDING_PRESETS>).map(
+                (key) => (
+                  <label
+                    key={key}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs",
+                      preset === key && "border-primary bg-primary/10",
+                    )}
+                    title={PADDING_PRESETS[key].help}
+                  >
+                    <input
+                      type="radio"
+                      name="match-export-preset"
+                      checked={preset === key}
+                      onChange={() => choosePreset(key)}
+                      className="accent-primary"
+                    />
+                    {PADDING_PRESETS[key].label}
+                    <span className="text-muted-foreground">
+                      ({PADDING_PRESETS[key].head}s / {PADDING_PRESETS[key].tail}s)
+                    </span>
+                  </label>
+                ),
+              )}
+              <label
+                className={cn(
+                  "flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs",
+                  preset === "custom" && "border-primary bg-primary/10",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="match-export-preset"
+                  checked={preset === "custom"}
+                  onChange={() => choosePreset("custom")}
+                  className="accent-primary"
+                />
+                Custom
+              </label>
+            </div>
+            <div
+              className={cn(
+                "grid grid-cols-2 gap-3 pt-1",
+                preset !== "custom" && "opacity-60",
+              )}
+            >
+              <label className="space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span>Head (before beep)</span>
+                  <span className="font-mono tabular-nums">
+                    {headPad.toFixed(2)}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={headPadCap}
+                  step={0.1}
+                  value={headPad}
+                  disabled={preset !== "custom" || busy}
+                  onChange={(e) => setHeadPad(parseFloat(e.target.value))}
+                  className="w-full accent-primary"
+                />
+              </label>
+              <label className="space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span>Tail (after final shot)</span>
+                  <span className="font-mono tabular-nums">
+                    {tailPad.toFixed(2)}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={tailPadCap}
+                  step={0.1}
+                  value={tailPad}
+                  disabled={preset !== "custom" || busy}
+                  onChange={(e) => setTailPad(parseFloat(e.target.value))}
+                  className="w-full accent-primary"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Tracks
+            </div>
+            <div className="flex flex-wrap gap-3 text-xs">
+              <label
+                className={cn(
+                  "flex items-center gap-1.5",
+                  !anySelectedStageHasSecondaries && "opacity-60",
+                )}
+                title={
+                  anySelectedStageHasSecondaries
+                    ? "Attach each stage's per-cam trims as connected clips"
+                    : "None of the selected stages have secondary cams"
+                }
+              >
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={includeSecondaries && anySelectedStageHasSecondaries}
+                  disabled={!anySelectedStageHasSecondaries || busy}
+                  onChange={(e) => setIncludeSecondaries(e.target.checked)}
+                />
+                Include secondary cams
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={includeOverlay}
+                  disabled={busy}
+                  onChange={(e) => setIncludeOverlay(e.target.checked)}
+                />
+                Include overlay (when present)
+              </label>
+            </div>
+          </section>
+
+          <section className="space-y-1">
+            <label className="text-xs">
+              Project name
+              <input
+                type="text"
+                value={projectName}
+                disabled={busy}
+                onChange={(e) => setProjectName(e.target.value)}
+                className="mt-1 block w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </label>
+            <p className="text-[11px] text-muted-foreground">
+              Output file: <code>exports/&lt;slug&gt;-match.fcpxml</code>.
+              Re-running overwrites.
+            </p>
+          </section>
+
+          {job && !dialogError ? (
+            <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 font-medium">
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+                {job.message ?? "Running..."}
+              </div>
+              {job.progress != null ? (
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full bg-primary transition-[width]"
+                    style={{ width: `${Math.round(job.progress * 100)}%` }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {dialogError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+              <div className="mb-1 flex items-center gap-1 font-medium text-destructive">
+                <AlertCircle className="size-3.5" />
+                Match export failed
+              </div>
+              <p className="text-muted-foreground">{dialogError}</p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+            <Button variant="ghost" disabled={busy} onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={busy || !projectName.trim()}>
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Film className="size-4" />
+              )}
+              Export match
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
