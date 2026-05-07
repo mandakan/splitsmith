@@ -497,6 +497,10 @@ export interface MatchExportRequestPayload {
    *  ``"pip-corners"`` adds an FCPXML adjust-transform so each cam lands
    *  in a rotating corner (TR -> TL -> BR -> BL) at 25% scale. */
   pip_layout?: "stacked" | "pip-corners";
+  /** Issue #197. ``"fcpxml"`` writes Final Cut Pro 1.10 (default).
+   *  ``"fcp7xml"`` writes a Final Cut Pro 7-style ``.xml`` importable
+   *  into Premiere Pro and DaVinci Resolve. */
+  output_format?: "fcpxml" | "fcp7xml";
 }
 
 export interface MatchExportResult {

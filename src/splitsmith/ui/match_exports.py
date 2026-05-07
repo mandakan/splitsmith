@@ -20,11 +20,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .. import composition, fcpxml_gen
+from .. import composition, fcp7xml_render, fcpxml_gen
 from ..config import OutputConfig
 from .exports import audit_shots_to_engine_shots
 
 PipLayout = Literal["stacked", "pip-corners"]
+# Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
+# default). ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml file
+# importable into Premiere Pro and DaVinci Resolve.
+OutputFormat = Literal["fcpxml", "fcp7xml"]
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,8 @@ class MatchExportRequestData:
     # ``<adjust-transform>`` to each secondary so they land in rotating
     # corners (TR -> TL -> BR -> BL) at 25% scale with a 2% inset.
     pip_layout: PipLayout = "stacked"
+    # Issue #197. Renderer chosen for this export.
+    output_format: OutputFormat = "fcpxml"
 
 
 @dataclass(frozen=True)
@@ -213,14 +219,18 @@ def export_match(
         )
 
     exports_dir.mkdir(parents=True, exist_ok=True)
-    output_path = exports_dir / f"{_slugify(request.project_name)}-match.fcpxml"
+    extension = ".fcpxml" if request.output_format == "fcpxml" else ".xml"
+    output_path = exports_dir / f"{_slugify(request.project_name)}-match{extension}"
     # Match export goes through the composition IR (issue #194). The bridge
-    # renderer lowers back to ``generate_match_fcpxml`` so the output stays
-    # byte-identical to the pre-IR path; future renderer work (transitions,
-    # titles, FCP7 XML, ffmpeg) replaces the bridge piece by piece.
+    # renderer lowers back to ``generate_match_fcpxml`` for the FCPXML path
+    # so output stays byte-identical to the pre-IR emitter; the FCP7 XML
+    # path (issue #197) walks the IR directly via ``fcp7xml_render``.
     comp = composition.from_stage_compositions(compositions, project_name=request.project_name)
     try:
-        composition.render_fcpxml(comp, output_path=output_path, config=config)
+        if request.output_format == "fcpxml":
+            composition.render_fcpxml(comp, output_path=output_path, config=config)
+        else:
+            fcp7xml_render.render_fcp7xml(comp, output_path=output_path)
     except (ValueError, FileNotFoundError) as exc:
         raise MatchExportError(str(exc)) from exc
 
