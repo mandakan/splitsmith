@@ -31,6 +31,12 @@ PipLayout = Literal["stacked", "pip-corners"]
 # ``"mp4"`` bakes the composition into a stitched MP4 via ffmpeg --
 # overlays / PiP burned in, no NLE round-trip needed.
 OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
+# Issue #195. ``"none"`` keeps today's hard-cut stitching.
+# ``"cross-dissolve"`` / ``"dip-to-color"`` map to FCP's built-in
+# transition effects. Only the FCPXML renderer emits transitions
+# today; FCP7 / MP4 ignore the request until they grow transition
+# support.
+TransitionKind = Literal["none", "cross-dissolve", "dip-to-color"]
 
 
 @dataclass(frozen=True)
@@ -84,6 +90,11 @@ class MatchExportRequestData:
     pip_layout: PipLayout = "stacked"
     # Issue #197. Renderer chosen for this export.
     output_format: OutputFormat = "fcpxml"
+    # Issue #195. Uniform transition between every consecutive stage
+    # (or ``"none"`` for hard cuts). ``transition_duration_seconds`` is
+    # ignored when ``transition_kind == "none"``.
+    transition_kind: TransitionKind = "none"
+    transition_duration_seconds: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -225,10 +236,26 @@ def export_match(
     output_path = exports_dir / f"{_slugify(request.project_name)}-match{extension}"
     # Match export goes through the composition IR (issue #194). The bridge
     # renderer lowers back to ``generate_match_fcpxml`` for the FCPXML path
-    # so output stays byte-identical to the pre-IR emitter; the FCP7 XML
-    # path (issue #197) walks the IR directly. The MP4 path (#174) shells
-    # out to ffmpeg per stage, then concat-demuxes the temps.
-    comp = composition.from_stage_compositions(compositions, project_name=request.project_name)
+    # so output stays byte-identical to the pre-IR emitter when no extra
+    # IR features are present; the FCP7 XML path (issue #197) walks the
+    # IR directly. The MP4 path (#174) shells out to ffmpeg per stage,
+    # then concat-demuxes the temps.
+    transitions = _build_uniform_transitions(
+        kind=request.transition_kind,
+        duration=request.transition_duration_seconds,
+        stage_count=len(compositions),
+    )
+    if transitions and request.output_format != "fcpxml":
+        anomalies.append(
+            f"transitions ignored: not yet supported by the "
+            f"{request.output_format} renderer (issue #195 follow-ups)"
+        )
+        transitions = ()
+    comp = composition.from_stage_compositions(
+        compositions,
+        project_name=request.project_name,
+        transitions=transitions,
+    )
     try:
         if request.output_format == "fcpxml":
             composition.render_fcpxml(comp, output_path=output_path, config=config)
@@ -276,3 +303,25 @@ def _slugify(name: str) -> str:
     """Filesystem-friendly slug. Mirrors ``exports._slugify`` so match-export
     filenames look the same as their per-stage cousins."""
     return _SLUG_RE.sub("-", name.lower()).strip("-") or "match"
+
+
+def _build_uniform_transitions(
+    *,
+    kind: TransitionKind,
+    duration: float,
+    stage_count: int,
+) -> tuple[composition.Transition, ...]:
+    """Expand a single ``(kind, duration)`` choice into N-1 transitions
+    (one between each consecutive stage pair). Returns ``()`` for the
+    no-op cases (kind == ``"none"`` or fewer than two stages)."""
+    if kind == "none" or stage_count < 2:
+        return ()
+    return tuple(
+        composition.Transition(
+            from_stage_index=i,
+            to_stage_index=i + 1,
+            kind=kind,
+            duration_seconds=duration,
+        )
+        for i in range(stage_count - 1)
+    )
