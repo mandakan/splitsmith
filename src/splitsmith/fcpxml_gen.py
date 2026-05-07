@@ -171,11 +171,21 @@ def generate_fcpxml(
     asset_id = "r2"
     format_id = "r1"
     # Resource IDs after the primary asset are allocated in this order:
-    # secondary cams first, then overlay last so the overlay always lives on
-    # the highest lane (V2/V3/... below it) regardless of cam count.
+    # secondary cams first, then (optionally) a dedicated overlay format,
+    # then the overlay asset last so the overlay always lives on the highest
+    # lane (V2/V3/... below it) regardless of cam count.
     usable_secondaries = [s for s in (secondaries or []) if s.video_path.exists()]
-    overlay_asset_id = f"r{3 + len(usable_secondaries)}"
     use_overlay = overlay_path is not None and overlay_path.exists()
+    overlay_meta_for_format = overlay_video if overlay_video is not None else video
+    overlay_uses_own_format = use_overlay and _overlay_format_differs(
+        video, overlay_meta_for_format
+    )
+    next_id = 3 + len(usable_secondaries)
+    overlay_format_id: str | None = None
+    if overlay_uses_own_format:
+        overlay_format_id = f"r{next_id}"
+        next_id += 1
+    overlay_asset_id = f"r{next_id}"
 
     fcpxml = ET.Element("fcpxml", {"version": config.fcpxml_version})
 
@@ -274,6 +284,29 @@ def generate_fcpxml(
         assert overlay_path is not None  # narrowed by use_overlay
         overlay_duration_frames = int(round(overlay_meta.duration_seconds / float(frame_duration)))
         overlay_duration_str = _frame_aligned_str(overlay_duration_frames, fd_num, fd_den)
+        # Dedicated format when geometry / fps differs so FCP scales the
+        # overlay over the timeline at default ``spatialConform="fit"``.
+        # When dims & fps match the primary, reusing format_id keeps the
+        # XML byte-comparable with the pre-#45 output.
+        if overlay_uses_own_format:
+            assert overlay_format_id is not None
+            overlay_fd_num = overlay_meta.frame_rate_den
+            overlay_fd_den = overlay_meta.frame_rate_num
+            ET.SubElement(
+                resources,
+                "format",
+                {
+                    "id": overlay_format_id,
+                    "name": _format_name(overlay_meta),
+                    "frameDuration": _frame_aligned_str(1, overlay_fd_num, overlay_fd_den),
+                    "width": str(overlay_meta.width),
+                    "height": str(overlay_meta.height),
+                    "colorSpace": "1-1-1 (Rec. 709)",
+                },
+            )
+            asset_format_ref = overlay_format_id
+        else:
+            asset_format_ref = format_id
         overlay_asset = ET.SubElement(
             resources,
             "asset",
@@ -284,7 +317,7 @@ def generate_fcpxml(
                 "duration": overlay_duration_str,
                 "hasVideo": "1",
                 "hasAudio": "0",
-                "format": format_id,
+                "format": asset_format_ref,
                 "videoSources": "1",
             },
         )
@@ -509,6 +542,7 @@ def generate_match_fcpxml(
         # cam, asset_id, sec_dur_in_parent_frames
         usable_secondaries: list[tuple[SecondaryClip, str, int]]
         overlay_asset_id: str | None
+        overlay_format_id: str | None  # None when overlay reuses the timeline format
         overlay_duration_frames: int  # in parent frame units; 0 when no overlay
 
     plans: list[_StagePlan] = []
@@ -556,11 +590,15 @@ def generate_match_fcpxml(
             usable_secondaries.append((sec, sec_id, sec_dur_in_parent_frames))
 
         overlay_asset_id: str | None = None
+        overlay_format_id: str | None = None
         overlay_duration_frames = 0
         if stage.overlay_path is not None and stage.overlay_path.exists():
+            overlay_meta = stage.overlay_video if stage.overlay_video is not None else stage.video
+            if _overlay_format_differs(stage.video, overlay_meta):
+                resource_counter += 1
+                overlay_format_id = f"r{resource_counter}"
             resource_counter += 1
             overlay_asset_id = f"r{resource_counter}"
-            overlay_meta = stage.overlay_video if stage.overlay_video is not None else stage.video
             overlay_duration_frames = int(round(overlay_meta.duration_seconds / fd_seconds))
 
         plans.append(
@@ -572,6 +610,7 @@ def generate_match_fcpxml(
                 effective_duration_frames=effective_duration_frames,
                 usable_secondaries=usable_secondaries,
                 overlay_asset_id=overlay_asset_id,
+                overlay_format_id=overlay_format_id,
                 overlay_duration_frames=overlay_duration_frames,
             )
         )
@@ -634,6 +673,29 @@ def generate_match_fcpxml(
                 {"kind": "original-media", "src": sec.video_path.resolve().as_uri()},
             )
         if plan.overlay_asset_id is not None and plan.stage.overlay_path is not None:
+            if plan.overlay_format_id is not None:
+                overlay_meta = (
+                    plan.stage.overlay_video
+                    if plan.stage.overlay_video is not None
+                    else plan.stage.video
+                )
+                overlay_fd_num = overlay_meta.frame_rate_den
+                overlay_fd_den = overlay_meta.frame_rate_num
+                ET.SubElement(
+                    resources,
+                    "format",
+                    {
+                        "id": plan.overlay_format_id,
+                        "name": _format_name(overlay_meta),
+                        "frameDuration": _frame_aligned_str(1, overlay_fd_num, overlay_fd_den),
+                        "width": str(overlay_meta.width),
+                        "height": str(overlay_meta.height),
+                        "colorSpace": "1-1-1 (Rec. 709)",
+                    },
+                )
+                overlay_asset_format = plan.overlay_format_id
+            else:
+                overlay_asset_format = format_id
             overlay_asset = ET.SubElement(
                 resources,
                 "asset",
@@ -644,7 +706,7 @@ def generate_match_fcpxml(
                     "duration": _frame_aligned_str(plan.overlay_duration_frames, fd_num, fd_den),
                     "hasVideo": "1",
                     "hasAudio": "0",
-                    "format": format_id,
+                    "format": overlay_asset_format,
                     "videoSources": "1",
                 },
             )
@@ -835,6 +897,24 @@ def _frame_aligned_str(frames: int, fd_num: int, fd_den: int) -> str:
     if fd_den == 1:
         return f"{num}s"
     return f"{num}/{fd_den}s"
+
+
+def _overlay_format_differs(primary: VideoMetadata, overlay: VideoMetadata) -> bool:
+    """``True`` when the overlay needs its own ``<format>`` element.
+
+    Reusing the primary's format ID is fine when dimensions and frame rate
+    match; when either differs (smaller overlay for size savings, capped
+    fps, etc.), FCP needs the overlay's true geometry to scale it across
+    the timeline instead of pinning it at native size. ``spatialConform``
+    defaults to ``"fit"`` which preserves aspect ratio -- exactly what we
+    want when downscaling a same-aspect overlay.
+    """
+    return (
+        primary.width != overlay.width
+        or primary.height != overlay.height
+        or primary.frame_rate_num != overlay.frame_rate_num
+        or primary.frame_rate_den != overlay.frame_rate_den
+    )
 
 
 def _format_name(video: VideoMetadata) -> str:

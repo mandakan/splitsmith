@@ -25,16 +25,35 @@ gate on that before invoking :func:`render_overlay`.
 from __future__ import annotations
 
 import json
+import math
+import platform
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
+from typing import Literal
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
+
+OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
+"""Pluggable encoder for the alpha overlay MOV.
+
+- ``"auto"`` (default): ``hevc-alpha`` on macOS when ``hevc_videotoolbox``
+  is advertised by the running ``ffmpeg``, otherwise ``prores-4444``.
+  Picks the smallest file the host can produce without losing alpha.
+- ``"hevc-alpha"``: Apple's HEVC with alpha via ``hevc_videotoolbox``.
+  ~10-20x smaller than ProRes 4444 for mostly-transparent text overlays.
+  macOS only; FCP imports it natively.
+- ``"prores-4444"``: original behaviour. Cross-platform, large files
+  (~330 Mbit/s @ 1080p24); use as the archival / non-Mac fallback.
+"""
+
+OVERLAY_CODECS: tuple[OverlayCodec, ...] = ("auto", "hevc-alpha", "prores-4444")
 
 
 @dataclass(frozen=True)
@@ -407,6 +426,158 @@ def _shot_times_from_audit(audit_data: dict, *, beep_offset_seconds: float) -> l
     return out
 
 
+def _ffmpeg_supports_encoder(ffmpeg_binary: str, encoder: str) -> bool:
+    """``True`` when ``ffmpeg -encoders`` advertises ``encoder``.
+
+    Mirrors the probe in :mod:`splitsmith.trim` -- a runtime check beats
+    hard-coding macOS-only encoders, since users can install ffmpeg
+    builds without VideoToolbox.
+    """
+    try:
+        proc = subprocess.run(
+            [ffmpeg_binary, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0:
+        return False
+    return encoder in proc.stdout
+
+
+def _resolve_codec(codec: OverlayCodec, ffmpeg_binary: str) -> Literal["hevc-alpha", "prores-4444"]:
+    """Resolve ``"auto"`` against the host. Concrete codecs pass through.
+
+    ``hevc-alpha`` only makes sense on Apple platforms with VideoToolbox;
+    elsewhere we fall back to ``prores-4444`` rather than fail the export.
+    Callers asking for a concrete codec get exactly that -- failures are
+    surfaced by ffmpeg itself, not silently rewritten.
+    """
+    if codec == "hevc-alpha" or codec == "prores-4444":
+        return codec
+    if codec != "auto":
+        raise OverlayRenderError(
+            f"unknown overlay codec {codec!r}; expected one of {OVERLAY_CODECS}"
+        )
+    if platform.system() == "Darwin" and _ffmpeg_supports_encoder(
+        ffmpeg_binary, "hevc_videotoolbox"
+    ):
+        return "hevc-alpha"
+    return "prores-4444"
+
+
+def _scaled_dimensions(width: int, height: int, max_height: int | None) -> tuple[int, int]:
+    """Aspect-preserving downscale to ``max_height``. Both outputs even.
+
+    Even dims keep yuv420 / yuv444 chroma alignment happy across encoders;
+    odd dims trip ``hevc_videotoolbox`` on some macOS builds. We never
+    upscale -- a cap above the source is a no-op.
+    """
+    if max_height is None or max_height >= height:
+        return width, height
+    new_h = max(2, max_height)
+    new_w = max(2, int(round(width * (new_h / height))))
+    if new_w % 2:
+        new_w -= 1
+    if new_h % 2:
+        new_h -= 1
+    return new_w, new_h
+
+
+def _capped_frame_rate(num: int, den: int, max_fps: float | None) -> tuple[int, int]:
+    """Cap source ``num/den`` at ``max_fps`` while keeping a rational rate.
+
+    Returns a ``(numerator, denominator)`` pair the FCPXML can quote
+    literally. Strategy: divide the source by the smallest integer factor
+    that brings it under the cap, and prefer that candidate when it lands
+    within 5% of the requested cap -- this is what makes NTSC sources do
+    the right thing (60000/1001 capped at 30 -> 30000/1001 instead of
+    flattening to 30/1). When the integer-divisor candidate would be far
+    below the cap (e.g. 60 capped at 24 -> 20 fps), fall back to quoting
+    the cap as a rational so the user gets what they asked for.
+    """
+    src = Fraction(num, den)
+    if max_fps is None or float(src) <= max_fps + 1e-9:
+        return num, den
+    target = Fraction(max_fps).limit_denominator(1000)
+    if target <= 0:
+        raise OverlayRenderError(f"max_fps must be > 0, got {max_fps}")
+    factor = src / target
+    # Smallest integer ``k`` such that ``src / k <= target``. The 1e-9 nudge
+    # absorbs float rounding when ``factor`` is exactly an integer.
+    k = max(1, math.ceil(float(factor) - 1e-9))
+    candidate = src / k
+    if candidate >= target * Fraction(95, 100):
+        return candidate.numerator, candidate.denominator
+    return target.numerator, target.denominator
+
+
+def _build_ffmpeg_cmd(
+    *,
+    ffmpeg_binary: str,
+    codec: Literal["hevc-alpha", "prores-4444"],
+    width: int,
+    height: int,
+    rate: str,
+    output_path: Path,
+) -> list[str]:
+    """Encoder-specific argv. RGBA raw input is identical across codecs;
+    only the output side differs."""
+    cmd = [
+        ffmpeg_binary,
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgba",
+        "-s",
+        f"{width}x{height}",
+        "-r",
+        rate,
+        "-i",
+        "-",
+    ]
+    if codec == "hevc-alpha":
+        # ``alpha_quality`` ranges 0.0..1.0; 0.75 is a good legibility/size
+        # tradeoff for sharp text on transparent. ``hvc1`` tag is what FCP
+        # / QuickTime expect; the default ``hev1`` works in ffmpeg but is
+        # rejected by some Apple importers. ``yuva420p`` is the only alpha
+        # pixel format ``hevc_videotoolbox`` accepts.
+        cmd += [
+            "-c:v",
+            "hevc_videotoolbox",
+            "-allow_sw",
+            "1",
+            "-alpha_quality",
+            "0.75",
+            "-pix_fmt",
+            "yuva420p",
+            "-tag:v",
+            "hvc1",
+            "-r",
+            rate,
+            str(output_path),
+        ]
+    else:  # prores-4444
+        cmd += [
+            "-c:v",
+            "prores_ks",
+            "-profile:v",
+            "4444",
+            "-pix_fmt",
+            "yuva444p10le",
+            "-r",
+            rate,
+            str(output_path),
+        ]
+    return cmd
+
+
 def render_overlay(
     *,
     audit_path: Path,
@@ -418,6 +589,9 @@ def render_overlay(
     font_path: Path | None = None,
     ffmpeg_binary: str = "ffmpeg",
     probe: VideoMetadata | None = None,
+    codec: OverlayCodec = "auto",
+    max_height: int | None = None,
+    max_fps: float | None = None,
 ) -> Path:
     """Render an alpha overlay MOV alongside a trimmed clip.
 
@@ -438,6 +612,13 @@ def render_overlay(
     ``probe``: optional pre-computed metadata. When given, ``ffprobe`` is
         skipped -- useful from tests and to share one probe across the
         export's other steps.
+    ``codec``: encoder preset; see :data:`OVERLAY_CODECS`. ``"auto"``
+        produces the smallest file the host can write without losing alpha.
+    ``max_height``: cap output height; aspect-preserving downscale. The
+        FCPXML emits a separate format element so FCP scales it back up
+        over the timeline.
+    ``max_fps``: cap output frame rate. Source rate is preserved when it
+        already fits under the cap.
 
     Returns the written ``output_path``.
     """
@@ -456,9 +637,14 @@ def render_overlay(
 
     if probe is None:
         probe = probe_video(trimmed_video_path)
-    width = probe.width
-    height = probe.height
-    fps = probe.frame_rate_num / probe.frame_rate_den
+
+    if shutil.which(ffmpeg_binary) is None:
+        raise OverlayRenderError(f"ffmpeg binary not found: {ffmpeg_binary}")
+
+    resolved_codec = _resolve_codec(codec, ffmpeg_binary)
+    width, height = _scaled_dimensions(probe.width, probe.height, max_height)
+    rate_num, rate_den = _capped_frame_rate(probe.frame_rate_num, probe.frame_rate_den, max_fps)
+    fps = rate_num / rate_den
     duration_seconds = probe.duration_seconds
 
     if template is None:
@@ -473,37 +659,17 @@ def render_overlay(
         duration_seconds=duration_seconds,
     )
 
-    if shutil.which(ffmpeg_binary) is None:
-        raise OverlayRenderError(f"ffmpeg binary not found: {ffmpeg_binary}")
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    rate = f"{probe.frame_rate_num}/{probe.frame_rate_den}"
-    cmd = [
-        ffmpeg_binary,
-        "-y",
-        "-loglevel",
-        "error",
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "rgba",
-        "-s",
-        f"{width}x{height}",
-        "-r",
-        rate,
-        "-i",
-        "-",
-        "-c:v",
-        "prores_ks",
-        "-profile:v",
-        "4444",
-        "-pix_fmt",
-        "yuva444p10le",
-        "-r",
-        rate,
-        str(output_path),
-    ]
+    rate = f"{rate_num}/{rate_den}"
+    cmd = _build_ffmpeg_cmd(
+        ffmpeg_binary=ffmpeg_binary,
+        codec=resolved_codec,
+        width=width,
+        height=height,
+        rate=rate,
+        output_path=output_path,
+    )
 
     proc = subprocess.Popen(
         cmd,

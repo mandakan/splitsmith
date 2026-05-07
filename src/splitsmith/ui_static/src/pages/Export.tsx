@@ -48,6 +48,7 @@ import {
   type Job,
   type MatchExportResult,
   type MatchProject,
+  type OverlayCodec,
   type SecondaryExportStatus,
   type StageAudit,
   type StageExportStatus,
@@ -495,6 +496,17 @@ function StageActions({
   // Overlay (issue #45) defaults off: render is slower than the other
   // writers and most users only want it once per stage.
   const [overlay, setOverlay] = useState(false);
+  // Overlay format knobs (issue #45 follow-up). Defaults match the
+  // server: ``"auto"`` codec with no resolution / fps cap. ``"source"``
+  // is a UI-only sentinel that maps to ``null`` on the wire so the
+  // renderer mirrors the trimmed clip frame-for-frame.
+  const [overlayCodec, setOverlayCodec] = useState<OverlayCodec>("auto");
+  const [overlayMaxHeight, setOverlayMaxHeight] = useState<number | "source">(
+    "source",
+  );
+  const [overlayMaxFps, setOverlayMaxFps] = useState<number | "source">(
+    "source",
+  );
   // Per-cam include/exclude (issue #54). Default-on when the cam is
   // shippable (has a beep + source reachable); resyncs whenever the row
   // refreshes from the overview so flipping a cam's role / detecting its
@@ -577,6 +589,10 @@ function StageActions({
         write_fcpxml: fcpxml,
         write_report: reportFlag,
         write_overlay: overlay,
+        overlay_codec: overlayCodec,
+        overlay_max_height:
+          overlayMaxHeight === "source" ? null : overlayMaxHeight,
+        overlay_max_fps: overlayMaxFps === "source" ? null : overlayMaxFps,
         ...(row.secondaries.length > 0
           ? { secondary_video_ids: Array.from(selectedCams) }
           : {}),
@@ -725,6 +741,18 @@ function StageActions({
         </Button>
       </div>
 
+      {overlay ? (
+        <OverlayFormatPanel
+          codec={overlayCodec}
+          onCodecChange={setOverlayCodec}
+          maxHeight={overlayMaxHeight}
+          onMaxHeightChange={setOverlayMaxHeight}
+          maxFps={overlayMaxFps}
+          onMaxFpsChange={setOverlayMaxFps}
+          disabled={busy}
+        />
+      ) : null}
+
       <SecondariesPanel
         secondaries={row.secondaries}
         selected={selectedCams}
@@ -757,6 +785,104 @@ function StageActions({
     </div>
   );
 }
+
+function OverlayFormatPanel({
+  codec,
+  onCodecChange,
+  maxHeight,
+  onMaxHeightChange,
+  maxFps,
+  onMaxFpsChange,
+  disabled,
+}: {
+  codec: OverlayCodec;
+  onCodecChange: (next: OverlayCodec) => void;
+  maxHeight: number | "source";
+  onMaxHeightChange: (next: number | "source") => void;
+  maxFps: number | "source";
+  onMaxFpsChange: (next: number | "source") => void;
+  disabled: boolean;
+}) {
+  // Width / fps presets cover the common deltas a head-cam + FCP timeline
+  // sees in practice (1080p / 720p, 30 / 24 fps); the source-matching
+  // option preserves frame-for-frame parity for users who don't want any
+  // scaling on the FCP timeline.
+  const heightOptions: { value: number | "source"; label: string }[] = [
+    { value: "source", label: "Match source" },
+    { value: 1080, label: "1080p" },
+    { value: 720, label: "720p" },
+  ];
+  const fpsOptions: { value: number | "source"; label: string }[] = [
+    { value: "source", label: "Match source" },
+    { value: 30, label: "30 fps" },
+    { value: 24, label: "24 fps" },
+  ];
+  return (
+    <div className="space-y-2 rounded-md border border-border/60 bg-muted/10 p-2 text-xs">
+      <div className="px-1 font-medium text-muted-foreground">
+        Overlay format
+        <span className="ml-1 text-[11px]">
+          -- Auto picks HEVC w/ alpha on macOS (~10-20x smaller than ProRes
+          4444); caps tell FCP to scale a smaller overlay across the timeline
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Codec</span>
+          <select
+            className="rounded-md border border-border/60 bg-background px-2 py-1"
+            value={codec}
+            disabled={disabled}
+            onChange={(e) => onCodecChange(e.target.value as OverlayCodec)}
+          >
+            <option value="auto">Auto (recommended)</option>
+            <option value="hevc-alpha">HEVC w/ alpha (smallest, macOS)</option>
+            <option value="prores-4444">ProRes 4444 (largest, archival)</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Max height</span>
+          <select
+            className="rounded-md border border-border/60 bg-background px-2 py-1"
+            value={maxHeight === "source" ? "source" : String(maxHeight)}
+            disabled={disabled}
+            onChange={(e) =>
+              onMaxHeightChange(
+                e.target.value === "source" ? "source" : Number(e.target.value),
+              )
+            }
+          >
+            {heightOptions.map((o) => (
+              <option key={String(o.value)} value={String(o.value)}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Max fps</span>
+          <select
+            className="rounded-md border border-border/60 bg-background px-2 py-1"
+            value={maxFps === "source" ? "source" : String(maxFps)}
+            disabled={disabled}
+            onChange={(e) =>
+              onMaxFpsChange(
+                e.target.value === "source" ? "source" : Number(e.target.value),
+              )
+            }
+          >
+            {fpsOptions.map((o) => (
+              <option key={String(o.value)} value={String(o.value)}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
 
 function SecondariesPanel({
   secondaries,
@@ -1072,10 +1198,20 @@ function MatchExportDialog({
   const [headPad, setHeadPad] = useState<number>(PADDING_PRESETS.full.head);
   const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
   const [includeSecondaries, setIncludeSecondaries] = useState(true);
-  // Overlay defaults off because the per-frame PIL + ffmpeg ProRes 4444
-  // render is the slowest writer; opt in per export. Mirrors the per-
-  // stage Generate's default.
+  // Overlay defaults off because the per-frame PIL + ffmpeg render is the
+  // slowest writer; opt in per export. Mirrors the per-stage Generate's
+  // default.
   const [includeOverlay, setIncludeOverlay] = useState(false);
+  // Match-level overlay format. Mirrors the per-stage controls: any non-
+  // default value forces a re-render even if a stale overlay sits on
+  // disk, so the user's choice here actually applies.
+  const [overlayCodec, setOverlayCodec] = useState<OverlayCodec>("auto");
+  const [overlayMaxHeight, setOverlayMaxHeight] = useState<number | "source">(
+    "source",
+  );
+  const [overlayMaxFps, setOverlayMaxFps] = useState<number | "source">(
+    "source",
+  );
   const [projectName, setProjectName] = useState(defaultProjectName);
   const [job, setJob] = useState<Job | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
@@ -1113,6 +1249,10 @@ function MatchExportDialog({
         tail_pad_seconds: tailPad,
         include_secondaries: includeSecondaries,
         include_overlay: includeOverlay,
+        overlay_codec: overlayCodec,
+        overlay_max_height:
+          overlayMaxHeight === "source" ? null : overlayMaxHeight,
+        overlay_max_fps: overlayMaxFps === "source" ? null : overlayMaxFps,
         project_name: projectName,
       });
       setJob(submitted);
@@ -1304,6 +1444,17 @@ function MatchExportDialog({
                 Include overlay (when present)
               </label>
             </div>
+            {includeOverlay ? (
+              <OverlayFormatPanel
+                codec={overlayCodec}
+                onCodecChange={setOverlayCodec}
+                maxHeight={overlayMaxHeight}
+                onMaxHeightChange={setOverlayMaxHeight}
+                maxFps={overlayMaxFps}
+                onMaxFpsChange={setOverlayMaxFps}
+                disabled={busy}
+              />
+            ) : null}
           </section>
 
           <section className="space-y-1">

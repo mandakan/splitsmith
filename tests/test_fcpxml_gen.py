@@ -327,6 +327,78 @@ def test_generate_fcpxml_omits_overlay_clip_when_file_missing(tmp_path: Path) ->
     assert nested == []
 
 
+def test_generate_fcpxml_overlay_at_source_geometry_reuses_format(tmp_path: Path) -> None:
+    """Overlay metadata matching the primary -> no extra ``<format>``
+    element. The overlay's ``asset`` reuses the timeline format ID, so
+    the XML stays byte-comparable with the pre-cap output."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    overlay = tmp_path / "v_overlay.mov"
+    overlay.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        overlay_path=overlay,
+        overlay_video=_meta_30fps(),  # explicit but identical to primary
+    )
+    root = ET.fromstring(out.read_bytes())
+    formats = root.findall("./resources/format")
+    assert len(formats) == 1
+    assets = root.findall("./resources/asset")
+    overlay_asset = assets[1]
+    # Reuses format_id ("r1") since geometry matches.
+    assert overlay_asset.attrib["format"] == formats[0].attrib["id"]
+
+
+def test_generate_fcpxml_overlay_with_smaller_height_emits_dedicated_format(
+    tmp_path: Path,
+) -> None:
+    """Overlay rendered at a capped height -> a second ``<format>``
+    element with the overlay's true geometry, and the overlay asset
+    references that format. FCP relies on this to scale the smaller
+    overlay across the timeline at default ``spatialConform="fit"``."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    overlay = tmp_path / "v_overlay.mov"
+    overlay.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    overlay_meta = VideoMetadata(
+        width=1280,
+        height=720,
+        duration_seconds=20.0,
+        frame_rate_num=30,
+        frame_rate_den=1,
+    )
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),  # 1920x1080
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        overlay_path=overlay,
+        overlay_video=overlay_meta,
+    )
+    root = ET.fromstring(out.read_bytes())
+    formats = root.findall("./resources/format")
+    assert len(formats) == 2
+    primary_fmt, overlay_fmt = formats
+    assert primary_fmt.attrib["width"] == "1920"
+    assert primary_fmt.attrib["height"] == "1080"
+    assert overlay_fmt.attrib["width"] == "1280"
+    assert overlay_fmt.attrib["height"] == "720"
+    assets = root.findall("./resources/asset")
+    overlay_asset = assets[1]
+    assert overlay_asset.attrib["format"] == overlay_fmt.attrib["id"]
+
+
 def test_generate_fcpxml_inserts_overlay_as_lane_1_connected_clip(tmp_path: Path) -> None:
     """Overlay file present -> a second asset is registered and a lane=1
     connected ``asset-clip`` lives inside the V1 spine clip on V2."""
