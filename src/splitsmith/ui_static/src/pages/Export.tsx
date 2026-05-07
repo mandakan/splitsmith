@@ -113,9 +113,11 @@ export function Export() {
   }, [reload]);
 
   // A stage is eligible for the match export once its audit is complete
-  // (primary + beep + shots). The match-export endpoint queues a job that
-  // re-runs any missing per-stage trim before stitching, so we don't need
-  // ``has_exports`` here -- "ready" is enough.
+  // (primary + beep + shots) AND its source video is reachable -- the
+  // worker may need to (re-)trim, which requires the source on disk.
+  // We exclude unreachable stages here rather than letting the endpoint
+  // 424 on submit; the row's StatusBadge already flags "Source missing"
+  // so the user can see why a stage is greyed out.
   //
   // All match-export hooks live ABOVE the early-return below so the hook
   // order is stable across the loading -> loaded transition (React rules
@@ -123,7 +125,12 @@ export function Export() {
   const matchEligibleStageNumbers = useMemo(
     () =>
       (overview?.stages ?? [])
-        .filter((s) => !s.skipped && s.ready_to_export)
+        .filter(
+          (s) =>
+            !s.skipped &&
+            s.ready_to_export &&
+            s.source_reachable !== false,
+        )
         .map((s) => s.stage_number),
     [overview],
   );
@@ -354,7 +361,6 @@ export function Export() {
             setMatchDialogOpen(false);
             setMatchResult(result);
           }}
-          onError={setError}
         />
       ) : null}
     </div>
@@ -393,7 +399,9 @@ function StageRow({
               title={
                 matchEligible
                   ? "Include this stage in a match export (any missing trim is produced automatically)"
-                  : "Finish the audit first -- shot detection must produce at least one shot"
+                  : row.source_reachable === false
+                    ? "Source video is not reachable -- reconnect external storage or re-link on Ingest"
+                    : "Finish the audit first -- shot detection must produce at least one shot"
               }
               onClick={(e) => e.stopPropagation()}
               onChange={(e) =>
@@ -1049,7 +1057,6 @@ function MatchExportDialog({
   stages,
   onCancel,
   onSuccess,
-  onError,
 }: {
   stageNumbers: number[];
   headPadCap: number;
@@ -1058,7 +1065,6 @@ function MatchExportDialog({
   stages: StageExportStatus[];
   onCancel: () => void;
   onSuccess: (result: MatchExportResult) => void;
-  onError: (msg: string | null) => void;
 }) {
   // Default to "Full" -- mirrors the per-stage export's defaults so the
   // user has to opt in to a tighter cut.
@@ -1072,6 +1078,7 @@ function MatchExportDialog({
   const [includeOverlay, setIncludeOverlay] = useState(false);
   const [projectName, setProjectName] = useState(defaultProjectName);
   const [job, setJob] = useState<Job | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   const busy = job?.status === "pending" || job?.status === "running";
 
   const choosePreset = (next: PaddingPreset) => {
@@ -1094,7 +1101,11 @@ function MatchExportDialog({
     .some((s) => s.secondaries.length > 0);
 
   const submit = async () => {
-    onError(null);
+    // Errors during submit live inline in the dialog so the user sees
+    // them in context. Page-level ``onError`` is reserved for failures
+    // that occur after the dialog has closed (or that the user explicitly
+    // dismisses by closing the dialog).
+    setDialogError(null);
     try {
       const submitted = await api.exportMatch({
         stage_numbers: stageNumbers,
@@ -1107,11 +1118,11 @@ function MatchExportDialog({
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "failed") {
-        onError(final.error ?? "Match export failed");
+        setDialogError(final.error ?? "Match export failed");
         return;
       }
       if (final.status === "cancelled") {
-        onError("Match export cancelled");
+        setDialogError("Match export cancelled");
         return;
       }
       const result = final.result as
@@ -1123,18 +1134,16 @@ function MatchExportDialog({
           }
         | null;
       if (!result) {
-        onError("Match export finished without a result payload");
+        setDialogError("Match export finished without a result payload");
         return;
       }
       onSuccess(result);
     } catch (e) {
-      // Source-unreachable comes back as a structured 424 from the
-      // pre-flight check; surface its message verbatim.
       const unreachable = asSourceUnreachable(e);
       if (unreachable) {
-        onError(unreachable.message);
+        setDialogError(unreachable.message);
       } else {
-        onError(
+        setDialogError(
           e instanceof ApiError
             ? `Match export failed: ${e.detail}`
             : e instanceof Error
@@ -1314,7 +1323,7 @@ function MatchExportDialog({
             </p>
           </section>
 
-          {job ? (
+          {job && !dialogError ? (
             <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs">
               <div className="flex items-center gap-2 font-medium">
                 {busy ? (
@@ -1330,6 +1339,16 @@ function MatchExportDialog({
                   />
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {dialogError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+              <div className="mb-1 flex items-center gap-1 font-medium text-destructive">
+                <AlertCircle className="size-3.5" />
+                Match export failed
+              </div>
+              <p className="text-muted-foreground">{dialogError}</p>
             </div>
           ) : null}
 
