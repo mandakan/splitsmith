@@ -493,6 +493,10 @@ export interface MatchExportRequestPayload {
   /** Defaults to the bound project's name. Slugified for the output
    *  filename: ``<slug>-match.fcpxml``. */
   project_name?: string | null;
+  /** Issue #193. ``"stacked"`` keeps secondaries full-frame on V2/V3/...
+   *  ``"pip-corners"`` adds an FCPXML adjust-transform so each cam lands
+   *  in a rotating corner (TR -> TL -> BR -> BL) at 25% scale. */
+  pip_layout?: "stacked" | "pip-corners";
 }
 
 export interface MatchExportResult {

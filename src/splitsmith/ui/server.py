@@ -939,6 +939,10 @@ class MatchExportRequest(BaseModel):
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
     project_name: str | None = None
+    # Issue #193. ``"stacked"`` keeps secondaries full-frame (today's
+    # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
+    # secondary, rotating through TR -> TL -> BR -> BL at 25% scale.
+    pip_layout: Literal["stacked", "pip-corners"] = "stacked"
 
 
 class RevealRequest(BaseModel):
@@ -4586,6 +4590,7 @@ def create_app(
             include_secondaries=req.include_secondaries,
             include_overlay=req.include_overlay,
             project_name=project_name,
+            pip_layout=req.pip_layout,
         )
         try:
             result = match_export_helpers.export_match(

@@ -1134,6 +1134,248 @@ def test_match_fcpxml_raises_when_pads_collapse_duration(tmp_path: Path) -> None
 # --- probe_video -----------------------------------------------------------
 
 
+# --- PiP for secondary cams (issue #193) ----------------------------------
+
+
+def _expected_pip_attrs(
+    *,
+    seq_w: int,
+    seq_h: int,
+    scale: float,
+    margin_pct: float,
+    corner: str,
+) -> dict[str, str]:
+    half_w = seq_w / 2.0
+    half_h = seq_h / 2.0
+    clip_half_w = half_w * scale
+    clip_half_h = half_h * scale
+    margin_x = seq_w * (margin_pct / 100.0)
+    margin_y = seq_h * (margin_pct / 100.0)
+    if corner in ("top-right", "bottom-right"):
+        x = half_w - clip_half_w - margin_x
+    else:
+        x = -(half_w - clip_half_w - margin_x)
+    if corner in ("top-right", "top-left"):
+        y = half_h - clip_half_h - margin_y
+    else:
+        y = -(half_h - clip_half_h - margin_y)
+    return {"scale": f"{scale:g} {scale:g}", "position": f"{x:g} {y:g}"}
+
+
+def test_secondary_without_pip_emits_no_transform(tmp_path: Path) -> None:
+    """Default behaviour unchanged: a SecondaryClip with ``pip=None`` lands
+    full-frame on its lane, no ``<adjust-transform>``."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "cam.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_30fps(),
+                beep_offset_seconds=5.0,
+                label="Cam",
+            )
+        ],
+    )
+    cam_clip = ET.fromstring(out.read_bytes()).find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    assert cam_clip.find("adjust-transform") is None
+
+
+@pytest.mark.parametrize(
+    "corner",
+    ["top-right", "top-left", "bottom-right", "bottom-left"],
+)
+def test_secondary_with_pip_emits_corner_transform(corner: str, tmp_path: Path) -> None:
+    """``pip`` set -> ``<adjust-transform>`` as the cam clip's first child,
+    with scale + position computed from the sequence dims and corner."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "cam.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_30fps(),
+                beep_offset_seconds=5.0,
+                label="Cam",
+                pip=fcpxml_mod.PipPlacement(corner=corner),  # type: ignore[arg-type]
+            )
+        ],
+    )
+    cam_clip = ET.fromstring(out.read_bytes()).find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    transform = cam_clip.find("adjust-transform")
+    assert transform is not None
+    assert list(cam_clip)[0] is transform  # transform must precede markers / nested clips
+    expected = _expected_pip_attrs(
+        seq_w=1920, seq_h=1080, scale=0.25, margin_pct=2.0, corner=corner
+    )
+    assert transform.attrib == expected
+
+
+def test_pip_position_scales_with_sequence_dimensions(tmp_path: Path) -> None:
+    """At a 4K sequence with ``scale=0.25, margin_pct=2.0`` the absolute
+    pixel position is twice the 1080p value -- the clip stays anchored to
+    the same fractional corner regardless of resolution."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "cam.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_2997(),  # 3840x2160
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_2997(),
+                beep_offset_seconds=5.0,
+                label="Cam",
+                pip=fcpxml_mod.PipPlacement(corner="top-right"),
+            )
+        ],
+    )
+    transform = ET.fromstring(out.read_bytes()).find(
+        ".//spine/asset-clip/asset-clip/adjust-transform"
+    )
+    assert transform is not None
+    expected = _expected_pip_attrs(
+        seq_w=3840, seq_h=2160, scale=0.25, margin_pct=2.0, corner="top-right"
+    )
+    assert transform.attrib == expected
+
+
+def test_apply_pip_corner_cycle_assigns_rotating_corners() -> None:
+    """Multiple cams without explicit pip get TR -> TL -> BR -> BL when
+    ``apply_pip_corner_cycle`` is asked to inject a default."""
+    secs = tuple(
+        fcpxml_mod.SecondaryClip(
+            video_path=Path(f"cam{i}.mp4"),
+            video=_meta_30fps(),
+            beep_offset_seconds=5.0,
+            label=f"Cam {i}",
+        )
+        for i in range(4)
+    )
+    laid_out = fcpxml_mod.apply_pip_corner_cycle(
+        secs, default=fcpxml_mod.PipPlacement(scale=0.3, margin_pct=1.5)
+    )
+    corners = [s.pip.corner for s in laid_out]  # type: ignore[union-attr]
+    assert corners == ["top-right", "top-left", "bottom-right", "bottom-left"]
+    # Default scale / margin propagate; corner is the only override.
+    for s in laid_out:
+        assert s.pip is not None
+        assert s.pip.scale == 0.3
+        assert s.pip.margin_pct == 1.5
+
+
+def test_apply_pip_corner_cycle_preserves_explicit() -> None:
+    """A cam that already carries an explicit ``pip`` keeps it; cams without
+    one rotate through the remaining corners in input order."""
+    explicit = fcpxml_mod.SecondaryClip(
+        video_path=Path("cam_main.mp4"),
+        video=_meta_30fps(),
+        beep_offset_seconds=5.0,
+        label="Main cam",
+        pip=fcpxml_mod.PipPlacement(corner="bottom-left", scale=0.4),
+    )
+    auto = fcpxml_mod.SecondaryClip(
+        video_path=Path("cam_aux.mp4"),
+        video=_meta_30fps(),
+        beep_offset_seconds=5.0,
+        label="Aux cam",
+    )
+    laid_out = fcpxml_mod.apply_pip_corner_cycle(
+        (explicit, auto), default=fcpxml_mod.PipPlacement()
+    )
+    assert laid_out[0] is explicit  # untouched
+    assert laid_out[1].pip is not None
+    assert laid_out[1].pip.corner == "top-right"  # cycle starts at TR
+
+
+def test_apply_pip_corner_cycle_default_none_is_noop() -> None:
+    """Without a default, cams that lack ``pip`` stay as-is -- this is the
+    "stacked full-frame" path used by today's exports."""
+    sec = fcpxml_mod.SecondaryClip(
+        video_path=Path("cam.mp4"),
+        video=_meta_30fps(),
+        beep_offset_seconds=5.0,
+        label="Cam",
+    )
+    laid_out = fcpxml_mod.apply_pip_corner_cycle((sec,), default=None)
+    assert laid_out == (sec,)
+
+
+def test_match_fcpxml_secondary_pip_uses_sequence_dims(tmp_path: Path) -> None:
+    """In the stitched composer the sequence format comes from stage 0, so
+    every PiP transform must compute against the *base* dims even when a
+    later stage's primary has a different intrinsic size."""
+    primary = _make_video(tmp_path, "primary.mp4")
+    secondary = _make_video(tmp_path, "secondary.mp4")
+    out = tmp_path / "match.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="s1",
+                video_path=primary,
+                video=_meta_30fps(),  # 1920x1080
+                shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=5.0,
+                secondaries=(
+                    fcpxml_mod.SecondaryClip(
+                        video_path=secondary,
+                        video=_meta_30fps(),
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                        pip=fcpxml_mod.PipPlacement(corner="top-right"),
+                    ),
+                ),
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    transform = ET.fromstring(out.read_bytes()).find(
+        ".//spine/asset-clip/asset-clip/adjust-transform"
+    )
+    assert transform is not None
+    expected = _expected_pip_attrs(
+        seq_w=1920, seq_h=1080, scale=0.25, margin_pct=2.0, corner="top-right"
+    )
+    assert transform.attrib == expected
+
+
+# --- probe_video -----------------------------------------------------------
+
+
 @pytest.mark.integration
 def test_probe_video_against_real_fixture(fixtures_dir: Path) -> None:
     src = fixtures_dir / "stage_sample.mp4"
