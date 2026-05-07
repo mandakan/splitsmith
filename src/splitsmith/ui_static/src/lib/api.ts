@@ -453,6 +453,34 @@ export interface ExportStageResult {
   anomalies: string[];
 }
 
+/** Match-level stitched-FCPXML export (issue #171). The selected stages
+ *  must already have a lossless trim + audit shots; the match export
+ *  composes from those without re-encoding. */
+export interface MatchExportRequestPayload {
+  stage_numbers: number[];
+  /** Seconds of footage kept before the beep in each stage. Clamped
+   *  server-side to the project's pre-buffer (default 5.0). */
+  head_pad_seconds?: number;
+  /** Seconds of footage kept after the final shot in each stage.
+   *  Clamped server-side to the project's post-buffer. */
+  tail_pad_seconds?: number;
+  include_secondaries?: boolean;
+  include_overlay?: boolean;
+  /** Defaults to the bound project's name. Slugified for the output
+   *  filename: ``<slug>-match.fcpxml``. */
+  project_name?: string | null;
+}
+
+export interface MatchExportResult {
+  fcpxml_path: string;
+  stage_count: number;
+  duration_seconds: number;
+  /** Soft-failure messages (missing cam trim, ffprobe drop on a cam,
+   *  missing overlay). The export still wrote the FCPXML; these are
+   *  surfaced so the SPA can show "exported with warnings". */
+  anomalies: string[];
+}
+
 export interface RemovalPlan {
   video_path: string;
   raw_link_path: string;
@@ -1323,6 +1351,26 @@ export const api = {
         // caller can explicitly exclude all secondaries.
         ...(opts.secondary_video_ids !== undefined
           ? { secondary_video_ids: opts.secondary_video_ids }
+          : {}),
+      },
+    }),
+
+  /** Stitch N stages into one FCPXML (issue #171). Synchronous: the
+   *  composer runs in-process (just XML + a few ffprobes) and the response
+   *  carries the output path + total duration directly -- no JobHandle
+   *  poll. Stages must be pre-exported (lossless trim + audit shots);
+   *  400s otherwise with a per-stage message. */
+  exportMatch: (payload: MatchExportRequestPayload) =>
+    request<MatchExportResult>("/api/match/export", {
+      method: "POST",
+      json: {
+        stage_numbers: payload.stage_numbers,
+        head_pad_seconds: payload.head_pad_seconds ?? 5.0,
+        tail_pad_seconds: payload.tail_pad_seconds ?? 5.0,
+        include_secondaries: payload.include_secondaries ?? true,
+        include_overlay: payload.include_overlay ?? true,
+        ...(payload.project_name !== undefined
+          ? { project_name: payload.project_name }
           : {}),
       },
     }),
