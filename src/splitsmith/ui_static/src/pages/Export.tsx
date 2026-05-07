@@ -112,10 +112,10 @@ export function Export() {
     void reload();
   }, [reload]);
 
-  // A stage is eligible for the match export when the per-stage exporter
-  // already produced its lossless trim + the audit has shots. We use the
-  // overview's ``has_exports`` proxy for that since it lights up only after
-  // a successful Generate.
+  // A stage is eligible for the match export once its audit is complete
+  // (primary + beep + shots). The match-export endpoint queues a job that
+  // re-runs any missing per-stage trim before stitching, so we don't need
+  // ``has_exports`` here -- "ready" is enough.
   //
   // All match-export hooks live ABOVE the early-return below so the hook
   // order is stable across the loading -> loaded transition (React rules
@@ -123,7 +123,7 @@ export function Export() {
   const matchEligibleStageNumbers = useMemo(
     () =>
       (overview?.stages ?? [])
-        .filter((s) => !s.skipped && s.has_exports && s.ready_to_export)
+        .filter((s) => !s.skipped && s.ready_to_export)
         .map((s) => s.stage_number),
     [overview],
   );
@@ -230,20 +230,33 @@ export function Export() {
         </CardHeader>
       </Card>
 
-      {selectedForMatch.size > 0 ? (
+      {matchEligibleStageNumbers.length > 0 ? (
         <div className="sticky top-0 z-10 -mx-4 border-b border-border/60 bg-background/95 px-4 py-2 backdrop-blur">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <div>
-              <strong>{selectedForMatch.size}</strong> stage
-              {selectedForMatch.size === 1 ? "" : "s"} selected for match export
-              {selectedForMatch.size === 1
-                ? " -- pick at least one more to enable Export match."
-                : ""}
+              <strong>{selectedForMatch.size}</strong> of{" "}
+              {matchEligibleStageNumbers.length} eligible stage
+              {matchEligibleStageNumbers.length === 1 ? "" : "s"} selected
+              {selectedForMatch.size === 0 ? " -- pick stages to stitch" : ""}
             </div>
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
+                variant="outline"
+                disabled={
+                  selectedForMatch.size === matchEligibleStageNumbers.length
+                }
+                onClick={() =>
+                  setSelectedForMatch(new Set(matchEligibleStageNumbers))
+                }
+                title="Select every audited stage"
+              >
+                Select all
+              </Button>
+              <Button
+                size="sm"
                 variant="ghost"
+                disabled={selectedForMatch.size === 0}
                 onClick={() => setSelectedForMatch(new Set())}
               >
                 Clear
@@ -254,8 +267,8 @@ export function Export() {
                 onClick={() => setMatchDialogOpen(true)}
                 title={
                   selectedForMatch.size >= 2
-                    ? "Stitch the selected stages into one FCPXML"
-                    : "Select 2+ exported stages to enable"
+                    ? "Stitch the selected stages into one FCPXML (auto-runs missing per-stage trims)"
+                    : "Select 2+ stages to enable"
                 }
               >
                 <Film className="size-4" />
@@ -379,8 +392,8 @@ function StageRow({
               disabled={!matchEligible}
               title={
                 matchEligible
-                  ? "Include this stage in a match export"
-                  : "Run the per-stage export first to enable match selection"
+                  ? "Include this stage in a match export (any missing trim is produced automatically)"
+                  : "Finish the audit first -- shot detection must produce at least one shot"
               }
               onClick={(e) => e.stopPropagation()}
               onChange={(e) =>
@@ -1053,9 +1066,13 @@ function MatchExportDialog({
   const [headPad, setHeadPad] = useState<number>(PADDING_PRESETS.full.head);
   const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
   const [includeSecondaries, setIncludeSecondaries] = useState(true);
-  const [includeOverlay, setIncludeOverlay] = useState(true);
+  // Overlay defaults off because the per-frame PIL + ffmpeg ProRes 4444
+  // render is the slowest writer; opt in per export. Mirrors the per-
+  // stage Generate's default.
+  const [includeOverlay, setIncludeOverlay] = useState(false);
   const [projectName, setProjectName] = useState(defaultProjectName);
-  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const busy = job?.status === "pending" || job?.status === "running";
 
   const choosePreset = (next: PaddingPreset) => {
     setPreset(next);
@@ -1078,9 +1095,8 @@ function MatchExportDialog({
 
   const submit = async () => {
     onError(null);
-    setBusy(true);
     try {
-      const result = await api.exportMatch({
+      const submitted = await api.exportMatch({
         stage_numbers: stageNumbers,
         head_pad_seconds: headPad,
         tail_pad_seconds: tailPad,
@@ -1088,17 +1104,44 @@ function MatchExportDialog({
         include_overlay: includeOverlay,
         project_name: projectName,
       });
+      setJob(submitted);
+      const final = await api.pollJob(submitted.id, setJob);
+      if (final.status === "failed") {
+        onError(final.error ?? "Match export failed");
+        return;
+      }
+      if (final.status === "cancelled") {
+        onError("Match export cancelled");
+        return;
+      }
+      const result = final.result as
+        | {
+            fcpxml_path: string;
+            stage_count: number;
+            duration_seconds: number;
+            anomalies: string[];
+          }
+        | null;
+      if (!result) {
+        onError("Match export finished without a result payload");
+        return;
+      }
       onSuccess(result);
     } catch (e) {
-      onError(
-        e instanceof ApiError
-          ? `Match export failed: ${e.detail}`
-          : e instanceof Error
-            ? e.message
-            : String(e),
-      );
-    } finally {
-      setBusy(false);
+      // Source-unreachable comes back as a structured 424 from the
+      // pre-flight check; surface its message verbatim.
+      const unreachable = asSourceUnreachable(e);
+      if (unreachable) {
+        onError(unreachable.message);
+      } else {
+        onError(
+          e instanceof ApiError
+            ? `Match export failed: ${e.detail}`
+            : e instanceof Error
+              ? e.message
+              : String(e),
+        );
+      }
     }
   };
 
@@ -1270,6 +1313,25 @@ function MatchExportDialog({
               Re-running overwrites.
             </p>
           </section>
+
+          {job ? (
+            <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 font-medium">
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : null}
+                {job.message ?? "Running..."}
+              </div>
+              {job.progress != null ? (
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full bg-primary transition-[width]"
+                    style={{ width: `${Math.round(job.progress * 100)}%` }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
             <Button variant="ghost" disabled={busy} onClick={onCancel}>

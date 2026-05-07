@@ -45,6 +45,8 @@ const KIND_LABEL: Record<string, string> = {
   detect_beep: "Detect beep",
   trim: "Trim audit clip",
   shot_detect: "Detect shots",
+  export: "Export stage",
+  match_export: "Match export",
 };
 
 function formatKind(kind: string): string {

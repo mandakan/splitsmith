@@ -122,6 +122,13 @@ class Job(BaseModel):
     # evicting acknowledged failures so the user's dismissed errors roll
     # off faster than the ones they haven't seen yet.
     acknowledged: bool = False
+    # Optional structured result payload set by the worker via
+    # :meth:`JobHandle.set_result`. Reserved for jobs whose successful
+    # output is meaningful to the SPA (e.g. match-export emits the FCPXML
+    # path, total duration, and per-stage anomalies). The schema is per-
+    # kind: the SPA branches on ``Job.kind`` to interpret the dict. Stays
+    # ``None`` for jobs that signal success solely by writing files.
+    result: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None
@@ -158,6 +165,15 @@ class JobHandle:
             kwargs["message"] = message
         if kwargs:
             self._registry._patch(self._job_id, **kwargs)
+
+    def set_result(self, payload: dict[str, Any]) -> None:
+        """Stash a structured result on the Job snapshot.
+
+        The SPA reads ``Job.result`` after the job succeeds; the schema is
+        per-kind. Workers that complete by writing files (trim, export,
+        shot-detect) typically don't need this.
+        """
+        self._registry._patch(self._job_id, result=payload)
 
     def is_cancel_requested(self) -> bool:
         """True once the SPA POSTed ``/api/jobs/{id}/cancel`` for this job.

@@ -723,6 +723,13 @@ export interface Job {
    *  and the registry rolls acknowledged failures off faster than
    *  unacknowledged ones. */
   acknowledged: boolean;
+  /** Optional structured result payload set by the worker. Present on
+   *  successful jobs whose output is meaningful to the SPA -- e.g.
+   *  match-export emits ``{ fcpxml_path, stage_count, duration_seconds,
+   *  anomalies }``. The schema is per-kind: branch on ``Job.kind`` to
+   *  interpret. ``null`` for jobs that signal success only by writing
+   *  files. */
+  result: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -1355,13 +1362,14 @@ export const api = {
       },
     }),
 
-  /** Stitch N stages into one FCPXML (issue #171). Synchronous: the
-   *  composer runs in-process (just XML + a few ffprobes) and the response
-   *  carries the output path + total duration directly -- no JobHandle
-   *  poll. Stages must be pre-exported (lossless trim + audit shots);
-   *  400s otherwise with a per-stage message. */
+  /** Stitch N stages into one FCPXML (issue #171, #172). Job-queued: the
+   *  worker re-runs any missing per-stage exports (trim + optional
+   *  overlay) before stitching, so a fresh project goes from "audit done"
+   *  to "match FCPXML on disk" in one click. Returns a Job snapshot;
+   *  poll via {@link api.pollJob} until terminal, then read the
+   *  {@link MatchExportResult} from ``Job.result``. */
   exportMatch: (payload: MatchExportRequestPayload) =>
-    request<MatchExportResult>("/api/match/export", {
+    request<Job>("/api/match/export", {
       method: "POST",
       json: {
         stage_numbers: payload.stage_numbers,
