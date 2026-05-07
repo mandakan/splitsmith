@@ -59,6 +59,36 @@ class PipPlacement:
     scale: float = 0.25
     margin_pct: float = 2.0
 
+    def resolve(
+        self,
+        *,
+        sequence_width: int,
+        sequence_height: int,
+    ) -> tuple[float, tuple[float, float]]:
+        """Resolve to ``(scale, (x, y))`` in sequence-centre pixel space.
+
+        Position is in pixels relative to the sequence centre with +Y up
+        -- the same coordinate system FCPXML's ``<adjust-transform>``
+        uses. ``composition.Transform`` (#194) and the FCPXML emitter
+        both consume this resolved form so the corner / margin_pct
+        abstraction stays in one place.
+        """
+        half_w = sequence_width / 2.0
+        half_h = sequence_height / 2.0
+        clip_half_w = half_w * self.scale
+        clip_half_h = half_h * self.scale
+        margin_x = sequence_width * (self.margin_pct / 100.0)
+        margin_y = sequence_height * (self.margin_pct / 100.0)
+        if self.corner in ("top-right", "bottom-right"):
+            x = half_w - clip_half_w - margin_x
+        else:
+            x = -(half_w - clip_half_w - margin_x)
+        if self.corner in ("top-right", "top-left"):
+            y = half_h - clip_half_h - margin_y
+        else:
+            y = -(half_h - clip_half_h - margin_y)
+        return self.scale, (x, y)
+
 
 @dataclass(frozen=True)
 class SecondaryClip:
@@ -114,31 +144,10 @@ def _pip_transform_attrs(
     sequence_width: int,
     sequence_height: int,
 ) -> dict[str, str]:
-    """Compute ``<adjust-transform>`` attribute values for ``pip``.
-
-    FCPXML position is in pixels relative to the sequence centre with +Y
-    up. For a clip scaled by ``S``, half-extents are ``halfW*S`` /
-    ``halfH*S``; the corner placement keeps ``margin_pct`` of the sequence
-    width/height between the clip edge and the sequence edge.
-    """
-    half_w = sequence_width / 2.0
-    half_h = sequence_height / 2.0
-    clip_half_w = half_w * pip.scale
-    clip_half_h = half_h * pip.scale
-    margin_x = sequence_width * (pip.margin_pct / 100.0)
-    margin_y = sequence_height * (pip.margin_pct / 100.0)
-
-    if pip.corner in ("top-right", "bottom-right"):
-        x = half_w - clip_half_w - margin_x
-    else:
-        x = -(half_w - clip_half_w - margin_x)
-    if pip.corner in ("top-right", "top-left"):
-        y = half_h - clip_half_h - margin_y
-    else:
-        y = -(half_h - clip_half_h - margin_y)
-
+    """Format ``<adjust-transform>`` attributes for ``pip`` in this sequence."""
+    scale, (x, y) = pip.resolve(sequence_width=sequence_width, sequence_height=sequence_height)
     return {
-        "scale": f"{pip.scale:g} {pip.scale:g}",
+        "scale": f"{scale:g} {scale:g}",
         "position": f"{x:g} {y:g}",
     }
 
