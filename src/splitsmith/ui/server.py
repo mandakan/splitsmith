@@ -592,12 +592,20 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
     Test code monkeypatches this function (and
     ``ensemble_module.detect_shots_ensemble``) to avoid pulling the heavy
     model weights into the test process.
+
+    Voter E (issue #183) adds a CLIP image-encoder load on top of the
+    existing CLAP/PANN/GBDT models. Skip it unless the operator has
+    opted in via ``SPLITSMITH_ENABLE_VOTER_E=1`` so the default install
+    doesn't pay ~600 MB of memory and the first-call download.
     """
     global _ENSEMBLE_RUNTIME
     if _ENSEMBLE_RUNTIME is None:
         with _ENSEMBLE_RUNTIME_LOCK:
             if _ENSEMBLE_RUNTIME is None:
-                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime()
+                with_voter_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
+                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(
+                    with_voter_e=with_voter_e
+                )
     return _ENSEMBLE_RUNTIME
 
 
@@ -2344,6 +2352,12 @@ def create_app(
         # is set, look up handheld vs. headcam thresholds; otherwise
         # the ensemble falls back to the default class (headcam).
         cam_class = ensemble_module.camera_class_from_mount(prim.camera_mount)
+        # Voter E opt-in (issue #183). Off by default for the first
+        # release; flip via env var until corpus growth justifies
+        # default-on. Requires the calibration to ship a probe head
+        # AND the source video to be reachable.
+        enable_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
+        ensemble_cfg = ensemble_module.EnsembleConfig(enable_voter_e=enable_e)
         result = ensemble_module.detect_shots_ensemble(
             audio_array,
             sr,
@@ -2351,7 +2365,10 @@ def create_app(
             stg.time_seconds,
             runtime,
             expected_rounds=expected_rounds,
+            ensemble_config=ensemble_cfg,
             camera_class=cam_class,
+            video_path=source if enable_e else None,
+            source_beep_time=prim.beep_time if enable_e else None,
         )
 
         candidates: list[dict[str, Any]] = []
@@ -2367,12 +2384,14 @@ def create_app(
                     "vote_b": cand.vote_b,
                     "vote_c": cand.vote_c,
                     "vote_d": cand.vote_d,
+                    "vote_e": cand.vote_e,
                     "vote_total": cand.vote_total,
                     "apriori_boost": cand.apriori_boost,
                     "ensemble_score": cand.ensemble_score,
                     "score_c": cand.score_c,
                     "clap_diff": cand.clap_diff,
                     "gunshot_prob": cand.gunshot_prob,
+                    "voter_e_signal": cand.voter_e_signal,
                 }
             )
 

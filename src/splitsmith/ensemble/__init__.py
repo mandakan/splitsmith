@@ -43,7 +43,9 @@ from .calibration import (
     camera_class_from_mount,
     load_calibration,
     load_voter_c_model,
+    load_voter_e_probe,
 )
+from .visual import VisualRuntime
 
 __all__ = [
     "CAMERA_CLASS_HANDHELD",
@@ -55,9 +57,11 @@ __all__ = [
     "EnsembleConfig",
     "EnsembleResult",
     "EnsembleRuntime",
+    "VisualRuntime",
     "camera_class_from_mount",
     "detect_shots_ensemble",
     "load_calibration",
     "load_ensemble_runtime",
     "load_voter_c_model",
+    "load_voter_e_probe",
 ]

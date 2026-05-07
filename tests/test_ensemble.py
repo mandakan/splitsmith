@@ -36,6 +36,7 @@ from splitsmith.ensemble.voters import (
     vote_c_adaptive,
     vote_c_global,
     vote_d,
+    vote_e,
 )
 
 
@@ -143,6 +144,18 @@ def test_vote_d_pann_threshold() -> None:
     probs = np.array([0.001, 0.01, 0.1])
     out = vote_d(probs, voter_d_threshold=0.01)
     assert out.tolist() == [0, 1, 1]
+
+
+def test_vote_e_visual_probe_threshold() -> None:
+    probe_score = np.array([0.05, 0.30, 0.40, 0.95])
+    out = vote_e(probe_score, voter_e_threshold=0.30)
+    assert out.tolist() == [0, 1, 1, 1]
+
+
+def test_vote_e_handles_empty_input() -> None:
+    out = vote_e(np.zeros(0, dtype=np.float32), voter_e_threshold=0.5)
+    assert out.shape == (0,)
+    assert out.dtype == np.int64
 
 
 def test_apriori_boost_lifts_top_n_by_confidence() -> None:
@@ -382,6 +395,180 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     # consensus while the bottom 2 do not.
     kept_idx = [c.candidate_number - 1 for c in result.candidates if c.kept]
     assert kept_idx == [0, 2]
+
+
+# ---------------------------------------------------------------------------
+# Voter E (issue #183) wiring
+# ---------------------------------------------------------------------------
+
+
+class _StubVisualRuntime:
+    """Stand-in for ``VisualRuntime`` -- exposes ``probe`` for scoring."""
+
+    def __init__(self, scores: list[float]) -> None:
+        self._scores = scores
+        self.frame_cache_dir = None  # type: ignore[assignment]
+
+    @property
+    def probe(self):  # noqa: D401 -- minimal stub
+        scores = self._scores
+
+        class _P:
+            def predict_proba(self, x: np.ndarray) -> np.ndarray:
+                out = np.zeros((x.shape[0], 2), dtype=np.float64)
+                vals = np.array(scores[: x.shape[0]], dtype=np.float64)
+                out[:, 1] = vals
+                out[:, 0] = 1.0 - vals
+                return out
+
+        return _P()
+
+
+def test_detect_shots_ensemble_skips_voter_e_when_disabled(monkeypatch) -> None:
+    """Default config has ``enable_voter_e=False``; Voter E must not run
+    even if a visual runtime is attached. vote_e=0 / signal=0 for all."""
+    runtime = _build_stub_runtime()
+    runtime.visual = _StubVisualRuntime([0.99] * 4)  # type: ignore[assignment]
+
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=0.4,
+            confidence=0.6,
+            notes="",
+        )
+        for i in range(4)
+    ]
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    result = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+    )
+    assert all(c.vote_e == 0 for c in result.candidates)
+    assert all(c.voter_e_signal == 0.0 for c in result.candidates)
+
+
+def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(
+    monkeypatch, tmp_path
+) -> None:
+    """When ``enable_voter_e`` and ``e_required`` are both True and the
+    visual probe rejects two of four candidates, those two are dropped
+    from the consensus shots set even though all four pass A/B/C/D."""
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import calibration as ensemble_calibration
+    from splitsmith.ensemble import features as ensemble_features
+    from splitsmith.ensemble import visual as ensemble_visual
+
+    runtime = _build_stub_runtime()
+    # Two candidates above 0.5 (kept by Voter E), two below (vetoed).
+    runtime.visual = _StubVisualRuntime([0.9, 0.1, 0.8, 0.05])  # type: ignore[assignment]
+    # Calibration must carry a voter_e_threshold for the runtime to act.
+    cal = runtime.calibration.model_copy(
+        update={
+            "voter_e_threshold": 0.5,
+            "voter_e_target_recall": 0.95,
+            "voter_e_clip_model_id": "stub",
+            "voter_e_frame_offsets": [0.0],
+            "voter_e_probe_artifact": "stub.joblib",
+        }
+    )
+    # Mirror the threshold into the per-class block so thresholds_for() picks it up.
+    if cal.thresholds_by_camera_class:
+        for cls, t in cal.thresholds_by_camera_class.items():
+            cal.thresholds_by_camera_class[cls] = t.model_copy(
+                update={"voter_e_threshold": 0.5}
+            )
+    runtime.calibration = cal
+
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=0.4,
+            confidence=0.6,
+            notes="",
+        )
+        for i in range(4)
+    ]
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+    # Bypass real frame extraction + CLIP forward pass.
+    monkeypatch.setattr(
+        ensemble_visual,
+        "compute_visual_features",
+        lambda video_path, source_times, runtime, **_: np.zeros(
+            (len(source_times), 1), dtype=np.float32
+        ),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    fake_video = tmp_path / "fake.mp4"
+    fake_video.write_bytes(b"")
+    result = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        ensemble_config=EnsembleConfig(enable_voter_e=True, e_required=True),
+        video_path=fake_video,
+        source_beep_time=5.0,
+    )
+    votes_e = [c.vote_e for c in result.candidates]
+    kept = [c.kept for c in result.candidates]
+    signals = [c.voter_e_signal for c in result.candidates]
+    assert votes_e == [1, 0, 1, 0]
+    assert signals == [0.9, 0.1, 0.8, 0.05]
+    # Without e_required all four would have passed (A+B+C+D=4 >= 3 + c_required=True).
+    # With e_required=True, the two below threshold are dropped.
+    assert kept == [True, False, True, False]
+
+
+def test_candidate_times_in_source_anchors_on_beep() -> None:
+    from splitsmith.ensemble.visual import candidate_times_in_source
+
+    clip_times = np.array([0.5, 1.5, 3.0])
+    out = candidate_times_in_source(
+        clip_times, audit_beep_in_clip=0.5, source_beep_time=22.0
+    )
+    # clip_t - audit_beep_in_clip + source_beep_time
+    assert out.tolist() == [22.0, 23.0, 24.5]
 
 
 # ---------------------------------------------------------------------------
