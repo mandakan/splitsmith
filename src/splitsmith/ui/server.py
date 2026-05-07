@@ -943,6 +943,10 @@ class MatchExportRequest(BaseModel):
     # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
     # secondary, rotating through TR -> TL -> BR -> BL at 25% scale.
     pip_layout: Literal["stacked", "pip-corners"] = "stacked"
+    # Issue #197. ``"fcpxml"`` writes Final Cut Pro 1.10 (the default).
+    # ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml ``.xml``
+    # importable into Premiere Pro and DaVinci Resolve.
+    output_format: Literal["fcpxml", "fcp7xml"] = "fcpxml"
 
 
 class RevealRequest(BaseModel):
@@ -4591,6 +4595,7 @@ def create_app(
             include_overlay=req.include_overlay,
             project_name=project_name,
             pip_layout=req.pip_layout,
+            output_format=req.output_format,
         )
         try:
             result = match_export_helpers.export_match(

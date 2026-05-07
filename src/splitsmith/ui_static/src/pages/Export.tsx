@@ -1205,6 +1205,14 @@ function MatchExportDialog({
   const [pipLayout, setPipLayout] = useState<"stacked" | "pip-corners">(
     "stacked",
   );
+  // Issue #197. ``fcpxml`` is Final Cut Pro 1.10 (the editor splitsmith was
+  // built around). ``fcp7xml`` is the legacy xmeml format Premiere Pro and
+  // DaVinci Resolve import; coverage matches the FCPXML renderer for
+  // primary / secondaries / PiP / overlay / markers, with transitions and
+  // titles deferred per #195 / #196.
+  const [outputFormat, setOutputFormat] = useState<"fcpxml" | "fcp7xml">(
+    "fcpxml",
+  );
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1256,6 +1264,7 @@ function MatchExportDialog({
         tail_pad_seconds: tailPad,
         include_secondaries: includeSecondaries,
         pip_layout: pipLayout,
+        output_format: outputFormat,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1471,6 +1480,25 @@ function MatchExportDialog({
                   onChange={(e) => setIncludeOverlay(e.target.checked)}
                 />
                 Include overlay (when present)
+              </label>
+              <label
+                className="flex items-center gap-1.5"
+                title="FCPXML: Final Cut Pro 1.10 (default). FCP7 XML: legacy xmeml file importable into Premiere Pro and DaVinci Resolve."
+              >
+                Format
+                <select
+                  className="rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                  value={outputFormat}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setOutputFormat(
+                      e.target.value as "fcpxml" | "fcp7xml",
+                    )
+                  }
+                >
+                  <option value="fcpxml">FCPXML (Final Cut Pro)</option>
+                  <option value="fcp7xml">FCP7 XML (Premiere / DaVinci)</option>
+                </select>
               </label>
             </div>
             {includeOverlay ? (
