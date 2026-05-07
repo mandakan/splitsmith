@@ -560,7 +560,10 @@ def test_codec_auto_picks_hevc_on_darwin_with_videotoolbox(
     assert "prores_ks" not in cmd
 
 
-def test_codec_unknown_raises(tmp_path: Path) -> None:
+def test_codec_unknown_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Stub ``which`` so the ffmpeg-not-found check (which fires on CI
+    # boxes without ffmpeg installed) doesn't shadow the codec error.
+    monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
     audit = _write_audit(tmp_path)
     with pytest.raises(overlay_render.OverlayRenderError, match="unknown overlay codec"):
         overlay_render.render_overlay(
