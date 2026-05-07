@@ -474,7 +474,11 @@ def test_detect_shots_ensemble_skips_voter_e_when_disabled(monkeypatch) -> None:
 def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, tmp_path) -> None:
     """When ``enable_voter_e`` and ``e_required`` are both True and the
     visual probe rejects two of four candidates, those two are dropped
-    from the consensus shots set even though all four pass A/B/C/D."""
+    from the consensus shots set even though all four pass A/B/C/D.
+
+    Sets ``e_audio_strong_min_votes=None`` to exercise the unconditional
+    veto path -- the new default suppresses Voter E when all four audio
+    voters agreed (#185), which would skip the veto here entirely."""
     from splitsmith.ensemble import api as ensemble_api
     from splitsmith.ensemble import features as ensemble_features
     from splitsmith.ensemble import visual as ensemble_visual
@@ -541,7 +545,9 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
         beep_time=5.0,
         stage_time=10.0,
         runtime=runtime,
-        ensemble_config=EnsembleConfig(enable_voter_e=True, e_required=True),
+        ensemble_config=EnsembleConfig(
+            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=None
+        ),
         video_path=fake_video,
         source_beep_time=5.0,
     )
@@ -551,8 +557,109 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
     assert votes_e == [1, 0, 1, 0]
     assert signals == [0.9, 0.1, 0.8, 0.05]
     # Without e_required all four would have passed (A+B+C+D=4 >= 3 + c_required=True).
-    # With e_required=True, the two below threshold are dropped.
+    # With e_required=True (and the audio-strong gate disabled), the two
+    # below threshold are dropped.
     assert kept == [True, False, True, False]
+
+
+def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_path) -> None:
+    """Issue #185: when ``e_audio_strong_min_votes=4`` and a candidate has
+    audio ``vote_total=4`` (all four audio voters agreed), Voter E's veto
+    is suppressed even when ``e_required=True``. Mitigates the
+    audio-dominant clean-stage regression seen on tallmilan-2026-stage2."""
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+    from splitsmith.ensemble import visual as ensemble_visual
+
+    runtime = _build_stub_runtime()
+    # All four candidates: Voter E says no (signal below threshold).
+    runtime.visual = _StubVisualRuntime([0.05, 0.10, 0.15, 0.20])  # type: ignore[assignment]
+    cal = runtime.calibration.model_copy(
+        update={
+            "voter_e_threshold": 0.5,
+            "voter_e_target_recall": 0.95,
+            "voter_e_clip_model_id": "stub",
+            "voter_e_frame_offsets": [0.0],
+            "voter_e_probe_artifact": "stub.joblib",
+        }
+    )
+    if cal.thresholds_by_camera_class:
+        for cls, t in cal.thresholds_by_camera_class.items():
+            cal.thresholds_by_camera_class[cls] = t.model_copy(update={"voter_e_threshold": 0.5})
+    runtime.calibration = cal
+
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=0.4,
+            confidence=0.6,
+            notes="",
+        )
+        for i in range(4)
+    ]
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        ensemble_visual,
+        "compute_visual_features",
+        lambda video_path, source_times, runtime, **_: np.zeros(
+            (len(source_times), 1), dtype=np.float32
+        ),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    fake_video = tmp_path / "fake.mp4"
+    fake_video.write_bytes(b"")
+
+    # All audio voters approve every candidate (vote_total=4) under the stub
+    # runtime. With audio_strong_min_votes=4, Voter E's veto is fully
+    # suppressed -> all candidates pass even though Voter E rejected each.
+    result_strong = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        ensemble_config=EnsembleConfig(
+            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=4
+        ),
+        video_path=fake_video,
+        source_beep_time=5.0,
+    )
+    assert all(c.vote_total == 4 for c in result_strong.candidates)
+    assert all(c.vote_e == 0 for c in result_strong.candidates)
+    assert all(c.kept for c in result_strong.candidates)
+
+    # Sanity: with the gate set to 5 (no audio total can satisfy it under
+    # the 4-voter audio side), the unconditional veto fires and all are
+    # dropped.
+    result_strict = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        ensemble_config=EnsembleConfig(
+            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=5
+        ),
+        video_path=fake_video,
+        source_beep_time=5.0,
+    )
+    assert all(not c.kept for c in result_strict.candidates)
 
 
 def test_candidate_times_in_source_anchors_on_beep() -> None:

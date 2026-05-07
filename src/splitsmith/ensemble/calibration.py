@@ -200,6 +200,17 @@ class EnsembleCalibration(BaseModel):
             "that pre-date Voter E."
         ),
     )
+    voter_e_audio_strong_min_votes_recommended: int | None = Field(
+        default=None,
+        description=(
+            "Issue #185: provenance for the conditional-veto gate "
+            "(``EnsembleConfig.e_audio_strong_min_votes``) the corpus "
+            "supports. Informational; the live default lives in "
+            "``EnsembleConfig`` so config drift is visible at the call "
+            "site rather than buried in the calibration JSON. ``4`` "
+            "matches the head-mounted Go 3S sweep that landed in #185."
+        ),
+    )
     built_at: str = Field(
         description="ISO-8601 timestamp of when the artifacts were generated.",
     )

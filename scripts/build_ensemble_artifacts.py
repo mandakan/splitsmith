@@ -922,6 +922,7 @@ def build_artifacts(
         "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
         "voter_e_frame_offsets": list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None,
         "voter_e_probe_artifact": DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None,
+        "voter_e_audio_strong_min_votes_recommended": 4 if voter_e_probe is not None else None,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "default_camera_class": default_cls,
         "thresholds_by_camera_class": thresholds_by_class,

@@ -81,6 +81,24 @@ class EnsembleConfig(BaseModel):
             "effect when ``enable_voter_e`` is also True."
         ),
     )
+    e_audio_strong_min_votes: int | None = Field(
+        default=4,
+        description=(
+            "Issue #185: when set, suppress Voter E's veto on candidates "
+            "whose audio-side ``vote_total`` (A+B+C+D) is at or above "
+            "this value. Default ``4`` skips Voter E whenever all four "
+            "audio voters already agreed -- that's the 'audio unanimous' "
+            "signal most reliably correlated with a true shot, and "
+            "applying Voter E on top of it triggered the 50%-recall "
+            "regression on tallmilan-2026-stage2 in #183. Sweep on the "
+            "11 audited head-mount fixtures: ``4`` removes the per-"
+            "fixture regression entirely while preserving aggregate "
+            "precision lift; ``3`` makes Voter E a no-op (nothing "
+            "passes consensus with vote_total < 3); ``None`` reproduces "
+            "the unconditional veto from #183. Only takes effect when "
+            "both ``enable_voter_e`` and ``e_required`` are True."
+        ),
+    )
 
 
 class EnsembleCandidate(BaseModel):
@@ -301,7 +319,11 @@ def detect_shots_ensemble(
         c_required=cfg.c_required,
     )
     if voter_e_active and cfg.e_required:
-        keep_mask = keep_mask & ve.astype(bool)
+        veto_mask = ~ve.astype(bool)
+        if cfg.e_audio_strong_min_votes is not None:
+            audio_strong = vote_total >= int(cfg.e_audio_strong_min_votes)
+            veto_mask = veto_mask & ~audio_strong
+        keep_mask = keep_mask & ~veto_mask
 
     candidates: list[EnsembleCandidate] = []
     for i in range(n):

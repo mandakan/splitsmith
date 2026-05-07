@@ -1,12 +1,17 @@
 """Regression check for Voter E: production ensemble run on audited fixtures.
 
 Loads every head-mounted Go 3S audited fixture, runs the production
-``detect_shots_ensemble`` twice -- once with Voter E off (the legacy
-4-voter behaviour) and once with Voter E on as a precision veto -- and
-reports per-fixture and aggregate precision/recall against the labeled
-shots. This is the acceptance check required by issue #183: combined
-audio + Voter E must not regress recall vs the legacy ensemble while
-ideally lifting precision.
+``detect_shots_ensemble`` across a fusion-rule grid:
+
+* off              -- legacy 4-voter ensemble (current main without Voter E)
+* unconditional    -- Voter E veto applies to every candidate (issue #183)
+* strong3 / strong4 -- conditional veto suppressed when audio ``vote_total``
+  >= the threshold (issue #185). ``strong4`` skips Voter E whenever all
+  four audio voters agreed; ``strong3`` is the looser variant.
+
+Reports per-fixture and aggregate precision/recall against the labeled
+shots so the regression on audio-dominant stages can be quantified
+across rules.
 
 Run:
     uv run python scripts/regression_voter_e.py
@@ -16,8 +21,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-
-import numpy as np
 
 from splitsmith.beep_detect import load_audio
 from splitsmith.ensemble import (
@@ -30,6 +33,22 @@ from splitsmith.ensemble.calibration import camera_class_from_mount
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 TOL_MS = 75.0
+
+
+VARIANTS: list[tuple[str, EnsembleConfig, bool]] = [
+    ("off", EnsembleConfig(enable_voter_e=False), False),
+    ("unconditional", EnsembleConfig(enable_voter_e=True, e_required=True), True),
+    (
+        "strong3",
+        EnsembleConfig(enable_voter_e=True, e_required=True, e_audio_strong_min_votes=3),
+        True,
+    ),
+    (
+        "strong4",
+        EnsembleConfig(enable_voter_e=True, e_required=True, e_audio_strong_min_votes=4),
+        True,
+    ),
+]
 
 
 def _resolve_truth(truth: dict, candidates) -> list[bool]:
@@ -54,7 +73,7 @@ def _resolve_truth(truth: dict, candidates) -> list[bool]:
 def _eval(name: str, kept: list[bool], is_shot: list[bool]) -> dict:
     n_kept = sum(kept)
     n_shot = sum(is_shot)
-    n_tp = sum(1 for k, t in zip(kept, is_shot) if k and t)
+    n_tp = sum(1 for k, t in zip(kept, is_shot, strict=True) if k and t)
     n_fp = n_kept - n_tp
     n_fn = n_shot - n_tp
     precision = n_tp / n_kept if n_kept else 0.0
@@ -92,11 +111,14 @@ def main() -> int:
             continue
         fixtures.append(p)
 
-    print(f"Evaluating {len(fixtures)} head-mounted Go 3S fixtures with reachable video\n")
+    print(f"Evaluating {len(fixtures)} head-mounted Go 3S fixtures with reachable video")
+    print(f"Variants: {[v[0] for v in VARIANTS]}\n")
 
-    rows = []
-    agg_off: dict[str, int] = {"tp": 0, "fp": 0, "fn": 0}
-    agg_on: dict[str, int] = {"tp": 0, "fp": 0, "fn": 0}
+    aggregates: dict[str, dict[str, int]] = {
+        name: {"tp": 0, "fp": 0, "fn": 0} for name, _, _ in VARIANTS
+    }
+
+    rows: list[dict] = []
     for fixture_path in fixtures:
         truth = json.loads(fixture_path.read_text())
         wav = FIXTURES_DIR / f"{fixture_path.stem}.wav"
@@ -108,10 +130,11 @@ def main() -> int:
         cam_class = camera_class_from_mount((truth.get("camera") or {}).get("mount"))
         window = truth.get("fixture_window_in_source") or [0.0, 0.0]
         source_video = Path(truth["source_video"])
-        # source-video time of the beep = start of fixture window + beep within window.
         source_beep = float(window[0]) + beep
 
-        result_off = detect_shots_ensemble(
+        # The candidate universe is identical across variants -- only the
+        # kept-mask changes. Compute truth labels once.
+        result_universe = detect_shots_ensemble(
             audio,
             sr,
             beep,
@@ -120,66 +143,71 @@ def main() -> int:
             ensemble_config=EnsembleConfig(enable_voter_e=False),
             camera_class=cam_class,
         )
-        result_on = detect_shots_ensemble(
-            audio,
-            sr,
-            beep,
-            stage_t,
-            runtime,
-            ensemble_config=EnsembleConfig(enable_voter_e=True, e_required=True),
-            camera_class=cam_class,
-            video_path=source_video,
-            source_beep_time=source_beep,
-        )
+        is_shot = _resolve_truth(truth, result_universe.candidates)
 
-        is_shot = _resolve_truth(truth, result_off.candidates)
-        kept_off = [c.kept for c in result_off.candidates]
-        kept_on = [c.kept for c in result_on.candidates]
-        m_off = _eval("off", kept_off, is_shot)
-        m_on = _eval("on", kept_on, is_shot)
+        per_variant: dict[str, dict] = {}
+        for name, cfg, needs_video in VARIANTS:
+            result = detect_shots_ensemble(
+                audio,
+                sr,
+                beep,
+                stage_t,
+                runtime,
+                ensemble_config=cfg,
+                camera_class=cam_class,
+                video_path=source_video if needs_video else None,
+                source_beep_time=source_beep if needs_video else None,
+            )
+            kept = [c.kept for c in result.candidates]
+            m = _eval(name, kept, is_shot)
+            per_variant[name] = m
+            aggregates[name]["tp"] += m["tp"]
+            aggregates[name]["fp"] += m["fp"]
+            aggregates[name]["fn"] += m["fn"]
 
-        agg_off["tp"] += m_off["tp"]
-        agg_off["fp"] += m_off["fp"]
-        agg_off["fn"] += m_off["fn"]
-        agg_on["tp"] += m_on["tp"]
-        agg_on["fp"] += m_on["fp"]
-        agg_on["fn"] += m_on["fn"]
+        rows.append({"fixture": fixture_path.stem, "metrics": per_variant})
 
-        delta_p = m_on["precision"] - m_off["precision"]
-        delta_r = m_on["recall"] - m_off["recall"]
-        rows.append(
-            (fixture_path.stem, m_off, m_on, delta_p, delta_r)
-        )
-        print(
-            f"{fixture_path.stem:48s}  "
-            f"off P/R = {m_off['precision']:.3f}/{m_off['recall']:.3f} "
-            f"({m_off['tp']}/{m_off['kept']} kept; {m_off['fn']} miss)   "
-            f"on P/R = {m_on['precision']:.3f}/{m_on['recall']:.3f} "
-            f"({m_on['tp']}/{m_on['kept']} kept; {m_on['fn']} miss)   "
-            f"deltaP={delta_p:+.3f}  deltaR={delta_r:+.3f}"
-        )
+        line = f"{fixture_path.stem:48s}"
+        for name in (v[0] for v in VARIANTS):
+            m = per_variant[name]
+            line += (
+                f"  | {name:13s} P/R={m['precision']:.3f}/{m['recall']:.3f} "
+                f"({m['tp']}/{m['kept']} kept; {m['fn']} miss)"
+            )
+        print(line)
 
     def agg_pr(d: dict[str, int]) -> tuple[float, float]:
         kept = d["tp"] + d["fp"]
         gold = d["tp"] + d["fn"]
         return (d["tp"] / kept if kept else 0.0, d["tp"] / gold if gold else 0.0)
 
-    p_off, r_off = agg_pr(agg_off)
-    p_on, r_on = agg_pr(agg_on)
-    print()
-    print(
-        f"AGGREGATE   off P/R={p_off:.3f}/{r_off:.3f}   "
-        f"on P/R={p_on:.3f}/{r_on:.3f}   "
-        f"deltaP={p_on-p_off:+.3f}  deltaR={r_on-r_off:+.3f}"
-    )
-    print(
-        f"FP suppressed by Voter E: {agg_off['fp']} -> {agg_on['fp']} "
-        f"({agg_off['fp'] - agg_on['fp']} false positives removed)"
-    )
-    print(
-        f"Recall cost: {agg_off['fn']} -> {agg_on['fn']} false negatives "
-        f"(delta {agg_on['fn'] - agg_off['fn']:+d})"
-    )
+    print("\n=== aggregate ===")
+    print(f"{'variant':14s}  {'P':>6s}  {'R':>6s}  {'TP':>4s}  {'FP':>4s}  {'FN':>4s}")
+    for name in (v[0] for v in VARIANTS):
+        p, r = agg_pr(aggregates[name])
+        a = aggregates[name]
+        print(f"{name:14s}  {p:6.3f}  {r:6.3f}  " f"{a['tp']:4d}  {a['fp']:4d}  {a['fn']:4d}")
+
+    print("\n=== per-fixture recall regressions vs off ===")
+    regressions: dict[str, list[tuple[str, float]]] = {
+        name: [] for name in (v[0] for v in VARIANTS) if name != "off"
+    }
+    for row in rows:
+        off_r = row["metrics"]["off"]["recall"]
+        for name in regressions:
+            delta = row["metrics"][name]["recall"] - off_r
+            if delta < 0:
+                regressions[name].append((row["fixture"], delta))
+    for name in (v[0] for v in VARIANTS):
+        if name == "off":
+            continue
+        items = regressions[name]
+        if not items:
+            print(f"{name:14s}  no per-fixture recall regressions")
+            continue
+        print(f"{name:14s}  {len(items)} regressions:")
+        for fix, delta in items:
+            print(f"  {fix}  deltaR={delta:+.3f}")
 
     return 0
 
