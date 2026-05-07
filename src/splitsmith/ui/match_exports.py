@@ -20,15 +20,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .. import composition, fcp7xml_render, fcpxml_gen
+from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render
 from ..config import OutputConfig
 from .exports import audit_shots_to_engine_shots
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
 # default). ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml file
-# importable into Premiere Pro and DaVinci Resolve.
-OutputFormat = Literal["fcpxml", "fcp7xml"]
+# importable into Premiere Pro and DaVinci Resolve. Issue #174.
+# ``"mp4"`` bakes the composition into a stitched MP4 via ffmpeg --
+# overlays / PiP burned in, no NLE round-trip needed.
+OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 
 
 @dataclass(frozen=True)
@@ -219,19 +221,22 @@ def export_match(
         )
 
     exports_dir.mkdir(parents=True, exist_ok=True)
-    extension = ".fcpxml" if request.output_format == "fcpxml" else ".xml"
+    extension = _OUTPUT_EXTENSIONS[request.output_format]
     output_path = exports_dir / f"{_slugify(request.project_name)}-match{extension}"
     # Match export goes through the composition IR (issue #194). The bridge
     # renderer lowers back to ``generate_match_fcpxml`` for the FCPXML path
     # so output stays byte-identical to the pre-IR emitter; the FCP7 XML
-    # path (issue #197) walks the IR directly via ``fcp7xml_render``.
+    # path (issue #197) walks the IR directly. The MP4 path (#174) shells
+    # out to ffmpeg per stage, then concat-demuxes the temps.
     comp = composition.from_stage_compositions(compositions, project_name=request.project_name)
     try:
         if request.output_format == "fcpxml":
             composition.render_fcpxml(comp, output_path=output_path, config=config)
-        else:
+        elif request.output_format == "fcp7xml":
             fcp7xml_render.render_fcp7xml(comp, output_path=output_path)
-    except (ValueError, FileNotFoundError) as exc:
+        else:
+            mp4_render.render_mp4(comp, output_path=output_path)
+    except (ValueError, FileNotFoundError, mp4_render.FFmpegError) as exc:
         raise MatchExportError(str(exc)) from exc
 
     # Compute total duration for the response. Mirrors the composer's math
@@ -255,6 +260,13 @@ def export_match(
         duration_seconds=total_seconds,
         anomalies=anomalies,
     )
+
+
+_OUTPUT_EXTENSIONS: dict[OutputFormat, str] = {
+    "fcpxml": ".fcpxml",
+    "fcp7xml": ".xml",
+    "mp4": ".mp4",
+}
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
