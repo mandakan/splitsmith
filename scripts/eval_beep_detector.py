@@ -104,6 +104,7 @@ def run_one(
         tolerance_ms=tolerance_ms,
         detected_time_s=result.time,
         detected_score=winner_score,
+        detected_confidence=result.confidence,
         candidate_times_s=runner_up_times,
     )
 
@@ -151,12 +152,39 @@ def format_row(r: FixtureEvalResult) -> str:
         )
     err_ms = (r.error_s or 0.0) * 1000.0
     flag = "OK" if r.correct_top1 else ("topN" if r.correct_in_topn else "FAIL")
-    score = f"  score={r.detected_score:.1f}" if r.detected_score is not None else ""
+    conf = f"  conf={r.detected_confidence:.2f}" if r.detected_confidence is not None else ""
     return (
         f"  [{r.track:4}] {r.stem:55} {flag:4}  "
         f"det={r.detected_time_s:.3f}s  truth={r.ground_truth_s:.3f}s  "
-        f"err={err_ms:+.1f} ms{score}"
+        f"err={err_ms:+.1f} ms{conf}"
     )
+
+
+def format_confidence_bins(results: list[FixtureEvalResult]) -> list[str]:
+    """Per-confidence-bin precision -- the calibration evidence.
+
+    Layer 3 (#220) wants 'conf >= 0.7 right >=95% of the time' to hold;
+    if a layer-2 detector tweak skews this, the bin precision drops
+    visibly. The HITL threshold (#219) lives in this output too.
+    """
+    bands = [
+        (0.0, 0.3, "0.0-0.3"),
+        (0.3, 0.5, "0.3-0.5"),
+        (0.5, 0.7, "0.5-0.7"),
+        (0.7, 1.01, ">=0.7"),
+    ]
+    rows = ["", "Per confidence bin (top-1 precision):"]
+    for lo, hi, name in bands:
+        bucket = [
+            r
+            for r in results
+            if r.detected_confidence is not None and lo <= r.detected_confidence < hi
+        ]
+        n = len(bucket)
+        correct = sum(1 for r in bucket if r.correct_top1)
+        pct = (correct / n * 100.0) if n else 0.0
+        rows.append(f"  {name:8}  n={n:3}  correct={correct:3}  ({pct:5.1f}%)")
+    return rows
 
 
 def format_bucket(name: str, summary: EvalSummary) -> str:
@@ -228,6 +256,8 @@ def main() -> None:
         print("\nPer tag:")
         for tag in sorted(overall.by_tag):
             print(format_bucket(tag, overall.by_tag[tag]))
+    for line in format_confidence_bins(results):
+        print(line)
 
     if args.json:
         payload = {
@@ -241,6 +271,7 @@ def main() -> None:
                     "tolerance_s": r.tolerance_s,
                     "detected_time_s": r.detected_time_s,
                     "detected_score": r.detected_score,
+                    "detected_confidence": r.detected_confidence,
                     "error_s": r.error_s,
                     "correct_top1": r.correct_top1,
                     "correct_in_topn": r.correct_in_topn,

@@ -44,6 +44,7 @@ file I/O. ``load_audio`` is provided as a thin convenience for callers.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +64,69 @@ _RISE_FOOT_NOISE_FACTOR = 1.5
 # Fine smoothing window applied to the rise-foot envelope only. Just enough
 # to suppress single-sample wobble; not so wide that it shifts the onset.
 _LEADING_EDGE_SMOOTHING_MS = 10.0
+
+# Confidence-formula weights. Empirically tuned against the labelled
+# calibration suite (issue #220 layer 3): the resulting distribution has
+# >=0.7 right ~95 % of the time and 0.5-0.7 sitting around chance, which
+# is the gap the HITL queue (#219) needs. Bump these only with paired
+# eval-set numbers in the commit; the threshold settings downstream
+# rely on the calibration holding.
+_CONFIDENCE_TONAL_WEIGHT = 0.45
+_CONFIDENCE_DURATION_WEIGHT = 0.30
+_CONFIDENCE_SILENCE_WEIGHT = 0.25
+# Silence-score saturation point: tanh(silence / SILENCE_SCALE) maps the
+# raw ratio to [0, 1]. 5x is "comfortably above pre-roll noise" -- below
+# it we're in steel-ring / mag-swap-quiet territory; above it the metric
+# is saturated.
+_CONFIDENCE_SILENCE_SCALE = 5.0
+# Duration normalisation: ramp from 0 at MIN_MS to 1 at FULL_MS. Slightly
+# wider than the ranking-side prior so a 250 ms beep still gets ~0.25
+# confidence (it would land in HITL, which is the right call).
+_CONFIDENCE_DUR_MIN_MS = 200.0
+_CONFIDENCE_DUR_FULL_MS = 400.0
+# Margin tilt: the runner-up's score is folded in via
+# ``mix * (margin_floor + (1 - margin_floor) * margin)``. ``margin = 0``
+# (ties with runner-up) leaves only ``margin_floor`` of the quality
+# score; ``margin = 1`` (runner-up scores 0) preserves the full quality.
+_CONFIDENCE_MARGIN_FLOOR = 0.6
+
+
+def candidate_confidence(
+    *,
+    silence_score: float,
+    tonal_score: float,
+    duration_ms: float,
+    score: float,
+    runner_up_score: float,
+) -> float:
+    """Map per-candidate diagnostic features to a calibrated [0, 1].
+
+    The formula is a weighted blend of three quality components --
+    tonal purity, duration plausibility, saturating silence preference
+    -- multiplied by a margin tilt that demotes the winner when a
+    runner-up scores nearly as high. Calibration evidence lives in
+    ``tests/fixtures/beep_calibration/baseline.json``; bumping the
+    constants without re-checking the eval-set bins is asking for a
+    silent regression.
+
+    Pure function: no audio, no I/O. Tests cover the corner shapes
+    (peak winner, tied runner-up, sub-min duration, etc.).
+    """
+    tonal_norm = max(0.0, min(1.0, tonal_score))
+    dur_span = max(1.0, _CONFIDENCE_DUR_FULL_MS - _CONFIDENCE_DUR_MIN_MS)
+    dur_norm = max(0.0, min(1.0, (duration_ms - _CONFIDENCE_DUR_MIN_MS) / dur_span))
+    silence_norm = math.tanh(max(0.0, silence_score) / _CONFIDENCE_SILENCE_SCALE)
+    quality = (
+        _CONFIDENCE_TONAL_WEIGHT * tonal_norm
+        + _CONFIDENCE_DURATION_WEIGHT * dur_norm
+        + _CONFIDENCE_SILENCE_WEIGHT * silence_norm
+    )
+    if score > 0.0:
+        margin = max(0.0, min(1.0, 1.0 - runner_up_score / score))
+    else:
+        margin = 0.0
+    margin_factor = _CONFIDENCE_MARGIN_FLOOR + (1.0 - _CONFIDENCE_MARGIN_FLOOR) * margin
+    return max(0.0, min(1.0, quality * margin_factor))
 
 
 class BeepNotFoundError(RuntimeError):
@@ -242,17 +306,32 @@ def detect_beep(
     # leading edge for every candidate so the UI can show alternatives
     # without a second pass.
     ranked = sorted(candidates, key=lambda c: c[3], reverse=True)
+    runner_up_score = ranked[1][3] if len(ranked) > 1 else 0.0
     ranked_models: list[BeepCandidate] = []
     for run_start, run_end, run_peak, score, silence_score, tonal_ratio in ranked:
         leading_idx = _rise_foot_leading_edge(env_fine, run_start, run_end, noise_floor)
+        duration_ms = (run_end - run_start) * 1000.0 / sample_rate
+        # Confidence uses the GLOBAL runner-up's score for every
+        # candidate, not the next-lower in the sorted list. The HITL
+        # protocol cares about "is the winner clearly better than the
+        # next-best alternative?"; a runner-up's own confidence is
+        # mostly informational so the UI can colour the chip.
+        confidence = candidate_confidence(
+            silence_score=silence_score,
+            tonal_score=tonal_ratio,
+            duration_ms=duration_ms,
+            score=score,
+            runner_up_score=runner_up_score,
+        )
         ranked_models.append(
             BeepCandidate(
                 time=leading_idx / sample_rate,
                 score=score,
                 peak_amplitude=run_peak,
-                duration_ms=(run_end - run_start) * 1000.0 / sample_rate,
+                duration_ms=duration_ms,
                 silence_score=silence_score,
                 tonal_score=tonal_ratio,
+                confidence=confidence,
             )
         )
 
@@ -263,6 +342,7 @@ def detect_beep(
         time=winner.time,
         peak_amplitude=winner.peak_amplitude,
         duration_ms=winner.duration_ms,
+        confidence=winner.confidence,
         candidates=surfaced,
     )
 

@@ -106,6 +106,11 @@ class BeepCandidate(BaseModel):
     * ``tonal_score`` -- raw tonal-concentration ratio in [0, 1]: fraction
       of the run's bandpassed energy that falls inside the IPSC timer
       fundamental band. ~1.0 for a pure tone, << 1.0 for gunshots / steel.
+    * ``confidence`` -- calibrated probability in [0, 1] that this candidate
+      is the real beep. Empirically validated against the labeled fixture
+      set (issue #220 layer 3); >=0.7 right ~95 % of the time, 0.5-0.7
+      lands in the HITL queue (issue #219). Layer 2's raw ``score`` ranks
+      candidates; ``confidence`` is the threshold-able trust value.
     """
 
     time: float
@@ -114,6 +119,7 @@ class BeepCandidate(BaseModel):
     duration_ms: float
     silence_score: float = 0.0
     tonal_score: float = 0.0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class BeepDetection(BaseModel):
@@ -123,11 +129,14 @@ class BeepDetection(BaseModel):
     ``candidates[0]`` matching ``time``/``peak_amplitude``/``duration_ms``.
     The list is empty for callers that don't request alternatives (kept
     optional for backwards compatibility with on-disk audit JSON).
+    ``confidence`` mirrors the winning candidate's confidence so callers
+    that don't surface the candidate list still get the threshold value.
     """
 
     time: float
     peak_amplitude: float
     duration_ms: float
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     candidates: list[BeepCandidate] = Field(default_factory=list)
 
 

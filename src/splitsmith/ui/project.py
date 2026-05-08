@@ -182,6 +182,15 @@ class StageVideo(BaseModel):
     # surfaced in the UI to help the user judge auto-detection confidence.
     beep_peak_amplitude: float | None = None
     beep_duration_ms: float | None = None
+    # Calibrated detector confidence in [0, 1] for the chosen beep (issue
+    # #219 / #220 layer 3). Empirically validated on the labelled fixture
+    # set: >=0.7 right ~95 % of the time, 0.5-0.7 lands in the HITL queue,
+    # < 0.5 needs human attention. ``None`` for legacy projects from
+    # before this field existed and for ``beep_source == "aligned"`` where
+    # the detector confidence isn't a meaningful number for the secondary.
+    # Manual entry (``beep_source == "manual"``) clamps to 1.0 -- the user
+    # told us where the beep is.
+    beep_confidence: float | None = None
     # Auto-detection ran and produced no candidate (e.g. iPhone secondary cam
     # where the buzzer wasn't audible / sustained, or recording started after
     # the beep). Distinct from "never detected" (``beep_source is None`` and

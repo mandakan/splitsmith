@@ -1660,6 +1660,7 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
         time = 6.5
         peak_amplitude = 0.42
         duration_ms = 110.0
+        confidence = 0.85
         candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "x.wav")
@@ -1712,6 +1713,7 @@ def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch
         time = 4.0
         peak_amplitude = 0.5
         duration_ms = 100.0
+        confidence = 0.85
         candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "y.wav")
@@ -2428,6 +2430,7 @@ def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
         time = 1.0
         peak_amplitude = 0.5
         duration_ms = 80.0
+        confidence = 0.85
         candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
@@ -2534,6 +2537,7 @@ def test_acknowledge_endpoint_noop_for_succeeded_job(tmp_path: Path, monkeypatch
         time = 1.0
         peak_amplitude = 0.5
         duration_ms = 80.0
+        confidence = 0.85
         candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")

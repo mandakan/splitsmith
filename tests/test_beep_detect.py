@@ -218,3 +218,91 @@ def test_detect_beep_emits_silence_and_tonal_diagnostic_scores() -> None:
     # Pure tone should land near tonal_score 1.0 (energy concentrated in
     # the IPSC band).
     assert winner.tonal_score > 0.8
+
+
+def test_candidate_confidence_high_for_perfect_winner() -> None:
+    """Pure-tone winner with no contender should land in the auto-trust band.
+
+    Anchors the calibration evidence: if this drops below 0.7 a layer-2
+    detector tweak skewed the formula and the HITL gate (#219) needs
+    re-tuning.
+    """
+    from splitsmith.beep_detect import candidate_confidence
+
+    conf = candidate_confidence(
+        silence_score=20.0,
+        tonal_score=1.0,
+        duration_ms=400.0,
+        score=10.0,
+        runner_up_score=0.0,
+    )
+    assert conf >= 0.95
+
+
+def test_candidate_confidence_drops_when_runner_up_ties() -> None:
+    """A near-tie with the runner-up demotes the winner into HITL territory."""
+    from splitsmith.beep_detect import candidate_confidence
+
+    conf = candidate_confidence(
+        silence_score=20.0,
+        tonal_score=1.0,
+        duration_ms=400.0,
+        score=10.0,
+        runner_up_score=10.0,  # tie -> margin = 0
+    )
+    # Margin tilt should still leave some quality signal but well below
+    # the auto-trust threshold (#219 default 0.6).
+    assert 0.5 <= conf <= 0.65
+
+
+def test_candidate_confidence_low_for_short_broadband_transient() -> None:
+    """Gunshot-shaped runs should land below the HITL threshold."""
+    from splitsmith.beep_detect import candidate_confidence
+
+    conf = candidate_confidence(
+        silence_score=2.0,
+        tonal_score=0.4,
+        duration_ms=160.0,
+        score=1.0,
+        runner_up_score=0.5,
+    )
+    assert conf < 0.4
+
+
+def test_candidate_confidence_clamps_to_unit_interval() -> None:
+    from splitsmith.beep_detect import candidate_confidence
+
+    # Absurdly high silence + perfect tonal + ideal duration shouldn't
+    # exceed 1.0; negative inputs shouldn't go below 0.0.
+    high = candidate_confidence(
+        silence_score=10_000.0,
+        tonal_score=1.0,
+        duration_ms=10_000.0,
+        score=1.0,
+        runner_up_score=0.0,
+    )
+    low = candidate_confidence(
+        silence_score=-5.0,
+        tonal_score=-0.5,
+        duration_ms=10.0,
+        score=0.0,
+        runner_up_score=0.0,
+    )
+    assert 0.0 <= high <= 1.0
+    assert low == 0.0
+
+
+def test_detect_beep_populates_confidence_on_winner_and_detection() -> None:
+    """End-to-end: ``BeepDetection.confidence`` mirrors candidates[0].confidence."""
+    sr = 48000
+    rng = np.random.default_rng(202)
+    audio = (rng.standard_normal(sr * 4) * 0.001).astype(np.float32)
+    n = int(sr * 0.400)
+    t = np.arange(n) / sr
+    audio[sr : sr + n] += 0.15 * np.sin(2 * np.pi * 2700 * t).astype(np.float32)
+
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    assert 0.0 <= result.confidence <= 1.0
+    assert result.confidence == pytest.approx(result.candidates[0].confidence, abs=1e-9)
+    # Synthetic clean tone with no contender -- expect auto-trust band.
+    assert result.confidence >= 0.7

@@ -2019,6 +2019,7 @@ def create_app(
             video.beep_source = "auto"
             video.beep_peak_amplitude = beep.peak_amplitude
             video.beep_duration_ms = beep.duration_ms
+            video.beep_confidence = beep.confidence
             video.beep_candidates = list(beep.candidates)
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
@@ -2091,6 +2092,7 @@ def create_app(
             v_fresh.beep_source = video.beep_source
             v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
             v_fresh.beep_duration_ms = video.beep_duration_ms
+            v_fresh.beep_confidence = video.beep_confidence
             v_fresh.beep_candidates = list(video.beep_candidates)
             v_fresh.beep_reviewed = video.beep_reviewed
             v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
@@ -2765,6 +2767,7 @@ def create_app(
             video.beep_source = None
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
+            video.beep_confidence = None
             video.beep_candidates = []
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
@@ -2779,6 +2782,9 @@ def create_app(
             video.beep_source = "manual"
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
+            # Manual entry pins confidence at 1.0 -- the user told us
+            # where the beep is, so the auto-trust gate (#219) opens.
+            video.beep_confidence = 1.0
             video.beep_candidates = []
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
@@ -2852,6 +2858,7 @@ def create_app(
         video.beep_source = "auto"
         video.beep_peak_amplitude = chosen.peak_amplitude
         video.beep_duration_ms = chosen.duration_ms
+        video.beep_confidence = chosen.confidence
         video.beep_auto_detect_failed = False
         video.beep_alignment_confidence = None
         video.beep_alignment_delta_ms = None
