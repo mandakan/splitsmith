@@ -1237,6 +1237,11 @@ function MatchExportDialog({
   // whole export.
   const [introPath, setIntroPath] = useState<string>("");
   const [outroPath, setOutroPath] = useState<string>("");
+  // Issue #204. YouTube sidecar writes match-youtube.json + .srt
+  // alongside the export and (FCPXML route only) embeds chapter
+  // markers in the timeline so they round-trip through FCP into
+  // the MP4 chapter atom.
+  const [youtubeSidecar, setYoutubeSidecar] = useState<boolean>(false);
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1343,6 +1348,7 @@ function MatchExportDialog({
         title_duration_seconds: titleDurationSeconds,
         intro_path: introPath || undefined,
         outro_path: outroPath || undefined,
+        youtube_sidecar: youtubeSidecar,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1730,6 +1736,19 @@ function MatchExportDialog({
                   disabled={busy}
                   onChange={(e) => setOutroPath(e.target.value)}
                 />
+              </label>
+              <label
+                className="flex items-center gap-1.5"
+                title="Generate a YouTube-shaped JSON sidecar (title, chapter timestamps, tags) plus a per-shot .srt. The FCPXML route also embeds chapter markers so they round-trip into the MP4 chapter atom."
+              >
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={youtubeSidecar}
+                  disabled={busy}
+                  onChange={(e) => setYoutubeSidecar(e.target.checked)}
+                />
+                YouTube sidecar (chapters + .srt)
               </label>
             </div>
             {includeOverlay ? (

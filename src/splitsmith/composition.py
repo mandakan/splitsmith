@@ -232,7 +232,15 @@ class Segment:
 
 @dataclass(frozen=True)
 class Composition:
-    """A complete renderer-agnostic timeline (#194)."""
+    """A complete renderer-agnostic timeline (#194).
+
+    ``chapter_markers`` (issue #204): when ``True``, renderers emit
+    NLE-native chapter markers at each stage's visible head + on the
+    intro / outro segments. The FCPXML renderer carries them as
+    ``<chapter-marker>``; FCP / Premiere / DaVinci forward chapter
+    markers into the chapter atom on MP4 export, which is what
+    YouTube reads. Off by default to keep existing exports unchanged.
+    """
 
     project_name: str
     sequence: SequenceFormat
@@ -240,6 +248,7 @@ class Composition:
     intro: Segment | None = None
     outro: Segment | None = None
     transitions: tuple[Transition, ...] = ()
+    chapter_markers: bool = False
 
 
 # --- conversions -----------------------------------------------------------
@@ -267,6 +276,7 @@ def from_stage_compositions(
     titles: dict[int, TitleCard] | None = None,
     intro: Segment | None = None,
     outro: Segment | None = None,
+    chapter_markers: bool = False,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -354,6 +364,7 @@ def from_stage_compositions(
         transitions=tuple(transitions),
         intro=intro,
         outro=outro,
+        chapter_markers=chapter_markers,
     )
 
 
@@ -482,6 +493,7 @@ def render_fcpxml(
         and composition.outro is None
         and not composition.transitions
         and not has_titles
+        and not composition.chapter_markers
     ):
         # Single stage with no intro/outro/transitions/titles mirrors
         # today's per-stage path. Use generate_fcpxml so the file is
@@ -509,6 +521,7 @@ def render_fcpxml(
         titles=_lower_titles(composition),
         intro=_lower_segment(composition.intro),
         outro=_lower_segment(composition.outro),
+        chapter_markers=composition.chapter_markers,
     )
 
 

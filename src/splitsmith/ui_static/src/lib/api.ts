@@ -528,6 +528,11 @@ export interface MatchExportRequestPayload {
   /** Filesystem path to an optional outro clip placed after the
    *  last stage. Same semantics as ``intro_path``. */
   outro_path?: string | null;
+  /** Issue #204. Generate a YouTube-shaped JSON sidecar alongside
+   *  the export plus a per-shot ``.srt``. FCPXML route also gets
+   *  chapter markers embedded so they survive an NLE round-trip
+   *  into an MP4 chapter atom. */
+  youtube_sidecar?: boolean;
 }
 
 /** Body of a single export template (issue #198). Mirrors the dialog's
@@ -1557,6 +1562,9 @@ export const api = {
           : {}),
         ...(payload.outro_path !== undefined
           ? { outro_path: payload.outro_path }
+          : {}),
+        ...(payload.youtube_sidecar !== undefined
+          ? { youtube_sidecar: payload.youtube_sidecar }
           : {}),
       },
     }),

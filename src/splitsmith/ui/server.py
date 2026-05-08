@@ -967,6 +967,11 @@ class MatchExportRequest(BaseModel):
     # rest of the export still ships.
     intro_path: str | None = None
     outro_path: str | None = None
+    # Issue #204 layer 1. Generate a YouTube-shaped JSON sidecar
+    # alongside the export plus a per-shot ``.srt``. FCPXML route
+    # also gets chapter markers embedded so they survive an NLE
+    # round-trip into an MP4 chapter atom.
+    youtube_sidecar: bool = False
 
 
 class RevealRequest(BaseModel):
@@ -4643,6 +4648,7 @@ def create_app(
             title_duration_seconds=req.title_duration_seconds,
             intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
             outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
+            youtube_sidecar=req.youtube_sidecar,
         )
         try:
             result = match_export_helpers.export_match(
