@@ -1516,8 +1516,10 @@ def test_pip_position_is_resolution_independent(tmp_path: Path) -> None:
 
 
 def test_apply_pip_corner_cycle_assigns_rotating_corners() -> None:
-    """Multiple cams without explicit pip get TR -> TL -> BR -> BL when
-    ``apply_pip_corner_cycle`` is asked to inject a default."""
+    """Multiple cams without explicit pip get TL -> TR -> BR -> BL
+    (clockwise from the top-left) when ``apply_pip_corner_cycle`` is
+    asked to inject a default. The order matches reading flow so the
+    first cam is most prominent at the top-left."""
     secs = tuple(
         fcpxml_mod.SecondaryClip(
             video_path=Path(f"cam{i}.mp4"),
@@ -1531,7 +1533,7 @@ def test_apply_pip_corner_cycle_assigns_rotating_corners() -> None:
         secs, default=fcpxml_mod.PipPlacement(scale=0.3, margin_pct=1.5)
     )
     corners = [s.pip.corner for s in laid_out]  # type: ignore[union-attr]
-    assert corners == ["top-right", "top-left", "bottom-right", "bottom-left"]
+    assert corners == ["top-left", "top-right", "bottom-right", "bottom-left"]
     # Default scale / margin propagate; corner is the only override.
     for s in laid_out:
         assert s.pip is not None
@@ -1560,7 +1562,7 @@ def test_apply_pip_corner_cycle_preserves_explicit() -> None:
     )
     assert laid_out[0] is explicit  # untouched
     assert laid_out[1].pip is not None
-    assert laid_out[1].pip.corner == "top-right"  # cycle starts at TR
+    assert laid_out[1].pip.corner == "top-left"  # cycle starts at TL
 
 
 def test_apply_pip_corner_cycle_default_none_is_noop() -> None:
