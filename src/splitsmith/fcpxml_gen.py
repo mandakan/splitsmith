@@ -640,28 +640,27 @@ def generate_fcpxml(
     _tag_source_application(output_path)
 
 
-TransitionKind = Literal["cross-dissolve", "dip-to-color"]
+TransitionKind = Literal["zoom", "static"]
 
-# FCP's built-in transitions live under .motn templates with stable
-# names; emitting an ``<effect>`` resource that points at one of these
-# uids lets FCP resolve the transition without splitsmith bundling any
-# Motion files. Both have shipped unchanged for years -- if Apple ever
-# renames either, the FCPXML import will surface a missing-effect
-# warning and the user re-picks the transition manually.
+# FCP 12.x ships transitions as .motr templates under
+# PETemplates.localized; emitting an ``<effect>`` resource that points
+# at one of these uids lets FCP resolve the transition without
+# splitsmith bundling any Motion files. We restrict the menu to
+# transitions whose .motr file actually exists on disk in current FCP
+# builds -- earlier splitsmith versions targeted Cross Dissolve / Dip
+# to Color via .motn paths, but those files don't ship in FCP 12.x and
+# the transitions imported as the grey "missing effect" placeholder
+# (audio crossfade only). The user can swap to any related variant
+# (Zoom & Pan, Simple, Bloom, Flash, ...) in one click in FCP -- the
+# value here is just a working starting point.
 _TRANSITION_EFFECT_UIDS: dict[TransitionKind, str] = {
-    "cross-dissolve": (
-        ".../Transitions.localized/Dissolves.localized/"
-        "Cross Dissolve.localized/Cross Dissolve.motn"
-    ),
-    "dip-to-color": (
-        ".../Transitions.localized/Dissolves.localized/"
-        "Dip to Color Dissolve.localized/Dip to Color Dissolve.motn"
-    ),
+    "zoom": (".../Transitions.localized/Blurs.localized/" "Zoom.localized/Zoom.motr"),
+    "static": (".../Transitions.localized/Lights.localized/" "Static.localized/Static.motr"),
 }
 
 _TRANSITION_NAMES: dict[TransitionKind, str] = {
-    "cross-dissolve": "Cross Dissolve",
-    "dip-to-color": "Dip to Color Dissolve",
+    "zoom": "Zoom",
+    "static": "Static",
 }
 
 
@@ -752,14 +751,14 @@ class StageTransition:
     material -- the exporter validates this and raises a clear error
     otherwise.
 
-    ``color`` only applies to ``"dip-to-color"`` and accepts any FCP
-    colour string (e.g. ``"0 0 0 1"`` for opaque black). When omitted
-    FCP uses its default (black) -- explicit colour is a follow-up
-    when templating lands.
+    ``color`` is reserved for transition kinds that take a colour
+    parameter; the current built-in set (``zoom`` / ``static``) ignores
+    it. Kept on the dataclass so the IR -> emitter lowering can pass
+    through colour for future kinds without another schema bump.
     """
 
     after_stage_index: int
-    kind: TransitionKind = "cross-dissolve"
+    kind: TransitionKind = "zoom"
     duration_seconds: float = 0.5
     color: str | None = None
 

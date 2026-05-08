@@ -1032,7 +1032,7 @@ class MatchExportRequest(BaseModel):
     # pair, or ``"none"`` for hard cuts. Currently only the FCPXML
     # renderer emits transitions; FCP7 / MP4 surface a "transitions
     # ignored" anomaly when set together with those formats.
-    transition_kind: Literal["none", "cross-dissolve", "dip-to-color"] = "none"
+    transition_kind: Literal["none", "zoom", "static"] = "none"
     transition_duration_seconds: float = 0.5
     # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
     # card on the spine; ``"lower-third"`` is a connected text clip

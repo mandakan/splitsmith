@@ -641,7 +641,7 @@ export interface MatchExportRequestPayload {
    *  pair. ``"none"`` keeps today's hard cuts. Only FCPXML supports
    *  transitions today; selecting one with FCP7 XML or MP4 surfaces
    *  an anomaly note and falls back to hard cuts. */
-  transition_kind?: "none" | "cross-dissolve" | "dip-to-color";
+  transition_kind?: "none" | "zoom" | "static";
   /** Total transition length in seconds; ignored when
    *  ``transition_kind`` is ``"none"``. Each adjacent stage's effective
    *  window must contain at least half this value of material. */
@@ -686,7 +686,7 @@ export interface MatchExportTemplate {
   include_overlay?: boolean;
   pip_layout?: "stacked" | "pip-corners";
   output_format?: "fcpxml" | "fcp7xml" | "mp4";
-  transition_kind?: "none" | "cross-dissolve" | "dip-to-color";
+  transition_kind?: "none" | "zoom" | "static";
   transition_duration_seconds?: number;
   title_kind?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;

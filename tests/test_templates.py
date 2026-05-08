@@ -84,7 +84,7 @@ def test_load_template_rejects_unknown_field(tmp_path: Path) -> None:
     no effect when applying the template -- silent failure."""
     p = tmp_path / "typo.yaml"
     p.write_text(
-        "schema_version: 1\ntransitions_kind: cross-dissolve\n",
+        "schema_version: 1\ntransitions_kind: zoom\n",
         encoding="utf-8",
     )
     with pytest.raises(TemplateError):

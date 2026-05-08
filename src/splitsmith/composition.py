@@ -151,7 +151,7 @@ class Stage:
     title: TitleCard | None = None
 
 
-TransitionKind = Literal["cross-dissolve", "dip-to-color"]
+TransitionKind = Literal["zoom", "static"]
 
 
 @dataclass(frozen=True)
@@ -169,17 +169,17 @@ class Transition:
     stage's effective window contains at least ``duration_seconds / 2``
     of material before emitting the timeline.
 
-    The FCPXML renderer (this PR) emits ``cross-dissolve`` and
-    ``dip-to-color`` via FCP's built-in motion templates. The FCP7 XML
-    and ffmpeg renderers ignore transitions for now -- they'll grow
-    support in follow-up PRs.
+    The FCPXML renderer emits ``zoom`` and ``static`` via FCP's
+    built-in .motr motion templates (Blurs / Lights categories).
+    The FCP7 XML and ffmpeg renderers ignore transitions for now --
+    they'll grow support in follow-up PRs.
     """
 
     from_stage_index: int
     to_stage_index: int
-    kind: TransitionKind = "cross-dissolve"
+    kind: TransitionKind = "zoom"
     duration_seconds: float = 0.5
-    color: str | None = None  # dip-to-color only
+    color: str | None = None  # reserved for future colour-bearing kinds
 
 
 TitleStyle = Literal["slate", "lower-third"]
