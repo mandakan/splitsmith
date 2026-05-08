@@ -228,6 +228,63 @@ def test_export_match_drops_secondaries_when_flag_off(tmp_path: Path) -> None:
     assert nested == []
 
 
+def test_export_match_overlay_requested_but_unrendered_emits_clear_anomaly(
+    tmp_path: Path,
+) -> None:
+    """#217 -- when overlay is requested but the per-stage Generate
+    didn't render one (overlay_path is None), the anomaly tells the
+    user where to enable it rather than silently dropping the layer."""
+    audit = _make_audit(
+        tmp_path,
+        "stage1.json",
+        _audit_payload([{"shot_number": 1, "ms_after_beep": 500}]),
+    )
+    trim = _make_trim(tmp_path, "stage1_trimmed.mp4")
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit,
+                trimmed_path=trim,
+                beep_offset_seconds=5.0,
+                overlay_path=None,
+            )
+        ],
+        request=_make_request(),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert any("overlay not available" in a and "Overlay toggle" in a for a in result.anomalies)
+
+
+def test_export_match_overlay_silent_for_shotless_stages(tmp_path: Path) -> None:
+    """#217 -- shotless stages already surface a 'no shots audited'
+    anomaly that mentions overlay; don't emit a second 'overlay not
+    available' line for the same stage."""
+    audit = _make_audit(tmp_path, "stage1.json", _audit_payload([]))
+    trim = _make_trim(tmp_path, "stage1_trimmed.mp4")
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit,
+                trimmed_path=trim,
+                beep_offset_seconds=5.0,
+                overlay_path=None,
+            )
+        ],
+        request=_make_request(),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert any("no shots audited" in a for a in result.anomalies)
+    assert not any("overlay not available" in a for a in result.anomalies)
+
+
 def test_export_match_records_anomaly_for_missing_secondary(tmp_path: Path) -> None:
     audit = _make_audit(
         tmp_path,

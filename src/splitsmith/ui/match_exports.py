@@ -232,7 +232,19 @@ def export_match(
 
         overlay_path: Path | None = None
         overlay_video = None
-        if request.include_overlay and stage_input.overlay_path is not None:
+        if request.include_overlay and not shots:
+            # Shotless stages can't have an overlay -- it annotates shot
+            # times. The shotless anomaly above already signals it; don't
+            # double up unless the user explicitly opted in. (#217)
+            pass
+        elif request.include_overlay and stage_input.overlay_path is None:
+            # Overlay was requested but never rendered for this stage.
+            # Surface explicitly so the user knows why the timeline is bare.
+            anomalies.append(
+                f"stage {stage_input.stage_number}: overlay not available -- "
+                f"run the per-stage Generate with the Overlay toggle enabled"
+            )
+        elif request.include_overlay and stage_input.overlay_path is not None:
             if stage_input.overlay_path.exists():
                 try:
                     overlay_video = probe(stage_input.overlay_path)  # type: ignore[operator]

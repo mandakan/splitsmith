@@ -1619,16 +1619,37 @@ function MatchExportDialog({
                   </select>
                 </label>
               )}
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={includeOverlay}
-                  disabled={busy}
-                  onChange={(e) => setIncludeOverlay(e.target.checked)}
-                />
-                Include overlay (when present)
-              </label>
+              {(() => {
+                // #217 -- overlay annotates shot times, so it needs at
+                // least one audited shot across the selection. Disable
+                // the checkbox with a tooltip when nothing in scope has
+                // shots; the per-stage / match exports still skip it
+                // gracefully if it slips through.
+                const anyShots = stages.some(
+                  (s) =>
+                    stageNumbers.includes(s.stage_number) &&
+                    s.audit_shot_count > 0,
+                );
+                const overlayDisabled = busy || !anyShots;
+                const overlayTooltip = anyShots
+                  ? "Composite the per-shot overlay onto the timeline."
+                  : "Overlay needs at least one audited shot across the selection.";
+                return (
+                  <label
+                    className="flex items-center gap-1.5"
+                    title={overlayTooltip}
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={includeOverlay && anyShots}
+                      disabled={overlayDisabled}
+                      onChange={(e) => setIncludeOverlay(e.target.checked)}
+                    />
+                    Include overlay (when present)
+                  </label>
+                );
+              })()}
               <label
                 className="flex items-center gap-1.5"
                 title="FCPXML: Final Cut Pro 1.10 (default). FCP7 XML: legacy xmeml file importable into Premiere Pro and DaVinci Resolve."
