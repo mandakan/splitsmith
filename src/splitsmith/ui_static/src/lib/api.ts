@@ -533,6 +533,10 @@ export interface MatchExportRequestPayload {
    *  chapter markers embedded so they survive an NLE round-trip
    *  into an MP4 chapter atom. */
   youtube_sidecar?: boolean;
+  /** Issue #204 layer 2. Encode the MP4 with YouTube's recommended
+   *  H.264 profile / GOP / colour / audio params. Only meaningful
+   *  when ``output_format == "mp4"``. */
+  youtube_preset?: boolean;
 }
 
 /** Body of a single export template (issue #198). Mirrors the dialog's
@@ -1565,6 +1569,9 @@ export const api = {
           : {}),
         ...(payload.youtube_sidecar !== undefined
           ? { youtube_sidecar: payload.youtube_sidecar }
+          : {}),
+        ...(payload.youtube_preset !== undefined
+          ? { youtube_preset: payload.youtube_preset }
           : {}),
       },
     }),

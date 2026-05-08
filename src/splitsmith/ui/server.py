@@ -972,6 +972,10 @@ class MatchExportRequest(BaseModel):
     # also gets chapter markers embedded so they survive an NLE
     # round-trip into an MP4 chapter atom.
     youtube_sidecar: bool = False
+    # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
+    # H.264 profile / GOP / colour / audio params. Only meaningful for
+    # ``output_format == "mp4"``; ignored otherwise (anomaly surfaced).
+    youtube_preset: bool = False
 
 
 class RevealRequest(BaseModel):
@@ -4649,6 +4653,7 @@ def create_app(
             intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
             outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
             youtube_sidecar=req.youtube_sidecar,
+            youtube_preset=req.youtube_preset,
         )
         try:
             result = match_export_helpers.export_match(

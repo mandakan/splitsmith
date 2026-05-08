@@ -400,3 +400,95 @@ def test_export_match_slugifies_project_name_for_filename(tmp_path: Path) -> Non
         probe=_stub_probe,
     )
     assert result.fcpxml_path.name == "region-cup-2026-may-match.fcpxml"
+
+
+# --- youtube preset (#204 layer 2) ---------------------------------------
+
+
+def test_youtube_preset_anomaly_when_renderer_is_not_mp4(tmp_path: Path) -> None:
+    """The preset only applies to the MP4 renderer; setting it together
+    with an FCPXML / FCP7 export must not silently mis-encode anything
+    -- it surfaces as an anomaly so the user sees the mismatch."""
+    audit = _make_audit(
+        tmp_path,
+        "stage1.json",
+        _audit_payload([{"shot_number": 1, "ms_after_beep": 500}]),
+    )
+    trim = _make_trim(tmp_path, "stage1_trimmed.mp4")
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit,
+                trimmed_path=trim,
+                beep_offset_seconds=5.0,
+            )
+        ],
+        request=match_exports_mod.MatchExportRequestData(
+            stage_numbers=(1,),
+            head_pad_seconds=10.0,
+            tail_pad_seconds=20.0,
+            include_secondaries=True,
+            include_overlay=True,
+            project_name="match",
+            output_format="fcpxml",
+            youtube_preset=True,
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert any("youtube encode preset ignored" in a for a in result.anomalies)
+
+
+def test_youtube_preset_threads_through_to_mp4_renderer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the user picks output_format=mp4 with youtube_preset=True
+    the orchestrator forwards the flag to ``mp4_render.render_mp4``."""
+    audit = _make_audit(
+        tmp_path,
+        "stage1.json",
+        _audit_payload([{"shot_number": 1, "ms_after_beep": 500}]),
+    )
+    trim = _make_trim(tmp_path, "stage1_trimmed.mp4")
+
+    captured: dict[str, object] = {}
+
+    def fake_render_mp4(comp, *, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        captured["youtube_preset"] = kwargs.get("youtube_preset")
+        # Touch the output so downstream code that checks existence works.
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"")
+
+    monkeypatch.setattr(match_exports_mod.mp4_render, "render_mp4", fake_render_mp4)
+
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit,
+                trimmed_path=trim,
+                beep_offset_seconds=5.0,
+            )
+        ],
+        request=match_exports_mod.MatchExportRequestData(
+            stage_numbers=(1,),
+            head_pad_seconds=10.0,
+            tail_pad_seconds=20.0,
+            include_secondaries=True,
+            include_overlay=True,
+            project_name="match",
+            output_format="mp4",
+            youtube_preset=True,
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert captured["youtube_preset"] is True
+    # No anomaly when the preset matches the renderer.
+    assert not any("youtube encode preset" in a for a in result.anomalies)
+    assert result.fcpxml_path.suffix == ".mp4"

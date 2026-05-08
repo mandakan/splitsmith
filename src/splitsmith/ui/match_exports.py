@@ -119,6 +119,11 @@ class MatchExportRequestData:
     # writes the sidecar but no chapter markers (those renderers
     # don't carry chapters yet).
     youtube_sidecar: bool = False
+    # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
+    # H.264 profile / GOP / colour / audio params. Only meaningful for
+    # ``output_format == "mp4"`` -- gets surfaced as an anomaly when
+    # set against a non-MP4 renderer.
+    youtube_preset: bool = False
 
 
 @dataclass(frozen=True)
@@ -321,13 +326,23 @@ def export_match(
         outro=outro_segment,
         chapter_markers=embed_chapter_markers,
     )
+    youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
+    if request.youtube_preset and request.output_format != "mp4":
+        anomalies.append(
+            f"youtube encode preset ignored: only the mp4 renderer "
+            f"applies it (current renderer: {request.output_format})"
+        )
     try:
         if request.output_format == "fcpxml":
             composition.render_fcpxml(comp, output_path=output_path, config=config)
         elif request.output_format == "fcp7xml":
             fcp7xml_render.render_fcp7xml(comp, output_path=output_path)
         else:
-            mp4_render.render_mp4(comp, output_path=output_path)
+            mp4_render.render_mp4(
+                comp,
+                output_path=output_path,
+                youtube_preset=youtube_preset_active,
+            )
     except (ValueError, FileNotFoundError, mp4_render.FFmpegError) as exc:
         raise MatchExportError(str(exc)) from exc
 
