@@ -187,8 +187,15 @@ def export_match(
         # any beep_time_in_source value works here -- we pick 0.0 so the
         # ``time_absolute`` column stays trivially defined.
         shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
+        # Empty ``shots[]`` is permissive (#214): the stage still rides
+        # the spine as a trim-only segment. No shot markers, no chapter
+        # markers, no overlay -- those depend on shots. Surface an
+        # anomaly so the user sees which stages are exporting bare.
         if not shots:
-            raise MatchExportError(f"stage {stage_input.stage_number}: audit JSON has no shots")
+            anomalies.append(
+                f"stage {stage_input.stage_number}: no shots audited -- "
+                f"exported without shot markers / chapters / overlay"
+            )
 
         try:
             primary_meta = probe(stage_input.trimmed_path)  # type: ignore[operator]

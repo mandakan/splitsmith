@@ -195,26 +195,47 @@ def test_export_stage_refuses_missing_audit(tmp_path: Path) -> None:
         )
 
 
-def test_export_stage_refuses_empty_shots(tmp_path: Path) -> None:
+def test_export_stage_permissive_with_empty_shots(tmp_path: Path) -> None:
+    """#214 -- empty ``shots[]`` no longer hard-fails. The export
+    proceeds, skipping CSV / overlay (those require shots), but the
+    report still ships and surfaces "No shots detected" via the
+    standard anomaly pipeline. CSV / overlay skips also land as
+    anomalies so the user sees what was suppressed."""
     audit_path = tmp_path / "stage1.json"
     audit_path.write_text(json.dumps(_audit_payload(shots=[])), encoding="utf-8")
-    with pytest.raises(exports_mod.StageExportError):
-        exports_mod.export_stage(
-            request=exports_mod.StageExportRequest(stage_number=1),
-            audit_path=audit_path,
-            exports_dir=tmp_path / "exports",
-            source_video_path=None,
-            pre_buffer_seconds=5.0,
-            post_buffer_seconds=5.0,
-            stage_data=StageData(
-                stage_number=1,
-                stage_name="S",
-                time_seconds=8.0,
-                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
-            ),
-            beep_time_in_source=10.0,
-            config=Config(),
-        )
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=True,
+            write_overlay=True,
+            write_fcpxml=False,
+            write_report=True,
+        ),
+        audit_path=audit_path,
+        exports_dir=tmp_path / "exports",
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="S",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.shots_written == 0
+    assert result.csv_path is None
+    assert result.overlay_path is None
+    assert result.report_path is not None
+    assert result.report_path.exists()
+    # CSV / overlay skips are surfaced; the standard "no shots"
+    # anomaly piggybacks via report.detect_anomalies.
+    assert any("csv not written: no shots audited" in a for a in result.anomalies)
+    assert any("overlay not written: no shots audited" in a for a in result.anomalies)
+    assert any("No shots detected" in a for a in result.anomalies)
 
 
 def test_export_stage_skips_trim_and_fcpxml_when_source_unreachable(tmp_path: Path) -> None:

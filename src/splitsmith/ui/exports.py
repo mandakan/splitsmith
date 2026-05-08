@@ -213,10 +213,11 @@ def export_stage(
         raise StageExportError(f"failed to read audit JSON {audit_path}: {exc}") from exc
 
     shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=beep_time_in_source)
-    if not shots:
-        raise StageExportError(
-            f"audit JSON {audit_path} has no shots in shots[]; nothing to export"
-        )
+    # Empty ``shots[]`` is permissive (#214): the user may want a trim-only
+    # export. CSV / overlay / shot-markers depend on shots; the trimmed
+    # clip + FCPXML spine do not. ``report.detect_anomalies`` already
+    # surfaces "No shots detected in the stage window" for this case so
+    # the audit trail stays clean.
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     base = f"stage{stage_data.stage_number}_{_slugify(stage_data.stage_name)}"
@@ -327,8 +328,11 @@ def export_stage(
 
     csv_path: Path | None = None
     if request.write_csv:
-        csv_path = exports_dir / f"{base}_splits.csv"
-        csv_gen.write_splits_csv(shots, csv_path)
+        if shots:
+            csv_path = exports_dir / f"{base}_splits.csv"
+            csv_gen.write_splits_csv(shots, csv_path)
+        else:
+            skip_reasons.append("csv not written: no shots audited")
 
     # Overlay render (issue #45). Gated on having a trimmed clip to mirror;
     # the overlay must match the trim frame-for-frame or it will drift on
@@ -337,7 +341,12 @@ def export_stage(
     overlay_path: Path | None = None
     fcp_overlay_path: Path | None = None
     overlay_target = exports_dir / f"{base}_overlay.mov"
-    if request.write_overlay:
+    if request.write_overlay and not shots:
+        # Overlay annotates shot times; with no shots there's nothing to
+        # render. Surface as a skip reason so the user sees why the
+        # checkbox didn't produce output. (#214 / #217.)
+        skip_reasons.append("overlay not written: no shots audited")
+    elif request.write_overlay:
         # Resolve the trim we'll mirror: prefer the one we just wrote, then
         # a stale lossless trim from a prior run. If none exists -- e.g.
         # source unreachable AND no prior trim -- skip with a clear reason.

@@ -308,25 +308,81 @@ def test_export_match_raises_on_missing_audit(tmp_path: Path) -> None:
         )
 
 
-def test_export_match_raises_on_audit_with_no_shots(tmp_path: Path) -> None:
+def test_export_match_permissive_with_audit_with_no_shots(tmp_path: Path) -> None:
+    """#214 -- a stage with empty ``shots[]`` no longer hard-fails. The
+    spine still carries the stage as a trim-only segment; an anomaly
+    flags the missing markers."""
     audit = _make_audit(tmp_path, "stage1.json", _audit_payload([]))
     trim = _make_trim(tmp_path, "stage1_trimmed.mp4")
-    with pytest.raises(match_exports_mod.MatchExportError, match="no shots"):
-        match_exports_mod.export_match(
-            stages=[
-                match_exports_mod.MatchStageInput(
-                    stage_number=1,
-                    stage_name="Stage 1",
-                    audit_path=audit,
-                    trimmed_path=trim,
-                    beep_offset_seconds=5.0,
-                )
-            ],
-            request=_make_request(),
-            exports_dir=tmp_path / "exports",
-            config=OutputConfig(),
-            probe=_stub_probe,
-        )
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit,
+                trimmed_path=trim,
+                beep_offset_seconds=5.0,
+            )
+        ],
+        request=_make_request(),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert result.stage_count == 1
+    assert result.fcpxml_path.exists()
+    assert any("no shots audited" in a and "stage 1" in a for a in result.anomalies)
+    # Spine still carries the stage; FCPXML just has no shot markers.
+    root = ET.fromstring(result.fcpxml_path.read_bytes())
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert len(spine_clips) == 1
+    markers = spine_clips[0].findall("marker")
+    assert markers == []
+
+
+def test_export_match_permissive_mixed_shotful_and_shotless_stages(tmp_path: Path) -> None:
+    """When some stages have shots and others don't, the export proceeds
+    end-to-end with markers only on the shotful ones."""
+    audit_full = _make_audit(
+        tmp_path,
+        "stage1.json",
+        _audit_payload([{"shot_number": 1, "ms_after_beep": 500}]),
+    )
+    audit_empty = _make_audit(tmp_path, "stage2.json", _audit_payload([]))
+    trim_a = _make_trim(tmp_path, "stage1_trimmed.mp4")
+    trim_b = _make_trim(tmp_path, "stage2_trimmed.mp4")
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit_full,
+                trimmed_path=trim_a,
+                beep_offset_seconds=5.0,
+            ),
+            match_exports_mod.MatchStageInput(
+                stage_number=2,
+                stage_name="Stage 2",
+                audit_path=audit_empty,
+                trimmed_path=trim_b,
+                beep_offset_seconds=5.0,
+            ),
+        ],
+        request=_make_request(),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert result.stage_count == 2
+    # Anomaly only for the shotless stage.
+    assert any("stage 2" in a and "no shots audited" in a for a in result.anomalies)
+    assert not any("stage 1" in a and "no shots audited" in a for a in result.anomalies)
+    root = ET.fromstring(result.fcpxml_path.read_bytes())
+    clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert len(clips) == 2
+    # Stage 1 has a marker; stage 2 doesn't.
+    assert clips[0].findall("marker")
+    assert not clips[1].findall("marker")
 
 
 def test_export_match_raises_on_empty_stages(tmp_path: Path) -> None:
