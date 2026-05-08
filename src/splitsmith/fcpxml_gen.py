@@ -34,11 +34,13 @@ from .config import OutputConfig, Shot, SplitColorThresholds, VideoMetadata
 PipCorner = Literal["top-right", "top-left", "bottom-right", "bottom-left"]
 
 # Corner cycle order when PiP is requested without an explicit per-cam corner.
-# Top-right first because that's where the user typically wants the headcam-
-# vs-handheld layout to land for an IPSC stage view.
+# Top-left first, then clockwise -- the natural reading order for the user
+# scanning a stitched match: first cam takes the top-left, the next wraps
+# around to the right, then bottom-right, then bottom-left. This is the
+# default until per-cam corner overrides land in a layout-template feature.
 _PIP_CORNER_CYCLE: tuple[PipCorner, ...] = (
-    "top-right",
     "top-left",
+    "top-right",
     "bottom-right",
     "bottom-left",
 )
