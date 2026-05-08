@@ -1244,6 +1244,7 @@ def generate_match_fcpxml(
 
     # Intro segment (issue #173): plays first, full duration.
     if intro_asset_id is not None and intro is not None:
+        assert intro_format_id is not None
         intro_clip = ET.SubElement(
             spine,
             "asset-clip",
@@ -1253,7 +1254,7 @@ def generate_match_fcpxml(
                 "name": intro.name or intro.video_path.stem,
                 "start": "0s",
                 "duration": _frame_aligned_str(intro_duration_frames, fd_num, fd_den),
-                "format": format_id,
+                "format": intro_format_id,
             },
         )
         if chapter_markers:
@@ -1301,7 +1302,12 @@ def generate_match_fcpxml(
                 "name": stage.stage_name,
                 "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
                 "duration": eff_duration_str,
-                "format": format_id,
+                # Asset-clip format references the asset's own format
+                # (#236). For all-30p stages this still equals the
+                # sequence format; for mixed-rate stages (#233) it
+                # matches the primary's true format so FCP doesn't
+                # silently drop overrides applied to this clip.
+                "format": plan.primary_format_id,
             },
         )
 
@@ -1314,7 +1320,7 @@ def generate_match_fcpxml(
         # follows from delta = (beep_offset - head_trim) - sec_beep in
         # frames; a non-negative delta places the cam later in the parent's
         # local time, a negative delta skips into the cam's own media.
-        for lane_idx, (sec, sec_id, _sec_format_id, sec_dur_in_parent_frames) in enumerate(
+        for lane_idx, (sec, sec_id, sec_format_id, sec_dur_in_parent_frames) in enumerate(
             plan.usable_secondaries, start=1
         ):
             delta_frames = round(
@@ -1327,6 +1333,21 @@ def generate_match_fcpxml(
             else:
                 sec_offset_frames = plan.head_trim_frames
                 sec_start_frames = -delta_frames
+            # Cap the cam's visible duration to the parent's remaining
+            # visible window (#236). Without the cap a long cam clip
+            # extends past the primary's right edge in FCP, which the
+            # user reads as "trim not applied". Mirrors the MP4 renderer's
+            # ``min(cam_total - seek, effective - spine_start)`` math.
+            parent_visible_end = plan.head_trim_frames + plan.effective_duration_frames
+            cam_remaining = sec_dur_in_parent_frames - sec_start_frames
+            cam_room = parent_visible_end - sec_offset_frames
+            sec_visible_frames = max(0, min(cam_remaining, cam_room))
+            if sec_visible_frames == 0:
+                # Nothing of the cam fits in the parent's visible window
+                # (timing pushed it entirely past the right edge). Skip
+                # emitting the clip rather than producing a zero-length
+                # asset-clip the DTD rejects.
+                continue
             sec_clip = ET.SubElement(
                 primary_clip,
                 "asset-clip",
@@ -1336,8 +1357,14 @@ def generate_match_fcpxml(
                     "offset": _frame_aligned_str(sec_offset_frames, fd_num, fd_den),
                     "name": sec.label,
                     "start": _frame_aligned_str(sec_start_frames, fd_num, fd_den),
-                    "duration": _frame_aligned_str(sec_dur_in_parent_frames, fd_num, fd_den),
-                    "format": format_id,
+                    "duration": _frame_aligned_str(sec_visible_frames, fd_num, fd_den),
+                    # Asset-clip format must match the asset's actual
+                    # format, not the sequence's. When they diverge (mixed
+                    # rates after #233) FCP can drop transforms applied
+                    # to the clip -- including <adjust-transform> for
+                    # PiP. Using sec_format_id makes the format consistent
+                    # so PiP renders. (#236)
+                    "format": sec_format_id,
                 },
             )
             _attach_pip_transform(
@@ -1355,6 +1382,7 @@ def generate_match_fcpxml(
             # of the parent's visible start) so the overlay anchors at the
             # primary's visible start instead of head_trim seconds earlier.
             head_trim_str = _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den)
+            assert plan.overlay_format_id is not None  # set whenever overlay_asset_id is
             ET.SubElement(
                 primary_clip,
                 "asset-clip",
@@ -1365,7 +1393,9 @@ def generate_match_fcpxml(
                     "name": "Splitsmith overlay",
                     "start": head_trim_str,
                     "duration": eff_duration_str,
-                    "format": format_id,
+                    # Match the asset's actual format (#236). Same
+                    # rationale as the cam asset-clips above.
+                    "format": plan.overlay_format_id,
                 },
             )
 
@@ -1458,6 +1488,7 @@ def generate_match_fcpxml(
 
     # Outro segment (issue #173): plays after the last stage's primary.
     if outro_asset_id is not None and outro is not None:
+        assert outro_format_id is not None
         outro_clip = ET.SubElement(
             spine,
             "asset-clip",
@@ -1467,7 +1498,7 @@ def generate_match_fcpxml(
                 "name": outro.name or outro.video_path.stem,
                 "start": "0s",
                 "duration": _frame_aligned_str(outro_duration_frames, fd_num, fd_den),
-                "format": format_id,
+                "format": outro_format_id,
             },
         )
         if chapter_markers:
