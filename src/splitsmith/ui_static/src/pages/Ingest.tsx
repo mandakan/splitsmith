@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Clock,
   Crosshair,
+  FastForward,
   FileJson,
   FolderInput,
   FolderOpen,
@@ -27,6 +28,7 @@ import {
   PlayCircle,
   RefreshCw,
   Search,
+  Sparkles,
   Trash2,
   User,
   Video as VideoIcon,
@@ -448,6 +450,13 @@ export function Ingest() {
         // into a 50/50 grid produced the clipped picker rows we saw on first
         // launch -- give each card the row.
         <div className="space-y-4">
+          <ModeChoiceHero
+            project={project}
+            busy={busy}
+            setBusy={setBusy}
+            setError={setError}
+            onProjectUpdate={setProject}
+          />
           <ScoreboardSection
             project={project}
             source={scoreboardSource}
@@ -544,6 +553,150 @@ export function Ingest() {
         />
       ) : null}
     </div>
+  );
+}
+
+/** Empty-state hero pitching the two paths through splitsmith (#218 phase 3).
+ *
+ *  The mode choice is orthogonal to where the user gets stages from
+ *  (scoreboard import vs scan-and-create). It just sets the project's
+ *  ``automation.shot_detect_on_beep_verified`` override so the rest
+ *  of the app behaves accordingly:
+ *
+ *  - **Quick export (trim only)**: override = false. Beep -> trim ->
+ *    export. No CLAP / GBDT / PANN cycles. Stage badge stays at
+ *    "Ready"; export skips CSV / overlay / shot markers.
+ *
+ *  - **Full analysis (with shots)**: override = true. Beep verified
+ *    fires shot detection; stages walk "Shots pending" -> "Shots
+ *    audited"; export includes markers, CSV, overlay.
+ *
+ *  Hidden once the project has an explicit override (the user has
+ *  picked) so the empty-state doesn't keep nagging on subsequent
+ *  visits with the same project.
+ */
+function ModeChoiceHero({
+  project,
+  busy,
+  setBusy,
+  setError,
+  onProjectUpdate,
+}: {
+  project: MatchProject;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (p: MatchProject) => void;
+}) {
+  const explicitChoice = project.automation?.shot_detect_on_beep_verified;
+  // Already chose? Render a tiny inline indicator with a "Change"
+  // button instead of the full hero so the empty-state doesn't keep
+  // re-pitching the same question.
+  const choose = async (autoDetect: boolean | null) => {
+    setBusy(true);
+    try {
+      const updated = await api.updateSettings({
+        automation: { shot_detect_on_beep_verified: autoDetect },
+      });
+      onProjectUpdate(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (explicitChoice === true || explicitChoice === false) {
+    const label =
+      explicitChoice === true ? "Full analysis" : "Quick export (trim only)";
+    return (
+      <div className="flex items-center justify-between gap-2 rounded border border-border bg-muted/30 px-3 py-2 text-xs">
+        <span className="flex items-center gap-1.5">
+          <CheckCircle2 className="size-3.5 text-status-success" />
+          Mode: <span className="font-medium">{label}</span>
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          disabled={busy}
+          onClick={() => void choose(null)}
+        >
+          Change
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="size-4" />
+          How do you want to use splitsmith for this match?
+        </CardTitle>
+        <CardDescription>
+          Pick a mode to set sensible defaults. You can change this
+          later in Automation settings.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void choose(false)}
+            className={cn(
+              "group flex flex-col gap-2 rounded border border-border bg-background p-4 text-left transition-colors",
+              "hover:border-primary/50 hover:bg-accent/40",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <FastForward className="size-4 text-primary" />
+              <span className="text-sm font-semibold">
+                Quick export (trim only)
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Trim each stage around the start beep and stitch a match
+              timeline. No shot detection, no CSV, no overlay -- the
+              shortest path from raw videos to a stitched FCPXML / MP4.
+            </p>
+            <span className="text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+              Choose this --&gt;
+            </span>
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void choose(true)}
+            className={cn(
+              "group flex flex-col gap-2 rounded border border-border bg-background p-4 text-left transition-colors",
+              "hover:border-primary/50 hover:bg-accent/40",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Crosshair className="size-4 text-primary" />
+              <span className="text-sm font-semibold">
+                Full analysis (with shot times)
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              After you confirm the beep, splitsmith fires shot
+              detection. Audit the candidates and export with shot
+              markers, splits CSV, and the optional overlay layer.
+            </p>
+            <span className="text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+              Choose this --&gt;
+            </span>
+          </button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
