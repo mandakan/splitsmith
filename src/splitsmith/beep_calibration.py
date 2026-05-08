@@ -103,6 +103,7 @@ class FixtureEvalResult:
     correct_top1: bool
     correct_in_topn: bool  # any candidate within tolerance
     candidate_count: int
+    detected_confidence: float | None = None
     error_kind: str | None = None  # "not_found", "exception", or None
 
 
@@ -207,6 +208,7 @@ def evaluate_detection(
     tolerance_ms: float,
     detected_time_s: float | None,
     detected_score: float | None,
+    detected_confidence: float | None = None,
     candidate_times_s: Iterable[float] = (),
     error_kind: str | None = None,
 ) -> FixtureEvalResult:
@@ -229,6 +231,7 @@ def evaluate_detection(
             tolerance_s=tol_s,
             detected_time_s=None,
             detected_score=detected_score,
+            detected_confidence=detected_confidence,
             error_s=None,
             correct_top1=False,
             correct_in_topn=False,
@@ -247,6 +250,7 @@ def evaluate_detection(
         tolerance_s=tol_s,
         detected_time_s=detected_time_s,
         detected_score=detected_score,
+        detected_confidence=detected_confidence,
         error_s=error,
         correct_top1=correct_top1,
         correct_in_topn=correct_in_topn,
