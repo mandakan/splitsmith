@@ -148,7 +148,7 @@ class Stage:
     secondaries: tuple[ConnectedClip, ...] = ()
     overlay: ConnectedClip | None = None
     markers: tuple[Marker, ...] = ()
-    title: "TitleCard | None" = None
+    title: TitleCard | None = None
 
 
 TransitionKind = Literal["cross-dissolve", "dip-to-color"]
