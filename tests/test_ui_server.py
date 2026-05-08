@@ -1692,6 +1692,96 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     assert trim_calls[0]["stage_time"] == pytest.approx(12.0)
 
 
+def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """confidence >= threshold flips beep_reviewed to True without a click (#219)."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 12.0
+    project.save(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"X")
+
+    from splitsmith import beep_detect, trim
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeBeep:
+        time = 6.5
+        peak_amplitude = 0.42
+        duration_ms = 350.0
+        confidence = 0.92  # well above the 0.6 default threshold
+        candidates: list = []
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
+    (tmp_path / "z.wav").write_bytes(b"\x00")
+    monkeypatch.setattr(beep_detect, "load_audio", lambda p: ([0.0] * 100, 48_000))
+    monkeypatch.setattr(beep_detect, "detect_beep", lambda *a, **kw: FakeBeep())
+    monkeypatch.setattr(
+        trim,
+        "trim_video",
+        lambda **kw: trim.TrimResult(
+            output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0
+        ),
+    )
+    Path(project_root / "trimmed").mkdir(parents=True, exist_ok=True)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    _wait_for_job(client, resp.json()["id"])
+    primary_after = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary_after["beep_confidence"] == pytest.approx(0.92)
+    assert primary_after["beep_reviewed"] is True
+
+
+def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeypatch) -> None:
+    """Below-threshold beep keeps beep_reviewed=False so it lands in HITL queue."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    project.stages[0].time_seconds = 12.0
+    project.save(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"X")
+
+    from splitsmith import beep_detect, trim
+    from splitsmith.ui import audio as audio_helpers
+
+    class FakeBeep:
+        time = 6.5
+        peak_amplitude = 0.42
+        duration_ms = 200.0
+        confidence = 0.45  # below default threshold of 0.6
+        candidates: list = []
+
+    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "w.wav")
+    (tmp_path / "w.wav").write_bytes(b"\x00")
+    monkeypatch.setattr(beep_detect, "load_audio", lambda p: ([0.0] * 100, 48_000))
+    monkeypatch.setattr(beep_detect, "detect_beep", lambda *a, **kw: FakeBeep())
+    monkeypatch.setattr(
+        trim,
+        "trim_video",
+        lambda **kw: trim.TrimResult(
+            output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0
+        ),
+    )
+    Path(project_root / "trimmed").mkdir(parents=True, exist_ok=True)
+
+    resp = client.post("/api/stages/1/detect-beep")
+    assert resp.status_code == 200
+    _wait_for_job(client, resp.json()["id"])
+    primary_after = client.get("/api/project").json()["stages"][0]["videos"][0]
+    assert primary_after["beep_confidence"] == pytest.approx(0.45)
+    assert primary_after["beep_reviewed"] is False
+    # And it should now show up in the HITL queue.
+    queue = client.get("/api/hitl-queue").json()
+    assert len(queue["items"]) == 1
+    assert queue["items"][0]["kind"] == "beep_low_confidence"
+
+
 def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch) -> None:
     """Source-first / placeholder stages with time_seconds=0 (no scoreboard
     yet) should still let the user detect a beep -- trim just gets deferred
@@ -4929,12 +5019,18 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     resp = client.get("/api/automation")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["settings"] == {"shot_detect_on_beep_verified": True}
+    assert body["settings"] == {
+        "shot_detect_on_beep_verified": True,
+        "beep_low_confidence_threshold": 0.6,
+    }
     prov = body["provenance"]["shot_detect_on_beep_verified"]
     assert prov["source"] == "global"
     assert prov["global_value"] is True
     assert prov["project_value"] is None
     assert prov["cli_value"] is None
+    threshold_prov = body["provenance"]["beep_low_confidence_threshold"]
+    assert threshold_prov["source"] == "global"
+    assert threshold_prov["global_value"] == 0.6
 
 
 def test_get_automation_reports_project_provenance_when_overridden(
@@ -5042,6 +5138,164 @@ def test_dismiss_nudge_404_for_unknown_stage(tmp_path: Path) -> None:
         json={"stage_number": 99, "dismissed": True},
     )
     assert resp.status_code == 404
+
+
+def _build_project_with_primary(
+    root: Path,
+    name: str,
+    *,
+    beep_time: float | None,
+    beep_source: str | None,
+    beep_confidence: float | None,
+    beep_reviewed: bool,
+    beep_auto_detect_failed: bool = False,
+) -> MatchProject:
+    """Helper for HITL queue tests -- builds a project with one stage / primary."""
+    project = MatchProject.init(root, name=name)
+    primary = StageVideo(
+        path=root / "primary.mp4",
+        role="primary",
+        beep_time=beep_time,
+        beep_source=beep_source,  # type: ignore[arg-type]
+        beep_confidence=beep_confidence,
+        beep_reviewed=beep_reviewed,
+        beep_auto_detect_failed=beep_auto_detect_failed,
+    )
+    project.stages = [
+        StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.0, videos=[primary])
+    ]
+    project.save(root)
+    return project
+
+
+def test_hitl_queue_lists_low_confidence_auto_beep(tmp_path: Path) -> None:
+    """Auto-detected beep below the threshold lands in the queue."""
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "HITL Low",
+        beep_time=22.5,
+        beep_source="auto",
+        beep_confidence=0.4,
+        beep_reviewed=False,
+    )
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/hitl-queue")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["threshold"] == 0.6
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["kind"] == "beep_low_confidence"
+    assert item["stage_number"] == 1
+    assert item["confidence"] == 0.4
+    assert "candidate" in item["suggested_action"].lower()
+
+
+def test_hitl_queue_lists_missing_beep(tmp_path: Path) -> None:
+    """Auto-detect failure shows up as ``beep_missing``."""
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "HITL Missing",
+        beep_time=None,
+        beep_source="auto",
+        beep_confidence=None,
+        beep_reviewed=False,
+        beep_auto_detect_failed=True,
+    )
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/hitl-queue")
+    item = resp.json()["items"][0]
+    assert item["kind"] == "beep_missing"
+    assert item["confidence"] is None
+    assert "manual" in item["suggested_action"].lower()
+
+
+def test_hitl_queue_omits_high_confidence_reviewed_beep(tmp_path: Path) -> None:
+    """High-confidence auto-trusted beeps don't need attention."""
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "HITL Trusted",
+        beep_time=22.5,
+        beep_source="auto",
+        beep_confidence=0.85,
+        beep_reviewed=True,  # auto-trusted via threshold gate
+    )
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/hitl-queue")
+    assert resp.json()["items"] == []
+
+
+def test_hitl_queue_omits_manual_beep(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "HITL Manual",
+        beep_time=22.5,
+        beep_source="manual",
+        beep_confidence=1.0,
+        beep_reviewed=True,
+    )
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/hitl-queue")
+    assert resp.json()["items"] == []
+
+
+def test_hitl_queue_orders_by_stage_number(tmp_path: Path) -> None:
+    """Stages 3, 1, 2 with all-needs-review beeps come back in 1, 2, 3 order."""
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="HITL Order")
+    project.stages = []
+    for n in (3, 1, 2):
+        v = StageVideo(
+            path=root / f"p{n}.mp4",
+            role="primary",
+            beep_time=10.0,
+            beep_source="auto",  # type: ignore[arg-type]
+            beep_confidence=0.4,
+            beep_reviewed=False,
+        )
+        project.stages.append(
+            StageEntry(stage_number=n, stage_name=f"S{n}", time_seconds=12.0, videos=[v])
+        )
+    project.save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/hitl-queue")
+    stages = [item["stage_number"] for item in resp.json()["items"]]
+    assert stages == [1, 2, 3]
+
+
+def test_hitl_queue_threshold_respects_project_override(tmp_path: Path) -> None:
+    """Project-level threshold override flows through to the response."""
+    root = tmp_path / "match"
+    project = _build_project_with_primary(
+        root,
+        "HITL Threshold",
+        beep_time=22.5,
+        beep_source="auto",
+        beep_confidence=0.65,
+        beep_reviewed=False,
+    )
+    project.automation = AutomationOverride(beep_low_confidence_threshold=0.9)
+    project.save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    body = client.get("/api/hitl-queue").json()
+    assert body["threshold"] == 0.9
+    assert body["items"][0]["confidence"] == 0.65
 
 
 def test_post_settings_patches_automation_override(tmp_path: Path) -> None:
