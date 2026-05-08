@@ -1090,6 +1090,79 @@ def test_match_fcpxml_supports_mixed_frame_rates(tmp_path: Path) -> None:
     assert spine_clips[1].attrib["format"] == fid_by_fd["1001/30000s"]
 
 
+def test_match_fcpxml_connected_offsets_use_parent_grid_when_rates_differ(
+    tmp_path: Path,
+) -> None:
+    """Regression: a connected clip's ``offset`` must be expressed in the
+    *parent* primary's frame grid, not the sequence's. When stage 1's
+    primary is 60p but the sequence is 30p (taken from stage 0), the
+    cam offset 4s = ``120/30s`` (sequence grid) doesn't land on the
+    parent's 1/60s frame_duration evenly in the general case; FCP
+    rejects the import with "not on an edit frame boundary". The
+    correct emission quantizes to the parent (1/60s) -> ``240/60s``."""
+    v1 = _make_video(tmp_path, "stage1.mp4")
+    v2 = _make_video(tmp_path, "stage2.mp4")
+    cam = _make_video(tmp_path, "stage2_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    meta_60p = VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        frame_rate_num=60,
+        frame_rate_den=1,
+    )
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=v1,
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=5.0,
+            ),
+            StageComposition(
+                stage_name="stage2",
+                video_path=v2,
+                video=meta_60p,
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=1.0,  # head_trim = 4s
+                tail_pad_seconds=5.0,
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam,
+                        video=meta_60p,
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                        pip=PipPlacement(corner="bottom-left"),
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    cam_clip = spine_clips[1].find("asset-clip")
+    assert cam_clip is not None
+    # Stage 2 primary is 60p, so the cam's parent grid is 1/60s. Offset
+    # 4s must land on that grid: 4 * 60 = 240 -> "240/60s". The buggy
+    # emission used the sequence grid (1/30s) and produced "120/30s",
+    # which doesn't line up with the parent's frame_duration in the
+    # mixed-rate case.
+    assert cam_clip.attrib["offset"] == "240/60s"
+    # ``duration`` stays on the sequence grid (1/30s) -- it expresses
+    # how long the cam occupies the sequence timeline, which must
+    # quantize to the sequence's frame_duration. Stage 2's effective
+    # window is 7s (20s source - 4s head_trim - 9s tail_trim) @ 30p
+    # = 210 sequence frames -> "210/30s".
+    assert cam_clip.attrib["duration"] == "210/30s"
+
+
 def test_match_fcpxml_caps_cam_duration_to_parent_visible_window(
     tmp_path: Path,
 ) -> None:
