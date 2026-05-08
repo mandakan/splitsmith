@@ -665,11 +665,16 @@ _TRANSITION_NAMES: dict[TransitionKind, str] = {
 
 TitleStyle = Literal["slate", "lower-third"]
 
-# FCP's "Basic Title" generator. Stable across FCP versions and the
-# safest cross-installation pick; templates that require non-default
-# Motion library availability are intentionally avoided.
+# FCP's "Basic Title" generator. Apple changed the bundle layout
+# between FCP 11 and 12: in 12.x the file lives at
+# ``PETemplates.localized/Titles.localized/Bumper:Opener.localized/
+# Basic Title.localized/Basic Title.moti`` (note ``.moti`` extension
+# and the ``Bumper:Opener`` parent that didn't exist in 10.x/11.x).
+# We target the 12.x path because that's what current FCP versions
+# ship; older installations will surface a missing-effect warning on
+# import (the user can re-pick the title manually). #240.
 _BASIC_TITLE_EFFECT_UID = (
-    ".../Generators.localized/Titles.localized/" "Basic Title.localized/Basic Title.motn"
+    ".../Titles.localized/Bumper:Opener.localized/" "Basic Title.localized/Basic Title.moti"
 )
 
 
