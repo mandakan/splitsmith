@@ -77,14 +77,18 @@ def test_sequence_format_from_video_copies_dims_and_rate() -> None:
     ["top-right", "top-left", "bottom-right", "bottom-left"],
 )
 def test_pip_placement_resolve_matches_emitter_attrs(corner: str) -> None:
-    """``PipPlacement.resolve`` is the single source of truth for both the
-    IR's ``Transform`` and the FCPXML emitter's attribute strings -- if
-    the two ever disagreed the bridge would silently drift."""
+    """``PipPlacement.resolve`` is the IR's pixel-space source of truth;
+    the FCPXML emitter scales those pixels into FCPXML's normalized
+    ``100 == sequence_height`` position units (#236). The conversion is
+    a fixed scalar for a given sequence height, so both the IR and the
+    emitter still agree on placement -- they just speak different units.
+    """
     pip = PipPlacement(corner=corner)  # type: ignore[arg-type]
-    scale, (x, y) = pip.resolve(sequence_width=1920, sequence_height=1080)
+    scale, (x_px, y_px) = pip.resolve(sequence_width=1920, sequence_height=1080)
     attrs = fcpxml_gen._pip_transform_attrs(pip, sequence_width=1920, sequence_height=1080)
     assert attrs["scale"] == f"{scale:g} {scale:g}"
-    assert attrs["position"] == f"{x:g} {y:g}"
+    unit = 100.0 / 1080
+    assert attrs["position"] == f"{x_px * unit:g} {y_px * unit:g}"
 
 
 @pytest.mark.parametrize(

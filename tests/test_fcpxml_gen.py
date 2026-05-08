@@ -1375,6 +1375,10 @@ def _expected_pip_attrs(
     margin_pct: float,
     corner: str,
 ) -> dict[str, str]:
+    """Mirror of ``_pip_transform_attrs``: pixel position from
+    ``PipPlacement.resolve`` then converted to FCPXML's normalized
+    units (100 == sequence_height in pixels). See #236 for derivation.
+    """
     half_w = seq_w / 2.0
     half_h = seq_h / 2.0
     clip_half_w = half_w * scale
@@ -1389,7 +1393,11 @@ def _expected_pip_attrs(
         y = half_h - clip_half_h - margin_y
     else:
         y = -(half_h - clip_half_h - margin_y)
-    return {"scale": f"{scale:g} {scale:g}", "position": f"{x:g} {y:g}"}
+    unit_per_px = 100.0 / seq_h
+    return {
+        "scale": f"{scale:g} {scale:g}",
+        "position": f"{x * unit_per_px:g} {y * unit_per_px:g}",
+    }
 
 
 def test_secondary_without_pip_emits_no_transform(tmp_path: Path) -> None:
@@ -1463,10 +1471,11 @@ def test_secondary_with_pip_emits_corner_transform(corner: str, tmp_path: Path) 
     assert transform.attrib == expected
 
 
-def test_pip_position_scales_with_sequence_dimensions(tmp_path: Path) -> None:
-    """At a 4K sequence with ``scale=0.25, margin_pct=2.0`` the absolute
-    pixel position is twice the 1080p value -- the clip stays anchored to
-    the same fractional corner regardless of resolution."""
+def test_pip_position_is_resolution_independent(tmp_path: Path) -> None:
+    """#236 -- FCPXML position is in normalized "100 == sequence_height"
+    units. ``scale=0.25, margin_pct=2.0, corner="top-right"`` emits the
+    same position string on 1080p and 4K timelines (only the pixel
+    offset differs; the normalized value stays put)."""
     video = tmp_path / "v.mp4"
     video.write_bytes(b"")
     secondary = tmp_path / "cam.mp4"
@@ -1498,6 +1507,12 @@ def test_pip_position_scales_with_sequence_dimensions(tmp_path: Path) -> None:
         seq_w=3840, seq_h=2160, scale=0.25, margin_pct=2.0, corner="top-right"
     )
     assert transform.attrib == expected
+    # Resolution-independent: the same PiP at 1080p emits the same
+    # normalized position string.
+    expected_1080 = _expected_pip_attrs(
+        seq_w=1920, seq_h=1080, scale=0.25, margin_pct=2.0, corner="top-right"
+    )
+    assert expected_1080["position"] == expected["position"]
 
 
 def test_apply_pip_corner_cycle_assigns_rotating_corners() -> None:
