@@ -1138,10 +1138,11 @@ function CandidateRow({
       </div>
       <div
         className="mt-0.5 pl-7 text-[11px] text-muted-foreground"
-        title={`Silence-preference score: ${candidate.score.toFixed(2)} (run peak / pre-window mean). Peak amplitude on the bandpassed envelope: ${candidate.peak_amplitude.toFixed(3)}. Duration: ${candidate.duration_ms.toFixed(0)} ms.`}
+        title={`Calibrated detector confidence in [0, 1] (#220 layer 3a). Components: silence-preference ${candidate.silence_score.toFixed(2)} (run peak / pre-window max), tonal concentration ${candidate.tonal_score.toFixed(2)} (energy in IPSC fundamental band). Duration: ${candidate.duration_ms.toFixed(0)} ms; peak ${candidate.peak_amplitude.toFixed(3)}.`}
       >
-        score {candidate.score.toFixed(1)} &middot; peak {candidate.peak_amplitude.toFixed(2)}{" "}
-        &middot; {Math.round(candidate.duration_ms)} ms
+        conf {candidate.confidence.toFixed(2)} &middot; tonal{" "}
+        {candidate.tonal_score.toFixed(2)} &middot;{" "}
+        {Math.round(candidate.duration_ms)} ms
       </div>
     </li>
   );

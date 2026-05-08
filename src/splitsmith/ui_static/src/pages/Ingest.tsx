@@ -39,6 +39,7 @@ import {
 import { BeepSection } from "@/components/BeepSection";
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { FolderPicker } from "@/components/FolderPicker";
+import { HitlQueuePanel } from "@/components/HitlQueuePanel";
 import { MountSelect } from "@/components/MountSelect";
 import { SettingProvenance } from "@/components/SettingProvenance";
 import { Badge } from "@/components/ui/badge";
@@ -511,6 +512,19 @@ export function Ingest() {
       {project ? (
         <>
           <ReadyBanner project={project} analysis={analysis} />
+          {project.stages.length > 0 ? (
+            <HitlQueuePanel
+              onJumpToStage={(stageNumber) => {
+                // Stage rows tag themselves with id="stage-row-{n}"
+                // (added below). Falling back to no-op when the row
+                // hasn't rendered yet keeps the click safe.
+                const el = document.getElementById(`stage-row-${stageNumber}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+              }}
+            />
+          ) : null}
           <UnassignedSection
             project={project}
             analysis={analysis}
@@ -1779,7 +1793,13 @@ function AutomationSettingsPanel({
   // resolved value): "inherit", "true", or "false". Resolution is
   // shown via the badge + the helper line so the user sees both
   // layers at once without the select lying about its state.
-  const projectValue: boolean | null | undefined = shotDetectProv?.project_value;
+  // ``project_value`` is union-typed (bool | number) since the
+  // automation block now mixes toggles and thresholds; this select
+  // controls a boolean toggle only, so anything non-boolean is
+  // treated as "inherit".
+  const projectValueRaw = shotDetectProv?.project_value;
+  const projectValue: boolean | null | undefined =
+    typeof projectValueRaw === "boolean" ? projectValueRaw : null;
   const selectValue: "inherit" | "on" | "off" =
     projectValue === true ? "on" : projectValue === false ? "off" : "inherit";
 
@@ -2531,6 +2551,9 @@ function StageCard({
 
   return (
     <Card
+      // Stable anchor for the HITL queue panel (#219): clicking
+      // "Open" on a low-confidence row scrolls to this stage.
+      id={`stage-row-${stage.stage_number}`}
       className={cn(
         hasConflict && "border-status-warning",
         canAccept && "border-dashed border-ring/50",

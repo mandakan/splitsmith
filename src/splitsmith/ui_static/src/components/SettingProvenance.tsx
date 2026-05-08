@@ -35,9 +35,10 @@ const SOURCE_CLASSES: Record<AutomationProvenanceSource, string> = {
   default: "border-border bg-muted text-muted-foreground",
 };
 
-function formatValue(value: boolean | null | undefined): string {
+function formatValue(value: boolean | number | null | undefined): string {
   if (value === true) return "on";
   if (value === false) return "off";
+  if (typeof value === "number") return value.toString();
   return "(unset)";
 }
 
