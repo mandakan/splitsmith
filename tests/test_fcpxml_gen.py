@@ -1146,6 +1146,95 @@ def test_match_fcpxml_caps_cam_duration_to_parent_visible_window(
     assert cam_dur_frames <= 90
 
 
+def test_match_fcpxml_cam_with_pip_gets_simple_border_filter(
+    tmp_path: Path,
+) -> None:
+    """#243 -- cams with a PiP transform also get a Simple Border
+    ``<filter-video>`` so the corner inset has a visible frame.
+    The effect resource is allocated once and shared across cams."""
+    primary_path = _make_video(tmp_path, "stage1.mp4")
+    cam_path = _make_video(tmp_path, "stage1_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=primary_path,
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=20.0,
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam_path,
+                        video=_meta_30fps(),
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                        pip=PipPlacement(corner="top-right"),
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="frame",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    effects = root.findall("./resources/effect")
+    border_effects = [e for e in effects if e.attrib.get("name") == "Simple Border"]
+    assert len(border_effects) == 1
+    border = border_effects[0]
+    assert border.attrib["uid"].endswith("Simple Border.moef")
+    cam_clip = root.find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    filters = cam_clip.findall("filter-video")
+    assert len(filters) == 1
+    assert filters[0].attrib["ref"] == border.attrib["id"]
+
+
+def test_match_fcpxml_stacked_cam_has_no_frame_filter(tmp_path: Path) -> None:
+    """Stacked (full-frame) cams don't get the frame filter -- the
+    border would be a no-op visual since the cam already covers the
+    sequence. The effect resource is also skipped to keep the XML
+    tidy when no cam needs it."""
+    primary_path = _make_video(tmp_path, "stage1.mp4")
+    cam_path = _make_video(tmp_path, "stage1_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=primary_path,
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=20.0,
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam_path,
+                        video=_meta_30fps(),
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="no-frame",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    border_effects = [
+        e for e in root.findall("./resources/effect") if e.attrib.get("name") == "Simple Border"
+    ]
+    assert len(border_effects) == 0
+    cam_clip = root.find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    assert cam_clip.find("filter-video") is None
+
+
 def test_match_fcpxml_cam_clip_mutes_audio(tmp_path: Path) -> None:
     """#236 -- cam audio shouldn't compete with the primary's on the
     timeline. Emit ``<adjust-volume amount=\"-96dB\"/>`` on every cam

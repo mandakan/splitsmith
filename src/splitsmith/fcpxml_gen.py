@@ -677,6 +677,16 @@ _BASIC_TITLE_EFFECT_UID = (
     ".../Titles.localized/Bumper:Opener.localized/" "Basic Title.localized/Basic Title.moti"
 )
 
+# FCP's "Simple Border" video effect under Stylize (#243). Adds a thin
+# coloured outline around any clip; lives in ``PETemplates`` alongside
+# Basic Title. Used to make PiP cams visually distinct from the primary
+# at corner placements. The user can edit the border's colour /
+# thickness in FCP after import; we ship with the bundled defaults to
+# keep the XML small.
+_PIP_FRAME_EFFECT_UID = (
+    ".../Effects.localized/Stylize.localized/" "Simple Border.localized/Simple Border.moef"
+)
+
 
 @dataclass(frozen=True)
 class StageTitle:
@@ -1182,6 +1192,30 @@ def generate_match_fcpxml(
             },
         )
 
+    # PiP frame effect resource (#243). One Simple Border effect
+    # referenced by every cam asset-clip with a PiP transform; the
+    # frame defaults (thin white outline) come from the bundled
+    # effect's parameters and stay editable in FCP. Skip emission
+    # when no cam has PiP -- the cam covers the timeline at full
+    # frame and a frame would be a no-op visual.
+    pip_frame_effect_id: str | None = None
+    if any(
+        sec.pip is not None
+        for plan in plans
+        for sec, _sec_id, _sec_format_id, _sec_dur in plan.usable_secondaries
+    ):
+        resource_counter += 1
+        pip_frame_effect_id = f"r{resource_counter}"
+        ET.SubElement(
+            resources,
+            "effect",
+            {
+                "id": pip_frame_effect_id,
+                "name": "Simple Border",
+                "uid": _PIP_FRAME_EFFECT_UID,
+            },
+        )
+
     titles_by_index: dict[int, StageTitle] = {ti.stage_index: ti for ti in titles}
     slate_frames_by_index: dict[int, int] = {
         idx: round(ti.duration_seconds / fd_seconds)
@@ -1411,6 +1445,15 @@ def generate_match_fcpxml(
                 sequence_width=base.width,
                 sequence_height=base.height,
             )
+            # Visible frame around the PiP cam (#243). Only when the
+            # cam is corner-positioned (sec.pip is set); a stacked
+            # full-frame cam doesn't need it.
+            if sec.pip is not None and pip_frame_effect_id is not None:
+                ET.SubElement(
+                    sec_clip,
+                    "filter-video",
+                    {"ref": pip_frame_effect_id, "name": "Simple Border"},
+                )
 
         if plan.overlay_asset_id is not None:
             overlay_lane = len(plan.usable_secondaries) + 1
