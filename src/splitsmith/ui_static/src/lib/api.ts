@@ -391,6 +391,54 @@ export interface ScanResponse {
   skipped: string[];
 }
 
+/** Filesystem state of a registered ``raw/<name>`` symlink. ``ok`` =
+ *  resolves to a present file; ``broken`` = symlink with missing
+ *  target; ``missing_link`` = the symlink itself is gone;
+ *  ``not_a_symlink`` = a regular file (link_mode="copy") that the
+ *  relink flow can't help with. */
+export type LinkStatus = "ok" | "broken" | "missing_link" | "not_a_symlink";
+
+export interface LinkStatusEntry {
+  video_id: string;
+  name: string;
+  link_path: string;
+  current_target: string | null;
+  status: LinkStatus;
+}
+
+export interface LinkStatusResponse {
+  entries: LinkStatusEntry[];
+}
+
+export interface RelinkEntry {
+  video_id: string;
+  name: string;
+  link_path: string;
+  current_target: string | null;
+  current_status: LinkStatus;
+  candidates: string[];
+  chosen_path: string | null;
+  ambiguous: boolean;
+  found: boolean;
+}
+
+export interface RelinkScanResponse {
+  search_root: string;
+  entries: RelinkEntry[];
+}
+
+export interface RelinkAppliedEntry {
+  video_id: string;
+  name: string;
+  link_path: string;
+  previous_target: string | null;
+  new_target: string;
+}
+
+export interface RelinkApplyResponse {
+  applied: RelinkAppliedEntry[];
+}
+
 export type FsEntryKind = "dir" | "video" | "file";
 
 export interface FsEntry {
@@ -593,7 +641,7 @@ export interface MatchExportRequestPayload {
    *  pair. ``"none"`` keeps today's hard cuts. Only FCPXML supports
    *  transitions today; selecting one with FCP7 XML or MP4 surfaces
    *  an anomaly note and falls back to hard cuts. */
-  transition_kind?: "none" | "cross-dissolve" | "dip-to-color";
+  transition_kind?: "none" | "zoom" | "static";
   /** Total transition length in seconds; ignored when
    *  ``transition_kind`` is ``"none"``. Each adjacent stage's effective
    *  window must contain at least half this value of material. */
@@ -638,7 +686,7 @@ export interface MatchExportTemplate {
   include_overlay?: boolean;
   pip_layout?: "stacked" | "pip-corners";
   output_format?: "fcpxml" | "fcp7xml" | "mp4";
-  transition_kind?: "none" | "cross-dissolve" | "dip-to-color";
+  transition_kind?: "none" | "zoom" | "static";
   transition_duration_seconds?: number;
   title_kind?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
@@ -1185,6 +1233,28 @@ export const api = {
     request<ScanResponse>("/api/videos/scan", {
       method: "POST",
       json: { source_paths: sourcePaths, auto_assign_primary: autoAssignPrimary },
+    }),
+
+  /** Per-video filesystem status of the ``raw/<name>`` symlinks. The
+   *  Project page polls this so it can badge broken/missing entries
+   *  outside the relink dialog. */
+  getLinkStatus: () => request<LinkStatusResponse>("/api/videos/link-status"),
+
+  /** Recursive dry-run: walk ``searchRoot`` and report per-video
+   *  candidates by basename. Pure -- no filesystem mutations. */
+  relinkScan: (searchRoot: string) =>
+    request<RelinkScanResponse>("/api/videos/relink/scan", {
+      method: "POST",
+      json: { search_root: searchRoot },
+    }),
+
+  /** Apply a confirmed set of symlink rewrites. ``decisions`` maps
+   *  ``video_id`` -> absolute target path. Any video_id not listed is
+   *  left untouched. */
+  relinkApply: (decisions: Record<string, string>) =>
+    request<RelinkApplyResponse>("/api/videos/relink/apply", {
+      method: "POST",
+      json: { decisions },
     }),
 
   updateSettings: (patch: ProjectSettingsPatch) =>

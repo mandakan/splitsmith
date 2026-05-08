@@ -240,8 +240,8 @@ def test_fcpxml_match_with_transitions_validates(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
         transitions=[
-            fcpxml_gen.StageTransition(after_stage_index=0, kind="cross-dissolve"),
-            fcpxml_gen.StageTransition(after_stage_index=1, kind="dip-to-color"),
+            fcpxml_gen.StageTransition(after_stage_index=0, kind="zoom"),
+            fcpxml_gen.StageTransition(after_stage_index=1, kind="static"),
         ],
     )
     validate_against_dtd(out, dtd=fcpxml_dtd_path())

@@ -1751,19 +1751,17 @@ def test_match_with_transition_emits_effect_resource(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
         transitions=[
-            fcpxml_mod.StageTransition(
-                after_stage_index=0, kind="cross-dissolve", duration_seconds=0.5
-            )
+            fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom", duration_seconds=0.5)
         ],
     )
     root = ET.fromstring(out.read_bytes())
     effects = root.findall("./resources/effect")
     assert len(effects) == 1
-    assert effects[0].attrib["name"] == "Cross Dissolve"
-    assert effects[0].attrib["uid"].endswith("Cross Dissolve.motn")
+    assert effects[0].attrib["name"] == "Zoom"
+    assert effects[0].attrib["uid"].endswith("Zoom.motr")
     transition = root.find(".//spine/transition")
     assert transition is not None
-    assert transition.attrib["name"] == "Cross Dissolve"
+    assert transition.attrib["name"] == "Zoom"
     filter_video = transition.find("filter-video")
     assert filter_video is not None
     assert filter_video.attrib["ref"] == effects[0].attrib["id"]
@@ -1780,9 +1778,7 @@ def test_transition_offset_centred_on_boundary(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
         transitions=[
-            fcpxml_mod.StageTransition(
-                after_stage_index=0, kind="cross-dissolve", duration_seconds=0.5
-            )
+            fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom", duration_seconds=0.5)
         ],
     )
     root = ET.fromstring(out.read_bytes())
@@ -1795,7 +1791,7 @@ def test_transition_offset_centred_on_boundary(tmp_path: Path) -> None:
     assert transition.attrib["duration"] == "15/30s"
 
 
-def test_dip_to_color_uses_separate_effect(tmp_path: Path) -> None:
+def test_distinct_transition_kinds_allocate_separate_effects(tmp_path: Path) -> None:
     """A different transition kind allocates its own ``<effect>``;
     same kind on multiple boundaries reuses one."""
     primary_a = _make_video(tmp_path, "a.mp4")
@@ -1820,18 +1816,15 @@ def test_dip_to_color_uses_separate_effect(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
         transitions=[
-            fcpxml_mod.StageTransition(after_stage_index=0, kind="cross-dissolve"),
-            fcpxml_mod.StageTransition(after_stage_index=1, kind="dip-to-color"),
+            fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom"),
+            fcpxml_mod.StageTransition(after_stage_index=1, kind="static"),
         ],
     )
     root = ET.fromstring(out.read_bytes())
     effects = {e.attrib["name"]: e for e in root.findall("./resources/effect")}
-    assert set(effects) == {"Cross Dissolve", "Dip to Color Dissolve"}
+    assert set(effects) == {"Zoom", "Static"}
     transitions = root.findall(".//spine/transition")
-    assert [t.attrib["name"] for t in transitions] == [
-        "Cross Dissolve",
-        "Dip to Color Dissolve",
-    ]
+    assert [t.attrib["name"] for t in transitions] == ["Zoom", "Static"]
 
 
 def test_transition_too_long_for_adjacent_stage_raises(tmp_path: Path) -> None:
@@ -1870,7 +1863,7 @@ def test_transition_too_long_for_adjacent_stage_raises(tmp_path: Path) -> None:
             transitions=[
                 fcpxml_mod.StageTransition(
                     after_stage_index=0,
-                    kind="cross-dissolve",
+                    kind="zoom",
                     duration_seconds=5.0,
                 )
             ],
@@ -1886,7 +1879,7 @@ def test_transition_index_out_of_range_raises(tmp_path: Path) -> None:
             output_path=out,
             project_name="match",
             config=OutputConfig(),
-            transitions=[fcpxml_mod.StageTransition(after_stage_index=1, kind="cross-dissolve")],
+            transitions=[fcpxml_mod.StageTransition(after_stage_index=1, kind="zoom")],
         )
 
 

@@ -32,11 +32,13 @@ PipLayout = Literal["stacked", "pip-corners"]
 # overlays / PiP burned in, no NLE round-trip needed.
 OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 # Issue #195. ``"none"`` keeps today's hard-cut stitching.
-# ``"cross-dissolve"`` / ``"dip-to-color"`` map to FCP's built-in
-# transition effects. Only the FCPXML renderer emits transitions
-# today; FCP7 / MP4 ignore the request until they grow transition
-# support.
-TransitionKind = Literal["none", "cross-dissolve", "dip-to-color"]
+# ``"zoom"`` / ``"static"`` map to FCP's built-in .motr transition
+# templates (Blurs/Zoom and Lights/Static -- the variants whose UID
+# resolves cleanly in FCP 12.x). The user can swap to a related
+# variant in FCP after import. Only the FCPXML renderer emits
+# transitions today; FCP7 / MP4 ignore the request until they grow
+# transition support.
+TransitionKind = Literal["none", "zoom", "static"]
 # Issue #196. ``"none"`` keeps today's title-less stitching.
 # ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
 # a connected text clip overlaid on the start of the primary. Only

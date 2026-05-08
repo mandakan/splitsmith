@@ -76,7 +76,7 @@ class MatchExportTemplate(BaseModel):
     include_overlay: bool | None = None
     pip_layout: Literal["stacked", "pip-corners"] | None = None
     output_format: Literal["fcpxml", "fcp7xml", "mp4"] | None = None
-    transition_kind: Literal["none", "cross-dissolve", "dip-to-color"] | None = None
+    transition_kind: Literal["none", "zoom", "static"] | None = None
     transition_duration_seconds: float | None = None
     title_kind: Literal["none", "slate", "lower-third"] | None = None
     title_duration_seconds: float | None = None

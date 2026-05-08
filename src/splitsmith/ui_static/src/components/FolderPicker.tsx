@@ -59,6 +59,14 @@ interface FolderPickerProps {
    *  includes whatever margin the caller wants (typically a couple of
    *  hours on each side to cover warm-up + drive home with the cam). */
   matchWindow?: { startEpoch: number; endEpoch: number } | null;
+  /** When true, the "Use this folder" button stays enabled even when
+   *  the current folder has no direct video children. Set by callers
+   *  that walk recursively (e.g. relink scan), where the user is
+   *  expected to pick a top-level folder whose videos live in
+   *  subdirectories. */
+  allowEmptyFolder?: boolean;
+  /** Override the action button label. Default: "Use this folder". */
+  selectLabel?: string;
 }
 
 export function FolderPicker({
@@ -68,6 +76,8 @@ export function FolderPicker({
   onCancel,
   mode = "inline",
   matchWindow = null,
+  allowEmptyFolder = false,
+  selectLabel = "Use this folder",
 }: FolderPickerProps) {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [path, setPath] = useState<string | null>(initialPath ?? null);
@@ -332,16 +342,16 @@ export function FolderPicker({
           ) : (
             <Button
               type="button"
-              disabled={busy || !path || videosHere === 0}
+              disabled={busy || !path || (!allowEmptyFolder && videosHere === 0)}
               onClick={() => path && onSelect(path)}
               title={
-                videosHere === 0
+                !allowEmptyFolder && videosHere === 0
                   ? "Select a folder that contains video files, or drill in."
                   : `Use ${path}`
               }
             >
               <FolderOpen />
-              Use this folder
+              {selectLabel}
             </Button>
           )}
         </div>

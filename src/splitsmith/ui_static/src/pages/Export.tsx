@@ -1214,11 +1214,13 @@ function MatchExportDialog({
   const [outputFormat, setOutputFormat] = useState<
     "fcpxml" | "fcp7xml" | "mp4"
   >("fcpxml");
-  // Issue #195. ``"none"`` is today's hard-cut stitch. Cross-dissolve
-  // is the most-used transition in IPSC match recaps; dip-to-color is
-  // for stylised cuts. Only FCPXML emits transitions today.
+  // Issue #195. ``"none"`` is today's hard-cut stitch. ``"zoom"``
+  // (Blurs/Zoom) and ``"static"`` (Lights/Static) are the FCP 12.x
+  // built-in transitions whose .motr UID resolves cleanly on import;
+  // the user can swap to a related variant (Zoom & Pan, Bloom, ...)
+  // in FCP afterwards. Only FCPXML emits transitions today.
   const [transitionKind, setTransitionKind] = useState<
-    "none" | "cross-dissolve" | "dip-to-color"
+    "none" | "zoom" | "static"
   >("none");
   const [transitionDurationSeconds, setTransitionDurationSeconds] =
     useState<number>(0.5);
@@ -1319,10 +1321,12 @@ function MatchExportDialog({
     setPreset(next);
     if (next !== "custom") {
       const cfg = PADDING_PRESETS[next];
-      // Cap presets at the project's pre/post buffer in case it was
-      // configured below the preset's nominal value.
       setHeadPad(Math.min(cfg.head, headPadCap));
       setTailPad(Math.min(cfg.tail, tailPadCap));
+    }
+    if (next === "action" && transitionKind === "none") {
+      setTransitionKind("zoom");
+      setTransitionDurationSeconds(0.5);
     }
   };
 
@@ -1698,7 +1702,7 @@ function MatchExportDialog({
               </label>
               <label
                 className="flex items-center gap-1.5"
-                title="Cross-dissolve / dip-to-color between consecutive stages. FCPXML only; FCP7 XML still hard-cuts."
+                title="Zoom or Static between consecutive stages. FCPXML only; FCP7 XML still hard-cuts. Swap to any related variant (Zoom & Pan, Bloom, ...) in FCP after import."
               >
                 Transition
                 <select
@@ -1707,16 +1711,13 @@ function MatchExportDialog({
                   disabled={busy}
                   onChange={(e) =>
                     setTransitionKind(
-                      e.target.value as
-                        | "none"
-                        | "cross-dissolve"
-                        | "dip-to-color",
+                      e.target.value as "none" | "zoom" | "static",
                     )
                   }
                 >
                   <option value="none">None (hard cuts)</option>
-                  <option value="cross-dissolve">Cross dissolve</option>
-                  <option value="dip-to-color">Dip to color</option>
+                  <option value="zoom">Zoom (Blurs)</option>
+                  <option value="static">Static (Lights)</option>
                 </select>
               </label>
               {transitionKind !== "none" && (
