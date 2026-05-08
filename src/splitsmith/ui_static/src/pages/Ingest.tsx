@@ -24,6 +24,7 @@ import {
   FolderInput,
   FolderOpen,
   HardDrive,
+  Link2,
   Monitor,
   PlayCircle,
   RefreshCw,
@@ -38,6 +39,7 @@ import {
 
 import { BeepSection } from "@/components/BeepSection";
 import { CleanupDialog } from "@/components/CleanupDialog";
+import { RelinkDialog } from "@/components/RelinkDialog";
 import { FolderPicker } from "@/components/FolderPicker";
 import { HitlQueuePanel } from "@/components/HitlQueuePanel";
 import { MountSelect } from "@/components/MountSelect";
@@ -1539,6 +1541,7 @@ function SettingsSection({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [relinkOpen, setRelinkOpen] = useState(false);
   const [pickerFor, setPickerFor] = useState<
     null | "raw" | "audio" | "trimmed" | "exports" | "probes" | "thumbs"
   >(null);
@@ -1708,6 +1711,26 @@ function SettingsSection({
           />
           <div className="flex items-center justify-between border-t border-border pt-3">
             <div className="text-sm">
+              <div className="font-medium">Relink sources</div>
+              <div className="text-xs text-muted-foreground">
+                Repoint <code>raw/</code> symlinks after the originals moved
+                (e.g. onto a network share). Walks the picked folder
+                recursively and matches by filename.
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setRelinkOpen(true)}
+            >
+              <Link2 className="size-4" />
+              Relink sources...
+            </Button>
+          </div>
+          <div className="flex items-center justify-between border-t border-border pt-3">
+            <div className="text-sm">
               <div className="font-medium">Reclaim disk space</div>
               <div className="text-xs text-muted-foreground">
                 Delete generated artifacts (caches, exports, trimmed clips). Sources are never touched.
@@ -1727,6 +1750,7 @@ function SettingsSection({
         </CardContent>
       ) : null}
       {cleanupOpen ? <CleanupDialog onClose={() => setCleanupOpen(false)} /> : null}
+      {relinkOpen ? <RelinkDialog onClose={() => setRelinkOpen(false)} /> : null}
     </Card>
   );
 }

@@ -10,6 +10,9 @@ Endpoints (locked v1 surface):
   POST /api/videos/scan             -- register videos (folder or explicit paths)
   POST /api/videos/auto-match       -- run video_match.py heuristic, return suggestions
   POST /api/videos/remove           -- remove a registered video + cleanup caches
+  GET  /api/videos/link-status      -- per-video raw/<name> symlink state (ok/broken/...)
+  POST /api/videos/relink/scan      -- recursive dry-run: candidates per video
+  POST /api/videos/relink/apply     -- apply chosen symlink rewrites
   GET  /api/project/cleanup/plan    -- preview disk-cleanup plan
   POST /api/project/cleanup         -- apply disk-cleanup (refuses while jobs run)
   POST /api/assignments/move        -- set role / unassign / move between stages
@@ -783,6 +786,75 @@ class ScanResponse(BaseModel):
     registered: list[str]
     auto_assigned: dict[int, str]
     skipped: list[str]
+
+
+class RelinkScanRequest(BaseModel):
+    """Body for POST /api/videos/relink/scan.
+
+    Walks ``search_root`` recursively, indexes videos by basename, and
+    matches them against the project's registered ``raw/<name>``
+    entries. Pure dry-run: never touches the filesystem.
+    """
+
+    search_root: str
+
+
+class RelinkApplyRequest(BaseModel):
+    """Body for POST /api/videos/relink/apply.
+
+    ``decisions`` maps ``video_id`` to the absolute filesystem path the
+    user picked (typically one of the candidates returned by the scan
+    endpoint, or a manually-typed override). Any video_id not listed is
+    left untouched.
+    """
+
+    decisions: dict[str, str]
+
+
+class RelinkEntryResponse(BaseModel):
+    video_id: str
+    name: str
+    link_path: str
+    current_target: str | None
+    current_status: str
+    candidates: list[str]
+    chosen_path: str | None
+    ambiguous: bool
+    found: bool
+
+
+class RelinkScanResponse(BaseModel):
+    search_root: str
+    entries: list[RelinkEntryResponse]
+
+
+class RelinkAppliedEntry(BaseModel):
+    video_id: str
+    name: str
+    link_path: str
+    previous_target: str | None
+    new_target: str
+
+
+class RelinkApplyResponse(BaseModel):
+    applied: list[RelinkAppliedEntry]
+
+
+class LinkStatusEntry(BaseModel):
+    video_id: str
+    name: str
+    link_path: str
+    current_target: str | None
+    status: str
+
+
+class LinkStatusResponse(BaseModel):
+    """Per-video filesystem status for the ``raw/<name>`` symlinks.
+    Surfaced separately from ``/api/project`` so we don't pollute the
+    persisted ``MatchProject`` model with computed fs state.
+    """
+
+    entries: list[LinkStatusEntry]
 
 
 class SettingsRequest(BaseModel):
@@ -1830,6 +1902,115 @@ def create_app(
             registered=registered,
             auto_assigned=auto_assigned,
             skipped=skipped,
+        )
+
+    @app.get("/api/videos/link-status", response_model=LinkStatusResponse)
+    def get_link_status() -> LinkStatusResponse:
+        """Per-video status of ``raw/<name>`` symlinks.
+
+        Lets the SPA badge broken / missing entries on the project page
+        without an extra walk on every project fetch.
+        """
+        from .. import relink as relink_mod
+
+        project = state.load()
+        infos = relink_mod.inspect_links(project, state.project_root)
+        return LinkStatusResponse(
+            entries=[
+                LinkStatusEntry(
+                    video_id=info.video_id,
+                    name=info.name,
+                    link_path=str(info.link_path),
+                    current_target=str(info.target) if info.target is not None else None,
+                    status=info.status,
+                )
+                for info in infos
+            ]
+        )
+
+    @app.post("/api/videos/relink/scan", response_model=RelinkScanResponse)
+    def relink_scan(req: RelinkScanRequest) -> RelinkScanResponse:
+        """Recursive dry-run: walk ``search_root`` and report per-video
+        candidates without touching the filesystem.
+        """
+        from .. import relink as relink_mod
+
+        search_root = Path(req.search_root).expanduser()
+        try:
+            index = relink_mod.index_search_root(search_root)
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project = state.load()
+        infos = relink_mod.inspect_links(project, state.project_root)
+        plan = relink_mod.plan_relink(infos, index)
+        return RelinkScanResponse(
+            search_root=str(search_root.resolve()),
+            entries=[
+                RelinkEntryResponse(
+                    video_id=entry.video_id,
+                    name=entry.name,
+                    link_path=str(entry.link_path),
+                    current_target=(
+                        str(entry.current_target) if entry.current_target is not None else None
+                    ),
+                    current_status=entry.current_status,
+                    candidates=[str(p) for p in entry.candidates],
+                    chosen_path=str(entry.chosen_path) if entry.chosen_path is not None else None,
+                    ambiguous=entry.ambiguous,
+                    found=entry.found,
+                )
+                for entry in plan
+            ],
+        )
+
+    @app.post("/api/videos/relink/apply", response_model=RelinkApplyResponse)
+    def relink_apply(req: RelinkApplyRequest) -> RelinkApplyResponse:
+        """Apply a user-confirmed set of symlink rewrites.
+
+        ``project.json`` is not modified -- only the symlinks under
+        ``raw/`` are repointed. The video_id is preserved so the SPA
+        can match the response back to its rows.
+        """
+        from .. import relink as relink_mod
+
+        if not req.decisions:
+            raise HTTPException(status_code=400, detail="decisions must be non-empty")
+        project = state.load()
+        infos = {
+            info.video_id: info for info in relink_mod.inspect_links(project, state.project_root)
+        }
+        decisions: list[tuple[Path, Path]] = []
+        id_for_link: dict[Path, str] = {}
+        for video_id, target_str in req.decisions.items():
+            info = infos.get(video_id)
+            if info is None:
+                raise HTTPException(status_code=400, detail=f"unknown video_id: {video_id}")
+            if info.status == "not_a_symlink":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{info.name} is a regular file, not a symlink -- relink not supported",
+                )
+            target = Path(target_str).expanduser()
+            if not target.exists():
+                raise HTTPException(status_code=400, detail=f"target does not exist: {target}")
+            if not target.is_file():
+                raise HTTPException(status_code=400, detail=f"target is not a file: {target}")
+            decisions.append((info.link_path, target))
+            id_for_link[info.link_path] = video_id
+        applied = relink_mod.apply_relink(decisions)
+        return RelinkApplyResponse(
+            applied=[
+                RelinkAppliedEntry(
+                    video_id=id_for_link.get(entry.link_path, ""),
+                    name=entry.name,
+                    link_path=str(entry.link_path),
+                    previous_target=(
+                        str(entry.previous_target) if entry.previous_target is not None else None
+                    ),
+                    new_target=str(entry.new_target),
+                )
+                for entry in applied
+            ]
         )
 
     @app.post("/api/project/settings")
