@@ -1425,6 +1425,32 @@ function MatchExportDialog({
             order. Composes from existing trims; no re-encoding.
           </CardDescription>
           {(() => {
+            // #218 -- aggregate footer that breaks down the selection's
+            // composition (with markers vs trim-only). Renders before
+            // the per-stage shotless notice so the user sees the shape
+            // first, then the named-list detail.
+            const selected = stages.filter((s) =>
+              stageNumbers.includes(s.stage_number),
+            );
+            if (selected.length === 0) return null;
+            const withMarkers = selected.filter(
+              (s) => s.audit_shot_count > 0,
+            ).length;
+            const trimOnly = selected.length - withMarkers;
+            return (
+              <div className="mt-2 text-xs text-muted-foreground">
+                {selected.length} stage{selected.length === 1 ? "" : "s"} selected
+                {": "}
+                {withMarkers > 0
+                  ? `${withMarkers} with shot markers`
+                  : "0 with shot markers"}
+                {", "}
+                {trimOnly > 0 ? `${trimOnly} trim-only` : "0 trim-only"}
+                {"."}
+              </div>
+            );
+          })()}
+          {(() => {
             // #214 -- export is permissive about empty shots. Surface a
             // friendly inline note when any selected stage has zero
             // audited shots so the user knows what to expect (no shot

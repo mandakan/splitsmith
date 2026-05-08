@@ -55,6 +55,7 @@ import {
   api,
   asScoreboardError,
   type CameraMount,
+  type ExportOverview,
   type FsProbeResponse,
   type MatchAnalysis,
   type MatchProject,
@@ -65,6 +66,7 @@ import {
   type ScoreboardShooterRef,
   type ScoreboardSource,
   type StageEntry,
+  type StageExportStatus,
   type StageMatchWindow,
   type StageVideo,
   type VideoMatchAnalysisEntry,
@@ -82,6 +84,7 @@ export function Ingest() {
   const [error, setError] = useState<string | null>(null);
   const [scoreboardError, setScoreboardError] = useState<ScoreboardErrorDetail | null>(null);
   const [scoreboardSource, setScoreboardSource] = useState<ScoreboardSource | null>(null);
+  const [exportOverview, setExportOverview] = useState<ExportOverview | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<{
     video: StageVideo;
@@ -121,14 +124,20 @@ export function Ingest() {
       // heuristic output. Analysis lags slightly when the project is a
       // bare placeholder (no scoreboard yet); that's fine, the timeline
       // just doesn't show until stages have scorecard times.
-      const [proj, ana, src] = await Promise.all([
+      //
+      // Export overview (#218) feeds the per-stage badge so we can
+      // distinguish ``trimmed-only`` / ``shots-pending`` / ``shots-audited``
+      // terminal states without re-deriving audit state on the client.
+      const [proj, ana, src, overview] = await Promise.all([
         api.getProject(),
         api.getMatchAnalysis().catch(() => null),
         api.getScoreboardSource().catch(() => null),
+        api.getExportOverview().catch(() => null),
       ]);
       setProject(proj);
       setAnalysis(ana);
       setScoreboardSource(src);
+      setExportOverview(overview);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -505,6 +514,7 @@ export function Ingest() {
           <StagesSection
             project={project}
             analysis={analysis}
+            exportOverview={exportOverview}
             busy={busy}
             dragging={dragging}
             setDragging={setDragging}
@@ -2083,6 +2093,7 @@ function formatBytesShort(bytes: number): string {
 function StagesSection({
   project,
   analysis,
+  exportOverview,
   busy,
   dragging,
   setDragging,
@@ -2095,6 +2106,7 @@ function StagesSection({
 }: {
   project: MatchProject;
   analysis: MatchAnalysis | null;
+  exportOverview: ExportOverview | null;
   busy: boolean;
   dragging: { video: StageVideo; stage: StageEntry | null } | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
@@ -2197,6 +2209,11 @@ function StagesSection({
             allStages={project.stages}
             window={analysis?.stages.find((w) => w.stage_number === s.stage_number) ?? null}
             videoEntries={analysis?.videos ?? []}
+            exportStatus={
+              exportOverview?.stages.find(
+                (r) => r.stage_number === s.stage_number,
+              ) ?? null
+            }
             busy={busy}
             dragging={dragging}
             setDragging={setDragging}
@@ -2316,6 +2333,7 @@ function StageCard({
   allStages,
   window: matchWindow,
   videoEntries,
+  exportStatus,
   busy,
   dragging,
   setDragging,
@@ -2331,6 +2349,7 @@ function StageCard({
   allStages: StageEntry[];
   window: StageMatchWindow | null;
   videoEntries: VideoMatchAnalysisEntry[];
+  exportStatus: StageExportStatus | null;
   busy: boolean;
   dragging: { video: StageVideo; stage: StageEntry | null } | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
@@ -2396,7 +2415,7 @@ function StageCard({
             </CardDescription>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <StatusGlyph stage={stage} />
+            <StatusGlyph stage={stage} exportStatus={exportStatus} />
             <Button
               size="sm"
               variant="ghost"
@@ -3250,7 +3269,13 @@ function RemoveVideoDialog({
   );
 }
 
-function StatusGlyph({ stage }: { stage: StageEntry }) {
+function StatusGlyph({
+  stage,
+  exportStatus,
+}: {
+  stage: StageEntry;
+  exportStatus: StageExportStatus | null;
+}) {
   if (stage.skipped) {
     return (
       <Badge variant="outline" className="gap-1">
@@ -3305,6 +3330,50 @@ function StatusGlyph({ stage }: { stage: StageEntry }) {
         pending
       </Badge>
     );
+  }
+  // #218 -- once the beep ladder is climbed, the next axis is shot
+  // state. Three terminal labels:
+  //
+  //   * Shots audited: at least one row in audit JSON shots[].
+  //   * Shots pending: detection has run + produced candidates but the
+  //     user hasn't audited yet.
+  //   * Ready: beep verified, no detection run yet (e.g., automation
+  //     turned off, or user hasn't reached audit). Stays as the
+  //     fallback so the badge isn't misleading for trim-only flows.
+  if (exportStatus) {
+    if (exportStatus.audit_shot_count > 0) {
+      return (
+        <Badge
+          variant="statusComplete"
+          className="gap-1"
+          title={
+            `${exportStatus.audit_shot_count} shot${
+              exportStatus.audit_shot_count === 1 ? "" : "s"
+            } audited. Ready to export with shot markers.`
+          }
+        >
+          <CheckCircle2 className="size-3" /> Shots audited
+        </Badge>
+      );
+    }
+    if (
+      exportStatus.primary_processed.shot_detect &&
+      exportStatus.total_candidate_count > 0
+    ) {
+      return (
+        <Badge
+          variant="statusInProgress"
+          className="gap-1"
+          title={
+            `${exportStatus.total_candidate_count} candidate${
+              exportStatus.total_candidate_count === 1 ? "" : "s"
+            } detected -- open the Audit screen to keep / reject and seed shots[].`
+          }
+        >
+          ○ Shots pending
+        </Badge>
+      );
+    }
   }
   return (
     <Badge variant="statusComplete" className="gap-1">
