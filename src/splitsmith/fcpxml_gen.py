@@ -144,8 +144,28 @@ def _pip_transform_attrs(
     sequence_width: int,
     sequence_height: int,
 ) -> dict[str, str]:
-    """Format ``<adjust-transform>`` attributes for ``pip`` in this sequence."""
-    scale, (x, y) = pip.resolve(sequence_width=sequence_width, sequence_height=sequence_height)
+    """Format ``<adjust-transform>`` attributes for ``pip`` in this sequence.
+
+    FCPXML's ``position`` is in normalized units where ``100`` equals
+    the sequence's full height in pixels (i.e. one unit equals
+    ``sequence_height / 100`` px). Discovered empirically (#236):
+    raw-pixel emit produced a ``position`` value FCP UI displayed at
+    exactly ``sequence_height / 100`` x the intended pixel offset
+    (21.6x on a 4K timeline), pushing the cam off-screen.
+
+    The value is resolution-independent in this convention -- a top-
+    right corner at scale 0.25 and 2% margin emits the same normalized
+    position on 1080p and 4K timelines.
+
+    ``scale`` stays a unit-less ratio (1.0 == native size); only
+    position needs the conversion.
+    """
+    scale, (x_px, y_px) = pip.resolve(
+        sequence_width=sequence_width, sequence_height=sequence_height
+    )
+    unit_per_px = 100.0 / sequence_height
+    x = x_px * unit_per_px
+    y = y_px * unit_per_px
     return {
         "scale": f"{scale:g} {scale:g}",
         "position": f"{x:g} {y:g}",
