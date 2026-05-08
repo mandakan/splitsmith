@@ -982,10 +982,14 @@ def generate_match_fcpxml(
     plans: list[_StagePlan] = []
 
     for stage in stages:
-        stage_frame_duration = Fraction(stage.video.frame_rate_den, stage.video.frame_rate_num)
-        primary_duration_frames = int(
-            round(stage.video.duration_seconds / float(stage_frame_duration))
-        )
+        # ``primary_duration_frames`` is in *sequence* frames so it can be
+        # subtracted from ``head_trim_frames`` / ``tail_trim_frames``
+        # (which are also sequence frames) without unit-mixing. For
+        # mixed-rate stages (#233) computing this in stage-local frames
+        # produced an effective_duration_frames in nonsense units that
+        # surfaced as cams playing past the primary's right edge and
+        # primary durations way off on the spine.
+        primary_duration_frames = int(round(stage.video.duration_seconds / fd_seconds))
 
         # Determine actual head and tail available in the trimmed file.
         # head_avail = beep_offset (the trim's pre-buffer; may be < trim_buffer
@@ -1419,7 +1423,19 @@ def generate_match_fcpxml(
                 {
                     "ref": sec_id,
                     "lane": str(lane_idx),
-                    "offset": _frame_aligned_str(sec_offset_frames, fd_num, fd_den),
+                    # ``offset`` is in the *parent primary's* source
+                    # frame grid (the parent's frame_duration), not the
+                    # sequence's. When the primary's rate differs from
+                    # the sequence's (mixed-rate match exports, #233),
+                    # emitting in the sequence grid produces values
+                    # that don't land on the parent's frame boundary
+                    # and FCP rejects the import with "not on an edit
+                    # frame boundary". ``duration`` stays on the
+                    # *sequence's* grid -- it expresses how long the
+                    # connected clip occupies the timeline, which must
+                    # align with the sequence frame_duration for FCP
+                    # to render frame-by-frame.
+                    "offset": _asset_grid_str(sec_offset_frames * fd_seconds, stage.video),
                     "name": sec.label,
                     # ``start`` is into the cam's source media -- must
                     # be quantized to the cam's frame grid (#236). Emit
@@ -1465,7 +1481,12 @@ def generate_match_fcpxml(
             # stay in sync. ``offset`` is also head_trim (parent-source-time
             # of the parent's visible start) so the overlay anchors at the
             # primary's visible start instead of head_trim seconds earlier.
-            head_trim_str = _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den)
+            # ``offset`` is in the parent primary's source grid (must
+            # quantize to the primary's frame_duration -- mixed-rate
+            # fix); ``duration`` stays on the sequence grid (must
+            # quantize to the sequence's frame_duration). ``start`` is
+            # in the overlay's own grid.
+            parent_offset_str = _asset_grid_str(head_trim_seconds, stage.video)
             assert plan.overlay_format_id is not None  # set whenever overlay_asset_id is
             overlay_meta = (
                 plan.stage.overlay_video
@@ -1478,7 +1499,7 @@ def generate_match_fcpxml(
                 {
                     "ref": plan.overlay_asset_id,
                     "lane": str(overlay_lane),
-                    "offset": head_trim_str,
+                    "offset": parent_offset_str,
                     "name": "Splitsmith overlay",
                     # ``start`` is on the overlay asset's grid; emit in
                     # the overlay's frame_duration units (#236).
@@ -1494,15 +1515,17 @@ def generate_match_fcpxml(
         # above secondaries + overlay so the text always sits on top.
         # ``offset`` anchors at the primary's visible head; the user
         # can drag the title later in FCP if they want it elsewhere.
+        # ``offset`` is in the parent primary's source grid (mixed-rate
+        # fix); ``duration`` stays on the sequence grid; ``start``=0s
+        # since the title generator has no source media.
         if stage_title is not None and stage_title.style == "lower-third":
             assert title_effect_id is not None
             lt_lane = len(plan.usable_secondaries) + 2
             lt_dur_frames = round(stage_title.duration_seconds / fd_seconds)
-            head_trim_str = _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den)
             _emit_title_clip(
                 primary_clip,
                 ref=title_effect_id,
-                offset_str=head_trim_str,
+                offset_str=_asset_grid_str(head_trim_seconds, stage.video),
                 start_str="0s",
                 duration_str=_frame_aligned_str(lt_dur_frames, fd_num, fd_den),
                 title=stage_title,
@@ -1513,15 +1536,16 @@ def generate_match_fcpxml(
         # Chapter marker on the visible head of the primary (#204).
         # FCP / FCP7 / Premiere all forward chapter markers into the
         # MP4 chapter atom on export, which is the upload-ready
-        # signal YouTube reads. Marker start = head_trim_frames (the
-        # in-source frame where playback starts), so it lands on the
-        # spine at the stage's beginning.
+        # signal YouTube reads. Marker start = head_trim_seconds (the
+        # in-source time where playback starts), so it lands on the
+        # spine at the stage's beginning. ``start`` is in the parent
+        # primary's grid (mixed-rate fix).
         if chapter_markers:
             ET.SubElement(
                 primary_clip,
                 "chapter-marker",
                 {
-                    "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
+                    "start": _asset_grid_str(head_trim_seconds, stage.video),
                     "duration": frame_duration_str,
                     "value": stage.stage_name,
                 },
