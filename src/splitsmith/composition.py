@@ -215,9 +215,18 @@ class TitleCard:
 
 @dataclass(frozen=True)
 class Segment:
-    """Intro / outro segment (placeholder until #173 lands)."""
+    """Intro / outro segment (issue #173).
+
+    Plays before stage 0 (intro) or after stage N-1 (outro) on the
+    spine. ``name`` is the on-timeline label that surfaces in FCP's
+    inspector; falls back to the asset's file stem when empty.
+
+    ``title`` is reserved for a future "auto-overlay a TitleCard on
+    the segment" feature; the FCPXML renderer ignores it for now.
+    """
 
     asset: Asset
+    name: str = ""
     title: TitleCard | None = None
 
 
@@ -256,6 +265,8 @@ def from_stage_compositions(
     project_name: str,
     transitions: SequenceProto[Transition] = (),
     titles: dict[int, TitleCard] | None = None,
+    intro: Segment | None = None,
+    outro: Segment | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -274,6 +285,11 @@ def from_stage_compositions(
     :class:`TitleCard`. The IR attaches each title to its
     :class:`Stage`; the FCPXML renderer emits slate / lower-third
     via FCP's Basic Title generator.
+
+    ``intro`` / ``outro`` (issue #173): optional :class:`Segment`s
+    placed before stage 0 / after stage N-1 on the spine. The
+    segment's video must match the timeline frame rate; the FCPXML
+    renderer raises ``ValueError`` otherwise.
     """
     titles_map = dict(titles) if titles else {}
     if not stages:
@@ -336,6 +352,8 @@ def from_stage_compositions(
         sequence=seq,
         stages=tuple(ir_stages),
         transitions=tuple(transitions),
+        intro=intro,
+        outro=outro,
     )
 
 
@@ -489,6 +507,27 @@ def render_fcpxml(
         config=config,
         transitions=_lower_transitions(composition.transitions),
         titles=_lower_titles(composition),
+        intro=_lower_segment(composition.intro),
+        outro=_lower_segment(composition.outro),
+    )
+
+
+def _lower_segment(
+    segment: Segment | None,
+) -> fcpxml_gen.IntroOutroSegment | None:
+    """Lower an IR :class:`Segment` to ``fcpxml_gen.IntroOutroSegment``.
+
+    v1 ignores ``segment.title`` -- the FCPXML emitter doesn't paint a
+    title onto an intro/outro yet (auto-overlay would need a slate-
+    style ``<title>`` connected to the segment's asset-clip; tracked
+    as a follow-up).
+    """
+    if segment is None:
+        return None
+    return fcpxml_gen.IntroOutroSegment(
+        video_path=segment.asset.path,
+        video=segment.asset.metadata,
+        name=segment.name,
     )
 
 

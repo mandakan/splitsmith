@@ -683,6 +683,23 @@ class StageTitle:
 
 
 @dataclass(frozen=True)
+class IntroOutroSegment:
+    """A video clip placed before / after the match stages on the spine
+    (issue #173).
+
+    The clip plays at native duration; the user is responsible for
+    pre-trimming. The clip's frame rate must match the timeline (we
+    reject mismatched rates rather than rate-converting silently --
+    cross-fps timelines are out of scope for v1, mirroring the
+    constraint on stage primaries).
+    """
+
+    video_path: Path
+    video: VideoMetadata
+    name: str = ""  # falls back to file stem when empty
+
+
+@dataclass(frozen=True)
 class StageTransition:
     """A transition between two consecutive stages on the spine (issue #195).
 
@@ -744,6 +761,8 @@ def generate_match_fcpxml(
     config: OutputConfig,
     transitions: list[StageTransition] | None = None,
     titles: list[StageTitle] | None = None,
+    intro: IntroOutroSegment | None = None,
+    outro: IntroOutroSegment | None = None,
 ) -> None:
     """Write a stitched FCPXML with N stages back-to-back on the spine.
 
@@ -772,12 +791,24 @@ def generate_match_fcpxml(
     head. Slates combined with transitions raise ``ValueError`` --
     a slate between two transition-joined primaries has no clean
     visual semantic.
+
+    ``intro`` / ``outro`` (issue #173): optional video clips placed
+    before stage 0 / after stage N-1 on the spine. Frame rate must
+    match the timeline (raises ``ValueError`` otherwise). Transitions
+    only fire between stage primaries today; the intro -> stage 0 and
+    stage N-1 -> outro boundaries stay as hard cuts (the user can
+    crossfade them manually in FCP if desired).
     """
     if not stages:
         raise ValueError("generate_match_fcpxml requires at least one stage")
     for stage in stages:
         if not stage.video_path.exists():
             raise FileNotFoundError(f"video not found: {stage.video_path}")
+    for label, segment in (("intro", intro), ("outro", outro)):
+        if segment is None:
+            continue
+        if not segment.video_path.exists():
+            raise FileNotFoundError(f"{label} video not found: {segment.video_path}")
     transitions = list(transitions or ())
     titles = list(titles or ())
     seen_indices: set[int] = set()
@@ -829,6 +860,19 @@ def generate_match_fcpxml(
                 f"(stage 0: {base.frame_rate_num}/{base.frame_rate_den}, "
                 f"stage with {stage.video_path.name}: "
                 f"{stage.video.frame_rate_num}/{stage.video.frame_rate_den})"
+            )
+    for label, segment in (("intro", intro), ("outro", outro)):
+        if segment is None:
+            continue
+        if (
+            segment.video.frame_rate_num != base.frame_rate_num
+            or segment.video.frame_rate_den != base.frame_rate_den
+        ):
+            raise ValueError(
+                f"{label} frame rate "
+                f"({segment.video.frame_rate_num}/{segment.video.frame_rate_den}) "
+                f"does not match the timeline "
+                f"({base.frame_rate_num}/{base.frame_rate_den})"
             )
 
     frame_duration = Fraction(base.frame_rate_den, base.frame_rate_num)
@@ -1109,11 +1153,58 @@ def generate_match_fcpxml(
     }
     total_slate_frames = sum(slate_frames_by_index.values())
 
+    # Intro / outro asset resources (issue #173). One ``<asset>`` per
+    # segment; the spine references it via ``asset-clip``. Frame rate
+    # matches the timeline (validated above) so we reuse format_id.
+    intro_asset_id: str | None = None
+    intro_duration_frames = 0
+    if intro is not None:
+        resource_counter += 1
+        intro_asset_id = f"r{resource_counter}"
+        intro_duration_frames = round(intro.video.duration_seconds / fd_seconds)
+    outro_asset_id: str | None = None
+    outro_duration_frames = 0
+    if outro is not None:
+        resource_counter += 1
+        outro_asset_id = f"r{resource_counter}"
+        outro_duration_frames = round(outro.video.duration_seconds / fd_seconds)
+    for segment, asset_id, dur_frames in (
+        (intro, intro_asset_id, intro_duration_frames),
+        (outro, outro_asset_id, outro_duration_frames),
+    ):
+        if segment is None:
+            continue
+        assert asset_id is not None
+        seg_asset = ET.SubElement(
+            resources,
+            "asset",
+            {
+                "id": asset_id,
+                "name": segment.name or segment.video_path.stem,
+                "start": "0s",
+                "duration": _frame_aligned_str(dur_frames, fd_num, fd_den),
+                "hasVideo": "1",
+                "hasAudio": "1",
+                "format": format_id,
+                "videoSources": "1",
+                "audioSources": "1",
+                "audioChannels": "2",
+            },
+        )
+        ET.SubElement(
+            seg_asset,
+            "media-rep",
+            {"kind": "original-media", "src": segment.video_path.resolve().as_uri()},
+        )
+
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
     total_duration_frames = (
-        sum(plan.effective_duration_frames for plan in plans) + total_slate_frames
+        sum(plan.effective_duration_frames for plan in plans)
+        + total_slate_frames
+        + intro_duration_frames
+        + outro_duration_frames
     )
     sequence = ET.SubElement(
         project,
@@ -1132,6 +1223,23 @@ def generate_match_fcpxml(
     transitions_by_index: dict[int, StageTransition] = {t.after_stage_index: t for t in transitions}
 
     cumulative_offset_frames = 0
+
+    # Intro segment (issue #173): plays first, full duration.
+    if intro_asset_id is not None and intro is not None:
+        ET.SubElement(
+            spine,
+            "asset-clip",
+            {
+                "ref": intro_asset_id,
+                "offset": _frame_aligned_str(cumulative_offset_frames, fd_num, fd_den),
+                "name": intro.name or intro.video_path.stem,
+                "start": "0s",
+                "duration": _frame_aligned_str(intro_duration_frames, fd_num, fd_den),
+                "format": format_id,
+            },
+        )
+        cumulative_offset_frames += intro_duration_frames
+
     for stage_idx, plan in enumerate(plans):
         stage = plan.stage
         head_trim_seconds = plan.head_trim_frames * fd_seconds
@@ -1302,6 +1410,21 @@ def generate_match_fcpxml(
             )
 
         cumulative_offset_frames += plan.effective_duration_frames
+
+    # Outro segment (issue #173): plays after the last stage's primary.
+    if outro_asset_id is not None and outro is not None:
+        ET.SubElement(
+            spine,
+            "asset-clip",
+            {
+                "ref": outro_asset_id,
+                "offset": _frame_aligned_str(cumulative_offset_frames, fd_num, fd_den),
+                "name": outro.name or outro.video_path.stem,
+                "start": "0s",
+                "duration": _frame_aligned_str(outro_duration_frames, fd_num, fd_den),
+                "format": format_id,
+            },
+        )
 
     ET.indent(fcpxml, space="    ")
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)

@@ -1597,6 +1597,185 @@ def test_no_transitions_emits_unchanged_spine(tmp_path: Path) -> None:
     assert root.find("./resources/effect") is None
 
 
+# --- intro / outro segments (issue #173) ---------------------------------
+
+
+def _intro_segment(tmp_path: Path, name: str = "intro.mp4") -> fcpxml_mod.IntroOutroSegment:
+    p = _make_video(tmp_path, name)
+    return fcpxml_mod.IntroOutroSegment(
+        video_path=p,
+        video=VideoMetadata(
+            width=1920,
+            height=1080,
+            duration_seconds=5.0,
+            frame_rate_num=30,
+            frame_rate_den=1,
+        ),
+        name="Intro",
+    )
+
+
+def test_intro_lands_on_spine_before_stage_zero(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    intro = _intro_segment(tmp_path, "intro.mp4")
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        intro=intro,
+    )
+    root = ET.fromstring(out.read_bytes())
+    spine = root.find(".//spine")
+    assert spine is not None
+    children = list(spine)
+    assert children[0].tag == "asset-clip"
+    assert children[0].attrib["name"] == "Intro"
+    assert children[0].attrib["offset"] == "0s"
+    # 5s @ 30fps = 150 frames.
+    assert children[0].attrib["duration"] == "150/30s"
+    assert children[1].attrib["name"] == "A"
+    assert children[1].attrib["offset"] == "150/30s"
+
+
+def test_outro_lands_after_last_stage(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    outro_path = _make_video(tmp_path, "outro.mp4")
+    outro = fcpxml_mod.IntroOutroSegment(
+        video_path=outro_path,
+        video=_meta_30fps(),
+        name="Outro",
+    )
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        outro=outro,
+    )
+    root = ET.fromstring(out.read_bytes())
+    children = list(root.find(".//spine"))  # type: ignore[arg-type]
+    # Last spine child is the outro.
+    assert children[-1].tag == "asset-clip"
+    assert children[-1].attrib["name"] == "Outro"
+
+
+def test_intro_extends_sequence_duration(tmp_path: Path) -> None:
+    """Sequence duration grows by the intro's frame count."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    intro = _intro_segment(tmp_path, "intro.mp4")
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        intro=intro,
+    )
+    root = ET.fromstring(out.read_bytes())
+    sequence = root.find("./library/event/project/sequence")
+    assert sequence is not None
+    duration_frames = int(sequence.attrib["duration"].split("/")[0])
+    # Stage A: 330, Stage B: 324, intro: 150 -> 804.
+    assert duration_frames == 330 + 324 + 150
+
+
+def test_intro_with_mismatched_frame_rate_raises(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    bad_intro = fcpxml_mod.IntroOutroSegment(
+        video_path=_make_video(tmp_path, "intro_60fps.mp4"),
+        video=VideoMetadata(
+            width=1920,
+            height=1080,
+            duration_seconds=5.0,
+            frame_rate_num=60,
+            frame_rate_den=1,
+        ),
+        name="Bad",
+    )
+    with pytest.raises(ValueError, match="intro frame rate"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            intro=bad_intro,
+        )
+
+
+def test_intro_missing_file_raises_filenotfound(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    intro = fcpxml_mod.IntroOutroSegment(
+        video_path=tmp_path / "does-not-exist.mp4",
+        video=_meta_30fps(),
+        name="Intro",
+    )
+    with pytest.raises(FileNotFoundError, match="intro video"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            intro=intro,
+        )
+
+
+def test_intro_and_outro_both_emit(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    intro = _intro_segment(tmp_path, "intro.mp4")
+    outro = fcpxml_mod.IntroOutroSegment(
+        video_path=_make_video(tmp_path, "outro.mp4"),
+        video=intro.video,
+        name="Outro",
+    )
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        intro=intro,
+        outro=outro,
+    )
+    root = ET.fromstring(out.read_bytes())
+    children = list(root.find(".//spine"))  # type: ignore[arg-type]
+    assert [c.attrib.get("name") for c in children] == [
+        "Intro",
+        "A",
+        "B",
+        "Outro",
+    ]
+
+
+def test_intro_outro_emit_assets(tmp_path: Path) -> None:
+    """Each segment gets its own ``<asset>`` resource pointing at the
+    file via ``<media-rep>``."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    intro = _intro_segment(tmp_path, "intro.mp4")
+    outro = fcpxml_mod.IntroOutroSegment(
+        video_path=_make_video(tmp_path, "outro.mp4"),
+        video=intro.video,
+        name="Outro",
+    )
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        intro=intro,
+        outro=outro,
+    )
+    root = ET.fromstring(out.read_bytes())
+    asset_names = [a.attrib["name"] for a in root.findall("./resources/asset")]
+    assert "Intro" in asset_names
+    assert "Outro" in asset_names
+
+
 # --- title cards (issue #196) ---------------------------------------------
 
 

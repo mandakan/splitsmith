@@ -106,6 +106,12 @@ class MatchExportRequestData:
     # keeps the timeline title-less.
     title_kind: TitleKind = "none"
     title_duration_seconds: float = 1.5
+    # Issue #173. Optional intro / outro video clips placed before
+    # stage 0 / after stage N-1. Frame rate must match the timeline;
+    # the path must exist on disk. ``None`` keeps the export
+    # stage-only (today's behaviour).
+    intro_path: Path | None = None
+    outro_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -279,11 +285,27 @@ def export_match(
         # error from generate_match_fcpxml.
         anomalies.append("slate titles dropped: cannot combine with transitions " "(issue #196)")
         titles = {}
+    intro_segment = _resolve_segment(
+        request.intro_path,
+        label="intro",
+        probe=probe,
+        anomalies=anomalies,
+        renderer=request.output_format,
+    )
+    outro_segment = _resolve_segment(
+        request.outro_path,
+        label="outro",
+        probe=probe,
+        anomalies=anomalies,
+        renderer=request.output_format,
+    )
     comp = composition.from_stage_compositions(
         compositions,
         project_name=request.project_name,
         transitions=transitions,
         titles=titles,
+        intro=intro_segment,
+        outro=outro_segment,
     )
     try:
         if request.output_format == "fcpxml":
@@ -353,6 +375,42 @@ def _build_uniform_transitions(
             duration_seconds=duration,
         )
         for i in range(stage_count - 1)
+    )
+
+
+def _resolve_segment(
+    path: Path | None,
+    *,
+    label: str,
+    probe: object,
+    anomalies: list[str],
+    renderer: OutputFormat,
+) -> composition.Segment | None:
+    """Probe an intro/outro path into an IR ``Segment``.
+
+    Missing files surface as anomalies (not hard errors) so the export
+    proceeds without the segment -- mirrors the overlay/secondary
+    handling. Mismatched renderer / fps issues become anomalies too.
+    """
+    if path is None:
+        return None
+    if renderer != "fcpxml":
+        anomalies.append(
+            f"{label} ignored: not yet supported by the "
+            f"{renderer} renderer (issue #173 follow-ups)"
+        )
+        return None
+    if not path.exists():
+        anomalies.append(f"{label} dropped: video missing at {path}")
+        return None
+    try:
+        meta = probe(path)  # type: ignore[operator]
+    except fcpxml_gen.FFprobeError as exc:
+        anomalies.append(f"{label} dropped: {exc}")
+        return None
+    return composition.Segment(
+        asset=composition.Asset(path=path, metadata=meta),
+        name=label.capitalize(),
     )
 
 

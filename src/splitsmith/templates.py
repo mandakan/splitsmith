@@ -80,6 +80,8 @@ class MatchExportTemplate(BaseModel):
     transition_duration_seconds: float | None = None
     title_kind: Literal["none", "slate", "lower-third"] | None = None
     title_duration_seconds: float | None = None
+    intro_path: str | None = None  # filesystem path; ``~`` expands at apply time
+    outro_path: str | None = None
 
 
 class TemplateEntry(BaseModel):
