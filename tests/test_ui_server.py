@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from splitsmith.automation import AutomationOverride
 from splitsmith.thumbnail import ThumbnailError
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
@@ -4907,3 +4908,67 @@ def test_cleanup_endpoints_409_when_no_project_bound(tmp_path: Path) -> None:
     client = TestClient(app)
     assert client.get("/api/project/cleanup/plan?categories=audio").status_code == 409
     assert client.post("/api/project/cleanup", json={"categories": ["audio"]}).status_code == 409
+
+
+# --- automation settings (#216) ---------------------------------------------
+
+
+def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path) -> None:
+    """No overrides -> source is 'global', current value is the field
+    default. Smoke-test that the response shape matches what the SPA's
+    SettingProvenance component expects."""
+    root = tmp_path / "match"
+    MatchProject.init(root, name="Auto Match").save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/automation")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["settings"] == {"shot_detect_on_beep_verified": True}
+    prov = body["provenance"]["shot_detect_on_beep_verified"]
+    assert prov["source"] == "global"
+    assert prov["global_value"] is True
+    assert prov["project_value"] is None
+    assert prov["cli_value"] is None
+
+
+def test_get_automation_reports_project_provenance_when_overridden(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="Override Match")
+    project.automation = AutomationOverride(shot_detect_on_beep_verified=False)
+    project.save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/automation")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["settings"]["shot_detect_on_beep_verified"] is False
+    prov = body["provenance"]["shot_detect_on_beep_verified"]
+    assert prov["source"] == "project"
+    assert prov["project_value"] is False
+    assert prov["global_value"] is True
+
+
+def test_post_settings_patches_automation_override(tmp_path: Path) -> None:
+    """Round-trip: post an automation override, then GET /api/automation
+    sees it as the project layer."""
+    root = tmp_path / "match"
+    MatchProject.init(root, name="Patch Match").save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/project/settings",
+        json={"automation": {"shot_detect_on_beep_verified": False}},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["automation"]["shot_detect_on_beep_verified"] is False
+
+    auto = client.get("/api/automation").json()
+    assert auto["settings"]["shot_detect_on_beep_verified"] is False
+    assert auto["provenance"]["shot_detect_on_beep_verified"]["source"] == "project"

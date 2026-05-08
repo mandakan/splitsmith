@@ -801,6 +801,12 @@ class SettingsRequest(BaseModel):
     # post = pad after stage end. Both must be non-negative.
     trim_pre_buffer_seconds: float | None = None
     trim_post_buffer_seconds: float | None = None
+    # Layered automation override (#215). ``None`` keeps the current
+    # value; pass an :class:`AutomationOverride`-shaped dict with
+    # field values (or nulls) to set / clear individual project-level
+    # overrides. The resolved effective value is exposed via
+    # ``GET /api/automation``.
+    automation: automation_settings.AutomationOverride | None = None
     confirm: bool = False
 
 
@@ -1202,6 +1208,35 @@ def create_app(
     @app.get("/api/project")
     def get_project() -> JSONResponse:
         return JSONResponse(state.load().model_dump(mode="json"))
+
+    @app.get("/api/automation")
+    def get_automation() -> JSONResponse:
+        """Resolved automation settings + per-field provenance (#215 / #216).
+
+        Combines the global YAML / env-var defaults with the bound
+        project's override. The SPA renders provenance badges next to
+        each toggle so users see which layer set the current value.
+        ``cli_value`` is always None on the daemon path -- the server
+        doesn't take per-call CLI flags.
+        """
+        project = state.load()
+        resolved = automation_settings.resolve_automation(
+            project_override=project.automation,
+        )
+        return JSONResponse(
+            {
+                "settings": resolved.settings.model_dump(mode="json"),
+                "provenance": {
+                    field: {
+                        "source": prov.source,
+                        "cli_value": prov.cli_value,
+                        "project_value": prov.project_value,
+                        "global_value": prov.global_value,
+                    }
+                    for field, prov in resolved.provenance.items()
+                },
+            }
+        )
 
     @app.get("/api/project/match-analysis")
     def get_match_analysis() -> JSONResponse:
@@ -1761,6 +1796,13 @@ def create_app(
                     detail=f"{buf_field} must be non-negative, got {value}",
                 )
             setattr(project, buf_field, value)
+
+        # #215 -- patch the automation override on the project.
+        # Replacing the whole sub-object keeps the patch shape simple
+        # (the override is small enough that field-level merging would
+        # add complexity without a real benefit).
+        if req.automation is not None:
+            project.automation = req.automation
 
         # Make sure each configured directory is creatable; surface a 400
         # rather than failing later in detect-beep / trim / export.

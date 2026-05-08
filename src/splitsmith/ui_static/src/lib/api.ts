@@ -145,6 +145,10 @@ export interface MatchProject {
   thumbs_dir: string | null;
   trim_pre_buffer_seconds: number;
   trim_post_buffer_seconds: number;
+  /** #215 -- project-level automation override. Each field is optional;
+   *  a ``null`` (or missing) value means the project inherits from the
+   *  global default. Resolved view available via ``getAutomation()``. */
+  automation: AutomationOverride;
 }
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
@@ -284,7 +288,39 @@ export interface ProjectSettingsPatch {
   thumbs_dir?: string | null;
   trim_pre_buffer_seconds?: number | null;
   trim_post_buffer_seconds?: number | null;
+  /** #215 -- project-level automation override. Replaces the whole
+   *  override object; pass field values (or null to clear an
+   *  override back to the global default). */
+  automation?: AutomationOverride | null;
   confirm?: boolean;
+}
+
+/** Mirror of ``splitsmith.automation.AutomationOverride`` (#215). */
+export interface AutomationOverride {
+  shot_detect_on_beep_verified?: boolean | null;
+}
+
+/** Mirror of the resolved-settings shape returned by ``GET /api/automation``
+ *  (#216). The SPA renders ``<SettingProvenance>`` next to each toggle by
+ *  reading the matching ``provenance`` entry. */
+export interface ResolvedAutomationResponse {
+  settings: {
+    shot_detect_on_beep_verified: boolean;
+  };
+  provenance: Record<string, AutomationFieldProvenance>;
+}
+
+export type AutomationProvenanceSource =
+  | "cli"
+  | "project"
+  | "global"
+  | "default";
+
+export interface AutomationFieldProvenance {
+  source: AutomationProvenanceSource;
+  cli_value: boolean | null;
+  project_value: boolean | null;
+  global_value: boolean;
 }
 
 export interface NonEmptyOldDir {
@@ -1106,6 +1142,9 @@ export const api = {
       method: "POST",
       json: patch,
     }),
+
+  getAutomation: () =>
+    request<ResolvedAutomationResponse>("/api/automation"),
 
   moveAssignment: (
     videoPath: string,

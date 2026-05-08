@@ -38,6 +38,7 @@ import { BeepSection } from "@/components/BeepSection";
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { FolderPicker } from "@/components/FolderPicker";
 import { MountSelect } from "@/components/MountSelect";
+import { SettingProvenance } from "@/components/SettingProvenance";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +59,7 @@ import {
   type MatchAnalysis,
   type MatchProject,
   type NonEmptyOldDirsDetail,
+  type ResolvedAutomationResponse,
   type ScoreboardErrorDetail,
   type ScoreboardMatchRef,
   type ScoreboardShooterRef,
@@ -477,6 +479,15 @@ export function Ingest() {
 
       {project ? (
         <SettingsSection project={project} busy={busy} setBusy={setBusy} setError={setError} onProjectUpdate={setProject} />
+      ) : null}
+
+      {project ? (
+        <AutomationSettingsPanel
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          onProjectUpdate={setProject}
+        />
       ) : null}
 
       {project ? (
@@ -1539,6 +1550,141 @@ function SettingsSection({
         </CardContent>
       ) : null}
       {cleanupOpen ? <CleanupDialog onClose={() => setCleanupOpen(false)} /> : null}
+    </Card>
+  );
+}
+
+/** Project-level automation panel (#215 / #216).
+ *
+ * Renders a collapsible card with each automation toggle, a tristate
+ * select that lets the user inherit / override per project, and a
+ * SettingProvenance badge that names the layer supplying the current
+ * effective value.
+ *
+ * Pulls from ``GET /api/automation`` so the badge and the select are
+ * driven by the same resolution logic the server uses; writes flow
+ * through the existing ``POST /api/project/settings`` endpoint with
+ * the ``automation`` patch field.
+ */
+function AutomationSettingsPanel({
+  busy,
+  setBusy,
+  setError,
+  onProjectUpdate,
+}: {
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (p: MatchProject) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [resolved, setResolved] = useState<ResolvedAutomationResponse | null>(
+    null,
+  );
+
+  const reload = useCallback(async () => {
+    try {
+      const r = await api.getAutomation();
+      setResolved(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [setError]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const setShotDetect = async (value: boolean | null) => {
+    setBusy(true);
+    try {
+      const updated = await api.updateSettings({
+        automation: { shot_detect_on_beep_verified: value },
+      });
+      onProjectUpdate(updated);
+      setError(null);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shotDetectProv = resolved?.provenance.shot_detect_on_beep_verified;
+  // The ``select`` reflects the project-level *override* (not the
+  // resolved value): "inherit", "true", or "false". Resolution is
+  // shown via the badge + the helper line so the user sees both
+  // layers at once without the select lying about its state.
+  const projectValue: boolean | null | undefined = shotDetectProv?.project_value;
+  const selectValue: "inherit" | "on" | "off" =
+    projectValue === true ? "on" : projectValue === false ? "off" : "inherit";
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <CardTitle className="flex items-center justify-between gap-2 text-base">
+          <span className="flex items-center gap-2">
+            <FolderInput className="size-4" />
+            Automation
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {expanded ? "Hide" : "Configure"}
+          </span>
+        </CardTitle>
+        <CardDescription>
+          When splitsmith runs the next step automatically. Override
+          per project; the global default lives in your config.yaml.
+        </CardDescription>
+      </CardHeader>
+      {expanded ? (
+        <CardContent className="space-y-3">
+          {resolved && shotDetectProv ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="font-medium">
+                  Auto-detect shots after beep verified
+                </span>
+                <SettingProvenance provenance={shotDetectProv} />
+                <span className="text-xs text-muted-foreground">
+                  effective:{" "}
+                  {resolved.settings.shot_detect_on_beep_verified
+                    ? "on"
+                    : "off"}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                When you mark a beep reviewed, splitsmith fires the
+                CLAP / GBDT / PANN ensemble to seed audited shots.
+                Turn off if you only want trim + export, or to gate
+                detection manually.
+              </div>
+              <select
+                className="rounded border border-border bg-background px-2 py-1 text-sm"
+                value={selectValue}
+                disabled={busy}
+                onChange={(e) => {
+                  const v = e.target.value as "inherit" | "on" | "off";
+                  void setShotDetect(
+                    v === "inherit" ? null : v === "on" ? true : false,
+                  );
+                }}
+              >
+                <option value="inherit">
+                  Use global default ({shotDetectProv.global_value ? "on" : "off"})
+                </option>
+                <option value="on">Always on (project override)</option>
+                <option value="off">Always off (project override)</option>
+              </select>
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">Loading...</div>
+          )}
+        </CardContent>
+      ) : null}
     </Card>
   );
 }
