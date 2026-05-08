@@ -288,6 +288,44 @@ def test_fcpxml_match_with_titles_validates(tmp_path: Path) -> None:
 
 
 @fcpxml_dtd
+def test_fcpxml_match_with_intro_outro_validates(tmp_path: Path) -> None:
+    """Intro / outro emit ``<asset>`` + ``<media-rep>`` resources and
+    spine ``<asset-clip>``s framing the stages. DTD checks asset
+    structure (required ``id`` / ``hasVideo`` / ``hasAudio``) and
+    spine ordering."""
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    intro_path = _make_video(tmp_path, "intro.mp4")
+    outro_path = _make_video(tmp_path, "outro.mp4")
+    out = tmp_path / "match.fcpxml"
+    stages = [
+        StageComposition(
+            stage_name=name,
+            video_path=p,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        )
+        for name, p in (("A", primary_a), ("B", primary_b))
+    ]
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        intro=fcpxml_gen.IntroOutroSegment(
+            video_path=intro_path, video=_meta_30fps(), name="Intro"
+        ),
+        outro=fcpxml_gen.IntroOutroSegment(
+            video_path=outro_path, video=_meta_30fps(), name="Outro"
+        ),
+    )
+    validate_against_dtd(out, dtd=fcpxml_dtd_path())
+
+
+@fcpxml_dtd
 def test_invalid_fcpxml_fails_validation(tmp_path: Path) -> None:
     """Sanity: hand-rolled bad FCPXML must trip the validator. Catches
     helper regressions (e.g. xmllint flags wrong / DTD path silently

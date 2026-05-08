@@ -1231,6 +1231,12 @@ function MatchExportDialog({
   >("none");
   const [titleDurationSeconds, setTitleDurationSeconds] =
     useState<number>(1.5);
+  // Issue #173. Optional intro / outro video clips. Empty string =
+  // disabled. The server expands ``~`` and probes the file; missing
+  // paths surface as anomalies (non-fatal) rather than failing the
+  // whole export.
+  const [introPath, setIntroPath] = useState<string>("");
+  const [outroPath, setOutroPath] = useState<string>("");
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1294,6 +1300,8 @@ function MatchExportDialog({
     if (t.title_kind !== undefined) setTitleKind(t.title_kind);
     if (t.title_duration_seconds !== undefined)
       setTitleDurationSeconds(t.title_duration_seconds);
+    if (t.intro_path !== undefined) setIntroPath(t.intro_path);
+    if (t.outro_path !== undefined) setOutroPath(t.outro_path);
   };
 
   const choosePreset = (next: PaddingPreset) => {
@@ -1333,6 +1341,8 @@ function MatchExportDialog({
         transition_duration_seconds: transitionDurationSeconds,
         title_kind: titleKind,
         title_duration_seconds: titleDurationSeconds,
+        intro_path: introPath || undefined,
+        outro_path: outroPath || undefined,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1691,6 +1701,36 @@ function MatchExportDialog({
                   s
                 </label>
               )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <label
+                className="flex items-center gap-1.5"
+                title="Optional video clip placed before the first stage. Frame rate must match the timeline. ~ expands to your home directory. Leave blank to skip."
+              >
+                Intro clip
+                <input
+                  type="text"
+                  placeholder="~/match-intro.mov"
+                  className="flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                  value={introPath}
+                  disabled={busy}
+                  onChange={(e) => setIntroPath(e.target.value)}
+                />
+              </label>
+              <label
+                className="flex items-center gap-1.5"
+                title="Optional video clip placed after the last stage. Same constraints as the intro."
+              >
+                Outro clip
+                <input
+                  type="text"
+                  placeholder="~/match-outro.mov"
+                  className="flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                  value={outroPath}
+                  disabled={busy}
+                  onChange={(e) => setOutroPath(e.target.value)}
+                />
+              </label>
             </div>
             {includeOverlay ? (
               <OverlayFormatPanel

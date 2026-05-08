@@ -961,6 +961,12 @@ class MatchExportRequest(BaseModel):
     # FCP7 / MP4 surface a "titles ignored" anomaly when combined.
     title_kind: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
+    # Issue #173. Optional intro / outro video paths. Server expands
+    # ``~`` and probes the file to validate frame rate against the
+    # timeline. Missing files surface as anomalies; non-fatal so the
+    # rest of the export still ships.
+    intro_path: str | None = None
+    outro_path: str | None = None
 
 
 class RevealRequest(BaseModel):
@@ -4635,6 +4641,8 @@ def create_app(
             transition_duration_seconds=req.transition_duration_seconds,
             title_kind=req.title_kind,
             title_duration_seconds=req.title_duration_seconds,
+            intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
+            outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
         )
         try:
             result = match_export_helpers.export_match(

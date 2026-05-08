@@ -520,6 +520,14 @@ export interface MatchExportRequestPayload {
    *  ``"none"``. Slates default to 1.5s; lower-thirds default to
    *  3.0s but the dialog uses one input either way. */
   title_duration_seconds?: number;
+  /** Issue #173. Filesystem path to an optional intro clip placed
+   *  before stage 0 on the spine. ``~`` expands server-side. Frame
+   *  rate must match the timeline; missing files surface as
+   *  anomalies (non-fatal). FCPXML only today. */
+  intro_path?: string | null;
+  /** Filesystem path to an optional outro clip placed after the
+   *  last stage. Same semantics as ``intro_path``. */
+  outro_path?: string | null;
 }
 
 /** Body of a single export template (issue #198). Mirrors the dialog's
@@ -539,6 +547,8 @@ export interface MatchExportTemplate {
   transition_duration_seconds?: number;
   title_kind?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
+  intro_path?: string;
+  outro_path?: string;
 }
 
 export interface MatchExportTemplateEntry {
@@ -1541,6 +1551,12 @@ export const api = {
           : {}),
         ...(payload.title_duration_seconds !== undefined
           ? { title_duration_seconds: payload.title_duration_seconds }
+          : {}),
+        ...(payload.intro_path !== undefined
+          ? { intro_path: payload.intro_path }
+          : {}),
+        ...(payload.outro_path !== undefined
+          ? { outro_path: payload.outro_path }
           : {}),
       },
     }),
