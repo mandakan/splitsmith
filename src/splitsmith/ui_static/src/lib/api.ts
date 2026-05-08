@@ -14,14 +14,22 @@ export type VideoRole = "primary" | "secondary" | "ignored";
 export type BeepSource = "auto" | "manual" | "aligned";
 
 /** One ranked beep candidate emitted by ``detect-beep`` (issue #22).
- *  ``score`` is silence-preference (run_peak / pre-window mean); higher =
- *  more confident. ``beep_candidates[0]`` matches the promoted ``beep_time``
- *  on the parent ``StageVideo``. */
+ *  ``score`` is the composite ranking score: silence-preference tilted by
+ *  tonal concentration and duration plausibility. ``confidence`` is the
+ *  calibrated [0, 1] threshold value (#219 / #220 layer 3a) -- >=0.7
+ *  the auto-trust band, < 0.6 lands in the HITL queue. The raw
+ *  ``silence_score`` and ``tonal_score`` components are surfaced so the
+ *  candidate card can explain *why* a confidence is what it is.
+ *  ``beep_candidates[0]`` matches the promoted ``beep_time`` on the
+ *  parent ``StageVideo``. */
 export interface BeepCandidate {
   time: number;
   score: number;
   peak_amplitude: number;
   duration_ms: number;
+  silence_score: number;
+  tonal_score: number;
+  confidence: number;
 }
 
 /** Response from POST /api/stages/{n}/videos/{vid}/beep/snap. The user
@@ -62,6 +70,15 @@ export interface StageVideo {
   beep_reviewed: boolean;
   beep_peak_amplitude: number | null;
   beep_duration_ms: number | null;
+  /** Calibrated detector confidence in [0, 1] for the chosen beep
+   *  (#219 / #220 layer 3a). Manual entries clamp to 1.0; auto-detected
+   *  beeps carry the value the formula in ``beep_detect`` produced.
+   *  Null on legacy projects from before this field existed and on
+   *  ``beep_source == "aligned"`` where the detector confidence isn't
+   *  meaningful for a secondary. The HITL queue uses this against
+   *  ``automation.beep_low_confidence_threshold`` to decide whether
+   *  the beep needs review. */
+  beep_confidence: number | null;
   /** Ranked alternative candidates from the most recent auto-detection run.
    *  Empty when the project predates issue #22 or after a manual override. */
   beep_candidates: BeepCandidate[];
@@ -301,6 +318,11 @@ export interface ProjectSettingsPatch {
 /** Mirror of ``splitsmith.automation.AutomationOverride`` (#215). */
 export interface AutomationOverride {
   shot_detect_on_beep_verified?: boolean | null;
+  /** HITL gate threshold (#219). Auto-detected beeps with confidence
+   *  at or above this value pre-flip ``beep_reviewed`` so the
+   *  shot-detect chain fires; below it the beep lands in the HITL
+   *  queue and the user (or an agent) has to pick. Range [0, 1]. */
+  beep_low_confidence_threshold?: number | null;
 }
 
 /** Mirror of the resolved-settings shape returned by ``GET /api/automation``
@@ -309,6 +331,7 @@ export interface AutomationOverride {
 export interface ResolvedAutomationResponse {
   settings: {
     shot_detect_on_beep_verified: boolean;
+    beep_low_confidence_threshold: number;
   };
   provenance: Record<string, AutomationFieldProvenance>;
 }
@@ -319,11 +342,35 @@ export type AutomationProvenanceSource =
   | "global"
   | "default";
 
+/** Per-field source + values. ``cli_value`` / ``project_value`` /
+ *  ``global_value`` are bool-or-number because the automation block now
+ *  mixes toggles and thresholds. The provenance widget renders via
+ *  JSON.stringify so the union is invisible at the call site. */
 export interface AutomationFieldProvenance {
   source: AutomationProvenanceSource;
-  cli_value: boolean | null;
-  project_value: boolean | null;
-  global_value: boolean;
+  cli_value: boolean | number | null;
+  project_value: boolean | number | null;
+  global_value: boolean | number;
+}
+
+export type HitlItemKind = "beep_low_confidence" | "beep_missing";
+
+/** One row in the project's HITL queue (#219). Items are ordered by
+ *  stage_number ascending. ``confidence`` is null for ``beep_missing``
+ *  entries (no candidate was produced) and populated for
+ *  ``beep_low_confidence`` entries (the threshold value the auto-trust
+ *  gate measured against is in ``HitlQueueResponse.threshold``). */
+export interface HitlQueueItem {
+  kind: HitlItemKind;
+  stage_number: number;
+  video_id: string;
+  confidence: number | null;
+  suggested_action: string;
+}
+
+export interface HitlQueueResponse {
+  items: HitlQueueItem[];
+  threshold: number;
 }
 
 export interface NonEmptyOldDir {
@@ -1148,6 +1195,13 @@ export const api = {
 
   getAutomation: () =>
     request<ResolvedAutomationResponse>("/api/automation"),
+
+  /** Project-level work queue: beeps the auto-trust gate (#219) didn't
+   *  clear -- either missing (auto-detect found nothing) or below the
+   *  ``beep_low_confidence_threshold``. The HITL panel polls this on
+   *  the Ingest page; the MCP wrapper exposes it as a resource so an
+   *  agent can drive the picks. */
+  getHitlQueue: () => request<HitlQueueResponse>("/api/hitl-queue"),
 
   dismissNudge: (stageNumber: number, dismissed: boolean) =>
     request<MatchProject>("/api/project/nudges/dismiss", {
