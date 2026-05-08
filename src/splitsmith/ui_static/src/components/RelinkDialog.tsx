@@ -240,6 +240,8 @@ export function RelinkDialog({ onClose, onApplied }: RelinkDialogProps) {
                 }}
                 onCancel={() => setPickerOpen(false)}
                 mode="inline"
+                allowEmptyFolder
+                selectLabel="Scan this folder"
               />
             </div>
           ) : (
