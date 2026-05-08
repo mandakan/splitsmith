@@ -34,6 +34,10 @@ dependencies = [
     "torch>=2.11.0",
     "panns-inference>=0.1.1",
     "transformers>=5.7.0",
+    # Model Context Protocol server (issue #211). Wraps the existing
+    # HTTP / library APIs as tools any MCP-aware client can drive.
+    # Stdio transport is the default; SSE comes for free.
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]

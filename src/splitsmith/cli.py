@@ -781,6 +781,46 @@ def overlay(
     console.print(f"[green]Wrote[/] {output}")
 
 
+@app.command()
+def mcp(
+    allowed_root: Path | None = typer.Option(
+        None,
+        "--allowed-root",
+        help=(
+            "Optional sandbox root. Every path argument the agent passes "
+            "(project_root, video files, directories) must resolve under "
+            "this directory; otherwise the tool errors with SandboxError. "
+            "When omitted the server runs without a sandbox and the agent "
+            "has the same filesystem access as the launching user."
+        ),
+    ),
+) -> None:
+    """Run the splitsmith Model Context Protocol server over stdio (issue #211).
+
+    Exposes splitsmith's pipeline as agent-callable tools. This layer
+    (#211 layer 1) ships the read-only surface (probe video, discover
+    videos, get project, list stages, get HITL queue); subsequent
+    layers add write tools, detection orchestration, and the export
+    pipeline.
+
+    Configure your MCP-aware client (Claude Desktop, Claude Code, etc.)
+    to launch this command and pipe stdio. ``--allowed-root`` is the
+    single knob to constrain filesystem access.
+    """
+    import os
+
+    from .mcp import create_server
+    from .mcp.sandbox import ALLOWED_ROOT_ENV
+
+    if allowed_root is not None:
+        resolved = allowed_root.expanduser().resolve()
+        if not resolved.is_dir():
+            raise typer.BadParameter(f"--allowed-root {resolved} is not a directory")
+        os.environ[ALLOWED_ROOT_ENV] = str(resolved)
+    server = create_server()
+    server.run()
+
+
 # ---------------------------------------------------------------------------
 # Pipeline helpers
 # ---------------------------------------------------------------------------
