@@ -1,0 +1,691 @@
+{
+  "config": {
+    "freq_min_hz": 2000,
+    "freq_max_hz": 5000,
+    "min_duration_ms": 150,
+    "min_amplitude": 0.05,
+    "min_abs_peak": 0.04,
+    "silence_window_s": 1.5,
+    "silence_pre_skip_s": 0.2,
+    "search_window_s": 30.0,
+    "top_n_candidates": 5
+  },
+  "results": [
+    {
+      "stem": "beep-test",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 4.877,
+      "tolerance_s": 0.02,
+      "detected_time_s": 4.877083333333333,
+      "detected_score": 6050.912090243303,
+      "error_s": 8.333333333343518e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld",
+        "steel-prone"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": 4.99975,
+      "detected_score": 81.26305856879668,
+      "error_s": -0.00025000000000030553,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage1",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 132.11914367051946,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage1",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 22.9417,
+      "tolerance_s": 0.015,
+      "detected_time_s": 22.941729166666665,
+      "detected_score": 35.08542466412034,
+      "error_s": 2.9166666664082186e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": 5.000229166666666,
+      "detected_score": 38.06752411024251,
+      "error_s": 0.0002291666666662806,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage2",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 2347.701351334532,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage2",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 17.6261,
+      "tolerance_s": 0.015,
+      "detected_time_s": 17.6260625,
+      "detected_score": 27.800113565473012,
+      "error_s": -3.750000000124487e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld",
+        "steel-prone"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": null,
+      "detected_score": null,
+      "error_s": null,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 0,
+      "error_kind": "not_found"
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage3",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 52.59200093953135,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage3",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 25.4267,
+      "tolerance_s": 0.015,
+      "detected_time_s": 25.426729166666668,
+      "detected_score": 17.291687671567942,
+      "error_s": 2.91666666676349e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld",
+        "steel-prone"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": 5.000208333333333,
+      "detected_score": 33.71748231777052,
+      "error_s": 0.00020833333333314386,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage5",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.49383333333333335,
+      "detected_score": 113.92997311267499,
+      "error_s": -0.006166666666666654,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 3,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage5",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "steel-prone"
+      ],
+      "ground_truth_s": 6.522,
+      "tolerance_s": 0.015,
+      "detected_time_s": 12.175729166666667,
+      "detected_score": 11.471020124317086,
+      "error_s": 5.6537291666666665,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 3,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage6-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.292,
+      "tolerance_s": 0.015,
+      "detected_time_s": null,
+      "detected_score": null,
+      "error_s": null,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 0,
+      "error_kind": "not_found"
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage6",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 341.81809651145323,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage6",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 14.1252,
+      "tolerance_s": 0.015,
+      "detected_time_s": 14.125229166666667,
+      "detected_score": 24.151088327623683,
+      "error_s": 2.91666666676349e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": 4.99975,
+      "detected_score": 12.934565618928646,
+      "error_s": -0.00025000000000030553,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage7",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5000208333333334,
+      "detected_score": 50.038693824169556,
+      "error_s": 2.0833333333358794e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage7",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 17.3027,
+      "tolerance_s": 0.015,
+      "detected_time_s": 13.611875,
+      "detected_score": 22.44801742154941,
+      "error_s": -3.690825000000002,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage8-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld",
+        "steel-prone"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": 5.000166666666667,
+      "detected_score": 11.489182992616835,
+      "error_s": 0.00016666666666687036,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage8",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 31.646755513459052,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 3,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-2026-stage8",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 25.3944,
+      "tolerance_s": 0.015,
+      "detected_time_s": 25.394375,
+      "detected_score": 24.84577465730274,
+      "error_s": -2.5000000000829914e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": 5.000416666666666,
+      "detected_score": 66.71628000323034,
+      "error_s": 0.0004166666666662877,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage2",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 290.4498285567559,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage2",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 28.7817,
+      "tolerance_s": 0.015,
+      "detected_time_s": 28.78172916666667,
+      "detected_score": 14.306837987132761,
+      "error_s": 2.91666666676349e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage3",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5000208333333334,
+      "detected_score": 12979.619350493773,
+      "error_s": 2.0833333333358794e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage4-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": null,
+      "detected_score": null,
+      "error_s": null,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 0,
+      "error_kind": "not_found"
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage4",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 19.04325,
+      "detected_score": 421.6534498151464,
+      "error_s": 14.04325,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.1507,
+      "tolerance_s": 0.015,
+      "detected_time_s": 1.1506875,
+      "detected_score": 25.772087826605777,
+      "error_s": -1.2499999999970868e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage5",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.5,
+      "detected_score": 16.949652295339945,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage5",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep"
+      ],
+      "ground_truth_s": 15.0302,
+      "tolerance_s": 0.015,
+      "detected_time_s": 15.030166666666666,
+      "detected_score": 52.937002507816466,
+      "error_s": -3.3333333334439885e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld",
+        "steel-prone"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": null,
+      "detected_score": null,
+      "error_s": null,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 0,
+      "error_kind": "not_found"
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage6",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 0.501125,
+      "detected_score": 812.8434802018494,
+      "error_s": 0.0011250000000000426,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage6",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 20.454,
+      "tolerance_s": 0.015,
+      "detected_time_s": 26.8686875,
+      "detected_score": 38.08577835748842,
+      "error_s": 6.414687499999999,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
+      "track": "clip",
+      "tags": [
+        "handheld",
+        "steel-prone"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.015,
+      "detected_time_s": null,
+      "detected_score": null,
+      "error_s": null,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 0,
+      "error_kind": "not_found"
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage7",
+      "track": "clip",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 0.5,
+      "tolerance_s": 0.015,
+      "detected_time_s": 3.1420208333333335,
+      "detected_score": 34.51542327414717,
+      "error_s": 2.6420208333333335,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage7",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 21.879,
+      "tolerance_s": 0.015,
+      "detected_time_s": 24.521020833333335,
+      "detected_score": 34.51542327414717,
+      "error_s": 2.6420208333333335,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 1,
+      "error_kind": null
+    }
+  ],
+  "summary": {
+    "total": 37,
+    "top1_hits": 26,
+    "topn_hits": 30,
+    "not_found": 5,
+    "exceptions": 0,
+    "recall_top1": 0.7027027027027027,
+    "recall_topn": 0.8108108108108109,
+    "by_tag": {
+      "handheld": {
+        "total": 12,
+        "top1_hits": 7,
+        "topn_hits": 7,
+        "not_found": 5,
+        "exceptions": 0,
+        "recall_top1": 0.5833333333333334,
+        "recall_topn": 0.5833333333333334
+      },
+      "steel-prone": {
+        "total": 19,
+        "top1_hits": 12,
+        "topn_hits": 14,
+        "not_found": 3,
+        "exceptions": 0,
+        "recall_top1": 0.631578947368421,
+        "recall_topn": 0.7368421052631579
+      },
+      "headcam": {
+        "total": 24,
+        "top1_hits": 18,
+        "topn_hits": 22,
+        "not_found": 0,
+        "exceptions": 0,
+        "recall_top1": 0.75,
+        "recall_topn": 0.9166666666666666
+      },
+      "late-beep": {
+        "total": 20,
+        "top1_hits": 16,
+        "topn_hits": 18,
+        "not_found": 0,
+        "exceptions": 0,
+        "recall_top1": 0.8,
+        "recall_topn": 0.9
+      }
+    }
+  }
+}
