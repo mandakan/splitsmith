@@ -1276,6 +1276,87 @@ def create_app(
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 
+    @app.get("/api/hitl-queue")
+    def get_hitl_queue() -> JSONResponse:
+        """Items in the project that need human (or agent) attention (#219).
+
+        Walks every primary video and emits one item per beep that's
+        either missing (auto-detection found no candidate) or below the
+        ``beep_low_confidence_threshold`` automation gate -- exactly
+        the cases where the auto-trust chain didn't fire and a human
+        has to pick. Manual entries and high-confidence reviewed beeps
+        never appear here.
+
+        Response shape (stable; consumed by the SPA AND the MCP):
+
+            {
+              "items": [
+                {
+                  "kind": "beep_missing" | "beep_low_confidence",
+                  "stage_number": int,
+                  "video_id": str,
+                  "confidence": float | None,
+                  "suggested_action": str,
+                },
+                ...
+              ],
+              "threshold": float,
+            }
+
+        Ordered by stage number ascending; severity ties (a low-conf
+        and a missing on the same stage) keep their stable insertion
+        order. The SPA shows this as a project-level work queue; the
+        MCP exposes it as a resource so an agent can drive the picks.
+        """
+        project = state.load()
+        resolved = automation_settings.resolve_automation(
+            project_override=project.automation,
+        )
+        threshold = resolved.settings.beep_low_confidence_threshold
+        items: list[dict] = []
+        for stg in sorted(project.stages, key=lambda s: s.stage_number):
+            primary = next(
+                (v for v in stg.videos if v.role == "primary"),
+                None,
+            )
+            if primary is None:
+                continue
+            if primary.beep_auto_detect_failed:
+                items.append(
+                    {
+                        "kind": "beep_missing",
+                        "stage_number": stg.stage_number,
+                        "video_id": primary.video_id,
+                        "confidence": None,
+                        "suggested_action": (
+                            "Set the beep manually on the waveform: open the "
+                            "stage's ingest panel and click the beep marker."
+                        ),
+                    }
+                )
+                continue
+            if (
+                primary.beep_source == "auto"
+                and primary.beep_time is not None
+                and not primary.beep_reviewed
+            ):
+                # Either confidence is below the threshold OR the field
+                # predates layer 3a (None) -- both warrant review.
+                items.append(
+                    {
+                        "kind": "beep_low_confidence",
+                        "stage_number": stg.stage_number,
+                        "video_id": primary.video_id,
+                        "confidence": primary.beep_confidence,
+                        "suggested_action": (
+                            "Listen to the ranked candidates and pick the "
+                            "correct beep, or nudge the timestamp on the "
+                            "waveform."
+                        ),
+                    }
+                )
+        return JSONResponse({"items": items, "threshold": threshold})
+
     @app.get("/api/project/match-analysis")
     def get_match_analysis() -> JSONResponse:
         """Run the canonical video-match heuristic over the project and return
@@ -2063,10 +2144,21 @@ def create_app(
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
             video.processed["beep"] = True
-            # Auto-detected beeps need explicit user review (#71). Reset
-            # the flag here so a re-detect on a previously reviewed video
-            # invalidates the prior approval.
-            video.beep_reviewed = False
+            # Auto-detected beeps need explicit user review (#71) UNLESS
+            # the calibrated confidence (#220 layer 3a) clears the
+            # ``beep_low_confidence_threshold`` automation gate (#219).
+            # Above the threshold we auto-trust: the detector is right
+            # ~95 % of the time in that band, so making the user click
+            # to confirm every high-confidence beep adds friction
+            # without catching real problems. Below it the user has to
+            # review -- the HITL queue (``GET /api/hitl-queue``) lists
+            # exactly these. Resets to False on re-detection so the
+            # prior approval doesn't carry over to a fresh run.
+            resolved_auto = automation_settings.resolve_automation(
+                project_override=proj.automation,
+            )
+            threshold = resolved_auto.settings.beep_low_confidence_threshold
+            video.beep_reviewed = beep.confidence >= threshold
             # Sanity check: when in-stream succeeded on a secondary, ALSO
             # run cross-correlation against the primary. If the two
             # methods disagree by more than ~250 ms it usually means the

@@ -69,6 +69,23 @@ class AutomationSettings(BaseSettings):
     shot_detect_on_beep_verified: bool = True
     """When the user marks a beep reviewed, fire shot detection."""
 
+    beep_low_confidence_threshold: float = 0.6
+    """Minimum auto-detector confidence in [0, 1] required to auto-trust a beep.
+
+    Joins issue #219: an auto-detected beep with confidence at or above
+    this threshold pre-sets ``beep_reviewed=True`` (the user is offered
+    a one-click confirm but the chain doesn't wait), so shot detection
+    fires immediately. Below the threshold the beep lands in the HITL
+    queue and the user (or an agent driving the workflow) is asked to
+    pick the right candidate from the ranked list.
+
+    Empirically the labelled fixture set has ~95% top-1 precision in the
+    ``confidence >= 0.7`` band; 0.6 is the conservative default that
+    keeps a few ambiguous cases in HITL rather than wasting CLAP / GBDT
+    / PANN cycles on a beep the agent will end up correcting. Manual
+    entries always clamp confidence to 1.0 and bypass this gate.
+    """
+
 
 class AutomationOverride(BaseModel):
     """Layer override -- ``None`` on a field means "inherit from below".
@@ -79,6 +96,7 @@ class AutomationOverride(BaseModel):
     """
 
     shot_detect_on_beep_verified: bool | None = None
+    beep_low_confidence_threshold: float | None = None
 
 
 # Where each resolved field came from. The UI uses this for the
@@ -94,12 +112,17 @@ class FieldProvenance:
     ``cli_value`` / ``project_value`` are ``None`` when that layer
     stayed silent. ``global_value`` is always present because the
     global settings always have a default.
+
+    Field types are union-typed (``bool | float``) because the
+    automation block is now mixed (toggles + thresholds). The UI
+    provenance widget renders the values via JSON.stringify so the
+    union is invisible on the wire.
     """
 
     source: ProvenanceSource
-    cli_value: bool | None
-    project_value: bool | None
-    global_value: bool
+    cli_value: bool | float | None
+    project_value: bool | float | None
+    global_value: bool | float
 
 
 @dataclass(frozen=True)
