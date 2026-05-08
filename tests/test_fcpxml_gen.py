@@ -25,6 +25,8 @@ from splitsmith.config import (
 )
 from splitsmith.fcpxml_gen import (
     FFprobeError,
+    PipPlacement,
+    SecondaryClip,
     StageComposition,
     generate_fcpxml,
     generate_match_fcpxml,
@@ -1076,15 +1078,219 @@ def test_match_fcpxml_supports_mixed_frame_rates(tmp_path: Path) -> None:
     fid_by_fd = {f.attrib["frameDuration"]: f.attrib["id"] for f in formats}
     assert asset_format_refs[0] == fid_by_fd["1/30s"]
     assert asset_format_refs[1] == fid_by_fd["1001/30000s"]
-    # Sequence keeps the stage-0 format; spine asset-clips read in that
-    # frame_duration so FCP conforms each asset.
+    # Sequence keeps the stage-0 format; each spine asset-clip
+    # references the format of its underlying asset (#236) so FCP
+    # doesn't drop overrides applied to the clip.
     sequence = root.find("./library/event/project/sequence")
     assert sequence is not None
     assert sequence.attrib["format"] == fid_by_fd["1/30s"]
     spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
     assert len(spine_clips) == 2
-    for clip in spine_clips:
-        assert clip.attrib["format"] == fid_by_fd["1/30s"]
+    assert spine_clips[0].attrib["format"] == fid_by_fd["1/30s"]
+    assert spine_clips[1].attrib["format"] == fid_by_fd["1001/30000s"]
+
+
+def test_match_fcpxml_caps_cam_duration_to_parent_visible_window(
+    tmp_path: Path,
+) -> None:
+    """#236 -- a cam whose source duration exceeds the parent's visible
+    window must be capped to the window. Without the cap FCP renders
+    the cam past the primary's right edge ("trim not applied")."""
+    primary_path = _make_video(tmp_path, "stage1.mp4")
+    cam_path = _make_video(tmp_path, "stage1_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    cam_meta = VideoMetadata(
+        width=1920,
+        height=1080,
+        # 30s of cam vs a 20s primary that gets trimmed to ~5s on the spine.
+        duration_seconds=30.0,
+        frame_rate_num=30,
+        frame_rate_den=1,
+    )
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=primary_path,
+                video=_meta_30fps(),  # 20s @ 30p
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=1.0,  # head_trim = 4s
+                tail_pad_seconds=1.0,  # tail_trim = 13s; effective = 3s
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam_path,
+                        video=cam_meta,
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                        pip=PipPlacement(corner="top-right"),
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="cap",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    primary_clip = root.find("./library/event/project/sequence/spine/asset-clip")
+    assert primary_clip is not None
+    cam_clip = primary_clip.find("asset-clip")
+    assert cam_clip is not None
+    # Parent visible window is head_trim_frames + effective_duration_frames =
+    # 120 + 90 = 210 frames at 30p, in source coords. Cam offset (parent
+    # source-time) starts at head_trim_frames = 120; cam_room = 210 - 120 = 90.
+    # Cap should yield duration <= 90 frames (3s).
+    cam_dur = cam_clip.attrib["duration"]
+    cam_dur_frames = int(cam_dur.split("/")[0])
+    assert cam_dur_frames <= 90
+
+
+def test_match_fcpxml_cam_clip_mutes_audio(tmp_path: Path) -> None:
+    """#236 -- cam audio shouldn't compete with the primary's on the
+    timeline. Emit ``<adjust-volume amount=\"-96dB\"/>`` on every cam
+    asset-clip so FCP imports the cam silent."""
+    primary_path = _make_video(tmp_path, "stage1.mp4")
+    cam_path = _make_video(tmp_path, "stage1_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=primary_path,
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=20.0,
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam_path,
+                        video=_meta_30fps(),
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="mute",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    primary_clip = root.find("./library/event/project/sequence/spine/asset-clip")
+    assert primary_clip is not None
+    cam_clip = primary_clip.find("asset-clip")
+    assert cam_clip is not None
+    volume = cam_clip.find("adjust-volume")
+    assert volume is not None
+    assert volume.attrib["amount"] == "-96dB"
+
+
+def test_match_fcpxml_cam_start_uses_cam_frame_grid(tmp_path: Path) -> None:
+    """#236 -- cam asset-clip's ``start`` is in the cam's own
+    frame_duration; emitting it with the sequence's denominator (when
+    cam rate differs) makes FCP treat the value as off-grid and silently
+    drop overrides applied to the clip."""
+    primary_path = _make_video(tmp_path, "stage1.mp4")
+    cam_path = _make_video(tmp_path, "stage1_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    cam_meta = VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        # 60p source on a 30p timeline -- the case from the user's report.
+        frame_rate_num=60,
+        frame_rate_den=1,
+    )
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=primary_path,
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=8.0,
+                head_pad_seconds=2.0,  # head_trim = 6s
+                tail_pad_seconds=20.0,
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam_path,
+                        video=cam_meta,
+                        beep_offset_seconds=10.0,  # cam beep is later -> seek into cam
+                        label="Cam",
+                        pip=PipPlacement(corner="top-right"),
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="grid",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    primary_clip = root.find("./library/event/project/sequence/spine/asset-clip")
+    assert primary_clip is not None
+    cam_clip = primary_clip.find("asset-clip")
+    assert cam_clip is not None
+    # delta = (8 - 6) - 10 = -8s -> seek 8s into cam media. At 60p that's 480
+    # cam frames, expressed as 480/60s. Crucially the denominator is 60 (cam
+    # frame rate), not 30000 (sequence's frame_duration denominator).
+    assert cam_clip.attrib["start"] == "480/60s"
+
+
+def test_match_fcpxml_cam_asset_clip_format_matches_cam_format(
+    tmp_path: Path,
+) -> None:
+    """#236 -- the cam asset-clip's ``format`` attribute must reference
+    the cam's own format, not the sequence's. When they differ FCP
+    can drop overrides applied to the clip (PiP transforms, etc.)."""
+    primary_path = _make_video(tmp_path, "stage1.mp4")
+    cam_path = _make_video(tmp_path, "stage1_cam.mp4")
+    out = tmp_path / "match.fcpxml"
+    cam_meta = VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        frame_rate_num=60,
+        frame_rate_den=1,
+    )
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=primary_path,
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=20.0,
+                secondaries=[
+                    SecondaryClip(
+                        video_path=cam_path,
+                        video=cam_meta,
+                        beep_offset_seconds=5.0,
+                        label="Cam",
+                        pip=PipPlacement(corner="top-right"),
+                    )
+                ],
+            ),
+        ],
+        output_path=out,
+        project_name="format-match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    formats = root.findall("./resources/format")
+    fid_by_fd = {f.attrib["frameDuration"]: f.attrib["id"] for f in formats}
+    primary_clip = root.find("./library/event/project/sequence/spine/asset-clip")
+    assert primary_clip is not None
+    cam_clip = primary_clip.find("asset-clip")
+    assert cam_clip is not None
+    # Cam is 60p; its asset-clip must reference the 60p format id.
+    assert cam_clip.attrib["format"] == fid_by_fd["1/60s"]
+    # And the PiP transform is in place.
+    assert cam_clip.find("adjust-transform") is not None
 
 
 def test_match_fcpxml_raises_on_empty_stages(tmp_path: Path) -> None:
