@@ -97,14 +97,23 @@ class BeepCandidate(BaseModel):
     """One ranked beep candidate from ``beep_detect``.
 
     Surfaced to the production UI so the user can pick a different candidate
-    when the auto-winner is wrong (issue #22). The score is silence-preference
-    (``run_peak / pre_window_mean``); higher = stronger candidate.
+    when the auto-winner is wrong (issue #22). Fields:
+
+    * ``score`` -- composite ranking score: silence-preference (``run_peak /
+      pre_window_mean``) tilted by tonal concentration. Higher = stronger.
+    * ``silence_score`` -- raw silence-preference component, kept for
+      diagnostics + threshold tuning.
+    * ``tonal_score`` -- raw tonal-concentration ratio in [0, 1]: fraction
+      of the run's bandpassed energy that falls inside the IPSC timer
+      fundamental band. ~1.0 for a pure tone, << 1.0 for gunshots / steel.
     """
 
     time: float
     score: float
     peak_amplitude: float
     duration_ms: float
+    silence_score: float = 0.0
+    tonal_score: float = 0.0
 
 
 class BeepDetection(BaseModel):
@@ -189,20 +198,31 @@ class BeepDetectConfig(BaseModel):
     freq_min_hz: int = 2000
     freq_max_hz: int = 5000
     min_duration_ms: int = 150
-    # Fraction of the global envelope peak that a candidate run must clear.
-    # Lowered from 0.3 because Insta360 GO 3S audio at competitions records the
-    # beep MUCH quieter than nearby steel rings or shots; a 0.3 floor would
-    # silently skip the real beep when a louder transient exists earlier in the
-    # clip. 0.05 admits faint candidates; the silence-preference scoring below
-    # then picks the one preceded by the longest pre-event silence.
+    # Cutoff is ``max(min_amplitude * global_peak, noise_floor * noise_factor,
+    # min_abs_peak)``. Each leg defends a different failure mode:
+    #
+    # * ``min_amplitude * global_peak`` -- on recordings where a gunshot sets
+    #   the global peak, this floor is high and effectively unused (gunshots
+    #   sit in the same 2-5 kHz band). Kept low (0.05) for that case.
+    # * ``noise_floor * noise_factor`` -- recovers handheld / phone clips
+    #   where the beep is faint (envelope ~0.01-0.05) but still well above
+    #   the median noise floor. The dominant gating leg in practice.
+    # * ``min_abs_peak`` -- belt-and-braces against pathological clips with
+    #   sub-noise envelopes (e.g. a thumb over the mic). Set very low so it
+    #   doesn't crowd out faint real beeps.
     min_amplitude: float = 0.05
-    # Absolute peak floor on the bandpassed envelope. Belt-and-braces against
-    # very-quiet false positives (RO chatter clipping into the 2-5 kHz band,
-    # mic handling, etc.) when the leading window happens to contain a
-    # near-silent segment. Real IPSC beeps from a Insta360 GO 3S typically peak
-    # around 0.05-0.20 in [-1, 1] -- 0.04 is well below that. The effective
-    # cutoff per recording is max(min_amplitude * global_peak, min_abs_peak).
-    min_abs_peak: float = 0.04
+    min_abs_peak: float = 0.005
+    # Cutoff = max(..., noise_floor * noise_factor). 5x is empirically the
+    # crossover between "always finds the beep" and "starts admitting low-SNR
+    # ambient transients" on the labelled fixture set. Real beeps clear this
+    # by 10x+ comfortably.
+    noise_floor_factor: float = 5.0
+    # Hilbert-envelope smoothing window. The IPSC tone is sustained ~300-500
+    # ms but its envelope wobbles (carrier intermodulation, mic AGC pump);
+    # 40 ms smoothing bridges the natural intra-beep dips so a single run
+    # spans the whole tone. 10 ms (the previous default) fragmented faint
+    # beeps into 100-150 ms shards that fell below ``min_duration_ms``.
+    envelope_smoothing_ms: float = 40.0
     # Silence-preference scoring: an IPSC beep is preceded by ~3 s of "Are you
     # ready / Stand by", then a brief pause. A steel ring or shot during the
     # stage is NOT. We score each candidate by run_peak / (mean envelope in
@@ -211,6 +231,38 @@ class BeepDetectConfig(BaseModel):
     # so the metric isn't polluted by the beep's own envelope leakage.
     silence_window_s: float = 1.5
     silence_pre_skip_s: float = 0.2
+    # Minimum amount of available pre-window (after the skip) for
+    # silence-preference scoring to be meaningful. Below this, silence_
+    # score falls back to the neutral 1.0 -- a candidate at t=0.05 s
+    # otherwise gets a degenerate ``peak / noise_floor`` score that
+    # beats real beeps whose pre-window contains "Are you ready / Stand
+    # by" chatter. 0.2 s is well below the headcam minimum (0.3 s
+    # available at the canonical 0.5 s pre-trim) so it doesn't disable
+    # the metric on the trivially-trimmed case.
+    min_pre_window_s: float = 0.2
+    # Tonal-quality scoring: the IPSC timer emits a near-pure tone whose
+    # exact frequency varies by manufacturer (Pact, Pocket Pro, CED, Tallmi-
+    # lan etc.) -- empirical fundamentals on the labelled fixture set span
+    # 2.3-3.2 kHz. Gunshots, steel rings, and RO chatter spread energy
+    # across the full 2-5 kHz band. We measure energy concentration in
+    # [tonal_band_lo_hz, tonal_band_hi_hz] vs the wider
+    # [freq_min_hz, freq_max_hz] band and tilt the silence-preference score
+    # by the ratio. ``tonal_weight`` (in [0, 1]) sets how strongly this
+    # tilts ranking; 1.0 = full weight, 0.0 = legacy silence-only. Empiri-
+    # cally 0.5 is the sweet spot: enough tilt to demote broadband shots
+    # without throwing out real beeps that sit at the band edges.
+    tonal_band_lo_hz: int = 2200
+    tonal_band_hi_hz: int = 3500
+    tonal_weight: float = 0.7
+    # Duration-prior scoring: IPSC timer beeps run 300-500 ms; gunshots and
+    # steel rings post-smoothing land at 100-200 ms. The duration factor
+    # ramps linearly from 0 at ``dur_match_min_ms`` to 1 at
+    # ``dur_match_full_ms`` and is multiplied into the composite score.
+    # Demotes short transients without rejecting them outright -- a borderline
+    # candidate can still surface in top-N for HITL review.
+    dur_match_min_ms: float = 150.0
+    dur_match_full_ms: float = 300.0
+    dur_match_weight: float = 1.0
     # Hard search-window cap. Real IPSC beeps come within the first ~30 s of a
     # head-cam recording: shooter walks to the line, RO runs through commands,
     # beep. After that window we're inside the stage where mid-stage moments

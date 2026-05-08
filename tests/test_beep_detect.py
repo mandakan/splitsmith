@@ -116,3 +116,105 @@ def test_detect_beep_rejects_2d_input() -> None:
 def test_detect_beep_rejects_empty() -> None:
     with pytest.raises(ValueError, match="empty"):
         detect_beep(np.array([], dtype=np.float32), 48000, BeepDetectConfig())
+
+
+def test_detect_beep_recovers_faint_beep_below_legacy_threshold() -> None:
+    """Faint tone (peak ~0.03 in [-1, 1]) should still be detected.
+
+    The legacy detector required an absolute envelope peak of 0.04 + a
+    fraction of global peak; a real iPhone beep at peak 0.025 fell below
+    both and silently failed. The noise-floor-relative cutoff in
+    ``BeepDetectConfig`` lets the candidate qualify on SNR, not absolute
+    loudness.
+    """
+    sr = 48000
+    rng = np.random.default_rng(13)
+    audio = (rng.standard_normal(sr * 6) * 0.001).astype(np.float32)
+    insert_at = int(sr * 3.0)
+    duration = int(sr * 0.350)
+    t = np.arange(duration) / sr
+    # Ramp envelope so the beep onset is visibly faint, peak 0.03.
+    ramp = np.minimum(np.linspace(0.0, 1.0, duration), 1.0)
+    tone = 0.03 * ramp * np.sin(2 * np.pi * 2700 * t).astype(np.float32)
+    audio[insert_at : insert_at + duration] += tone
+
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    assert result.time == pytest.approx(insert_at / sr, abs=0.030)
+    assert result.peak_amplitude < 0.04, "test must exercise the sub-legacy-threshold path"
+
+
+def test_detect_beep_demotes_short_transient_in_favor_of_sustained_tone() -> None:
+    """A 150 ms shot-shaped transient should not outrank a 350 ms tone.
+
+    Real-world failure mode: stage shots have brief quiet pre-windows
+    (between mag swaps) and bandpass envelope > 0.05, so silence-
+    preference can crown them over the actual beep. The duration prior
+    + tonal scoring is what keeps the real beep on top.
+    """
+    sr = 48000
+    rng = np.random.default_rng(31)
+    audio = (rng.standard_normal(sr * 8) * 0.001).astype(np.float32)
+
+    # Pure tone (the "beep") at t=2 s, 350 ms, modest amplitude.
+    beep_at = int(sr * 2.0)
+    beep_dur = int(sr * 0.350)
+    bt = np.arange(beep_dur) / sr
+    audio[beep_at : beep_at + beep_dur] += 0.08 * np.sin(2 * np.pi * 2700 * bt).astype(np.float32)
+
+    # Broadband short transient (the "shot") at t=5 s, 150 ms, slightly
+    # louder than the beep -- preceded by 1.5 s of total silence so its
+    # silence-preference score blows up under the legacy detector.
+    shot_at = int(sr * 5.0)
+    shot_dur = int(sr * 0.150)
+    audio[shot_at : shot_at + shot_dur] += (rng.standard_normal(shot_dur) * 0.10).astype(np.float32)
+
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    # Top-1 must be the real beep, not the shot.
+    assert result.time == pytest.approx(beep_at / sr, abs=0.030)
+
+
+def test_detect_beep_handles_truncated_pre_window_without_blowup() -> None:
+    """Candidates near t=0 must not get a degenerate silence score.
+
+    Without the ``min_pre_window_s`` clamp, a transient that fires
+    at t=0.02 s gets ``peak / 0`` -- effectively infinity -- and beats
+    the actual beep. The detector's neutral-fallback rule is what
+    prevents this.
+    """
+    sr = 48000
+    rng = np.random.default_rng(57)
+    audio = (rng.standard_normal(sr * 6) * 0.001).astype(np.float32)
+
+    # Edge transient at t=0.02 s, 250 ms tone
+    edge_at = int(sr * 0.02)
+    edge_dur = int(sr * 0.250)
+    et = np.arange(edge_dur) / sr
+    audio[edge_at : edge_at + edge_dur] += 0.04 * np.sin(2 * np.pi * 2700 * et).astype(np.float32)
+
+    # Real beep at t=3 s, 400 ms tone (longer + louder = should win)
+    beep_at = int(sr * 3.0)
+    beep_dur = int(sr * 0.400)
+    bt = np.arange(beep_dur) / sr
+    audio[beep_at : beep_at + beep_dur] += 0.06 * np.sin(2 * np.pi * 2700 * bt).astype(np.float32)
+
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    assert result.time == pytest.approx(beep_at / sr, abs=0.030)
+
+
+def test_detect_beep_emits_silence_and_tonal_diagnostic_scores() -> None:
+    """Layer-3 (HITL / confidence) needs the underlying score components."""
+    sr = 48000
+    rng = np.random.default_rng(101)
+    audio = (rng.standard_normal(sr * 4) * 0.001).astype(np.float32)
+    n = int(sr * 0.350)
+    t = np.arange(n) / sr
+    audio[sr : sr + n] += 0.1 * np.sin(2 * np.pi * 2700 * t).astype(np.float32)
+
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    assert result.candidates
+    winner = result.candidates[0]
+    assert winner.silence_score > 0.0
+    assert 0.0 <= winner.tonal_score <= 1.0
+    # Pure tone should land near tonal_score 1.0 (energy concentrated in
+    # the IPSC band).
+    assert winner.tonal_score > 0.8
