@@ -47,6 +47,7 @@ import {
   type ExportOverview,
   type Job,
   type MatchExportResult,
+  type MatchExportTemplateEntry,
   type MatchProject,
   type OverlayCodec,
   type SecondaryExportStatus,
@@ -1249,6 +1250,52 @@ function MatchExportDialog({
   const [dialogError, setDialogError] = useState<string | null>(null);
   const busy = job?.status === "pending" || job?.status === "running";
 
+  // Issue #198. Fetch available templates on mount so the dialog can
+  // offer them in a dropdown. Failures don't block the dialog --
+  // templates are an additive feature, the manual controls still
+  // work without them.
+  const [templates, setTemplates] = useState<MatchExportTemplateEntry[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMatchTemplates()
+      .then((res) => {
+        if (!cancelled) setTemplates(res.templates);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const applyTemplate = (id: string) => {
+    setSelectedTemplateId(id);
+    const entry = templates.find((t) => t.id === id);
+    if (!entry) return;
+    const t = entry.template;
+    if (t.head_pad_seconds !== undefined) setHeadPad(t.head_pad_seconds);
+    if (t.tail_pad_seconds !== undefined) setTailPad(t.tail_pad_seconds);
+    if (t.head_pad_seconds !== undefined || t.tail_pad_seconds !== undefined) {
+      // The user no longer matches one of the named presets -- reflect
+      // that so the preset chips don't claim a stale selection.
+      setPreset("custom");
+    }
+    if (t.include_secondaries !== undefined)
+      setIncludeSecondaries(t.include_secondaries);
+    if (t.include_overlay !== undefined) setIncludeOverlay(t.include_overlay);
+    if (t.pip_layout !== undefined) setPipLayout(t.pip_layout);
+    if (t.output_format !== undefined) setOutputFormat(t.output_format);
+    if (t.transition_kind !== undefined) setTransitionKind(t.transition_kind);
+    if (t.transition_duration_seconds !== undefined)
+      setTransitionDurationSeconds(t.transition_duration_seconds);
+    if (t.title_kind !== undefined) setTitleKind(t.title_kind);
+    if (t.title_duration_seconds !== undefined)
+      setTitleDurationSeconds(t.title_duration_seconds);
+  };
+
   const choosePreset = (next: PaddingPreset) => {
     setPreset(next);
     if (next !== "custom") {
@@ -1356,6 +1403,39 @@ function MatchExportDialog({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
+          {templates.length > 0 && (
+            <section className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Template
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="rounded border border-border bg-background px-2 py-1 text-sm"
+                  value={selectedTemplateId}
+                  disabled={busy}
+                  onChange={(e) => applyTemplate(e.target.value)}
+                >
+                  <option value="">(none) -- manual</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.template.name ?? t.id}
+                      {t.source === "user" ? "" : " (built-in)"}
+                    </option>
+                  ))}
+                </select>
+                {selectedTemplateId &&
+                  templates.find((t) => t.id === selectedTemplateId)?.template
+                    .description && (
+                    <span className="text-xs text-muted-foreground">
+                      {
+                        templates.find((t) => t.id === selectedTemplateId)
+                          ?.template.description
+                      }
+                    </span>
+                  )}
+              </div>
+            </section>
+          )}
           <section className="space-y-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Padding

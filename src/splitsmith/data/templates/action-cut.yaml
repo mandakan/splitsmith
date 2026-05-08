@@ -1,0 +1,19 @@
+# Built-in: action cut.
+#
+# Tight pads (0.5s before beep, 1s after final shot) for a fast-moving
+# match reel. No transitions or titles -- the cut between stages is
+# the rhythm. Headcam-only export (no secondaries) so the pace stays
+# tight.
+schema_version: 1
+name: Action cut
+description: >-
+  Tight 0.5s/1.0s pads, hard cuts between stages, headcam only.
+  Right for a fast-moving social-share reel.
+head_pad_seconds: 0.5
+tail_pad_seconds: 1.0
+include_secondaries: false
+include_overlay: false
+pip_layout: stacked
+output_format: fcpxml
+transition_kind: none
+title_kind: none

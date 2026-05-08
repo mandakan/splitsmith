@@ -4354,6 +4354,27 @@ def create_app(
             summary += f" ({n} {word} -- see report.txt)"
         handle.update(progress=1.0, message=f"Done: {summary}")
 
+    @app.get("/api/match/templates")
+    def list_match_templates() -> JSONResponse:
+        """List export templates from built-in + user dirs (issue #198).
+
+        Used by the export dialog to populate a "Template" dropdown.
+        Each entry carries the parsed template body so the client can
+        apply it client-side without a second request.
+        """
+        from .. import templates as templates_mod
+
+        entries = templates_mod.list_templates()
+        payload = [
+            {
+                "id": e.id,
+                "source": e.source,
+                "template": e.template.model_dump(exclude_none=True),
+            }
+            for e in entries
+        ]
+        return JSONResponse({"templates": payload})
+
     @app.post("/api/match/export")
     def export_match(req: MatchExportRequest) -> JSONResponse:
         """Stitch N stages into one FCPXML (issue #171, #172).
