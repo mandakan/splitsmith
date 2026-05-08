@@ -2051,7 +2051,7 @@ def test_match_with_slate_title_emits_basic_title_effect(tmp_path: Path) -> None
     effects = root.findall("./resources/effect")
     assert len(effects) == 1
     assert effects[0].attrib["name"] == "Basic Title"
-    assert effects[0].attrib["uid"].endswith("Basic Title.motn")
+    assert effects[0].attrib["uid"].endswith("Basic Title.moti")
 
 
 def test_slate_title_lands_on_spine_before_primary(tmp_path: Path) -> None:
