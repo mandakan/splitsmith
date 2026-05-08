@@ -514,6 +514,15 @@ class MatchProject(BaseModel):
     # value drives per-event behaviour like "auto-fire shot detect
     # after the user marks the beep reviewed."
     automation: AutomationOverride = Field(default_factory=AutomationOverride)
+    # Per-project dismissals for the SPA's audit-pending nudge (#218
+    # phase 4). Each entry is a stage_number whose "Stage X has N
+    # detected shots awaiting your review" reminder the user has
+    # explicitly closed. The dismissal sticks across reloads but is
+    # cleared automatically when the stage transitions to a different
+    # state (audit completed, candidates re-detected) -- the SPA
+    # decides re-emission, the project just remembers what was
+    # dismissed.
+    nudges_dismissed_stages: list[int] = Field(default_factory=list)
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:

@@ -1018,6 +1018,21 @@ class SkipStageRequest(BaseModel):
     skipped: bool
 
 
+class NudgeDismissRequest(BaseModel):
+    """Body for POST /api/project/nudges/dismiss (#218 phase 4).
+
+    The audit-pending reminder shown on stages with empty
+    ``shots[]`` but a non-empty candidate pool. ``dismissed=True``
+    adds ``stage_number`` to the project's
+    ``nudges_dismissed_stages`` list; ``dismissed=False`` clears it
+    so the reminder reappears (e.g., the user wants the prompt
+    back).
+    """
+
+    stage_number: int
+    dismissed: bool = True
+
+
 class CoachShotPatchRequest(BaseModel):
     """Body for PATCH /api/stages/{n}/shots/{shot_number}/coach (issue #161).
 
@@ -1237,6 +1252,29 @@ def create_app(
                 },
             }
         )
+
+    @app.post("/api/project/nudges/dismiss")
+    def dismiss_nudge(req: NudgeDismissRequest) -> JSONResponse:
+        """Persist a per-project nudge dismissal (#218 phase 4).
+
+        Adds ``stage_number`` to ``MatchProject.nudges_dismissed_stages``
+        when ``dismissed=True`` (idempotent), removes it otherwise.
+        Returns the full project dump so the SPA can replace its
+        cached state without a separate refetch.
+        """
+        project = state.load()
+        try:
+            project.stage(req.stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        current = set(project.nudges_dismissed_stages)
+        if req.dismissed:
+            current.add(req.stage_number)
+        else:
+            current.discard(req.stage_number)
+        project.nudges_dismissed_stages = sorted(current)
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
 
     @app.get("/api/project/match-analysis")
     def get_match_analysis() -> JSONResponse:

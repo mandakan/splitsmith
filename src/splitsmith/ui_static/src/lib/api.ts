@@ -149,6 +149,9 @@ export interface MatchProject {
    *  a ``null`` (or missing) value means the project inherits from the
    *  global default. Resolved view available via ``getAutomation()``. */
   automation: AutomationOverride;
+  /** #218 phase 4 -- per-project list of stage numbers whose audit-
+   *  pending nudge the user has explicitly dismissed. */
+  nudges_dismissed_stages: number[];
 }
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
@@ -1145,6 +1148,12 @@ export const api = {
 
   getAutomation: () =>
     request<ResolvedAutomationResponse>("/api/automation"),
+
+  dismissNudge: (stageNumber: number, dismissed: boolean) =>
+    request<MatchProject>("/api/project/nudges/dismiss", {
+      method: "POST",
+      json: { stage_number: stageNumber, dismissed },
+    }),
 
   moveAssignment: (
     videoPath: string,
