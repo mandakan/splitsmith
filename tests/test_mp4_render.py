@@ -356,6 +356,126 @@ def test_render_mp4_missing_binary_raises(tmp_path: Path) -> None:
         )
 
 
+# --- youtube preset (#204 layer 2) ---------------------------------------
+
+
+def _meta_60fps() -> VideoMetadata:
+    return VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        frame_rate_num=60,
+        frame_rate_den=1,
+    )
+
+
+def test_default_encode_args_match_today(tmp_path: Path) -> None:
+    """Without the preset the encode params keep today's CRF 20 / fast /
+    AAC 192k profile -- the byte-equivalence guarantee for existing
+    consumers."""
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    cmd = mp4_render._build_stage_command(
+        plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
+    )
+    assert "-crf" in cmd and cmd[cmd.index("-crf") + 1] == "20"
+    assert "-preset" in cmd and cmd[cmd.index("-preset") + 1] == "fast"
+    assert cmd[cmd.index("-b:a") + 1] == "192k"
+    # YouTube-specific tags must NOT leak into the default profile.
+    assert "-color_primaries" not in cmd
+    assert "-profile:v" not in cmd
+    assert "-g" not in cmd
+
+
+def test_youtube_preset_emits_recommended_codec_params_30fps(tmp_path: Path) -> None:
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    cmd = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "stage.mp4",
+        youtube_preset=True,
+    )
+    # H.264 High @ Level 4.2, CRF 18, slow preset.
+    assert cmd[cmd.index("-c:v") + 1] == "libx264"
+    assert cmd[cmd.index("-preset") + 1] == "slow"
+    assert cmd[cmd.index("-profile:v") + 1] == "high"
+    assert cmd[cmd.index("-level") + 1] == "4.2"
+    assert cmd[cmd.index("-crf") + 1] == "18"
+    assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p"
+    # 2s GOP at 30fps -> 60.
+    assert cmd[cmd.index("-g") + 1] == "60"
+    assert cmd[cmd.index("-keyint_min") + 1] == "60"
+    assert cmd[cmd.index("-sc_threshold") + 1] == "0"
+    # rec.709 colour tags so YouTube doesn't autodetect wrong.
+    assert cmd[cmd.index("-color_primaries") + 1] == "bt709"
+    assert cmd[cmd.index("-color_trc") + 1] == "bt709"
+    assert cmd[cmd.index("-colorspace") + 1] == "bt709"
+    # AAC-LC 48k stereo at the upper end of YouTube's recommended range.
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
+    assert cmd[cmd.index("-b:a") + 1] == "384k"
+    assert cmd[cmd.index("-ar") + 1] == "48000"
+    assert cmd[cmd.index("-ac") + 1] == "2"
+    # +faststart so the moov atom lands at the head -- progressive
+    # streaming + faster YouTube ingest.
+    assert cmd[cmd.index("-movflags") + 1] == "+faststart"
+
+
+def test_youtube_preset_doubles_gop_at_60fps(tmp_path: Path) -> None:
+    """2s GOP at 60fps -> 120 keyframe interval. Resolution doesn't
+    change the GOP -- only the source frame rate does."""
+    stage = StageComposition(
+        stage_name="A",
+        video_path=_make_video(tmp_path, "a.mp4"),
+        video=_meta_60fps(),
+        shots=[_shot(1, 1.0, 1.0)],
+        beep_offset_seconds=5.0,
+        head_pad_seconds=10.0,
+        tail_pad_seconds=20.0,
+    )
+    comp = composition.from_stage_compositions([stage], project_name="m")
+    plan = mp4_render._plan_stage(comp.stages[0], comp.sequence)
+    cmd = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "stage.mp4",
+        youtube_preset=True,
+    )
+    assert cmd[cmd.index("-g") + 1] == "120"
+    assert cmd[cmd.index("-keyint_min") + 1] == "120"
+
+
+def test_youtube_preset_threads_through_render_mp4(tmp_path: Path) -> None:
+    """Passing ``youtube_preset=True`` to ``render_mp4`` reaches the
+    per-stage encode -- per-stage cmd carries CRF 18; the concat step
+    stays stream-copy regardless."""
+    stage_a = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    stage_b = _basic_stage(tmp_path=tmp_path, name="B", primary_name="b.mp4")
+    comp = composition.from_stage_compositions([stage_a, stage_b], project_name="m")
+
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    out = tmp_path / "match.mp4"
+    mp4_render.render_mp4(
+        comp,
+        output_path=out,
+        work_dir=work,
+        runner=runner,
+        youtube_preset=True,
+    )
+
+    args_per_call = [call.args[0] for call in runner.call_args_list]
+    # Both per-stage invocations carry the YouTube codec params.
+    for stage_cmd in args_per_call[:2]:
+        assert stage_cmd[stage_cmd.index("-crf") + 1] == "18"
+        assert stage_cmd[stage_cmd.index("-profile:v") + 1] == "high"
+        assert stage_cmd[stage_cmd.index("-color_primaries") + 1] == "bt709"
+    # Concat is stream-copy; no codec swap there.
+    concat = args_per_call[2]
+    assert "-c" in concat and concat[concat.index("-c") + 1] == "copy"
+    assert "-crf" not in concat
+
+
 def test_render_mp4_requires_at_least_one_stage(tmp_path: Path) -> None:
     """Empty stages on a Composition shouldn't even reach ffmpeg."""
     # Build an empty composition by sidestepping the constructor's guard.

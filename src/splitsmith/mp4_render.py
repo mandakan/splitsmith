@@ -58,6 +58,7 @@ def render_mp4(
     work_dir: Path | None = None,
     ffmpeg_binary: str = "ffmpeg",
     runner: Runner = subprocess.run,
+    youtube_preset: bool = False,
 ) -> None:
     """Render ``composition`` as a stitched ``.mp4`` at ``output_path``.
 
@@ -65,6 +66,10 @@ def render_mp4(
     ``TemporaryDirectory`` cleaned up on return. Pass an explicit path
     when debugging; the per-stage MP4s are easier to inspect than the
     final concat output.
+
+    ``youtube_preset`` swaps the default per-stage encode for YouTube's
+    recommended H.264 profile / GOP / colour tags (issue #204 layer 2).
+    The concat step keeps stream-copy in either case.
     """
     plans = [_plan_stage(stage, composition.sequence) for stage in composition.stages]
     if not plans:
@@ -80,6 +85,7 @@ def render_mp4(
                 work_dir=Path(tmp),
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
+                youtube_preset=youtube_preset,
             )
     else:
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +96,7 @@ def render_mp4(
             work_dir=work_dir,
             ffmpeg_binary=ffmpeg_binary,
             runner=runner,
+            youtube_preset=youtube_preset,
         )
 
 
@@ -101,6 +108,7 @@ def _render_with_work_dir(
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
+    youtube_preset: bool = False,
 ) -> None:
     stage_files: list[Path] = []
     for idx, plan in enumerate(plans):
@@ -110,6 +118,7 @@ def _render_with_work_dir(
             sequence=composition.sequence,
             output_path=stage_out,
             ffmpeg_binary=ffmpeg_binary,
+            youtube_preset=youtube_preset,
         )
         _run(cmd, runner=runner)
         stage_files.append(stage_out)
@@ -226,6 +235,7 @@ def _build_stage_command(
     sequence,  # type: ignore[no-untyped-def]
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
+    youtube_preset: bool = False,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation that renders one stage to ``output_path``.
 
@@ -234,6 +244,9 @@ def _build_stage_command(
     of cases (no cams, no overlay) we still re-encode for simplicity;
     a stream-copy fast-path is a follow-up if encode time becomes a
     problem.
+
+    ``youtube_preset`` swaps the encode params (codec, GOP, colour
+    tags, audio bitrate) to YouTube's recommended profile.
     """
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     stage = plan.stage
@@ -288,23 +301,85 @@ def _build_stage_command(
         "[final]",
         "-map",
         "0:a?",  # primary audio when present, no error if absent
+    ]
+    args += list(_encode_args(sequence, youtube_preset=youtube_preset))
+    args += [str(output_path)]
+    return tuple(args)
+
+
+def _encode_args(
+    sequence,  # type: ignore[no-untyped-def]
+    *,
+    youtube_preset: bool,
+) -> tuple[str, ...]:
+    """Return the ``-c:v`` ... ``-movflags +faststart`` slice of the
+    ffmpeg invocation. The default profile keeps today's lossy-but-fast
+    encode (CRF 20, AAC 192k); ``youtube_preset`` swaps in YouTube's
+    recommended params (issue #204 layer 2).
+
+    Resolution / fps inform GOP only -- 2 seconds at the sequence frame
+    rate, rounded to the nearest frame. Quality is CRF 18 universally;
+    YouTube re-encodes regardless, so a single-pass quality target is
+    enough and avoids the extra runner invocation a true two-pass
+    encode would require.
+    """
+    if not youtube_preset:
+        return (
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+        )
+    fps = sequence.frame_rate_num / max(1, sequence.frame_rate_den)
+    gop = max(1, int(round(fps * 2)))
+    return (
         "-c:v",
         "libx264",
         "-preset",
-        "fast",
+        "slow",
+        "-profile:v",
+        "high",
+        "-level",
+        "4.2",
         "-crf",
-        "20",
+        "18",
         "-pix_fmt",
         "yuv420p",
+        "-g",
+        str(gop),
+        "-keyint_min",
+        str(gop),
+        "-sc_threshold",
+        "0",  # closed GOP -- no scene-cut keyframes between the fixed boundaries
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-colorspace",
+        "bt709",
+        "-color_range",
+        "tv",
         "-c:a",
         "aac",
         "-b:a",
-        "192k",
+        "384k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
         "-movflags",
         "+faststart",
-        str(output_path),
-    ]
-    return tuple(args)
+    )
 
 
 def _build_stage_filter_graph(

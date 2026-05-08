@@ -1242,6 +1242,12 @@ function MatchExportDialog({
   // markers in the timeline so they round-trip through FCP into
   // the MP4 chapter atom.
   const [youtubeSidecar, setYoutubeSidecar] = useState<boolean>(false);
+  // Issue #204 layer 2. YouTube-tuned encode preset for the MP4
+  // renderer (H.264 High, CRF 18, 2s closed GOP, BT.709 tags, AAC
+  // 384k 48k stereo, +faststart). Only meaningful when the chosen
+  // output format is "mp4"; the request layer surfaces an anomaly
+  // if it's set against another renderer.
+  const [youtubePreset, setYoutubePreset] = useState<boolean>(false);
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1349,6 +1355,7 @@ function MatchExportDialog({
         intro_path: introPath || undefined,
         outro_path: outroPath || undefined,
         youtube_sidecar: youtubeSidecar,
+        youtube_preset: youtubePreset,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1749,6 +1756,19 @@ function MatchExportDialog({
                   onChange={(e) => setYoutubeSidecar(e.target.checked)}
                 />
                 YouTube sidecar (chapters + .srt)
+              </label>
+              <label
+                className="flex items-center gap-1.5"
+                title="Encode the MP4 with YouTube's recommended H.264 profile, 2s closed GOP, BT.709 colour tags, and AAC 384k 48k stereo. Only applies when output format is MP4."
+              >
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={youtubePreset && outputFormat === "mp4"}
+                  disabled={busy || outputFormat !== "mp4"}
+                  onChange={(e) => setYoutubePreset(e.target.checked)}
+                />
+                YouTube encode preset (MP4 only)
               </label>
             </div>
             {includeOverlay ? (
