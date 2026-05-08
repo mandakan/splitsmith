@@ -856,31 +856,12 @@ def generate_match_fcpxml(
             "semantic. Use lower-third titles, or remove transitions."
         )
 
+    # Sequence rate / size is taken from stage 0; per-asset rates and
+    # sizes can differ and are emitted as their own ``<format>`` so FCP
+    # conforms each asset to the timeline at edit time. The previous
+    # hard guard on mixed rates (#233) was unnecessarily restrictive --
+    # FCPXML supports per-asset formats by design.
     base = stages[0].video
-    for stage in stages[1:]:
-        if (
-            stage.video.frame_rate_num != base.frame_rate_num
-            or stage.video.frame_rate_den != base.frame_rate_den
-        ):
-            raise ValueError(
-                "mixed frame rates across stages are not supported "
-                f"(stage 0: {base.frame_rate_num}/{base.frame_rate_den}, "
-                f"stage with {stage.video_path.name}: "
-                f"{stage.video.frame_rate_num}/{stage.video.frame_rate_den})"
-            )
-    for label, segment in (("intro", intro), ("outro", outro)):
-        if segment is None:
-            continue
-        if (
-            segment.video.frame_rate_num != base.frame_rate_num
-            or segment.video.frame_rate_den != base.frame_rate_den
-        ):
-            raise ValueError(
-                f"{label} frame rate "
-                f"({segment.video.frame_rate_num}/{segment.video.frame_rate_den}) "
-                f"does not match the timeline "
-                f"({base.frame_rate_num}/{base.frame_rate_den})"
-            )
 
     frame_duration = Fraction(base.frame_rate_den, base.frame_rate_num)
     fd_num = base.frame_rate_den
@@ -910,17 +891,54 @@ def generate_match_fcpxml(
     # stage (each stage's overlay sits above that stage's secondaries only).
     resource_counter = 1  # r1 already used by format
 
+    # Multi-rate / multi-resolution support (#233). Each unique
+    # (frame_rate, width, height) tuple gets its own ``<format>``;
+    # assets reference theirs so FCP conforms to the sequence rate at
+    # edit time. The sequence's own format covers stage 0 by default.
+    formats_by_key: dict[tuple[int, int, int, int], str] = {
+        (base.frame_rate_num, base.frame_rate_den, base.width, base.height): format_id
+    }
+
+    def _format_id_for(meta: VideoMetadata) -> str:
+        """Return the format id for an asset matching ``meta``'s rate +
+        resolution. Allocates and emits a new ``<format>`` resource
+        when no existing one matches."""
+        nonlocal resource_counter
+        key = (meta.frame_rate_num, meta.frame_rate_den, meta.width, meta.height)
+        existing = formats_by_key.get(key)
+        if existing is not None:
+            return existing
+        resource_counter += 1
+        new_id = f"r{resource_counter}"
+        formats_by_key[key] = new_id
+        meta_fd_num = meta.frame_rate_den
+        meta_fd_den = meta.frame_rate_num
+        ET.SubElement(
+            resources,
+            "format",
+            {
+                "id": new_id,
+                "name": _format_name(meta),
+                "frameDuration": _frame_aligned_str(1, meta_fd_num, meta_fd_den),
+                "width": str(meta.width),
+                "height": str(meta.height),
+                "colorSpace": "1-1-1 (Rec. 709)",
+            },
+        )
+        return new_id
+
     @dataclass
     class _StagePlan:
         stage: StageComposition
         primary_id: str
+        primary_format_id: str
         primary_duration_frames: int
         head_trim_frames: int
         effective_duration_frames: int
-        # cam, asset_id, sec_dur_in_parent_frames
-        usable_secondaries: list[tuple[SecondaryClip, str, int]]
+        # cam, asset_id, asset_format_id, sec_dur_in_parent_frames
+        usable_secondaries: list[tuple[SecondaryClip, str, str, int]]
         overlay_asset_id: str | None
-        overlay_format_id: str | None  # None when overlay reuses the timeline format
+        overlay_format_id: str | None
         overlay_duration_frames: int  # in parent frame units; 0 when no overlay
 
     plans: list[_StagePlan] = []
@@ -955,26 +973,31 @@ def generate_match_fcpxml(
                 "or check the trimmed clip length"
             )
 
+        # Each asset references the format matching its source rate +
+        # resolution; ``_format_id_for`` allocates + emits the
+        # ``<format>`` resource on first sighting (#233). Format
+        # resources land in the XML in discovery order, interleaved
+        # with asset emissions further down.
+        primary_format_id = _format_id_for(stage.video)
         resource_counter += 1
         primary_id = f"r{resource_counter}"
 
-        usable_secondaries: list[tuple[SecondaryClip, str, int]] = []
+        usable_secondaries: list[tuple[SecondaryClip, str, str, int]] = []
         for sec in stage.secondaries:
             if not sec.video_path.exists():
                 continue
+            sec_format_id = _format_id_for(sec.video)
             resource_counter += 1
             sec_id = f"r{resource_counter}"
             sec_dur_in_parent_frames = int(round(sec.video.duration_seconds / fd_seconds))
-            usable_secondaries.append((sec, sec_id, sec_dur_in_parent_frames))
+            usable_secondaries.append((sec, sec_id, sec_format_id, sec_dur_in_parent_frames))
 
         overlay_asset_id: str | None = None
         overlay_format_id: str | None = None
         overlay_duration_frames = 0
         if stage.overlay_path is not None and stage.overlay_path.exists():
             overlay_meta = stage.overlay_video if stage.overlay_video is not None else stage.video
-            if _overlay_format_differs(stage.video, overlay_meta):
-                resource_counter += 1
-                overlay_format_id = f"r{resource_counter}"
+            overlay_format_id = _format_id_for(overlay_meta)
             resource_counter += 1
             overlay_asset_id = f"r{resource_counter}"
             overlay_duration_frames = int(round(overlay_meta.duration_seconds / fd_seconds))
@@ -983,6 +1006,7 @@ def generate_match_fcpxml(
             _StagePlan(
                 stage=stage,
                 primary_id=primary_id,
+                primary_format_id=primary_format_id,
                 primary_duration_frames=primary_duration_frames,
                 head_trim_frames=head_trim_frames,
                 effective_duration_frames=effective_duration_frames,
@@ -994,7 +1018,10 @@ def generate_match_fcpxml(
         )
 
     # Emit assets in the same order resource IDs were assigned so the XML
-    # reads top-to-bottom in stage order.
+    # reads top-to-bottom in stage order. Each asset references its own
+    # ``<format>`` (allocated above via ``_format_id_for``); the spine
+    # asset-clips below stay in the sequence's frame_duration so FCP
+    # conforms each asset at edit time (#233).
     for plan in plans:
         primary_asset = ET.SubElement(
             resources,
@@ -1006,7 +1033,7 @@ def generate_match_fcpxml(
                 "duration": _frame_aligned_str(plan.primary_duration_frames, fd_num, fd_den),
                 "hasVideo": "1",
                 "hasAudio": "1",
-                "format": format_id,
+                "format": plan.primary_format_id,
                 "videoSources": "1",
                 "audioSources": "1",
                 "audioChannels": "2",
@@ -1017,7 +1044,7 @@ def generate_match_fcpxml(
             "media-rep",
             {"kind": "original-media", "src": plan.stage.video_path.resolve().as_uri()},
         )
-        for sec, sec_id, _sec_dur_in_parent_frames in plan.usable_secondaries:
+        for sec, sec_id, sec_format_id, _sec_dur_in_parent_frames in plan.usable_secondaries:
             sec_asset = ET.SubElement(
                 resources,
                 "asset",
@@ -1039,7 +1066,7 @@ def generate_match_fcpxml(
                     ),
                     "hasVideo": "1",
                     "hasAudio": "1",
-                    "format": format_id,
+                    "format": sec_format_id,
                     "videoSources": "1",
                     "audioSources": "1",
                     "audioChannels": "2",
@@ -1051,29 +1078,7 @@ def generate_match_fcpxml(
                 {"kind": "original-media", "src": sec.video_path.resolve().as_uri()},
             )
         if plan.overlay_asset_id is not None and plan.stage.overlay_path is not None:
-            if plan.overlay_format_id is not None:
-                overlay_meta = (
-                    plan.stage.overlay_video
-                    if plan.stage.overlay_video is not None
-                    else plan.stage.video
-                )
-                overlay_fd_num = overlay_meta.frame_rate_den
-                overlay_fd_den = overlay_meta.frame_rate_num
-                ET.SubElement(
-                    resources,
-                    "format",
-                    {
-                        "id": plan.overlay_format_id,
-                        "name": _format_name(overlay_meta),
-                        "frameDuration": _frame_aligned_str(1, overlay_fd_num, overlay_fd_den),
-                        "width": str(overlay_meta.width),
-                        "height": str(overlay_meta.height),
-                        "colorSpace": "1-1-1 (Rec. 709)",
-                    },
-                )
-                overlay_asset_format = plan.overlay_format_id
-            else:
-                overlay_asset_format = format_id
+            assert plan.overlay_format_id is not None  # set whenever overlay_asset_id is
             overlay_asset = ET.SubElement(
                 resources,
                 "asset",
@@ -1084,7 +1089,7 @@ def generate_match_fcpxml(
                     "duration": _frame_aligned_str(plan.overlay_duration_frames, fd_num, fd_den),
                     "hasVideo": "1",
                     "hasAudio": "0",
-                    "format": overlay_asset_format,
+                    "format": plan.overlay_format_id,
                     "videoSources": "1",
                 },
             )
@@ -1161,27 +1166,33 @@ def generate_match_fcpxml(
     total_slate_frames = sum(slate_frames_by_index.values())
 
     # Intro / outro asset resources (issue #173). One ``<asset>`` per
-    # segment; the spine references it via ``asset-clip``. Frame rate
-    # matches the timeline (validated above) so we reuse format_id.
+    # segment; the spine references it via ``asset-clip``. Per-asset
+    # ``<format>`` lets the segment carry a different frame rate than
+    # the timeline (#233); FCP conforms at edit time.
     intro_asset_id: str | None = None
+    intro_format_id: str | None = None
     intro_duration_frames = 0
     if intro is not None:
+        intro_format_id = _format_id_for(intro.video)
         resource_counter += 1
         intro_asset_id = f"r{resource_counter}"
         intro_duration_frames = round(intro.video.duration_seconds / fd_seconds)
     outro_asset_id: str | None = None
+    outro_format_id: str | None = None
     outro_duration_frames = 0
     if outro is not None:
+        outro_format_id = _format_id_for(outro.video)
         resource_counter += 1
         outro_asset_id = f"r{resource_counter}"
         outro_duration_frames = round(outro.video.duration_seconds / fd_seconds)
-    for segment, asset_id, dur_frames in (
-        (intro, intro_asset_id, intro_duration_frames),
-        (outro, outro_asset_id, outro_duration_frames),
+    for segment, asset_id, asset_format, dur_frames in (
+        (intro, intro_asset_id, intro_format_id, intro_duration_frames),
+        (outro, outro_asset_id, outro_format_id, outro_duration_frames),
     ):
         if segment is None:
             continue
         assert asset_id is not None
+        assert asset_format is not None
         seg_asset = ET.SubElement(
             resources,
             "asset",
@@ -1192,7 +1203,7 @@ def generate_match_fcpxml(
                 "duration": _frame_aligned_str(dur_frames, fd_num, fd_den),
                 "hasVideo": "1",
                 "hasAudio": "1",
-                "format": format_id,
+                "format": asset_format,
                 "videoSources": "1",
                 "audioSources": "1",
                 "audioChannels": "2",
@@ -1303,7 +1314,7 @@ def generate_match_fcpxml(
         # follows from delta = (beep_offset - head_trim) - sec_beep in
         # frames; a non-negative delta places the cam later in the parent's
         # local time, a negative delta skips into the cam's own media.
-        for lane_idx, (sec, sec_id, sec_dur_in_parent_frames) in enumerate(
+        for lane_idx, (sec, sec_id, _sec_format_id, sec_dur_in_parent_frames) in enumerate(
             plan.usable_secondaries, start=1
         ):
             delta_frames = round(

@@ -360,6 +360,46 @@ def test_fcpxml_match_with_chapter_markers_validates(tmp_path: Path) -> None:
 
 
 @fcpxml_dtd
+def test_fcpxml_match_with_mixed_frame_rates_validates(tmp_path: Path) -> None:
+    """#233 -- per-stage primaries at different frame rates each get
+    their own ``<format>`` resource; the sequence + spine math stay in
+    stage 0's frame_duration so FCP conforms each asset at edit time.
+    The structural test in test_fcpxml_gen.py covers the format ID
+    plumbing; this gate confirms the result still validates against
+    Apple's DTD."""
+    primary_a = _make_video(tmp_path, "a.mp4")
+    primary_b = _make_video(tmp_path, "b.mp4")
+    out = tmp_path / "match.fcpxml"
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary_a,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        ),
+        StageComposition(
+            stage_name="B",
+            video_path=primary_b,
+            video=_meta_2997(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        ),
+    ]
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="mixed-rates",
+        config=OutputConfig(),
+    )
+    validate_against_dtd(out, dtd=fcpxml_dtd_path())
+
+
+@fcpxml_dtd
 def test_invalid_fcpxml_fails_validation(tmp_path: Path) -> None:
     """Sanity: hand-rolled bad FCPXML must trip the validator. Catches
     helper regressions (e.g. xmllint flags wrong / DTD path silently

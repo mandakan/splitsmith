@@ -486,3 +486,40 @@ def test_render_mp4_requires_at_least_one_stage(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="at least one stage"):
         mp4_render.render_mp4(comp, output_path=tmp_path / "out.mp4", work_dir=tmp_path / "work")
+
+
+def test_render_mp4_rejects_mixed_frame_rates_with_clear_message(
+    tmp_path: Path,
+) -> None:
+    """#233 -- the MP4 renderer can't conform per-asset rates without
+    re-encoding through ``fps=``. Surface a clear error naming the
+    offending stage and pointing the user at the FCPXML / FCP7
+    renderers which do conform."""
+    meta_60 = VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        frame_rate_num=60,
+        frame_rate_den=1,
+    )
+    stage_a = StageComposition(
+        stage_name="A",
+        video_path=_make_video(tmp_path, "a.mp4"),
+        video=_meta_30fps(),
+        shots=[_shot(1, 1.0, 1.0)],
+        beep_offset_seconds=5.0,
+        head_pad_seconds=10.0,
+        tail_pad_seconds=20.0,
+    )
+    stage_b = StageComposition(
+        stage_name="B",
+        video_path=_make_video(tmp_path, "b.mp4"),
+        video=meta_60,
+        shots=[_shot(1, 1.0, 1.0)],
+        beep_offset_seconds=5.0,
+        head_pad_seconds=10.0,
+        tail_pad_seconds=20.0,
+    )
+    comp = composition.from_stage_compositions([stage_a, stage_b], project_name="match")
+    with pytest.raises(ValueError, match="mp4 renderer requires"):
+        mp4_render.render_mp4(comp, output_path=tmp_path / "out.mp4", work_dir=tmp_path / "work")
