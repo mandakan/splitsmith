@@ -1555,16 +1555,16 @@ def test_secondary_with_pip_emits_corner_transform(corner: str, tmp_path: Path) 
     assert transform is not None
     assert list(cam_clip)[0] is transform  # transform must precede markers / nested clips
     expected = _expected_pip_attrs(
-        seq_w=1920, seq_h=1080, scale=0.25, margin_pct=2.0, corner=corner
+        seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner=corner
     )
     assert transform.attrib == expected
 
 
 def test_pip_position_is_resolution_independent(tmp_path: Path) -> None:
     """#236 -- FCPXML position is in normalized "100 == sequence_height"
-    units. ``scale=0.25, margin_pct=2.0, corner="top-right"`` emits the
-    same position string on 1080p and 4K timelines (only the pixel
-    offset differs; the normalized value stays put)."""
+    units. The default PiP (scale=0.30, margin_pct=2.0, corner="top-right")
+    emits the same position string on 1080p and 4K timelines (only the
+    pixel offset differs; the normalized value stays put)."""
     video = tmp_path / "v.mp4"
     video.write_bytes(b"")
     secondary = tmp_path / "cam.mp4"
@@ -1593,22 +1593,22 @@ def test_pip_position_is_resolution_independent(tmp_path: Path) -> None:
     )
     assert transform is not None
     expected = _expected_pip_attrs(
-        seq_w=3840, seq_h=2160, scale=0.25, margin_pct=2.0, corner="top-right"
+        seq_w=3840, seq_h=2160, scale=0.30, margin_pct=2.0, corner="top-right"
     )
     assert transform.attrib == expected
     # Resolution-independent: the same PiP at 1080p emits the same
     # normalized position string.
     expected_1080 = _expected_pip_attrs(
-        seq_w=1920, seq_h=1080, scale=0.25, margin_pct=2.0, corner="top-right"
+        seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner="top-right"
     )
     assert expected_1080["position"] == expected["position"]
 
 
 def test_apply_pip_corner_cycle_assigns_rotating_corners() -> None:
-    """Multiple cams without explicit pip get TL -> TR -> BR -> BL
-    (clockwise from the top-left) when ``apply_pip_corner_cycle`` is
-    asked to inject a default. The order matches reading flow so the
-    first cam is most prominent at the top-left."""
+    """Multiple cams without explicit pip get BL -> BR -> TR -> TL
+    (counter-clockwise from the bottom-left) when ``apply_pip_corner_cycle``
+    is asked to inject a default. The order keeps the 1-cam common case
+    away from the overlay (shot counter top-left, timer top-right)."""
     secs = tuple(
         fcpxml_mod.SecondaryClip(
             video_path=Path(f"cam{i}.mp4"),
@@ -1622,7 +1622,7 @@ def test_apply_pip_corner_cycle_assigns_rotating_corners() -> None:
         secs, default=fcpxml_mod.PipPlacement(scale=0.3, margin_pct=1.5)
     )
     corners = [s.pip.corner for s in laid_out]  # type: ignore[union-attr]
-    assert corners == ["top-left", "top-right", "bottom-right", "bottom-left"]
+    assert corners == ["bottom-left", "bottom-right", "top-right", "top-left"]
     # Default scale / margin propagate; corner is the only override.
     for s in laid_out:
         assert s.pip is not None
@@ -1638,7 +1638,7 @@ def test_apply_pip_corner_cycle_preserves_explicit() -> None:
         video=_meta_30fps(),
         beep_offset_seconds=5.0,
         label="Main cam",
-        pip=fcpxml_mod.PipPlacement(corner="bottom-left", scale=0.4),
+        pip=fcpxml_mod.PipPlacement(corner="top-right", scale=0.4),
     )
     auto = fcpxml_mod.SecondaryClip(
         video_path=Path("cam_aux.mp4"),
@@ -1651,7 +1651,7 @@ def test_apply_pip_corner_cycle_preserves_explicit() -> None:
     )
     assert laid_out[0] is explicit  # untouched
     assert laid_out[1].pip is not None
-    assert laid_out[1].pip.corner == "top-left"  # cycle starts at TL
+    assert laid_out[1].pip.corner == "bottom-left"  # cycle starts at BL
 
 
 def test_apply_pip_corner_cycle_default_none_is_noop() -> None:
@@ -1704,7 +1704,7 @@ def test_match_fcpxml_secondary_pip_uses_sequence_dims(tmp_path: Path) -> None:
     )
     assert transform is not None
     expected = _expected_pip_attrs(
-        seq_w=1920, seq_h=1080, scale=0.25, margin_pct=2.0, corner="top-right"
+        seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner="top-right"
     )
     assert transform.attrib == expected
 

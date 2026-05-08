@@ -94,7 +94,9 @@ class MatchExportRequestData:
     # Issue #193. ``"stacked"`` keeps today's full-frame stacked layout
     # (every secondary covers the one below). ``"pip-corners"`` adds an
     # ``<adjust-transform>`` to each secondary so they land in rotating
-    # corners (TR -> TL -> BR -> BL) at 25% scale with a 2% inset.
+    # corners (BL -> BR -> TR -> TL, counter-clockwise from bottom-left
+    # so the 1-cam case stays clear of the overlay's top-corner widgets)
+    # at 30% scale with a 2% inset.
     pip_layout: PipLayout = "stacked"
     # Issue #197. Renderer chosen for this export.
     output_format: OutputFormat = "fcpxml"

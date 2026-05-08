@@ -34,15 +34,17 @@ from .config import OutputConfig, Shot, SplitColorThresholds, VideoMetadata
 PipCorner = Literal["top-right", "top-left", "bottom-right", "bottom-left"]
 
 # Corner cycle order when PiP is requested without an explicit per-cam corner.
-# Top-left first, then clockwise -- the natural reading order for the user
-# scanning a stitched match: first cam takes the top-left, the next wraps
-# around to the right, then bottom-right, then bottom-left. This is the
-# default until per-cam corner overrides land in a layout-template feature.
+# Bottom-left first, then counter-clockwise: BL -> BR -> TR -> TL. The
+# overlay (shot counter top-left, timer top-right) collides with PiPs at
+# the top corners, so the bottom corners are filled first; CCW keeps the
+# 1-cam common case anchored to the bottom-left away from the running
+# timer. Per-cam corner overrides land in a layout-template feature
+# follow-up.
 _PIP_CORNER_CYCLE: tuple[PipCorner, ...] = (
-    "top-left",
-    "top-right",
-    "bottom-right",
     "bottom-left",
+    "bottom-right",
+    "top-right",
+    "top-left",
 )
 
 
@@ -57,8 +59,8 @@ class PipPlacement:
     sequence width / height (so it scales sensibly across resolutions).
     """
 
-    corner: PipCorner = "top-right"
-    scale: float = 0.25
+    corner: PipCorner = "bottom-left"
+    scale: float = 0.30
     margin_pct: float = 2.0
 
     def resolve(

@@ -217,11 +217,11 @@ def test_build_stage_command_pip_secondary(tmp_path: Path) -> None:
         plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
     )
     fg = cmd[cmd.index("-filter_complex") + 1]
-    # Cam scaled to 25% of 1920x1080 -> 480x270.
-    assert "scale=480:270" in fg
-    # ffmpeg overlay X = (1920*(1-0.25))/2 + 681.6 = 720 + 681.6 = 1401.6
-    # ffmpeg overlay Y = (1080*(1-0.25))/2 - 383.4 = 405 - 383.4 = 21.6
-    assert "overlay=x=1401.6:y=21.6" in fg
+    # Cam scaled to 30% of 1920x1080 -> 576x324.
+    assert "scale=576:324" in fg
+    # ffmpeg overlay X = (1920*(1-0.3))/2 + 633.6 = 672 + 633.6 = 1305.6
+    # ffmpeg overlay Y = (1080*(1-0.3))/2 - 356.4 = 378 - 356.4 = 21.6
+    assert "overlay=x=1305.6:y=21.6" in fg
     # ``enable`` keeps the cam visible only during its computed window.
     assert "between(t," in fg
 

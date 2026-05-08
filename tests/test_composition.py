@@ -173,12 +173,12 @@ def test_from_stage_compositions_resolves_pip_against_sequence_dims(tmp_path: Pa
     comp = composition.from_stage_compositions([stage_comp], project_name="match")
     sec = comp.stages[0].secondaries[0]
     assert sec.transform is not None
-    # 1920x1080 sequence, scale=0.25, margin_pct=2.0:
-    # half_w=960, clip_half_w=240, margin_x=38.4 -> x = 960 - 240 - 38.4 = 681.6
-    # half_h=540, clip_half_h=135, margin_y=21.6 -> y = 540 - 135 - 21.6 = 383.4
-    assert sec.transform.scale == pytest.approx(0.25)
-    assert sec.transform.position[0] == pytest.approx(681.6)
-    assert sec.transform.position[1] == pytest.approx(383.4)
+    # 1920x1080 sequence, default scale=0.30, margin_pct=2.0:
+    # half_w=960, clip_half_w=288, margin_x=38.4 -> x = 960 - 288 - 38.4 = 633.6
+    # half_h=540, clip_half_h=162, margin_y=21.6 -> y = 540 - 162 - 21.6 = 356.4
+    assert sec.transform.scale == pytest.approx(0.30)
+    assert sec.transform.position[0] == pytest.approx(633.6)
+    assert sec.transform.position[1] == pytest.approx(356.4)
     assert sec.beep_offset_seconds == 5.0
     assert sec.role == "cam"
 

@@ -400,15 +400,15 @@ def test_pip_emits_basic_motion_filter(tmp_path: Path) -> None:
     assert effect is not None
     assert effect.findtext("effectid") == "basic"
     params = {p.findtext("parameterid"): p for p in effect.findall("parameter")}
-    assert params["scale"].findtext("value") == "25"  # 0.25 * 100
-    # 1080p sequence, scale=0.25, margin=2.0%:
-    # IR position = (681.6, 383.4) (FCPXML coords, +Y up)
-    # FCP7 horiz = 681.6 / 960 = 0.71 (rounded)
-    # FCP7 vert = -383.4 / 540 = -0.71 (FCP7 +Y down -> sign flips)
+    assert params["scale"].findtext("value") == "30"  # 0.30 * 100
+    # 1080p sequence, default scale=0.30, margin=2.0%:
+    # IR position = (633.6, 356.4) (FCPXML coords, +Y up)
+    # FCP7 horiz = 633.6 / 960 = 0.66 (rounded)
+    # FCP7 vert = -356.4 / 540 = -0.66 (FCP7 +Y down -> sign flips)
     horiz = float(params["center"].find("value/horiz").text)  # type: ignore[arg-type, union-attr]
     vert = float(params["center"].find("value/vert").text)  # type: ignore[arg-type, union-attr]
-    assert horiz == pytest.approx(0.71, abs=0.01)
-    assert vert == pytest.approx(-0.71, abs=0.01)
+    assert horiz == pytest.approx(0.66, abs=0.01)
+    assert vert == pytest.approx(-0.66, abs=0.01)
 
 
 def test_pip_y_axis_flips_for_bottom_corners(tmp_path: Path) -> None:
