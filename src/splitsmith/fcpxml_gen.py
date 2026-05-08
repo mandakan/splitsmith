@@ -1300,7 +1300,10 @@ def generate_match_fcpxml(
                 "ref": plan.primary_id,
                 "offset": _frame_aligned_str(cumulative_offset_frames, fd_num, fd_den),
                 "name": stage.stage_name,
-                "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
+                # ``start`` is the offset into the asset's own media -- emit
+                # in the primary's frame grid so FCP doesn't treat it as
+                # off-grid (#236).
+                "start": _asset_grid_str(head_trim_seconds, stage.video),
                 "duration": eff_duration_str,
                 # Asset-clip format references the asset's own format
                 # (#236). For all-30p stages this still equals the
@@ -1356,7 +1359,11 @@ def generate_match_fcpxml(
                     "lane": str(lane_idx),
                     "offset": _frame_aligned_str(sec_offset_frames, fd_num, fd_den),
                     "name": sec.label,
-                    "start": _frame_aligned_str(sec_start_frames, fd_num, fd_den),
+                    # ``start`` is into the cam's source media -- must
+                    # be quantized to the cam's frame grid (#236). Emit
+                    # in the cam's denominator so FCP doesn't treat
+                    # off-grid values as malformed and drop transforms.
+                    "start": _asset_grid_str(sec_start_frames * fd_seconds, sec.video),
                     "duration": _frame_aligned_str(sec_visible_frames, fd_num, fd_den),
                     # Asset-clip format must match the asset's actual
                     # format, not the sequence's. When they diverge (mixed
@@ -1367,6 +1374,12 @@ def generate_match_fcpxml(
                     "format": sec_format_id,
                 },
             )
+            # Mute the cam's audio on the timeline (#236). The asset
+            # itself keeps ``hasAudio="1"`` (the file does), but the
+            # match flow uses only the primary's audio; the cams ride
+            # for video alignment alone. -96 dB is FCP's "effectively
+            # silent" sentinel.
+            ET.SubElement(sec_clip, "adjust-volume", {"amount": "-96dB"})
             _attach_pip_transform(
                 sec_clip,
                 sec.pip,
@@ -1383,6 +1396,11 @@ def generate_match_fcpxml(
             # primary's visible start instead of head_trim seconds earlier.
             head_trim_str = _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den)
             assert plan.overlay_format_id is not None  # set whenever overlay_asset_id is
+            overlay_meta = (
+                plan.stage.overlay_video
+                if plan.stage.overlay_video is not None
+                else plan.stage.video
+            )
             ET.SubElement(
                 primary_clip,
                 "asset-clip",
@@ -1391,7 +1409,9 @@ def generate_match_fcpxml(
                     "lane": str(overlay_lane),
                     "offset": head_trim_str,
                     "name": "Splitsmith overlay",
-                    "start": head_trim_str,
+                    # ``start`` is on the overlay asset's grid; emit in
+                    # the overlay's frame_duration units (#236).
+                    "start": _asset_grid_str(head_trim_seconds, overlay_meta),
                     "duration": eff_duration_str,
                     # Match the asset's actual format (#236). Same
                     # rationale as the cam asset-clips above.
@@ -1576,6 +1596,24 @@ def _frame_aligned_str(frames: int, fd_num: int, fd_den: int) -> str:
     if fd_den == 1:
         return f"{num}s"
     return f"{num}/{fd_den}s"
+
+
+def _asset_grid_str(seconds: float, meta: VideoMetadata) -> str:
+    """Format ``seconds`` quantized to the asset's frame grid + emit
+    with the asset's frame_duration denominator (#236).
+
+    ``<asset-clip start>`` is in the *asset's* timebase; emitting with
+    the sequence's denominator (when source rate differs from
+    sequence) makes FCP treat the value as off-grid and silently drop
+    overrides applied to the clip -- including ``<adjust-transform>``
+    for PiP placement. The wall-clock time is the same; the
+    representation has to match the asset's frameDuration.
+    """
+    fd_num = meta.frame_rate_den
+    fd_den = meta.frame_rate_num
+    fd_seconds = fd_num / fd_den
+    frames = round(seconds / fd_seconds)
+    return _frame_aligned_str(frames, fd_num, fd_den)
 
 
 def _overlay_format_differs(primary: VideoMetadata, overlay: VideoMetadata) -> bool:
