@@ -37,6 +37,12 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 # today; FCP7 / MP4 ignore the request until they grow transition
 # support.
 TransitionKind = Literal["none", "cross-dissolve", "dip-to-color"]
+# Issue #196. ``"none"`` keeps today's title-less stitching.
+# ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
+# a connected text clip overlaid on the start of the primary. Only
+# the FCPXML renderer emits titles today; FCP7 / MP4 ignore the
+# request until they grow title support.
+TitleKind = Literal["none", "slate", "lower-third"]
 
 
 @dataclass(frozen=True)
@@ -95,6 +101,11 @@ class MatchExportRequestData:
     # ignored when ``transition_kind == "none"``.
     transition_kind: TransitionKind = "none"
     transition_duration_seconds: float = 0.5
+    # Issue #196. Per-stage titles. Text defaults to the stage name;
+    # ``title_duration_seconds`` is uniform across stages. ``"none"``
+    # keeps the timeline title-less.
+    title_kind: TitleKind = "none"
+    title_duration_seconds: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -251,10 +262,28 @@ def export_match(
             f"{request.output_format} renderer (issue #195 follow-ups)"
         )
         transitions = ()
+    titles = _build_uniform_titles(
+        kind=request.title_kind,
+        duration=request.title_duration_seconds,
+        stage_inputs=stages,
+    )
+    if titles and request.output_format != "fcpxml":
+        anomalies.append(
+            f"titles ignored: not yet supported by the "
+            f"{request.output_format} renderer (issue #196 follow-ups)"
+        )
+        titles = {}
+    if titles and transitions and any(t.style == "slate" for t in titles.values()):
+        # Mirror the emitter's guard at the request layer so the
+        # response carries an explicit anomaly instead of a 500-shaped
+        # error from generate_match_fcpxml.
+        anomalies.append("slate titles dropped: cannot combine with transitions " "(issue #196)")
+        titles = {}
     comp = composition.from_stage_compositions(
         compositions,
         project_name=request.project_name,
         transitions=transitions,
+        titles=titles,
     )
     try:
         if request.output_format == "fcpxml":
@@ -325,3 +354,24 @@ def _build_uniform_transitions(
         )
         for i in range(stage_count - 1)
     )
+
+
+def _build_uniform_titles(
+    *,
+    kind: TitleKind,
+    duration: float,
+    stage_inputs: list[MatchStageInput],
+) -> dict[int, composition.TitleCard]:
+    """Expand a single ``(kind, duration)`` into one ``TitleCard`` per
+    stage. Each title's text defaults to the stage name -- templating
+    will let users customise this in #198."""
+    if kind == "none":
+        return {}
+    return {
+        idx: composition.TitleCard(
+            text=stage_input.stage_name,
+            duration_seconds=duration,
+            style=kind,
+        )
+        for idx, stage_input in enumerate(stage_inputs)
+    }

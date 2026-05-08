@@ -152,6 +152,52 @@ def _pip_transform_attrs(
     }
 
 
+def _emit_title_clip(
+    parent: ET.Element,
+    *,
+    ref: str,
+    offset_str: str,
+    start_str: str,
+    duration_str: str,
+    title: StageTitle,
+    text_style_id: str,
+    lane: int | None = None,
+) -> ET.Element:
+    """Emit a ``<title>`` element with text + style children (issue #196).
+
+    Per FCPXML 1.10 the order inside ``<title>`` is ``param*, text*,
+    text-style-def*``; we emit a single ``<text>`` whose child
+    ``<text-style ref=...>`` references a sibling ``<text-style-def>``
+    that carries the actual font / size / colour. ``text_style_id``
+    must be unique across the document.
+    """
+    attrs = {
+        "ref": ref,
+        "offset": offset_str,
+        "start": start_str,
+        "duration": duration_str,
+        "name": title.text,
+    }
+    if lane is not None:
+        attrs["lane"] = str(lane)
+    title_el = ET.SubElement(parent, "title", attrs)
+    text_el = ET.SubElement(title_el, "text")
+    style_use = ET.SubElement(text_el, "text-style", {"ref": text_style_id})
+    style_use.text = title.text
+    style_def = ET.SubElement(title_el, "text-style-def", {"id": text_style_id})
+    ET.SubElement(
+        style_def,
+        "text-style",
+        {
+            "font": title.font,
+            "fontSize": str(title.font_size),
+            "fontColor": title.color,
+            "alignment": "center",
+        },
+    )
+    return title_el
+
+
 def _attach_pip_transform(
     asset_clip: ET.Element,
     pip: PipPlacement | None,
@@ -597,6 +643,45 @@ _TRANSITION_NAMES: dict[TransitionKind, str] = {
 }
 
 
+TitleStyle = Literal["slate", "lower-third"]
+
+# FCP's "Basic Title" generator. Stable across FCP versions and the
+# safest cross-installation pick; templates that require non-default
+# Motion library availability are intentionally avoided.
+_BASIC_TITLE_EFFECT_UID = (
+    ".../Generators.localized/Titles.localized/" "Basic Title.localized/Basic Title.motn"
+)
+
+
+@dataclass(frozen=True)
+class StageTitle:
+    """A title card associated with a stage (issue #196).
+
+    ``slate`` -- the title sits on the spine BEFORE the stage's
+    primary, extending the timeline by ``duration_seconds``. Useful
+    for "Stage 3 -- Skipper" cards that the user wants to read before
+    the action starts.
+
+    ``lower-third`` -- the title is a connected clip overlaid above
+    the primary, anchored to its visible head and showing for
+    ``duration_seconds``. Useful for an unobtrusive label that doesn't
+    interrupt the timeline.
+
+    ``font_size`` is in FCPXML points (1080p sequence default scale);
+    larger sequences may want a larger value but FCP will scale a
+    Basic Title across the timeline format -- the default works for
+    most home / matchcam exports.
+    """
+
+    stage_index: int
+    text: str
+    style: TitleStyle = "slate"
+    duration_seconds: float = 1.5
+    font_size: int = 144
+    font: str = "Helvetica"
+    color: str = "1 1 1 1"  # opaque white
+
+
 @dataclass(frozen=True)
 class StageTransition:
     """A transition between two consecutive stages on the spine (issue #195).
@@ -658,6 +743,7 @@ def generate_match_fcpxml(
     project_name: str,
     config: OutputConfig,
     transitions: list[StageTransition] | None = None,
+    titles: list[StageTitle] | None = None,
 ) -> None:
     """Write a stitched FCPXML with N stages back-to-back on the spine.
 
@@ -678,6 +764,14 @@ def generate_match_fcpxml(
     least ``duration / 2`` of effective material to overlap or the
     exporter raises ``ValueError``. ``None`` keeps today's hard-cut
     layout.
+
+    ``titles`` (issue #196): optional list of ``StageTitle``s that
+    add a ``slate`` (pre-stage card on the spine) or ``lower-third``
+    (connected text clip overlaid on the primary) per stage. Slates
+    extend the spine; lower-thirds anchor to the primary's visible
+    head. Slates combined with transitions raise ``ValueError`` --
+    a slate between two transition-joined primaries has no clean
+    visual semantic.
     """
     if not stages:
         raise ValueError("generate_match_fcpxml requires at least one stage")
@@ -685,6 +779,7 @@ def generate_match_fcpxml(
         if not stage.video_path.exists():
             raise FileNotFoundError(f"video not found: {stage.video_path}")
     transitions = list(transitions or ())
+    titles = list(titles or ())
     seen_indices: set[int] = set()
     for t in transitions:
         if t.after_stage_index in seen_indices:
@@ -700,6 +795,28 @@ def generate_match_fcpxml(
                 f"duration ({t.duration_seconds:g}s)"
             )
         seen_indices.add(t.after_stage_index)
+    seen_title_indices: set[int] = set()
+    for ti in titles:
+        if ti.stage_index in seen_title_indices:
+            raise ValueError(f"duplicate title for stage index {ti.stage_index}")
+        if not 0 <= ti.stage_index < len(stages):
+            raise ValueError(
+                f"title.stage_index={ti.stage_index} is out of range for "
+                f"{len(stages)} stages (must be in 0..{len(stages) - 1})"
+            )
+        if ti.duration_seconds <= 0:
+            raise ValueError(
+                f"title for stage {ti.stage_index} has non-positive "
+                f"duration ({ti.duration_seconds:g}s)"
+            )
+        seen_title_indices.add(ti.stage_index)
+    has_slate = any(ti.style == "slate" for ti in titles)
+    if has_slate and transitions:
+        raise ValueError(
+            "slate titles and transitions cannot be combined -- a slate "
+            "between two transition-joined primaries has no clean visual "
+            "semantic. Use lower-third titles, or remove transitions."
+        )
 
     base = stages[0].video
     for stage in stages[1:]:
@@ -965,10 +1082,39 @@ def generate_match_fcpxml(
             )
             transition_effect_ids[trans.kind] = effect_id
 
+    # Title effect resource (issue #196). One ``<effect>`` referencing
+    # FCP's Basic Title generator suffices for both slate and lower-
+    # third styles -- they're just different placements of the same
+    # generator, distinguished by where the ``<title>`` element lands
+    # (spine vs connected) and by its lane.
+    title_effect_id: str | None = None
+    if titles:
+        resource_counter += 1
+        title_effect_id = f"r{resource_counter}"
+        ET.SubElement(
+            resources,
+            "effect",
+            {
+                "id": title_effect_id,
+                "name": "Basic Title",
+                "uid": _BASIC_TITLE_EFFECT_UID,
+            },
+        )
+
+    titles_by_index: dict[int, StageTitle] = {ti.stage_index: ti for ti in titles}
+    slate_frames_by_index: dict[int, int] = {
+        idx: round(ti.duration_seconds / fd_seconds)
+        for idx, ti in titles_by_index.items()
+        if ti.style == "slate"
+    }
+    total_slate_frames = sum(slate_frames_by_index.values())
+
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": "splitsmith"})
     project = ET.SubElement(event, "project", {"name": project_name})
-    total_duration_frames = sum(plan.effective_duration_frames for plan in plans)
+    total_duration_frames = (
+        sum(plan.effective_duration_frames for plan in plans) + total_slate_frames
+    )
     sequence = ET.SubElement(
         project,
         "sequence",
@@ -990,6 +1136,26 @@ def generate_match_fcpxml(
         stage = plan.stage
         head_trim_seconds = plan.head_trim_frames * fd_seconds
         eff_duration_str = _frame_aligned_str(plan.effective_duration_frames, fd_num, fd_den)
+
+        # Slate title (issue #196). Sits on the spine BEFORE the
+        # primary; bumps the cumulative offset so the primary lands
+        # after the slate. Only one slate per stage; lower-third
+        # variants are emitted as connected clips below.
+        stage_title = titles_by_index.get(stage_idx)
+        if stage_title is not None and stage_title.style == "slate":
+            assert title_effect_id is not None
+            slate_dur_frames = slate_frames_by_index[stage_idx]
+            _emit_title_clip(
+                spine,
+                ref=title_effect_id,
+                offset_str=_frame_aligned_str(cumulative_offset_frames, fd_num, fd_den),
+                start_str="0s",
+                duration_str=_frame_aligned_str(slate_dur_frames, fd_num, fd_den),
+                title=stage_title,
+                text_style_id=f"ts-slate-{stage_idx}",
+            )
+            cumulative_offset_frames += slate_dur_frames
+
         primary_clip = ET.SubElement(
             spine,
             "asset-clip",
@@ -1065,6 +1231,26 @@ def generate_match_fcpxml(
                     "duration": eff_duration_str,
                     "format": format_id,
                 },
+            )
+
+        # Lower-third title (issue #196). Connected clip on the lane
+        # above secondaries + overlay so the text always sits on top.
+        # ``offset`` anchors at the primary's visible head; the user
+        # can drag the title later in FCP if they want it elsewhere.
+        if stage_title is not None and stage_title.style == "lower-third":
+            assert title_effect_id is not None
+            lt_lane = len(plan.usable_secondaries) + 2
+            lt_dur_frames = round(stage_title.duration_seconds / fd_seconds)
+            head_trim_str = _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den)
+            _emit_title_clip(
+                primary_clip,
+                ref=title_effect_id,
+                offset_str=head_trim_str,
+                start_str="0s",
+                duration_str=_frame_aligned_str(lt_dur_frames, fd_num, fd_den),
+                title=stage_title,
+                text_style_id=f"ts-lt-{stage_idx}",
+                lane=lt_lane,
             )
 
         # Markers. Each shot's clip-local source-media time stays the marker
