@@ -763,6 +763,7 @@ def generate_match_fcpxml(
     titles: list[StageTitle] | None = None,
     intro: IntroOutroSegment | None = None,
     outro: IntroOutroSegment | None = None,
+    chapter_markers: bool = False,
 ) -> None:
     """Write a stitched FCPXML with N stages back-to-back on the spine.
 
@@ -798,6 +799,12 @@ def generate_match_fcpxml(
     only fire between stage primaries today; the intro -> stage 0 and
     stage N-1 -> outro boundaries stay as hard cuts (the user can
     crossfade them manually in FCP if desired).
+
+    ``chapter_markers`` (issue #204): emit a ``<chapter-marker>`` on
+    the first frame of each primary (and on intro / outro segments)
+    so an NLE-side MP4 export carries chapter timestamps. Off by
+    default to keep existing exports unchanged; the YouTube sidecar
+    flow turns it on so chapters survive the round-trip through FCP.
     """
     if not stages:
         raise ValueError("generate_match_fcpxml requires at least one stage")
@@ -1226,7 +1233,7 @@ def generate_match_fcpxml(
 
     # Intro segment (issue #173): plays first, full duration.
     if intro_asset_id is not None and intro is not None:
-        ET.SubElement(
+        intro_clip = ET.SubElement(
             spine,
             "asset-clip",
             {
@@ -1238,6 +1245,16 @@ def generate_match_fcpxml(
                 "format": format_id,
             },
         )
+        if chapter_markers:
+            ET.SubElement(
+                intro_clip,
+                "chapter-marker",
+                {
+                    "start": "0s",
+                    "duration": frame_duration_str,
+                    "value": intro.name or "Intro",
+                },
+            )
         cumulative_offset_frames += intro_duration_frames
 
     for stage_idx, plan in enumerate(plans):
@@ -1361,6 +1378,23 @@ def generate_match_fcpxml(
                 lane=lt_lane,
             )
 
+        # Chapter marker on the visible head of the primary (#204).
+        # FCP / FCP7 / Premiere all forward chapter markers into the
+        # MP4 chapter atom on export, which is the upload-ready
+        # signal YouTube reads. Marker start = head_trim_frames (the
+        # in-source frame where playback starts), so it lands on the
+        # spine at the stage's beginning.
+        if chapter_markers:
+            ET.SubElement(
+                primary_clip,
+                "chapter-marker",
+                {
+                    "start": _frame_aligned_str(plan.head_trim_frames, fd_num, fd_den),
+                    "duration": frame_duration_str,
+                    "value": stage.stage_name,
+                },
+            )
+
         # Markers. Each shot's clip-local source-media time stays the marker
         # ``start``; FCP only renders markers within [primary.start,
         # primary.start + duration], so we drop shots outside that window
@@ -1413,7 +1447,7 @@ def generate_match_fcpxml(
 
     # Outro segment (issue #173): plays after the last stage's primary.
     if outro_asset_id is not None and outro is not None:
-        ET.SubElement(
+        outro_clip = ET.SubElement(
             spine,
             "asset-clip",
             {
@@ -1425,6 +1459,16 @@ def generate_match_fcpxml(
                 "format": format_id,
             },
         )
+        if chapter_markers:
+            ET.SubElement(
+                outro_clip,
+                "chapter-marker",
+                {
+                    "start": "0s",
+                    "duration": frame_duration_str,
+                    "value": outro.name or "Outro",
+                },
+            )
 
     ET.indent(fcpxml, space="    ")
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
