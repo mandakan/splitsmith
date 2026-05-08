@@ -45,6 +45,7 @@ from .composition import (
     Stage,
     Transform,
 )
+from .config import VideoMetadata
 
 
 def render_fcp7xml(
@@ -292,14 +293,18 @@ def _emit_file(
     parent: ET.Element,
     *,
     path: Path,
-    duration_frames: int,
-    width: int,
-    height: int,
-    timebase: int,
-    ntsc: bool,
+    meta: VideoMetadata,
     file_ids: dict[Path, str],
     has_audio: bool,
 ) -> None:
+    """Emit a ``<file>`` referencing the source media.
+
+    The ``<rate>`` and ``<duration>`` come from the source's own
+    metadata (#233): for mixed-rate timelines the underlying file's
+    frame rate must match its actual encoding so xmeml-aware readers
+    (Premiere, Resolve) conform correctly. The clipitem above this
+    file keeps the sequence rate for spine-relative timing.
+    """
     file_id, first_use = _file_id_for(path, file_ids)
     if not first_use:
         ET.SubElement(parent, "file", {"id": file_id})
@@ -307,13 +312,15 @@ def _emit_file(
     file_el = ET.SubElement(parent, "file", {"id": file_id})
     _text(file_el, "name", path.name)
     _text(file_el, "pathurl", path.resolve().as_uri())
-    _emit_rate(file_el, timebase, ntsc)
-    _text(file_el, "duration", str(duration_frames))
+    file_timebase, file_ntsc = _fcp7_rate(meta.frame_rate_num, meta.frame_rate_den)
+    _emit_rate(file_el, file_timebase, file_ntsc)
+    file_fd = meta.frame_rate_den / meta.frame_rate_num
+    _text(file_el, "duration", str(round(meta.duration_seconds / file_fd)))
     media = ET.SubElement(file_el, "media")
     video = ET.SubElement(media, "video")
     sample = ET.SubElement(video, "samplecharacteristics")
-    _text(sample, "width", str(width))
-    _text(sample, "height", str(height))
+    _text(sample, "width", str(meta.width))
+    _text(sample, "height", str(meta.height))
     if has_audio:
         audio = ET.SubElement(media, "audio")
         _text(audio, "channelcount", "2")
@@ -346,11 +353,7 @@ def _emit_primary_clipitem(
     _emit_file(
         clip,
         path=stage.primary.path,
-        duration_frames=plan.primary_duration_frames,
-        width=stage.primary.metadata.width,
-        height=stage.primary.metadata.height,
-        timebase=timebase,
-        ntsc=ntsc,
+        meta=stage.primary.metadata,
         file_ids=file_ids,
         has_audio=True,
     )
@@ -416,11 +419,7 @@ def _emit_secondary_clipitem(
     _emit_file(
         clip,
         path=secondary.asset.path,
-        duration_frames=sec_duration_frames,
-        width=sec_meta.width,
-        height=sec_meta.height,
-        timebase=timebase,
-        ntsc=ntsc,
+        meta=sec_meta,
         file_ids=file_ids,
         has_audio=True,
     )
@@ -463,11 +462,7 @@ def _emit_overlay_clipitem(
     _emit_file(
         clip,
         path=overlay.asset.path,
-        duration_frames=overlay_duration_frames,
-        width=overlay.asset.metadata.width,
-        height=overlay.asset.metadata.height,
-        timebase=timebase,
-        ntsc=ntsc,
+        meta=overlay.asset.metadata,
         file_ids=file_ids,
         has_audio=False,
     )

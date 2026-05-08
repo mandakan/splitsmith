@@ -1031,36 +1031,60 @@ def test_match_fcpxml_overlay_skips_into_media_when_head_trimmed(tmp_path: Path)
     assert overlay_clip.attrib["lane"] == "1"
 
 
-def test_match_fcpxml_raises_on_mixed_frame_rates(tmp_path: Path) -> None:
+def test_match_fcpxml_supports_mixed_frame_rates(tmp_path: Path) -> None:
+    """#233 -- mixed primary frame rates across stages no longer hard-
+    fail. Each asset references its own ``<format>`` so FCP conforms
+    to the timeline (taken from stage 0) at edit time. Spine timing
+    stays in sequence frame_duration units."""
     v1 = _make_video(tmp_path, "stage1.mp4")
     v2 = _make_video(tmp_path, "stage2.mp4")
     out = tmp_path / "match.fcpxml"
-    with pytest.raises(ValueError, match="mixed frame rates"):
-        generate_match_fcpxml(
-            stages=[
-                StageComposition(
-                    stage_name="stage1",
-                    video_path=v1,
-                    video=_meta_30fps(),
-                    shots=[],
-                    beep_offset_seconds=5.0,
-                    head_pad_seconds=5.0,
-                    tail_pad_seconds=5.0,
-                ),
-                StageComposition(
-                    stage_name="stage2",
-                    video_path=v2,
-                    video=_meta_2997(),
-                    shots=[],
-                    beep_offset_seconds=5.0,
-                    head_pad_seconds=5.0,
-                    tail_pad_seconds=5.0,
-                ),
-            ],
-            output_path=out,
-            project_name="match",
-            config=OutputConfig(),
-        )
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="stage1",
+                video_path=v1,
+                video=_meta_30fps(),
+                shots=[],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=5.0,
+            ),
+            StageComposition(
+                stage_name="stage2",
+                video_path=v2,
+                video=_meta_2997(),
+                shots=[],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=5.0,
+            ),
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    formats = root.findall("./resources/format")
+    # Two distinct formats: 30/1 (stage 0) + 30000/1001 (stage 1's 29.97).
+    assert len(formats) == 2
+    frame_durations = {f.attrib["frameDuration"] for f in formats}
+    assert frame_durations == {"1/30s", "1001/30000s"}
+    # Each asset references the format matching its own rate.
+    assets = root.findall("./resources/asset")
+    asset_format_refs = [a.attrib["format"] for a in assets]
+    fid_by_fd = {f.attrib["frameDuration"]: f.attrib["id"] for f in formats}
+    assert asset_format_refs[0] == fid_by_fd["1/30s"]
+    assert asset_format_refs[1] == fid_by_fd["1001/30000s"]
+    # Sequence keeps the stage-0 format; spine asset-clips read in that
+    # frame_duration so FCP conforms each asset.
+    sequence = root.find("./library/event/project/sequence")
+    assert sequence is not None
+    assert sequence.attrib["format"] == fid_by_fd["1/30s"]
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert len(spine_clips) == 2
+    for clip in spine_clips:
+        assert clip.attrib["format"] == fid_by_fd["1/30s"]
 
 
 def test_match_fcpxml_raises_on_empty_stages(tmp_path: Path) -> None:
@@ -1682,10 +1706,15 @@ def test_intro_extends_sequence_duration(tmp_path: Path) -> None:
     assert duration_frames == 330 + 324 + 150
 
 
-def test_intro_with_mismatched_frame_rate_raises(tmp_path: Path) -> None:
+def test_intro_with_mismatched_frame_rate_emits_per_asset_format(
+    tmp_path: Path,
+) -> None:
+    """#233 -- intro at a different rate from the timeline no longer
+    raises. The intro asset references its own ``<format>`` so FCP
+    conforms it to the timeline at edit time."""
     primary_a, primary_b, out = _two_stage_match(tmp_path)
     stages = _basic_match_stages(primary_a, primary_b)
-    bad_intro = fcpxml_mod.IntroOutroSegment(
+    intro = fcpxml_mod.IntroOutroSegment(
         video_path=_make_video(tmp_path, "intro_60fps.mp4"),
         video=VideoMetadata(
             width=1920,
@@ -1694,16 +1723,20 @@ def test_intro_with_mismatched_frame_rate_raises(tmp_path: Path) -> None:
             frame_rate_num=60,
             frame_rate_den=1,
         ),
-        name="Bad",
+        name="Intro",
     )
-    with pytest.raises(ValueError, match="intro frame rate"):
-        generate_match_fcpxml(
-            stages=stages,
-            output_path=out,
-            project_name="match",
-            config=OutputConfig(),
-            intro=bad_intro,
-        )
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        intro=intro,
+    )
+    root = ET.fromstring(out.read_bytes())
+    formats = root.findall("./resources/format")
+    # Sequence format (stage 0's 30fps) + intro's 60fps.
+    durs = {f.attrib["frameDuration"] for f in formats}
+    assert "1/60s" in durs
 
 
 def test_intro_missing_file_raises_filenotfound(tmp_path: Path) -> None:

@@ -74,6 +74,29 @@ def render_mp4(
     plans = [_plan_stage(stage, composition.sequence) for stage in composition.stages]
     if not plans:
         raise ValueError("render_mp4 requires at least one stage")
+
+    # The concat-demuxer pipeline (stream-copy) requires every per-stage
+    # temp share the same frame rate as the sequence. The FCPXML / FCP7
+    # path lifted this restriction in #233 because their NLE readers
+    # conform per-asset rates; the MP4 path can't conform without
+    # re-encoding through an ``fps=`` filter, which is a larger
+    # change than this issue's scope. Surface a clear error naming the
+    # offenders so the user knows whether to switch renderer or
+    # convert sources externally.
+    seq = composition.sequence
+    mismatched: list[str] = []
+    for stage in composition.stages:
+        meta = stage.primary.metadata
+        if meta.frame_rate_num != seq.frame_rate_num or meta.frame_rate_den != seq.frame_rate_den:
+            mismatched.append(f"{stage.name} ({meta.frame_rate_num}/{meta.frame_rate_den})")
+    if mismatched:
+        raise ValueError(
+            f"mp4 renderer requires all stages at the timeline frame rate "
+            f"({seq.frame_rate_num}/{seq.frame_rate_den}); these stages differ: "
+            + ", ".join(mismatched)
+            + ". Switch to the FCPXML or FCP7 renderer (which conform "
+            "per-asset rates) or convert the sources to a shared rate first."
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if work_dir is None:
