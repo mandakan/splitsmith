@@ -1,0 +1,20 @@
+# Built-in: match recap.
+#
+# Full pads (5s/5s) so each stage reads cleanly, lower-third titles
+# overlay the stage name, cross-dissolve between stages. Lower-third
+# (not slate) so transitions can co-exist on the timeline.
+schema_version: 1
+name: Match recap
+description: >-
+  Cross-dissolve stitches with lower-third stage labels.
+  Tail pad keeps a few seconds after the final shot.
+head_pad_seconds: 5.0
+tail_pad_seconds: 5.0
+include_secondaries: true
+include_overlay: true
+pip_layout: pip-corners
+output_format: fcpxml
+transition_kind: cross-dissolve
+transition_duration_seconds: 0.5
+title_kind: lower-third
+title_duration_seconds: 3.0

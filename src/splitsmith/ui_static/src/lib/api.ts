@@ -522,6 +522,31 @@ export interface MatchExportRequestPayload {
   title_duration_seconds?: number;
 }
 
+/** Body of a single export template (issue #198). Mirrors the dialog's
+ *  controls; missing fields leave the dialog default unchanged when
+ *  the template is applied. */
+export interface MatchExportTemplate {
+  schema_version: number;
+  name?: string;
+  description?: string;
+  head_pad_seconds?: number;
+  tail_pad_seconds?: number;
+  include_secondaries?: boolean;
+  include_overlay?: boolean;
+  pip_layout?: "stacked" | "pip-corners";
+  output_format?: "fcpxml" | "fcp7xml" | "mp4";
+  transition_kind?: "none" | "cross-dissolve" | "dip-to-color";
+  transition_duration_seconds?: number;
+  title_kind?: "none" | "slate" | "lower-third";
+  title_duration_seconds?: number;
+}
+
+export interface MatchExportTemplateEntry {
+  id: string;
+  source: "builtin" | "user";
+  template: MatchExportTemplate;
+}
+
 export interface MatchExportResult {
   fcpxml_path: string;
   stage_count: number;
@@ -1499,8 +1524,36 @@ export const api = {
         ...(payload.project_name !== undefined
           ? { project_name: payload.project_name }
           : {}),
+        ...(payload.pip_layout !== undefined
+          ? { pip_layout: payload.pip_layout }
+          : {}),
+        ...(payload.output_format !== undefined
+          ? { output_format: payload.output_format }
+          : {}),
+        ...(payload.transition_kind !== undefined
+          ? { transition_kind: payload.transition_kind }
+          : {}),
+        ...(payload.transition_duration_seconds !== undefined
+          ? { transition_duration_seconds: payload.transition_duration_seconds }
+          : {}),
+        ...(payload.title_kind !== undefined
+          ? { title_kind: payload.title_kind }
+          : {}),
+        ...(payload.title_duration_seconds !== undefined
+          ? { title_duration_seconds: payload.title_duration_seconds }
+          : {}),
       },
     }),
+
+  /** List export templates (issue #198). Used by the export dialog
+   *  to populate a "Template" dropdown; selecting a template
+   *  pre-fills the dialog state with its values. User templates
+   *  ship under ``~/.splitsmith/templates/`` and override built-ins
+   *  by ``id``. */
+  getMatchTemplates: () =>
+    request<{ templates: MatchExportTemplateEntry[] }>(
+      "/api/match/templates",
+    ),
 
   /** Open the OS file manager at ``path`` (selecting the file on macOS /
    *  Windows; opening the parent dir on Linux). The backend rejects paths
