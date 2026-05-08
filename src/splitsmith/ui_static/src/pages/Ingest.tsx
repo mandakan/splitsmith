@@ -2270,6 +2270,7 @@ function StagesSection({
   onSetSkipped: (stageNumber: number, skipped: boolean) => void;
   onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
+  const dismissedStages = project.nudges_dismissed_stages ?? [];
   if (project.stages.length === 0) return null;
 
   // Compute primary-conflict highlighting: a video appearing as primary on more
@@ -2367,6 +2368,7 @@ function StagesSection({
                 (r) => r.stage_number === s.stage_number,
               ) ?? null
             }
+            dismissedStages={dismissedStages}
             busy={busy}
             dragging={dragging}
             setDragging={setDragging}
@@ -2487,6 +2489,7 @@ function StageCard({
   window: matchWindow,
   videoEntries,
   exportStatus,
+  dismissedStages,
   busy,
   dragging,
   setDragging,
@@ -2503,6 +2506,7 @@ function StageCard({
   window: StageMatchWindow | null;
   videoEntries: VideoMatchAnalysisEntry[];
   exportStatus: StageExportStatus | null;
+  dismissedStages: number[];
   busy: boolean;
   dragging: { video: StageVideo; stage: StageEntry | null } | null;
   setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
@@ -2592,6 +2596,15 @@ function StageCard({
         />
       </CardHeader>
       <CardContent className="space-y-2 pt-0">
+        <AuditPendingNudge
+          stage={stage}
+          exportStatus={exportStatus}
+          dismissedStages={dismissedStages}
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          onProjectUpdate={onProjectUpdate}
+        />
         {stage.videos.length === 0 ? (
           <p className="text-sm text-muted-foreground">No videos assigned.</p>
         ) : null}
@@ -3418,6 +3431,80 @@ function RemoveVideoDialog({
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** Inline audit-pending reminder rendered inside a StageCard (#218 phase 4).
+ *
+ *  Renders only when the stage is in the "shots pending" terminal
+ *  state: shot detection ran, candidates exist, but ``shots[]`` is
+ *  still empty. Dismissible via a per-project list persisted on
+ *  ``MatchProject.nudges_dismissed_stages`` so the nag doesn't
+ *  reappear on every reload. The dismissal is automatically obviated
+ *  when the user audits a candidate (``audit_shot_count > 0`` -> the
+ *  whole nudge stops emitting), so we don't bother clearing dismissed
+ *  entries here.
+ */
+function AuditPendingNudge({
+  stage,
+  exportStatus,
+  dismissedStages,
+  busy,
+  setBusy,
+  setError,
+  onProjectUpdate,
+}: {
+  stage: StageEntry;
+  exportStatus: StageExportStatus | null;
+  dismissedStages: number[];
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  setError: (msg: string | null) => void;
+  onProjectUpdate: (p: MatchProject) => void;
+}) {
+  if (!exportStatus) return null;
+  if (
+    !exportStatus.primary_processed.shot_detect ||
+    exportStatus.audit_shot_count > 0 ||
+    exportStatus.total_candidate_count === 0
+  ) {
+    return null;
+  }
+  if (dismissedStages.includes(stage.stage_number)) return null;
+
+  const dismiss = async () => {
+    setBusy(true);
+    try {
+      const updated = await api.dismissNudge(stage.stage_number, true);
+      onProjectUpdate(updated);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const count = exportStatus.total_candidate_count;
+  return (
+    <div className="flex items-start justify-between gap-2 rounded border border-status-warning/40 bg-status-warning/10 px-2.5 py-1.5 text-xs">
+      <span>
+        Stage {stage.stage_number} has {count} detected shot
+        {count === 1 ? "" : "s"} awaiting your review. Open the Audit
+        screen to keep / reject and seed shots[].
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="-mr-1 h-5 px-1.5 text-[11px]"
+        disabled={busy}
+        onClick={() => void dismiss()}
+        title="Hide this reminder for this stage. It will come back automatically once you audit at least one shot."
+      >
+        Dismiss
+      </Button>
     </div>
   );
 }

@@ -4953,6 +4953,93 @@ def test_get_automation_reports_project_provenance_when_overridden(
     assert prov["global_value"] is True
 
 
+def test_dismiss_nudge_persists_stage_number(tmp_path: Path) -> None:
+    """#218 phase 4 -- POST adds the stage to nudges_dismissed_stages
+    and the response carries the updated project."""
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="Nudge Match")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
+        )
+    ]
+    project.save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/project/nudges/dismiss",
+        json={"stage_number": 1, "dismissed": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["nudges_dismissed_stages"] == [1]
+
+
+def test_dismiss_nudge_idempotent(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="Idempotent")
+    project.stages = [
+        StageEntry(
+            stage_number=2,
+            stage_name="Two",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
+        )
+    ]
+    project.nudges_dismissed_stages = [2]
+    project.save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/project/nudges/dismiss",
+        json={"stage_number": 2, "dismissed": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["nudges_dismissed_stages"] == [2]
+
+
+def test_dismiss_nudge_clears_when_dismissed_false(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    project = MatchProject.init(root, name="Reset")
+    project.stages = [
+        StageEntry(
+            stage_number=3,
+            stage_name="Three",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
+        )
+    ]
+    project.nudges_dismissed_stages = [3]
+    project.save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/project/nudges/dismiss",
+        json={"stage_number": 3, "dismissed": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["nudges_dismissed_stages"] == []
+
+
+def test_dismiss_nudge_404_for_unknown_stage(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    MatchProject.init(root, name="NoStage").save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/project/nudges/dismiss",
+        json={"stage_number": 99, "dismissed": True},
+    )
+    assert resp.status_code == 404
+
+
 def test_post_settings_patches_automation_override(tmp_path: Path) -> None:
     """Round-trip: post an automation override, then GET /api/automation
     sees it as the project layer."""
