@@ -132,7 +132,13 @@ class ConnectedClip:
 
 @dataclass(frozen=True)
 class Stage:
-    """One stage's contribution to the composition."""
+    """One stage's contribution to the composition.
+
+    ``title`` (issue #196) is an optional ``TitleCard`` rendered as a
+    slate (pre-stage card on the spine) or lower-third (connected
+    text clip overlaid on the primary). Renderers that don't support
+    titles ignore the field.
+    """
 
     name: str
     primary: Asset
@@ -142,6 +148,7 @@ class Stage:
     secondaries: tuple[ConnectedClip, ...] = ()
     overlay: ConnectedClip | None = None
     markers: tuple[Marker, ...] = ()
+    title: "TitleCard | None" = None
 
 
 TransitionKind = Literal["cross-dissolve", "dip-to-color"]
@@ -180,16 +187,30 @@ TitleStyle = Literal["slate", "lower-third"]
 
 @dataclass(frozen=True)
 class TitleCard:
-    """Title overlay (placeholder until #196 lands).
+    """Title overlay attached to a stage (issue #196).
 
-    ``slate`` is a short pre-stage card; ``lower-third`` is a connected
-    text clip overlapping the start of a stage. Renderers map this to a
-    target-native title primitive.
+    ``slate`` -- a short pre-stage card on the spine; extends the
+    timeline by ``duration_seconds``. Lands before the stage's
+    primary so the user reads the card, then the action begins.
+
+    ``lower-third`` -- a connected text clip on the topmost lane that
+    overlaps the start of the stage; doesn't extend the timeline.
+
+    ``font_size`` is in FCPXML points at the timeline's native scale;
+    bigger sequences may want larger sizes but Basic Title scales
+    automatically across formats.
+
+    The FCPXML renderer (this PR) emits both styles via FCP's Basic
+    Title generator. FCP7 XML / ffmpeg renderers ignore titles for
+    now -- they'll grow support in follow-up PRs.
     """
 
     text: str
     duration_seconds: float
     style: TitleStyle = "slate"
+    font_size: int = 144
+    font: str = "Helvetica"
+    color: str = "1 1 1 1"
 
 
 @dataclass(frozen=True)
@@ -234,6 +255,7 @@ def from_stage_compositions(
     *,
     project_name: str,
     transitions: SequenceProto[Transition] = (),
+    titles: dict[int, TitleCard] | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -247,14 +269,20 @@ def from_stage_compositions(
     that the FCPXML renderer emits between consecutive stages. Each
     transition's ``from_stage_index`` / ``to_stage_index`` must point at
     valid stage positions; v1 only accepts consecutive pairs.
+
+    ``titles`` (issue #196): optional mapping from stage index to a
+    :class:`TitleCard`. The IR attaches each title to its
+    :class:`Stage`; the FCPXML renderer emits slate / lower-third
+    via FCP's Basic Title generator.
     """
+    titles_map = dict(titles) if titles else {}
     if not stages:
         raise ValueError("Composition requires at least one stage")
     base = stages[0].video
     seq = SequenceFormat.from_video(base)
 
     ir_stages: list[Stage] = []
-    for stage_comp in stages:
+    for stage_idx, stage_comp in enumerate(stages):
         secondaries: list[ConnectedClip] = []
         for sec in stage_comp.secondaries:
             transform = _pip_to_transform(sec.pip, seq) if sec.pip is not None else None
@@ -299,6 +327,7 @@ def from_stage_compositions(
                 secondaries=tuple(secondaries),
                 overlay=overlay,
                 markers=markers,
+                title=titles_map.get(stage_idx),
             )
         )
 
@@ -428,15 +457,17 @@ def render_fcpxml(
     so transitions / titles / new renderers can reach the wire.
     """
     legacy_stages = to_stage_compositions(composition)
+    has_titles = any(s.title is not None for s in composition.stages)
     if (
         len(legacy_stages) == 1
         and composition.intro is None
         and composition.outro is None
         and not composition.transitions
+        and not has_titles
     ):
-        # Single stage with no intro/outro/transitions mirrors today's
-        # per-stage path. Use generate_fcpxml so the file is byte-
-        # identical to a single-stage export.
+        # Single stage with no intro/outro/transitions/titles mirrors
+        # today's per-stage path. Use generate_fcpxml so the file is
+        # byte-identical to a single-stage export.
         stage = legacy_stages[0]
         fcpxml_gen.generate_fcpxml(
             video_path=stage.video_path,
@@ -457,6 +488,7 @@ def render_fcpxml(
         project_name=composition.project_name,
         config=config,
         transitions=_lower_transitions(composition.transitions),
+        titles=_lower_titles(composition),
     )
 
 
@@ -480,6 +512,27 @@ def _lower_transitions(
                 kind=t.kind,
                 duration_seconds=t.duration_seconds,
                 color=t.color,
+            )
+        )
+    return out
+
+
+def _lower_titles(composition: Composition) -> list[fcpxml_gen.StageTitle]:
+    """Lower per-stage IR titles to ``fcpxml_gen.StageTitle`` for the
+    legacy emitter (issue #196)."""
+    out: list[fcpxml_gen.StageTitle] = []
+    for idx, stage in enumerate(composition.stages):
+        if stage.title is None:
+            continue
+        out.append(
+            fcpxml_gen.StageTitle(
+                stage_index=idx,
+                text=stage.title.text,
+                style=stage.title.style,
+                duration_seconds=stage.title.duration_seconds,
+                font_size=stage.title.font_size,
+                font=stage.title.font,
+                color=stage.title.color,
             )
         )
     return out

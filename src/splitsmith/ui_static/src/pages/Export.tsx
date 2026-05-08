@@ -1221,6 +1221,15 @@ function MatchExportDialog({
   >("none");
   const [transitionDurationSeconds, setTransitionDurationSeconds] =
     useState<number>(0.5);
+  // Issue #196. ``"none"`` keeps the timeline title-less. ``"slate"``
+  // adds a pre-stage card on the spine (extends total duration);
+  // ``"lower-third"`` overlays a small text clip at each stage's
+  // start (no spine extension). Only FCPXML emits titles today.
+  const [titleKind, setTitleKind] = useState<
+    "none" | "slate" | "lower-third"
+  >("none");
+  const [titleDurationSeconds, setTitleDurationSeconds] =
+    useState<number>(1.5);
   // Overlay defaults off because the per-frame PIL + ffmpeg render is the
   // slowest writer; opt in per export. Mirrors the per-stage Generate's
   // default.
@@ -1275,6 +1284,8 @@ function MatchExportDialog({
         output_format: outputFormat,
         transition_kind: transitionKind,
         transition_duration_seconds: transitionDurationSeconds,
+        title_kind: titleKind,
+        title_duration_seconds: titleDurationSeconds,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height:
@@ -1552,6 +1563,49 @@ function MatchExportDialog({
                       const v = parseFloat(e.target.value);
                       if (!Number.isNaN(v) && v > 0)
                         setTransitionDurationSeconds(v);
+                    }}
+                  />
+                  s
+                </label>
+              )}
+              <label
+                className="flex items-center gap-1.5"
+                title="Slate: pre-stage card on the timeline (extends duration). Lower-third: connected text overlay at the start of each primary. FCPXML only."
+              >
+                Titles
+                <select
+                  className="rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                  value={titleKind}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setTitleKind(
+                      e.target.value as "none" | "slate" | "lower-third",
+                    )
+                  }
+                >
+                  <option value="none">None</option>
+                  <option value="slate">Slate (pre-stage)</option>
+                  <option value="lower-third">Lower third</option>
+                </select>
+              </label>
+              {titleKind !== "none" && (
+                <label
+                  className="flex items-center gap-1.5"
+                  title="Title duration in seconds. Slates add this to the total timeline; lower-thirds overlay for this many seconds at the start of each stage."
+                >
+                  Duration
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={10.0}
+                    step={0.5}
+                    className="w-16 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+                    value={titleDurationSeconds}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (!Number.isNaN(v) && v > 0)
+                        setTitleDurationSeconds(v);
                     }}
                   />
                   s

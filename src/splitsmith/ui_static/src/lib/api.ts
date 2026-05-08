@@ -512,6 +512,14 @@ export interface MatchExportRequestPayload {
    *  ``transition_kind`` is ``"none"``. Each adjacent stage's effective
    *  window must contain at least half this value of material. */
   transition_duration_seconds?: number;
+  /** Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
+   *  card on the spine; ``"lower-third"`` is a connected text clip
+   *  overlaid on the start of the primary. FCPXML only today. */
+  title_kind?: "none" | "slate" | "lower-third";
+  /** Title duration in seconds; ignored when ``title_kind`` is
+   *  ``"none"``. Slates default to 1.5s; lower-thirds default to
+   *  3.0s but the dialog uses one input either way. */
+  title_duration_seconds?: number;
 }
 
 export interface MatchExportResult {

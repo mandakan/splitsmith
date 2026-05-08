@@ -1597,6 +1597,221 @@ def test_no_transitions_emits_unchanged_spine(tmp_path: Path) -> None:
     assert root.find("./resources/effect") is None
 
 
+# --- title cards (issue #196) ---------------------------------------------
+
+
+def test_match_with_slate_title_emits_basic_title_effect(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        titles=[
+            fcpxml_mod.StageTitle(
+                stage_index=0, text="Stage A", style="slate", duration_seconds=1.5
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    effects = root.findall("./resources/effect")
+    assert len(effects) == 1
+    assert effects[0].attrib["name"] == "Basic Title"
+    assert effects[0].attrib["uid"].endswith("Basic Title.motn")
+
+
+def test_slate_title_lands_on_spine_before_primary(tmp_path: Path) -> None:
+    """Slate sits on the spine ahead of the stage's primary; the
+    primary's offset shifts forward by the slate duration so playback
+    is slate -> primary."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        titles=[
+            fcpxml_mod.StageTitle(
+                stage_index=0, text="Stage A", style="slate", duration_seconds=1.0
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    spine = root.find(".//spine")
+    assert spine is not None
+    children = list(spine)
+    # Order: title (slate), primary A, primary B (no slate on B).
+    assert children[0].tag == "title"
+    assert children[0].attrib["offset"] == "0s"
+    assert children[0].attrib["duration"] == "30/30s"  # 1s @ 30fps
+    assert children[1].tag == "asset-clip"
+    assert children[1].attrib["name"] == "A"
+    assert children[1].attrib["offset"] == "30/30s"
+
+
+def test_slate_title_carries_text_and_style_def(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        titles=[
+            fcpxml_mod.StageTitle(
+                stage_index=0,
+                text="Stage A",
+                style="slate",
+                font="Helvetica",
+                font_size=144,
+                color="1 1 1 1",
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    title = root.find(".//spine/title")
+    assert title is not None
+    text_el = title.find("text")
+    assert text_el is not None
+    style_use = text_el.find("text-style")
+    assert style_use is not None
+    assert style_use.text == "Stage A"
+    style_def = title.find("text-style-def")
+    assert style_def is not None
+    assert style_use.attrib["ref"] == style_def.attrib["id"]
+    inner = style_def.find("text-style")
+    assert inner is not None
+    assert inner.attrib["font"] == "Helvetica"
+    assert inner.attrib["fontSize"] == "144"
+    assert inner.attrib["fontColor"] == "1 1 1 1"
+
+
+def test_lower_third_title_lands_as_connected_clip(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        titles=[
+            fcpxml_mod.StageTitle(
+                stage_index=0,
+                text="Stage A",
+                style="lower-third",
+                duration_seconds=2.0,
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    spine_titles = root.findall("./library/event/project/sequence/spine/title")
+    assert len(spine_titles) == 0
+    nested_title = root.find("./library/event/project/sequence/spine/asset-clip/title")
+    assert nested_title is not None
+    # Lane is above secondaries (0) + overlay slot (+1) + 1 = 2 for a
+    # stage with neither cams nor overlay.
+    assert nested_title.attrib["lane"] == "2"
+    assert nested_title.attrib["duration"] == "60/30s"  # 2s @ 30fps
+
+
+def test_slate_title_extends_sequence_duration(tmp_path: Path) -> None:
+    """Sequence duration = sum(effective) + sum(slate frames). Stage
+    A: 11s effective (330 frames). Stage B with last shot at +0.8s:
+    tail_avail = 20-5.8 = 14.2; tail_trim = 14.2-5 = 9.2s -> 276
+    frames; effective = 20-9.2 = 10.8s = 324 frames. Plus 2 slates
+    of 1s each = 60 frames. Total = 330 + 324 + 60 = 714."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        titles=[
+            fcpxml_mod.StageTitle(stage_index=0, text="A", style="slate", duration_seconds=1.0),
+            fcpxml_mod.StageTitle(stage_index=1, text="B", style="slate", duration_seconds=1.0),
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    sequence = root.find("./library/event/project/sequence")
+    assert sequence is not None
+    duration_frames = int(sequence.attrib["duration"].split("/")[0])
+    # Stage A effective = 330 frames; stage B effective = 324 frames;
+    # 2 slates @ 30 frames = 60 frames. Total = 714.
+    assert duration_frames == 330 + 324 + 60
+
+
+def test_slate_with_transitions_raises(tmp_path: Path) -> None:
+    """Combining slate titles with transitions has no clean visual
+    semantic; the emitter rejects the request explicitly."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    with pytest.raises(ValueError, match="slate titles and transitions"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            transitions=[fcpxml_mod.StageTransition(after_stage_index=0)],
+            titles=[
+                fcpxml_mod.StageTitle(stage_index=0, text="A", style="slate", duration_seconds=1.0)
+            ],
+        )
+
+
+def test_lower_third_with_transitions_is_allowed(tmp_path: Path) -> None:
+    """Lower-thirds are connected to primaries so they don't conflict
+    with stage-boundary transitions."""
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    generate_match_fcpxml(
+        stages=stages,
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+        transitions=[fcpxml_mod.StageTransition(after_stage_index=0)],
+        titles=[
+            fcpxml_mod.StageTitle(
+                stage_index=0, text="A", style="lower-third", duration_seconds=2.0
+            )
+        ],
+    )
+    root = ET.fromstring(out.read_bytes())
+    assert root.find(".//spine/transition") is not None
+    assert root.find(".//spine/asset-clip/title") is not None
+
+
+def test_duplicate_title_indices_raise(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    with pytest.raises(ValueError, match="duplicate title"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            titles=[
+                fcpxml_mod.StageTitle(stage_index=0, text="A", duration_seconds=1.0),
+                fcpxml_mod.StageTitle(stage_index=0, text="A2", duration_seconds=1.0),
+            ],
+        )
+
+
+def test_title_index_out_of_range_raises(tmp_path: Path) -> None:
+    primary_a, primary_b, out = _two_stage_match(tmp_path)
+    stages = _basic_match_stages(primary_a, primary_b)
+    with pytest.raises(ValueError, match="out of range"):
+        generate_match_fcpxml(
+            stages=stages,
+            output_path=out,
+            project_name="match",
+            config=OutputConfig(),
+            titles=[fcpxml_mod.StageTitle(stage_index=2, text="C", duration_seconds=1.0)],
+        )
+
+
 # --- probe_video -----------------------------------------------------------
 
 

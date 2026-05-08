@@ -955,6 +955,12 @@ class MatchExportRequest(BaseModel):
     # ignored" anomaly when set together with those formats.
     transition_kind: Literal["none", "cross-dissolve", "dip-to-color"] = "none"
     transition_duration_seconds: float = 0.5
+    # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
+    # card on the spine; ``"lower-third"`` is a connected text clip
+    # overlaid on the start of the primary. FCPXML only today;
+    # FCP7 / MP4 surface a "titles ignored" anomaly when combined.
+    title_kind: Literal["none", "slate", "lower-third"] = "none"
+    title_duration_seconds: float = 1.5
 
 
 class RevealRequest(BaseModel):
@@ -4606,6 +4612,8 @@ def create_app(
             output_format=req.output_format,
             transition_kind=req.transition_kind,
             transition_duration_seconds=req.transition_duration_seconds,
+            title_kind=req.title_kind,
+            title_duration_seconds=req.title_duration_seconds,
         )
         try:
             result = match_export_helpers.export_match(
