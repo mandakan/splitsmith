@@ -35,6 +35,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, computed_field
 
 from .. import video_match
+from ..automation import AutomationOverride
 from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from ..video_match import match_videos_to_stages
 
@@ -497,6 +498,13 @@ class MatchProject(BaseModel):
     # a specific encoder name (e.g. ``"libx264"``) to pin the choice; the
     # next trim job uses the new value.
     trim_audit_encoder: str = "auto"
+    # Layered automation overrides (issue #215). Each field is
+    # optional; ``None`` means "inherit from the global default."
+    # Resolved at call time via :func:`splitsmith.automation.resolve_automation`
+    # with the CLI (if any) and the global settings; the resolved
+    # value drives per-event behaviour like "auto-fire shot detect
+    # after the user marks the beep reviewed."
+    automation: AutomationOverride = Field(default_factory=AutomationOverride)
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:

@@ -84,6 +84,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import automation as automation_settings
 from .. import beep_detect, cross_align, report, user_config, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
@@ -2066,7 +2067,18 @@ def create_app(
             # ``set_beep_reviewed``). Saves the heavy CLAP / GBDT / PANN
             # ensemble work when the beep timestamp is wrong, since
             # everything downstream of it would be garbage anyway.
-            if state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None:
+            #
+            # Layered automation gate (#215): users can disable the
+            # auto-trigger globally or per project. ``cli_override`` is
+            # always None for the server -- the daemon doesn't take
+            # CLI flags at this entry point.
+            resolved = automation_settings.resolve_automation(
+                project_override=fresh.automation,
+            )
+            if (
+                resolved.settings.shot_detect_on_beep_verified
+                and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+            ):
                 state.jobs.submit(
                     kind="shot_detect",
                     stage_number=stage_number,
@@ -2317,11 +2329,18 @@ def create_app(
             # so this still runs; the auto-detect path waits for the
             # user's explicit "Mark reviewed" click which re-fires
             # shot_detect from there.
-            state.jobs.submit(
-                kind="shot_detect",
-                stage_number=stage_number,
-                fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+            #
+            # Layered automation gate (#215): a global / project
+            # opt-out can suppress this auto-trigger.
+            resolved = automation_settings.resolve_automation(
+                project_override=fresh.automation,
             )
+            if resolved.settings.shot_detect_on_beep_verified:
+                state.jobs.submit(
+                    kind="shot_detect",
+                    stage_number=stage_number,
+                    fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                )
         handle.update(progress=1.0, message="Done")
 
     def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:

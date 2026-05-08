@@ -33,6 +33,9 @@ from . import (
     video_match,
 )
 from . import (
+    automation as automation_settings,
+)
+from . import (
     cleanup as cleanup_mod,
 )
 from .config import (
@@ -74,6 +77,15 @@ def single(
     write_trim: bool = typer.Option(True, "--trim/--no-trim"),
     write_csv: bool = typer.Option(True, "--csv/--no-csv"),
     write_fcpxml: bool = typer.Option(True, "--fcpxml/--no-fcpxml"),
+    auto_detect: bool | None = typer.Option(
+        None,
+        "--auto-detect/--no-auto-detect",
+        help=(
+            "Whether to run shot detection after the beep. Defaults to the "
+            "global automation setting (True). Use --no-auto-detect for a "
+            "trim-only export (issue #215)."
+        ),
+    ),
     trim_mode: str | None = typer.Option(
         None,
         "--trim-mode",
@@ -104,6 +116,7 @@ def single(
         write_trim=write_trim,
         write_csv=write_csv,
         write_fcpxml=write_fcpxml,
+        auto_detect_shots=_resolve_cli_auto_detect(auto_detect),
     )
     _print_files_summary(files)
 
@@ -146,6 +159,15 @@ def process(
     write_trim: bool = typer.Option(True, "--trim/--no-trim"),
     write_csv: bool = typer.Option(True, "--csv/--no-csv"),
     write_fcpxml: bool = typer.Option(True, "--fcpxml/--no-fcpxml"),
+    auto_detect: bool | None = typer.Option(
+        None,
+        "--auto-detect/--no-auto-detect",
+        help=(
+            "Whether to run shot detection after the beep. Defaults to the "
+            "global automation setting (True). Use --no-auto-detect to skip "
+            "shot detection across the batch (issue #215)."
+        ),
+    ),
     trim_mode: str | None = typer.Option(
         None,
         "--trim-mode",
@@ -169,6 +191,7 @@ def process(
     if not match.matches:
         raise typer.Exit(code=1)
 
+    auto_detect_shots = _resolve_cli_auto_detect(auto_detect)
     for m in match.matches:
         stage = next(s for s in competitor_stages.stages if s.stage_number == m.stage_number)
         console.rule(f"[bold]Stage {stage.stage_number}: {stage.stage_name}[/]")
@@ -181,6 +204,7 @@ def process(
                 write_trim=write_trim,
                 write_csv=write_csv,
                 write_fcpxml=write_fcpxml,
+                auto_detect_shots=auto_detect_shots,
             )
         except Exception as exc:  # noqa: BLE001 -- soft-fail per SPEC error-handling rules
             console.print(f"[red]Stage {stage.stage_number} failed: {exc}[/]")
@@ -762,6 +786,24 @@ def overlay(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_cli_auto_detect(flag: bool | None) -> bool:
+    """Resolve the ``--auto-detect/--no-auto-detect`` flag against the
+    layered automation settings (#215).
+
+    ``flag is None`` means the user didn't pass either form; fall
+    through to the project (CLI doesn't know which project, so just
+    the global settings) + global default. ``True`` / ``False``
+    overrides everything else.
+    """
+    cli_override = (
+        automation_settings.AutomationOverride(shot_detect_on_beep_verified=flag)
+        if flag is not None
+        else None
+    )
+    resolved = automation_settings.resolve_automation(cli_override=cli_override)
+    return resolved.settings.shot_detect_on_beep_verified
+
+
 def _process_one(
     *,
     stage: StageData,
@@ -771,8 +813,15 @@ def _process_one(
     write_trim: bool,
     write_csv: bool,
     write_fcpxml: bool,
+    auto_detect_shots: bool = True,
 ) -> ReportFiles:
-    """End-to-end pipeline for a single (stage, video) pair. Returns the file footer."""
+    """End-to-end pipeline for a single (stage, video) pair. Returns the file footer.
+
+    ``auto_detect_shots=False`` (the CLI's ``--no-auto-detect``) skips
+    the shot-detection step. Trim, CSV (empty), and FCPXML (no
+    markers) still produce -- mirrors the permissive export gate
+    introduced in #214.
+    """
     base = f"stage{stage.stage_number}_{_slugify(stage.stage_name)}"
     audio_path = _video_to_audio_path(video)
     audio, sr = _extract_or_load_audio(video, audio_path)
@@ -783,14 +832,20 @@ def _process_one(
         f"peak={beep.peak_amplitude:.3f}  duration={beep.duration_ms:.0f}ms"
     )
 
-    shots = shot_detect.detect_shots(audio, sr, beep.time, stage.time_seconds, config.shot_detect)
-    shots, refine_diffs = _refine_shot_times(audio, sr, shots, beep.time, config)
-    if refine_diffs:
-        console.print(
-            f"  [cyan]refined {len(refine_diffs)} shot time(s)[/]: "
-            + ", ".join(f"#{i + 1} {d['drift_ms']:+.1f}ms" for i, d in enumerate(refine_diffs))
+    if auto_detect_shots:
+        shots = shot_detect.detect_shots(
+            audio, sr, beep.time, stage.time_seconds, config.shot_detect
         )
-    _print_shots_table(shots)
+        shots, refine_diffs = _refine_shot_times(audio, sr, shots, beep.time, config)
+        if refine_diffs:
+            console.print(
+                f"  [cyan]refined {len(refine_diffs)} shot time(s)[/]: "
+                + ", ".join(f"#{i + 1} {d['drift_ms']:+.1f}ms" for i, d in enumerate(refine_diffs))
+            )
+        _print_shots_table(shots)
+    else:
+        shots = []
+        console.print("  [yellow]shot detection skipped[/] (--no-auto-detect)")
 
     files = ReportFiles()
     if write_trim:
@@ -809,10 +864,14 @@ def _process_one(
         )
         console.print(f"  [green]trimmed video[/]: {files.video}")
 
-    if write_csv:
+    if write_csv and shots:
         files.csv = output_dir / f"{base}_splits.csv"
         csv_gen.write_splits_csv(shots, files.csv)
         console.print(f"  [green]splits CSV[/]:    {files.csv}")
+    elif write_csv:
+        # Mirror the permissive export gate (#214): no CSV when no
+        # shots; the trim + FCPXML still ship.
+        console.print("  [yellow]splits CSV[/]:    skipped (no shots)")
 
     if write_fcpxml and files.video and files.video.exists():
         files.fcpxml = output_dir / f"{base}.fcpxml"
