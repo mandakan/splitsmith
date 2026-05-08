@@ -1424,6 +1424,30 @@ function MatchExportDialog({
             {stageNumbers.length === 1 ? "" : "s"} into one FCPXML in stage
             order. Composes from existing trims; no re-encoding.
           </CardDescription>
+          {(() => {
+            // #214 -- export is permissive about empty shots. Surface a
+            // friendly inline note when any selected stage has zero
+            // audited shots so the user knows what to expect (no shot
+            // markers, CSV, or overlay for those stages) without being
+            // gated.
+            const shotless = stages.filter(
+              (s) =>
+                stageNumbers.includes(s.stage_number) &&
+                s.audit_shot_count === 0,
+            );
+            if (shotless.length === 0) return null;
+            const stageList = shotless
+              .map((s) => `Stage ${s.stage_number}`)
+              .join(", ");
+            const verb = shotless.length === 1 ? "exports" : "export";
+            return (
+              <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                {stageList} {verb} without shot markers, CSV, or overlay
+                (no shots audited). Detection is optional -- you can still
+                export the trim and stitched timeline.
+              </div>
+            );
+          })()}
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {templates.length > 0 && (
