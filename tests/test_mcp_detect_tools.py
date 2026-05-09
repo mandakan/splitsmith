@@ -573,3 +573,189 @@ def test_detect_shots_passes_expected_rounds_through_to_ensemble(tmp_path: Path)
     # silently turn voter C off the adaptive path.
     assert mock_detect.call_args.kwargs["expected_rounds"] == 7
     assert result["expected_rounds"] == 7
+
+
+# ---------------------------------------------------------------------------
+# trim_audit_clip
+# ---------------------------------------------------------------------------
+
+
+def _seed_trim_project(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Project ready for trim: primary with beep_time + stage time + source."""
+    root = tmp_path / "match"
+    src = root / "raw" / "primary.mp4"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"FAKE_MP4")
+    primary = StageVideo(
+        path=Path("raw/primary.mp4"),
+        role="primary",
+        beep_time=5.0,
+        beep_source="manual",
+        beep_confidence=1.0,
+        beep_reviewed=True,
+    )
+    project = MatchProject.init(root, name="MCP Trim Test")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=12.0,
+            videos=[primary],
+        )
+    ]
+    project.save(root)
+    out = root / "trimmed" / "stage1_trimmed.mp4"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return root, src, out
+
+
+def test_trim_audit_clip_calls_helper_and_flips_flag(tmp_path: Path) -> None:
+    root, _src, out_path = _seed_trim_project(tmp_path)
+
+    with patch(
+        "splitsmith.mcp.detect_tools.audio_helpers.ensure_video_audit_trim",
+        return_value=out_path,
+    ) as mock_trim:
+        result = detect_tools.trim_audit_clip(str(root), stage_number=1)
+
+    assert mock_trim.call_count == 1
+    # Helper should be called with the primary's beep_time + stage time.
+    kwargs = mock_trim.call_args
+    args = kwargs.args
+    # ensure_video_audit_trim signature: (root, stage_number, video, source,
+    # beep_time, stage_time_seconds, *, project=...)
+    assert args[1] == 1  # stage_number
+    assert args[4] == 5.0  # beep_time
+    assert args[5] == 12.0  # stage_time
+    after = MatchProject.load(root).stages[0].videos[0]
+    assert after.processed["trim"] is True
+    assert result["output_path"].endswith("stage1_trimmed.mp4")
+    assert result["beep_time"] == 5.0
+
+
+def test_trim_audit_clip_targets_secondary_when_video_id_given(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "match"
+    primary_src = root / "raw" / "p.mp4"
+    secondary_src = root / "raw" / "s.mp4"
+    for s in (primary_src, secondary_src):
+        s.parent.mkdir(parents=True, exist_ok=True)
+        s.write_bytes(b"x")
+    primary = StageVideo(
+        path=Path("raw/p.mp4"),
+        role="primary",
+        beep_time=5.0,
+        beep_source="manual",
+        beep_confidence=1.0,
+    )
+    secondary = StageVideo(
+        path=Path("raw/s.mp4"),
+        role="secondary",
+        beep_time=4.5,
+        beep_source="aligned",
+    )
+    project = MatchProject.init(root, name="Trim Sec")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=12.0,
+            videos=[primary, secondary],
+        )
+    ]
+    project.save(root)
+    secondary_id = MatchProject.load(root).stages[0].videos[1].video_id
+
+    out = root / "trimmed" / f"stage1_cam_{secondary_id[:6]}_trimmed.mp4"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with patch(
+        "splitsmith.mcp.detect_tools.audio_helpers.ensure_video_audit_trim",
+        return_value=out,
+    ) as mock_trim:
+        result = detect_tools.trim_audit_clip(str(root), stage_number=1, video_id=secondary_id)
+
+    # Helper got the secondary, not the primary.
+    args = mock_trim.call_args.args
+    assert args[2].video_id == secondary_id
+    assert args[4] == 4.5  # secondary's own beep_time
+    after = MatchProject.load(root).stages[0]
+    sec_after = next(v for v in after.videos if v.video_id == secondary_id)
+    assert sec_after.processed["trim"] is True
+    # Primary's flag is untouched -- targeting one video doesn't ripple.
+    prim_after = next(v for v in after.videos if v.role == "primary")
+    assert prim_after.processed["trim"] is False
+    assert result["video_id"] == secondary_id
+
+
+def test_trim_audit_clip_rejects_video_without_beep(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    src = root / "raw" / "p.mp4"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"x")
+    primary = StageVideo(path=Path("raw/p.mp4"), role="primary")
+    project = MatchProject.init(root, name="No Beep Trim")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=12.0,
+            videos=[primary],
+        )
+    ]
+    project.save(root)
+    with pytest.raises(ValueError, match="no beep_time"):
+        detect_tools.trim_audit_clip(str(root), stage_number=1)
+
+
+def test_trim_audit_clip_rejects_zero_stage_time(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    src = root / "raw" / "p.mp4"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"x")
+    primary = StageVideo(
+        path=Path("raw/p.mp4"),
+        role="primary",
+        beep_time=5.0,
+        beep_source="manual",
+    )
+    project = MatchProject.init(root, name="No Time Trim")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=0.0,
+            videos=[primary],
+        )
+    ]
+    project.save(root)
+    with pytest.raises(ValueError, match="time_seconds=0"):
+        detect_tools.trim_audit_clip(str(root), stage_number=1)
+
+
+def test_trim_audit_clip_rejects_unknown_video_id(tmp_path: Path) -> None:
+    root, _src, _out = _seed_trim_project(tmp_path)
+    with pytest.raises(ValueError, match="not on stage"):
+        detect_tools.trim_audit_clip(str(root), stage_number=1, video_id="bogus")
+
+
+def test_trim_audit_clip_missing_source_raises(tmp_path: Path) -> None:
+    root = tmp_path / "match"
+    primary = StageVideo(
+        path=Path("raw/missing.mp4"),
+        role="primary",
+        beep_time=5.0,
+        beep_source="manual",
+    )
+    project = MatchProject.init(root, name="Missing Source Trim")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=12.0,
+            videos=[primary],
+        )
+    ]
+    project.save(root)
+    with pytest.raises(FileNotFoundError, match="source video missing"):
+        detect_tools.trim_audit_clip(str(root), stage_number=1)

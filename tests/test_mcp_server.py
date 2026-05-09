@@ -37,6 +37,7 @@ WRITE_TOOLS = {
 DETECT_TOOLS = {
     "detect_beep",
     "detect_shots",
+    "trim_audit_clip",
 }
 
 
