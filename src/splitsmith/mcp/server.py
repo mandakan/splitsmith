@@ -223,4 +223,36 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             force=force,
         )
 
+    @mcp.tool()
+    def detect_shots(
+        project_root: str,
+        stage_number: int,
+        reset: bool = False,
+    ) -> dict:
+        """Run the 4-voter shot-detection ensemble on a stage.
+
+        Mirror of ``POST /api/stages/{n}/shot-detect``. Loads the
+        audit clip's audio, runs CLAP + GBDT + PANN consensus, and
+        writes the candidate universe + seeded ``shots[]`` into
+        ``<project>/audit/stage<N>.json``.
+
+        Preconditions: stage has a primary, primary has
+        ``beep_time``, stage has ``time_seconds > 0``.
+
+        First call in this server lifetime loads the ensemble
+        runtime (~5 s for CLAP + GBDT + PANN, plus first-call
+        download if not yet cached locally). Subsequent calls
+        reuse the cached weights. A typical 60 s stage finishes in
+        20-40 s on CPU. Voter E (CLIP, ~600 MB) requires
+        ``SPLITSMITH_ENABLE_VOTER_E=1``.
+
+        ``reset=True`` wipes the existing ``shots[]`` before
+        seeding; default preserves curated lists.
+        """
+        return detect_tools.detect_shots_for_stage(
+            project_root,
+            stage_number=stage_number,
+            reset=reset,
+        )
+
     return mcp
