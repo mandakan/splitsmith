@@ -178,6 +178,71 @@ uv run splitsmith fcpxml \
 
 The `--beep-offset` flag (default 5.0s) tells the regenerator where the beep is in the trimmed video. It must equal `output.trim_buffer_seconds` from the config used during the original trim (5s by default).
 
+### `mcp` -- Model Context Protocol server
+
+Exposes splitsmith's pipeline as agent-callable tools so MCP-aware
+clients (Claude Desktop, Claude Code, IDE plugins) can drive a match
+end-to-end. Implementation of issue #211.
+
+```bash
+splitsmith mcp                            # stdio transport
+splitsmith mcp --allowed-root /path/to    # sandbox: every path the
+                                          # agent passes must resolve
+                                          # under this directory
+```
+
+Wire into your client by pointing it at the binary. For Claude Code,
+add to `~/.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "splitsmith": {
+      "command": "splitsmith",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+(For Claude Desktop, the equivalent file is
+`~/Library/Application Support/Claude/claude_desktop_config.json` on
+macOS, with the same shape.)
+
+Tools registered on the server (16 total):
+
+| category | tools |
+|---|---|
+| read-only | `probe_video`, `discover_videos`, `get_project`, `list_stages`, `get_hitl_queue` |
+| write | `assign_video`, `set_beep_manual`, `select_beep_candidate`, `mark_beep_reviewed` |
+| detect | `detect_beep`, `detect_shots`, `trim_audit_clip` |
+| export | `list_templates`, `export_stage`, `export_match` |
+
+All tools take `project_root` as a path string -- stateless, so
+multiple agents can collaborate on the same project. `set_beep_manual`
++ `detect_beep` honour the auto-trust gate (#219): confidence >=
+threshold flips `beep_reviewed=True`, below it the beep lands in the
+HITL queue (`get_hitl_queue`).
+
+#### `/splitsmith-match` Claude Code skill
+
+The full agent flow is encoded as a Claude Code skill at
+`skills/splitsmith-match/`. Install once:
+
+```bash
+ln -s "$(pwd)/skills/splitsmith-match" ~/.claude/skills/splitsmith-match
+```
+
+Then `/splitsmith-match` (or just describing the task -- "run
+splitsmith on this folder", "build the match recap") triggers the
+runbook: discover videos -> match to stages -> beep + shot
+detection -> resolve HITL queue -> per-stage exports -> match-level
+FCPXML / MP4 / YouTube sidecar. HITL checkpoints fire only when the
+agent's confidence would otherwise force a guess.
+
+Skill details + the runbook's HITL prompt patterns live in
+`skills/splitsmith-match/README.md` + `SKILL.md`.
+
 ## End-to-end demo on the bundled sample
 
 The repo ships with a real Stage 3 sample (Tallmilan 2026, "Per told me to do it!", 14.74s, 14 audited shots) at `tests/fixtures/stage_sample.mp4`. Anyone with the repo can do a full end-to-end run:
@@ -235,13 +300,43 @@ Splitsmith treats *consistency across stages and matches* as more important than
 
 ### Beep detection (`beep_detect.py`)
 
-1. Bandpass-filter the audio to `[freq_min_hz, freq_max_hz]` (default 2-5 kHz, the typical IPSC timer beep range).
-2. Compute the Hilbert envelope, lightly smoothed (10 ms moving average).
-3. Find candidate runs where the smoothed envelope exceeds `min_amplitude * peak` (default 30%) for at least `min_duration_ms` (default 150 ms).
-4. Pick the strongest candidate run.
-5. **Backtrack to the leading edge**: walk backward from the candidate's start through the smoothed envelope until reaching `5 * p95(noise)` (with the noise window taken from before the run). That sample is the reported beep time.
+1. Bandpass-filter the audio to `[freq_min_hz, freq_max_hz]` (default 2-5 kHz). Hilbert envelope, smoothed at 40 ms (broad enough to bridge the natural intra-beep dips IPSC tones produce). A separate 10 ms-smoothed envelope is held for rise-foot timing so the smoothing bias doesn't shift the leading edge.
+2. **Adaptive cutoff**: a candidate run must clear `max(min_amplitude * peak, noise_floor * noise_factor, min_abs_peak)`. The noise-floor leg recovers handheld / phone clips where the beep is faint in absolute terms but still well above the recording's median noise floor.
+3. **Composite scoring**: each candidate run is ranked by `silence_score * tonal_factor * duration_factor`:
+   - silence_score = run_peak / max-of-pre-window (preceded by quiet "Are you ready / Stand by" wins over preceded by recent shots)
+   - tonal_factor = energy concentration in the IPSC fundamental band (2.2-3.5 kHz) vs the wider search band; demotes broadband shots and steel rings
+   - duration_factor = squared ramp 150 -> 300 ms; demotes short transients without rejecting them outright
+4. **Adaptive rise-foot leading edge**: walk back from the run's peak while the envelope stays above `max(peak * 5%, noise_floor * 1.5x)`. The noise-floor floor stops the walk from sliding into pre-beep silence on faint beeps where 5 % of the peak is below the floor.
+5. **Calibrated confidence in [0, 1]** per candidate -- a weighted blend of tonal purity, duration plausibility, and saturating silence preference, tilted by the margin to the runner-up. Empirically validated against the labelled fixture set under `tests/fixtures/beep_calibration/`: confidence >= 0.7 is right ~95 % of the time. The production UI / MCP use this to gate the **auto-trust** chain (`automation.beep_low_confidence_threshold`, default 0.6); below the threshold the beep lands in the HITL queue.
 
-The backtrack matters because timer beeps ramp up over ~400 ms; a fixed amplitude threshold would land deep into the rise. Using a multiple of the recording's own pre-beep noise floor adapts to gain, distance, and ambient noise.
+Calibration evidence + per-confidence-bin precision live under `tests/fixtures/beep_calibration/baseline.json`; rebuild via `scripts/build_beep_calibration.py` after adding new audited fixtures and re-run `scripts/eval_beep_detector.py` to refresh the table.
+
+#### Auto-trust + HITL queue (issue #219)
+
+A detected beep with `confidence >= automation.beep_low_confidence_threshold`
+(default 0.6) flips `beep_reviewed=True` automatically -- the downstream
+chain (auto-trim, auto-shot-detect-on-beep-verified) fires without a
+manual review click. Below the threshold the beep stays unreviewed and
+shows up in the **HITL queue**:
+
+- HTTP: `GET /api/hitl-queue` returns `{items: [...], threshold: float}`.
+- SPA: the **Needs review** card on the Ingest page polls the queue and
+  surfaces each item's `suggested_action` text + a one-click "Open"
+  button that scrolls to the relevant stage row.
+- MCP: `get_hitl_queue` exposes the same shape; an agent (or
+  `/splitsmith-match`) drives the picks via `select_beep_candidate` /
+  `set_beep_manual` / `mark_beep_reviewed`.
+
+Tune the threshold via `~/.splitsmith/config.yaml`:
+
+```yaml
+automation:
+  beep_low_confidence_threshold: 0.6   # auto-trust >= this; below is HITL
+  shot_detect_on_beep_verified: true   # the existing chain gate
+```
+
+Per-project overrides + the resolved provenance badge (CLI > project >
+global > default) ride on the same automation block.
 
 ### Shot detection (`shot_detect.py`)
 
@@ -291,7 +386,22 @@ beep_detect:
   freq_min_hz: 2000
   freq_max_hz: 5000
   min_duration_ms: 150
-  min_amplitude: 0.3
+  # Cutoff = max(min_amplitude * peak, noise_floor_factor * noise_floor, min_abs_peak).
+  min_amplitude: 0.05
+  min_abs_peak: 0.005
+  noise_floor_factor: 5.0
+  envelope_smoothing_ms: 40.0
+  tonal_band_lo_hz: 2200
+  tonal_band_hi_hz: 3500
+  tonal_weight: 0.7
+  dur_match_min_ms: 150.0
+  dur_match_full_ms: 300.0
+  dur_match_weight: 1.0
+  silence_window_s: 1.5
+  silence_pre_skip_s: 0.2
+  min_pre_window_s: 0.2
+  search_window_s: 30.0
+  top_n_candidates: 5
 
 shot_detect:
   min_gap_ms: 80
