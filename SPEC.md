@@ -132,6 +132,14 @@ Anomaly detection:
 - Any split >3s within the stage window → flag (likely missed shot, or just a long transition).
 - Shot count differs significantly from typical IPSC stage round counts → informational note (we don't know exact round count).
 
+**`compare/`** — Multi-shooter side-by-side FCPXML export. Reads N existing single-shooter `MatchProject` directories (all from the same match) and emits one FCPXML where each stage is a beep-aligned grid compound clip. Each shooter must already have per-stage lossless trims on disk.
+- `manifest.py`: `CompareManifest` Pydantic model + `load_manifest` YAML loader. Validates `audio_from` matches a label, label uniqueness, and resolves relative paths against the manifest's parent dir.
+- `project_loader.py`: `load_shooter` walks `MatchProject.stages`, derives the per-stage trim path via the same `_slugify` rule the per-stage exporter uses, and computes `beep_offset_in_clip = min(trim_pre_buffer_seconds, primary.beep_time)`. Stages without a primary, beep, trim, or marked `skipped` are omitted.
+- `layout.py`: pure math. `choose_grid(roster_count)` picks the smallest of `{1up, 2up-h, 2up-v, 2x2, 3x3, 4x4}` that fits the full roster (sized for the manifest, not the present subset, so slot indices stay stable across stages). `compute_layout(...)` returns a `GridLayout` with `slots_per_label` (alphabetical) and `empty_slots` for filler placement.
+- `filler.py`: `ensure_filler` shells out to ffmpeg (`-f lavfi -i color=c=black -an`) to produce a silent black mp4 sized to the longest tile in the stage. Filename encodes `(W, H, fps_num, fps_den, duration_ms)` so stages with matching geometry share one file.
+- `emitter.py`: builds the FCPXML. Sequence format from the audio-source shooter; per-tile assets dedup formats via the same `formats_by_key` pattern as `fcpxml_gen.generate_match_fcpxml`. Slot 0 (alphabetically first present label) is the spine clip; others on lanes 1..N-1; filler tiles take later lanes. Beep alignment: `delta = round((max_beep - tile_beep) / fd)` so every tile's clip-local beep coincides at the same parent timeline frame. Audio: `<adjust-volume amount="-96dB"/>` on every tile except `manifest.audio_from`. Outer spine: one `<ref-clip>` per stage with a `<marker>` named `Stage N -- <name>`.
+- `cli.py`: Typer sub-app exposing `splitsmith compare export <manifest>`.
+
 ## Data structures
 
 ```python
@@ -238,9 +246,15 @@ splitsmith fcpxml \
     --csv PATH \
     --video PATH \
     --output PATH
+
+# Multi-shooter comparison: render N shooters' beep-aligned trims as
+# a per-stage grid into one FCPXML.
+splitsmith compare export PATH/TO/manifest.yaml
 ```
 
 The `fcpxml` regeneration command matters — the user will manually fix detection errors in the CSV and want to rebuild the timeline.
+
+The `compare` command reads N existing single-shooter projects (each with per-stage lossless trims already exported) plus a manifest YAML naming them, and emits one FCPXML where each stage is a beep-aligned grid compound clip. See `compare/` under module responsibilities for the per-module breakdown and `examples/compare-bromma-classifier-2026.yaml` for an annotated manifest.
 
 ## Error handling principles
 

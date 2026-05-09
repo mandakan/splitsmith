@@ -78,6 +78,20 @@ script after adding new audited fixtures.
 The review-time variant generator ``scripts/build_ensemble_fixture.py``
 still exists for offline comparison under ``build/ensemble-review/``.
 
+## Multi-shooter comparison (`compare/` package)
+
+``splitsmith compare export <manifest>`` reads N existing single-shooter
+``MatchProject`` directories (all from the same match) and emits one
+FCPXML where each stage is a beep-aligned grid compound clip. It does
+not run detection -- it only reads finished projects' per-stage trims.
+
+Slot order is alphabetical by manifest label and stable across stages
+(missing trims become black filler, never reshuffle the grid). The
+audio-source shooter from the manifest drives the sequence frame rate
+and is the only unmuted tile. Per-module breakdown lives in SPEC.md
+under "Module responsibilities"; the example manifest is at
+``examples/compare-bromma-classifier-2026.yaml``.
+
 ## Things Claude Code should not do
 
 - Add new dependencies without asking. The dep list is small on purpose.
