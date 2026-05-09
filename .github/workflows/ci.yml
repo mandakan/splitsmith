@@ -4,7 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Default ``branches: [main]`` skips PRs whose base is a feature
+    # branch (stacked PRs). Match every base so each stacked PR also
+    # runs CI.
+    branches: ["**"]
 
 jobs:
   test:
