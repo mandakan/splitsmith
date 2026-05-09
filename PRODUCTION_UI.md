@@ -1,5 +1,16 @@
 # Production UI -- Deferred Vision
 
+> **Update**: most of this vision is now built. The production UI ships as
+> the `splitsmith ui` subcommand (`src/splitsmith/ui/`); see the README for
+> a tour. The auto-trust + HITL queue (#219) and the calibrated beep
+> confidence (#220) sit on top of the audit UI -- they're documented in
+> the README's "Beep detection" + "Beep auto-trust + HITL queue"
+> sections. The MCP server + `/splitsmith-match` Claude Code skill (#211)
+> are the agent counterpart of the same flow.
+>
+> This file is kept as a record of the v1 design conversation. New
+> "deferred vision" backlog items live in GitHub issues.
+
 This file captures the full UI vision discussed during v1 development. The
 audit-only UI ships first as a separate, narrow tool. Everything below is
 intentionally deferred and should be filed as a GitHub issue (or split into

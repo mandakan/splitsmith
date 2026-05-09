@@ -30,19 +30,33 @@ raw videos + stage JSON
     │   uses video mtime/ctime vs scorecard_updated_at
     ▼
 [2] Detect start beep              (beep_detect.py)
-    │   bandpass filter, peak detection
+    │   bandpass + tonal/duration scoring + calibrated confidence;
+    │   automation.beep_low_confidence_threshold gates auto-trust
+    │   -> below it, items land in `GET /api/hitl-queue` (#219)
     ▼
-[3] Trim video losslessly          (trim.py)
-    │   ffmpeg -c copy from beep-5s to beep+stage_time+5s
+[3] Trim video                     (trim.py)
+    │   lossless (`-c copy`) for archival; audit-mode short-GOP
+    │   re-encode for SPA scrub
     ▼
-[4] Detect shots                   (shot_detect.py)
-    │   librosa onset detection within stage time window
+[4] Detect shots                   (shot_detect.py / ensemble/)
+    │   4-voter ensemble (envelope + CLAP + GBDT + PANN) with
+    │   per-camera-class thresholds + adaptive priors from
+    │   stage_rounds; consensus seeds shots[]
     ▼
-[5] Generate outputs               (csv_gen.py, fcpxml_gen.py, report.py)
+[5] Generate outputs               (csv_gen.py, fcpxml_gen.py,
+    │                              ui/exports.py, ui/match_exports.py,
+    │                              report.py)
     │
     ▼
-CSV + FCPXML + report per stage
+CSV + FCPXML + report per stage   match-level FCPXML / MP4 /
+                                  YouTube sidecar
 ```
+
+The CLI walks the pipeline in batch (`splitsmith process`); the
+production UI runs each stage on demand and surfaces the HITL queue
++ confidence gates; the MCP server (`splitsmith mcp`, issue #211)
+exposes every step as agent-callable tools so a Claude Code skill
+or other MCP client can drive the same flow.
 
 ### Module responsibilities
 
@@ -57,11 +71,13 @@ CSV + FCPXML + report per stage
 Be aware: `scorecard_updated_at` is when the score was *typed in*, not when the stage was shot. Real shoot time is typically 1–10 minutes earlier. Bias the matching window accordingly.
 
 **`beep_detect.py`** — Find the start beep timestamp in the audio.
-- Most shot timer beeps are pure tones in the 2.5–4 kHz range, lasting 200–400ms.
-- Approach: bandpass filter audio to 2000–5000 Hz, compute envelope, look for sustained energy with sharp onset.
-- Return: timestamp in seconds (float) of the beep's leading edge.
-- Must be robust to: ambient match noise, RO commands, distant beeps from other bays.
-- Heuristic for false-positive rejection: the beep is followed within `stage_time + 1s` by gunshot transients. If candidate beep is not, skip it.
+- Most shot timer beeps are pure tones in the 2.2-3.3 kHz range, lasting 200-500 ms (empirically 2298, 2402, 2698, 2700, 3198 Hz on the labelled fixture set).
+- Approach: bandpass filter to 2-5 kHz, compute Hilbert envelope, smooth at 40 ms; rank candidate runs by `silence_score * tonal_factor * duration_factor`.
+- Adaptive cutoff: `max(min_amplitude * peak, noise_floor * noise_factor, min_abs_peak)`. The noise-floor leg recovers handheld / phone clips where the beep is faint in absolute terms but well above the recording's median noise floor.
+- Return: a `BeepDetection` with `time` (rise-foot leading edge), `peak_amplitude`, `duration_ms`, calibrated `confidence` in [0, 1], and the ranked candidate list.
+- The confidence formula (in `candidate_confidence`) blends tonal purity, duration plausibility, and saturating silence preference, tilted by the margin to the runner-up. Empirically validated against `tests/fixtures/beep_calibration/`: confidence >= 0.7 is right ~95 % of the time. The HTTP server / MCP / SPA use this against `automation.beep_low_confidence_threshold` (default 0.6) to decide whether the auto-trust chain fires (#219).
+- Must be robust to: ambient match noise, RO commands, distant beeps from other bays, AGC'd handheld phones with faint beeps, mid-stage shots with quiet pre-roll.
+- Calibration suite + harness live under `tests/fixtures/beep_calibration/` and `scripts/eval_beep_detector.py`. `top-N` recall + per-confidence-bin precision are pinned in `baseline.json`; layer-2 detector tweaks must keep the auto-trust band at >= 95 %.
 
 **`shot_detect.py`** — Detect gunshot timestamps in audio.
 - Use `librosa.onset.onset_detect` with spectral flux as the onset envelope.
@@ -100,6 +116,13 @@ Tuning notes:
   - Special: first shot (draw) and shots after >1s gap (transitions/reloads) get a different color (e.g., blue) to indicate they're not pure splits.
 - Frame rate: detect from source video via ffprobe, generate fcpxml at matching rate.
 - Add markers on the V1 clip at each shot timestamp for keyboard navigation in FCP.
+
+**`splitsmith.mcp`** -- Model Context Protocol server (issue #211).
+- Wraps splitsmith's pipeline as agent-callable tools so MCP-aware clients (Claude Desktop, Claude Code, IDE plugins) can drive a match end-to-end.
+- Stateless: every tool takes `project_root` (path string) as its first arg so multiple agents can collaborate on the same project without an in-memory handle.
+- Optional sandbox: `SPLITSMITH_MCP_ALLOWED_ROOT` (or `splitsmith mcp --allowed-root`) constrains every path argument.
+- Tool surface (16 tools across read-only / write / detect / export categories) -- see the README for the full list. Detection tools (`detect_beep`, `detect_shots`, `trim_audit_clip`) are synchronous; `detect_shots` lazy-loads the CLAP/GBDT/PANN runtime once per server lifetime (mirror of the HTTP server's `_get_ensemble_runtime`).
+- Companion skill: `skills/splitsmith-match/SKILL.md` is the Claude Code runbook that orchestrates the tools with HITL checkpoints (ambiguous video assignments, low-confidence beeps via `get_hitl_queue`, low-confidence shots).
 
 **`report.py`** — Human-readable per-stage summary.
 Format example:
