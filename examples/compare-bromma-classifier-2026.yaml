@@ -1,0 +1,30 @@
+# Multi-shooter comparison manifest. Renders one FCPXML where every
+# stage from each project is laid out as a beep-aligned grid of tiles.
+#
+# Run:
+#   splitsmith compare export examples/compare-bromma-classifier-2026.yaml
+#
+# Each shooter's project must already have per-stage trims on disk
+# (run the per-stage exporter for each project first).
+
+# Where to write the FCPXML. Relative paths resolve against this
+# manifest's parent directory.
+output: bromma-classifier-2026.fcpxml
+
+# Whose audio plays. Must match one of the labels below. Every other
+# tile is muted at -96 dB.
+audio_from: Mathias
+
+# Layout for the 2-shooter case only. ``horizontal`` = side-by-side,
+# ``vertical`` = stacked. Ignored when there are 3+ shooters
+# (smallest-fits grid is 2x2 / 3x3 / 4x4).
+layout_2up: horizontal
+
+# Tile slots are alphabetical by label and stay fixed across every
+# stage in the export -- if a shooter is missing a stage's trim, that
+# slot becomes a black filler tile so the grid layout doesn't shift.
+shooters:
+  - project: ~/splitsmith/projects/mathias-bromma-classifier-2026
+    label: Mathias
+  - project: ~/splitsmith/projects/anders-bromma-classifier-2026
+    label: Anders

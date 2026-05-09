@@ -123,6 +123,33 @@ uv run splitsmith lab rescore --universe build/lab/runs/latest.json --consensus 
 uv run splitsmith lab promote --audit-json <project>/audit/stage4.json --audit-wav <project>/audio/stage4_audit.wav --slug stage-shots-myclub-2026-stage4
 ```
 
+### `compare` -- multi-shooter side-by-side FCPXML
+
+Render one FCPXML where each stage is a beep-aligned grid of N shooters' trims. Tile slots are alphabetical by label and stay fixed across every stage so a shooter who's missing a stage gets a black filler tile rather than reshuffling the grid. Audio comes from a single nominated shooter; everyone else is muted.
+
+Each shooter must already have per-stage lossless trims on disk (i.e., you've run the per-stage exporter for each project). The comparison emitter reads `<project>/exports/stage<N>_<slug>_trimmed.mp4` for every stage of every shooter.
+
+Manifest YAML:
+
+```yaml
+output: bromma-classifier-2026.fcpxml
+audio_from: Mathias        # must match a label below
+layout_2up: horizontal     # horizontal | vertical, only used when N == 2
+shooters:
+  - project: ~/splitsmith/projects/mathias-bromma-classifier-2026
+    label: Mathias
+  - project: ~/splitsmith/projects/anders-bromma-classifier-2026
+    label: Anders
+```
+
+Render:
+
+```bash
+uv run splitsmith compare export examples/compare-bromma-classifier-2026.yaml
+```
+
+Smallest-fits grid: 1 shooter -> 1up; 2 -> 2up (horizontal or vertical); 3-4 -> 2x2; 5-9 -> 3x3; 10-16 -> 4x4. Empty slots in the chosen grid become black filler tiles for the duration of that stage. Sequence frame rate / size come from the audio-source shooter's first stage; mismatched cam rates / sizes get their own `<format>` resource and ride on FCP's edit-time conform.
+
 ### `review` -- audit a fixture in a local web UI
 
 Open a single-page browser UI for reviewing detected shots against the fixture's audio (and optional video). Marker pins on the waveform: click to toggle keep/reject, drag to fine-tune time, double-click empty waveform space to add a manual marker. Save (`Cmd+S`) writes back to the fixture JSON's `shots[]`.
