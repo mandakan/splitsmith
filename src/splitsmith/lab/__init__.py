@@ -40,6 +40,8 @@ from .core import (
     run_eval,
     save_config_yaml,
     save_run,
+    scrub_local_path,
+    shooter_token,
 )
 from .promote import (
     PromoteFromAnchorRequest,
@@ -72,4 +74,6 @@ __all__ = [
     "run_eval",
     "save_config_yaml",
     "save_run",
+    "scrub_local_path",
+    "shooter_token",
 ]

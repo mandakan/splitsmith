@@ -10,7 +10,7 @@ purely a feasibility probe per issue #10.
 
 Run:
     uv run python scripts/probe_visual_voter.py
-    uv run python scripts/probe_visual_voter.py --fixture stage-shots-blacksmith-2026-stage3
+    uv run python scripts/probe_visual_voter.py --fixture stage-shots-blacksmith-2026-stage3-s97dcec94
 """
 
 from __future__ import annotations

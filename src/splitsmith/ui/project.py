@@ -524,6 +524,22 @@ class MatchProject(BaseModel):
     # dismissed.
     nudges_dismissed_stages: list[int] = Field(default_factory=list)
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def shooter_token(self) -> str | None:
+        """Public, PII-free token for the pinned shooter.
+
+        Mirrors :func:`splitsmith.lab.core.shooter_token` so the SPA can
+        build fixture slugs that include the same suffix the promote
+        endpoint stamps on the JSON. ``None`` when no SSI shooter is
+        pinned -- the SPA hides promote affordances in that case.
+        """
+        if self.selected_shooter_id is None:
+            return None
+        from ..lab.core import shooter_token as _token
+
+        return _token(self.selected_shooter_id)
+
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
         """Create a fresh project at ``root`` with the standard subdirectory layout.

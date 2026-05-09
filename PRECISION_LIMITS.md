@@ -206,7 +206,7 @@ fixtures.
 
 ## 4a. Candidate generator anchors on reverb peaks instead of onset
 
-**Where it bites:** stage-shots-blacksmith-2026-stage3 candidate #35 -- the
+**Where it bites:** stage-shots-blacksmith-2026-stage3-s97dcec94 candidate #35 -- the
 detector placed its anchor 144 ms after the true muzzle blast onset, on a
 reverb peak. The user's audit nudged the timestamp back to the correct
 position, but the candidate's *audio features* still belong to the reverb

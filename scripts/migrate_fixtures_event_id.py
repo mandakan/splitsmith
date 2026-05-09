@@ -8,7 +8,7 @@ further action.
 
 For non-canonical slugs that need to merge into an existing event group
 (e.g., ``stage-shots-blacksmith-handgun-open-2026-stage6`` should join
-the same event as ``stage-shots-blacksmith-2026-stage6``), pass
+the same event as ``stage-shots-blacksmith-2026-stage6-s97dcec94``), pass
 ``--alias <slug>=<event_id>`` one or more times. The migration writes
 the explicit ``event_id`` to the fixture JSON so the slug parser is
 bypassed.

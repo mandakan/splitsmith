@@ -21,7 +21,7 @@ camera on). Override with ``--pre-pad`` / ``--post-pad`` to instead extract
 
 Run:
     uv run python scripts/extract_full_fixture_audio.py
-    uv run python scripts/extract_full_fixture_audio.py --fixture stage-shots-blacksmith-2026-stage1
+    uv run python scripts/extract_full_fixture_audio.py --fixture stage-shots-blacksmith-2026-stage1-s97dcec94
     uv run python scripts/extract_full_fixture_audio.py --pre-pad 30 --post-pad 120
 """
 

@@ -150,6 +150,11 @@ export interface MatchProject {
   scoreboard_content_type: number | null;
   selected_shooter_id: number | null;
   selected_competitor_id: number | null;
+  // Server-computed PII-free token for the pinned shooter
+  // ("s" + first 8 chars of sha256("ssi-<id>")). Null when no shooter
+  // is pinned. Used to suffix fixture slugs so promotions on different
+  // shooters at the same match/stage don't collide on filename.
+  shooter_token: string | null;
   match_date: string | null;
   stages: StageEntry[];
   unassigned_videos: StageVideo[];

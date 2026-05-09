@@ -26,14 +26,14 @@
     "a metallic clang from a steel target falling"
   ],
   "calibration_fixtures": [
-    "stage-shots-blacksmith-2026-stage1",
-    "stage-shots-blacksmith-2026-stage2",
-    "stage-shots-blacksmith-2026-stage3",
-    "stage-shots-blacksmith-2026-stage5",
-    "stage-shots-blacksmith-2026-stage6",
-    "stage-shots-blacksmith-2026-stage8",
-    "stage-shots-tallmilan-2026-stage5",
-    "stage-shots-tallmilan-2026-stage6"
+    "stage-shots-blacksmith-2026-stage1-s97dcec94",
+    "stage-shots-blacksmith-2026-stage2-s97dcec94",
+    "stage-shots-blacksmith-2026-stage3-s97dcec94",
+    "stage-shots-blacksmith-2026-stage5-s97dcec94",
+    "stage-shots-blacksmith-2026-stage6-s97dcec94",
+    "stage-shots-blacksmith-2026-stage8-s97dcec94",
+    "stage-shots-tallmilan-2026-stage5-s97dcec94",
+    "stage-shots-tallmilan-2026-stage6-s97dcec94"
   ],
   "n_calibration_candidates": 605,
   "n_calibration_positives": 155,
@@ -55,14 +55,14 @@
       "n_calibration_candidates": 605,
       "n_calibration_positives": 155,
       "calibration_fixtures": [
-        "stage-shots-blacksmith-2026-stage1",
-        "stage-shots-blacksmith-2026-stage2",
-        "stage-shots-blacksmith-2026-stage3",
-        "stage-shots-blacksmith-2026-stage5",
-        "stage-shots-blacksmith-2026-stage6",
-        "stage-shots-blacksmith-2026-stage8",
-        "stage-shots-tallmilan-2026-stage5",
-        "stage-shots-tallmilan-2026-stage6"
+        "stage-shots-blacksmith-2026-stage1-s97dcec94",
+        "stage-shots-blacksmith-2026-stage2-s97dcec94",
+        "stage-shots-blacksmith-2026-stage3-s97dcec94",
+        "stage-shots-blacksmith-2026-stage5-s97dcec94",
+        "stage-shots-blacksmith-2026-stage6-s97dcec94",
+        "stage-shots-blacksmith-2026-stage8-s97dcec94",
+        "stage-shots-tallmilan-2026-stage5-s97dcec94",
+        "stage-shots-tallmilan-2026-stage6-s97dcec94"
       ],
       "voter_e_threshold": 0.43199207377244186
     }

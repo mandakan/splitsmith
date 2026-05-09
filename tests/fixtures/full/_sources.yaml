@@ -20,17 +20,17 @@
 video_dir: /Volumes/GO 3S/DCIM/Camera01
 
 fixtures:
-  stage-shots-blacksmith-2026-stage1: VID_20260412_132733_00_040.mp4
-  stage-shots-blacksmith-2026-stage2: VID_20260412_140158_00_041.mp4
-  stage-shots-blacksmith-2026-stage3: VID_20260412_091752_00_034.mp4
-  stage-shots-blacksmith-2026-stage5: VID_20260412_102637_00_035.mp4
-  stage-shots-blacksmith-2026-stage6: VID_20260412_105215_00_036.mp4
-  stage-shots-blacksmith-2026-stage8: VID_20260412_125853_00_039.mp4
-  stage-shots-blacksmith-2026-stage7: VID_20260412_112131_00_038.mp4
-  stage-shots-tallmilan-2026-stage5: VID_20260426_141808_00_043.mp4
-  stage-shots-tallmilan-2026-stage6: VID_20260426_145548_00_044.mp4
-  stage-shots-tallmilan-2026-stage2: VID_20260426_162417_00_048.mp4
-  stage-shots-tallmilan-2026-stage7: VID_20260426_152210_00_045.mp4
+  stage-shots-blacksmith-2026-stage1-s97dcec94: VID_20260412_132733_00_040.mp4
+  stage-shots-blacksmith-2026-stage2-s97dcec94: VID_20260412_140158_00_041.mp4
+  stage-shots-blacksmith-2026-stage3-s97dcec94: VID_20260412_091752_00_034.mp4
+  stage-shots-blacksmith-2026-stage5-s97dcec94: VID_20260412_102637_00_035.mp4
+  stage-shots-blacksmith-2026-stage6-s97dcec94: VID_20260412_105215_00_036.mp4
+  stage-shots-blacksmith-2026-stage8-s97dcec94: VID_20260412_125853_00_039.mp4
+  stage-shots-blacksmith-2026-stage7-s97dcec94: VID_20260412_112131_00_038.mp4
+  stage-shots-tallmilan-2026-stage5-s97dcec94: VID_20260426_141808_00_043.mp4
+  stage-shots-tallmilan-2026-stage6-s97dcec94: VID_20260426_145548_00_044.mp4
+  stage-shots-tallmilan-2026-stage2-s97dcec94: VID_20260426_162417_00_048.mp4
+  stage-shots-tallmilan-2026-stage7-s97dcec94: VID_20260426_152210_00_045.mp4
 
 # Override entries take precedence over ``video_dir`` + ``fixtures`` lookup.
 overrides:

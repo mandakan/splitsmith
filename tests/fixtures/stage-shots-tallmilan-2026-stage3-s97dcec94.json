@@ -1,0 +1,482 @@
+{
+  "source": "stage_sample.mp4 stage 3 'Per told me to do it!' (audio extracted at 48 kHz mono)",
+  "stage_number": 3,
+  "stage_name": "Per told me to do it!",
+  "fixture_window_in_source": [
+    19.3924,
+    36.1324
+  ],
+  "beep_time": 0.5,
+  "tolerance_ms": 15,
+  "stage_time_seconds": 14.74,
+  "stage_window_end_in_fixture": 15.24,
+  "shots": [
+    {
+      "shot_number": 1,
+      "candidate_number": 3,
+      "time": 2.2548,
+      "ms_after_beep": 1755,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 2,
+      "candidate_number": 4,
+      "time": 2.7188,
+      "ms_after_beep": 2219,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 3,
+      "candidate_number": 5,
+      "time": 3.2891,
+      "ms_after_beep": 2789,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 4,
+      "candidate_number": 6,
+      "time": 3.7381,
+      "ms_after_beep": 3238,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 5,
+      "candidate_number": 7,
+      "time": 4.4737,
+      "ms_after_beep": 3974,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 6,
+      "candidate_number": 8,
+      "time": 5.1441,
+      "ms_after_beep": 4644,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 7,
+      "candidate_number": 9,
+      "time": 5.6687,
+      "ms_after_beep": 5169,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 8,
+      "candidate_number": 14,
+      "time": 7.6399,
+      "ms_after_beep": 7140,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 9,
+      "candidate_number": 15,
+      "time": 7.8948,
+      "ms_after_beep": 7395,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 10,
+      "candidate_number": 16,
+      "time": 8.5036,
+      "ms_after_beep": 8004,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 11,
+      "candidate_number": 24,
+      "time": 10.5628,
+      "ms_after_beep": 10063,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 12,
+      "candidate_number": 25,
+      "time": 11.0721,
+      "ms_after_beep": 10572,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 13,
+      "candidate_number": 33,
+      "time": 13.4912,
+      "ms_after_beep": 12991,
+      "source": "detected",
+      "subclass": "paper"
+    },
+    {
+      "shot_number": 14,
+      "candidate_number": 35,
+      "time": 14.4004,
+      "ms_after_beep": 13900,
+      "source": "detected",
+      "subclass": "steel"
+    },
+    {
+      "shot_number": 15,
+      "candidate_number": 37,
+      "time": 15.1698,
+      "ms_after_beep": 14670,
+      "source": "detected",
+      "subclass": "steel"
+    }
+  ],
+  "_candidates_pending_audit": {
+    "_note": "Auto-detected by current shot_detect (rise-foot leading edge with reverb-chain re-anchor). NOT ground truth.",
+    "candidates": [
+      {
+        "candidate_number": 1,
+        "time": 1.2229,
+        "ms_after_beep": 723.0,
+        "peak_amplitude": 0.249,
+        "confidence": 0.537
+      },
+      {
+        "candidate_number": 2,
+        "time": 1.5017,
+        "ms_after_beep": 1002.0,
+        "peak_amplitude": 0.0571,
+        "confidence": 0.165
+      },
+      {
+        "candidate_number": 3,
+        "time": 2.2548,
+        "ms_after_beep": 1755.0,
+        "peak_amplitude": 0.3326,
+        "confidence": 0.794
+      },
+      {
+        "candidate_number": 4,
+        "time": 2.7189,
+        "ms_after_beep": 2219.0,
+        "peak_amplitude": 0.373,
+        "confidence": 0.275
+      },
+      {
+        "candidate_number": 5,
+        "time": 3.2891,
+        "ms_after_beep": 2789.0,
+        "peak_amplitude": 0.2181,
+        "confidence": 0.238
+      },
+      {
+        "candidate_number": 6,
+        "time": 3.7381,
+        "ms_after_beep": 3238.0,
+        "peak_amplitude": 0.2292,
+        "confidence": 0.185
+      },
+      {
+        "candidate_number": 7,
+        "time": 4.4737,
+        "ms_after_beep": 3974.0,
+        "peak_amplitude": 0.1578,
+        "confidence": 0.228
+      },
+      {
+        "candidate_number": 8,
+        "time": 5.1442,
+        "ms_after_beep": 4644.0,
+        "peak_amplitude": 0.1397,
+        "confidence": 0.282
+      },
+      {
+        "candidate_number": 9,
+        "time": 5.6687,
+        "ms_after_beep": 5169.0,
+        "peak_amplitude": 0.477,
+        "confidence": 0.24
+      },
+      {
+        "candidate_number": 10,
+        "time": 6.4236,
+        "ms_after_beep": 5924.0,
+        "peak_amplitude": 0.0896,
+        "confidence": 0.021
+      },
+      {
+        "candidate_number": 11,
+        "time": 6.7829,
+        "ms_after_beep": 6283.0,
+        "peak_amplitude": 0.1177,
+        "confidence": 0.042
+      },
+      {
+        "candidate_number": 12,
+        "time": 7.0377,
+        "ms_after_beep": 6538.0,
+        "peak_amplitude": 0.3591,
+        "confidence": 0.13
+      },
+      {
+        "candidate_number": 13,
+        "time": 7.1296,
+        "ms_after_beep": 6630.0,
+        "peak_amplitude": 0.0757,
+        "confidence": 0.051
+      },
+      {
+        "candidate_number": 14,
+        "time": 7.6399,
+        "ms_after_beep": 7140.0,
+        "peak_amplitude": 0.6214,
+        "confidence": 0.393
+      },
+      {
+        "candidate_number": 15,
+        "time": 7.8949,
+        "ms_after_beep": 7395.0,
+        "peak_amplitude": 0.428,
+        "confidence": 0.193
+      },
+      {
+        "candidate_number": 16,
+        "time": 8.5037,
+        "ms_after_beep": 8004.0,
+        "peak_amplitude": 0.2323,
+        "confidence": 0.215
+      },
+      {
+        "candidate_number": 17,
+        "time": 8.8816,
+        "ms_after_beep": 8382.0,
+        "peak_amplitude": 0.2449,
+        "confidence": 0.058
+      },
+      {
+        "candidate_number": 18,
+        "time": 9.2657,
+        "ms_after_beep": 8766.0,
+        "peak_amplitude": 0.1566,
+        "confidence": 0.057
+      },
+      {
+        "candidate_number": 19,
+        "time": 9.4265,
+        "ms_after_beep": 8927.0,
+        "peak_amplitude": 0.0962,
+        "confidence": 0.013
+      },
+      {
+        "candidate_number": 20,
+        "time": 9.5685,
+        "ms_after_beep": 9068.0,
+        "peak_amplitude": 0.1141,
+        "confidence": 0.016
+      },
+      {
+        "candidate_number": 21,
+        "time": 9.6858,
+        "ms_after_beep": 9186.0,
+        "peak_amplitude": 0.2089,
+        "confidence": 0.39
+      },
+      {
+        "candidate_number": 22,
+        "time": 9.7718,
+        "ms_after_beep": 9272.0,
+        "peak_amplitude": 0.348,
+        "confidence": 0.184
+      },
+      {
+        "candidate_number": 23,
+        "time": 10.1622,
+        "ms_after_beep": 9662.0,
+        "peak_amplitude": 0.0584,
+        "confidence": 0.009
+      },
+      {
+        "candidate_number": 24,
+        "time": 10.5629,
+        "ms_after_beep": 10063.0,
+        "peak_amplitude": 0.5874,
+        "confidence": 0.487
+      },
+      {
+        "candidate_number": 25,
+        "time": 11.0721,
+        "ms_after_beep": 10572.0,
+        "peak_amplitude": 0.5493,
+        "confidence": 0.219
+      },
+      {
+        "candidate_number": 26,
+        "time": 11.8559,
+        "ms_after_beep": 11356.0,
+        "peak_amplitude": 0.331,
+        "confidence": 0.023
+      },
+      {
+        "candidate_number": 27,
+        "time": 11.9711,
+        "ms_after_beep": 11471.0,
+        "peak_amplitude": 0.2014,
+        "confidence": 0.059
+      },
+      {
+        "candidate_number": 28,
+        "time": 12.1707,
+        "ms_after_beep": 11671.0,
+        "peak_amplitude": 0.0836,
+        "confidence": 0.031
+      },
+      {
+        "candidate_number": 29,
+        "time": 12.302,
+        "ms_after_beep": 11802.0,
+        "peak_amplitude": 0.0827,
+        "confidence": 0.071
+      },
+      {
+        "candidate_number": 30,
+        "time": 12.461,
+        "ms_after_beep": 11961.0,
+        "peak_amplitude": 0.0984,
+        "confidence": 0.067
+      },
+      {
+        "candidate_number": 31,
+        "time": 12.6961,
+        "ms_after_beep": 12196.0,
+        "peak_amplitude": 0.0506,
+        "confidence": 0.021
+      },
+      {
+        "candidate_number": 32,
+        "time": 13.3055,
+        "ms_after_beep": 12806.0,
+        "peak_amplitude": 0.051,
+        "confidence": 0.008
+      },
+      {
+        "candidate_number": 33,
+        "time": 13.4912,
+        "ms_after_beep": 12991.0,
+        "peak_amplitude": 0.6638,
+        "confidence": 0.621
+      },
+      {
+        "candidate_number": 34,
+        "time": 14.28,
+        "ms_after_beep": 13780.0,
+        "peak_amplitude": 0.0331,
+        "confidence": 0.021
+      },
+      {
+        "candidate_number": 35,
+        "time": 14.4005,
+        "ms_after_beep": 13900.0,
+        "peak_amplitude": 0.2523,
+        "confidence": 0.23
+      },
+      {
+        "candidate_number": 36,
+        "time": 14.9883,
+        "ms_after_beep": 14488.0,
+        "peak_amplitude": 0.2765,
+        "confidence": 0.325
+      },
+      {
+        "candidate_number": 37,
+        "time": 15.1698,
+        "ms_after_beep": 14670.0,
+        "peak_amplitude": 0.25,
+        "confidence": 0.209
+      },
+      {
+        "candidate_number": 38,
+        "time": 15.7333,
+        "ms_after_beep": 15233.0,
+        "peak_amplitude": 0.2391,
+        "confidence": 0.248
+      },
+      {
+        "candidate_number": 39,
+        "time": 15.9272,
+        "ms_after_beep": 15427.0,
+        "peak_amplitude": 0.092,
+        "confidence": 0.065
+      },
+      {
+        "candidate_number": 40,
+        "time": 16.1652,
+        "ms_after_beep": 15665.0,
+        "peak_amplitude": 0.2669,
+        "confidence": 0.387
+      }
+    ],
+    "labels_by_time": {
+      "1.223": "handling",
+      "9.686": "handling",
+      "14.988": "steel_ring",
+      "15.733": "steel_ring",
+      "16.165": "handling",
+      "1.502": "movement",
+      "6.424": "movement",
+      "6.783": "cross_bay",
+      "7.038": "cross_bay",
+      "8.882": "wind",
+      "9.266": "wind",
+      "9.772": "handling",
+      "11.856": "wind",
+      "12.302": "movement",
+      "14.280": "cross_bay",
+      "15.927": "handling",
+      "7.130": "cross_bay",
+      "9.427": "handling",
+      "9.569": "handling",
+      "10.162": "wind",
+      "11.971": "movement",
+      "12.171": "movement",
+      "12.461": "movement",
+      "12.696": "movement",
+      "13.306": "movement"
+    }
+  },
+  "stage_rounds": {
+    "paper": 5,
+    "poppers": 2,
+    "plates": 0,
+    "shots_per_paper": 2,
+    "expected": 12
+  },
+  "camera": {
+    "id": "go3s",
+    "make": "Insta360",
+    "model": "GO 3S",
+    "mount": "head",
+    "position": "shooter",
+    "audio_source": "internal",
+    "agc_state": "unknown",
+    "sample_rate": 48000,
+    "bit_depth": null,
+    "audio_codec": null
+  },
+  "history": [],
+  "venue": {
+    "environment": "outdoor",
+    "surface": "unknown"
+  },
+  "gun": {
+    "calibre": "9mm",
+    "muzzle_device": "none",
+    "action": "semi-auto",
+    "power_factor": "minor"
+  },
+  "shooter": {
+    "id": "s97dcec94"
+  },
+  "event_id": "tallmilan-2026:3:s97dcec94",
+  "source_video": "/Volumes/GO 3S/DCIM/Camera01/VID_20260426_165837_00_049.mp4"
+}

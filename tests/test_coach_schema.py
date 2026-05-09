@@ -199,7 +199,7 @@ def test_write_coach_fields_empty_note_clears() -> None:
 
 
 def test_real_audit_json_round_trip(tmp_path: Path) -> None:
-    src = FIXTURES / "stage-shots-blacksmith-2026-stage1.json"
+    src = FIXTURES / "stage-shots-blacksmith-2026-stage1-s97dcec94.json"
     data = json.loads(src.read_text(encoding="utf-8"))
     assert isinstance(data.get("shots"), list)
     assert data["shots"], "fixture must have shots to test against"

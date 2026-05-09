@@ -221,7 +221,7 @@ export function BeepSection({
     setError(null);
     try {
       const job = await api.detectShots(stageNumber, { reset: true });
-      const final = await api.pollJob(job.id);
+      const final = await api.pollJob(job.id, () => {});
       if (final.status === "failed") {
         setError(final.error ?? "Shot detection failed");
       } else {

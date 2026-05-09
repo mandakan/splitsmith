@@ -24,18 +24,18 @@ from splitsmith.shot_detect import detect_shots
 from splitsmith.shot_refine import refine_shot_time
 
 DEFAULT_FIXTURES = [
-    "stage-shots-tallmilan-2026-stage3",
-    "stage-shots-blacksmith-2026-stage7",
-    "stage-shots-blacksmith-2026-stage1",
-    "stage-shots-blacksmith-2026-stage2",
-    "stage-shots-blacksmith-2026-stage3",
-    "stage-shots-blacksmith-2026-stage5",
-    "stage-shots-blacksmith-2026-stage6",
-    "stage-shots-blacksmith-2026-stage8",
-    "stage-shots-tallmilan-2026-stage2",
-    "stage-shots-tallmilan-2026-stage7",
-    "stage-shots-tallmilan-2026-stage5",
-    "stage-shots-tallmilan-2026-stage6",
+    "stage-shots-tallmilan-2026-stage3-s97dcec94",
+    "stage-shots-blacksmith-2026-stage7-s97dcec94",
+    "stage-shots-blacksmith-2026-stage1-s97dcec94",
+    "stage-shots-blacksmith-2026-stage2-s97dcec94",
+    "stage-shots-blacksmith-2026-stage3-s97dcec94",
+    "stage-shots-blacksmith-2026-stage5-s97dcec94",
+    "stage-shots-blacksmith-2026-stage6-s97dcec94",
+    "stage-shots-blacksmith-2026-stage8-s97dcec94",
+    "stage-shots-tallmilan-2026-stage2-s97dcec94",
+    "stage-shots-tallmilan-2026-stage7-s97dcec94",
+    "stage-shots-tallmilan-2026-stage5-s97dcec94",
+    "stage-shots-tallmilan-2026-stage6-s97dcec94",
 ]
 FIXTURES_DIR = Path("tests/fixtures")
 

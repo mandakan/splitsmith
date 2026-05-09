@@ -55,38 +55,38 @@ from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
 DEFAULT_FIXTURES = [
-    "stage-shots-tallmilan-2026-stage3",
-    "stage-shots-blacksmith-2026-stage7",
-    "stage-shots-blacksmith-2026-stage1",
-    "stage-shots-blacksmith-2026-stage2",
-    "stage-shots-blacksmith-2026-stage3",
-    "stage-shots-blacksmith-2026-stage5",
-    "stage-shots-blacksmith-2026-stage6",
-    "stage-shots-blacksmith-2026-stage8",
-    "stage-shots-tallmilan-2026-stage2",
-    "stage-shots-tallmilan-2026-stage7",
-    "stage-shots-tallmilan-2026-stage4",
-    "stage-shots-tallmilan-2026-stage5",
-    "stage-shots-tallmilan-2026-stage6",
+    "stage-shots-tallmilan-2026-stage3-s97dcec94",
+    "stage-shots-blacksmith-2026-stage7-s97dcec94",
+    "stage-shots-blacksmith-2026-stage1-s97dcec94",
+    "stage-shots-blacksmith-2026-stage2-s97dcec94",
+    "stage-shots-blacksmith-2026-stage3-s97dcec94",
+    "stage-shots-blacksmith-2026-stage5-s97dcec94",
+    "stage-shots-blacksmith-2026-stage6-s97dcec94",
+    "stage-shots-blacksmith-2026-stage8-s97dcec94",
+    "stage-shots-tallmilan-2026-stage2-s97dcec94",
+    "stage-shots-tallmilan-2026-stage7-s97dcec94",
+    "stage-shots-tallmilan-2026-stage4-s97dcec94",
+    "stage-shots-tallmilan-2026-stage5-s97dcec94",
+    "stage-shots-tallmilan-2026-stage6-s97dcec94",
     # Phone-cam (issue #137 / promote-secondary, PR #134). Calibration
     # script auto-skips fixtures missing CLAP / PANN caches; run
     # ``scripts/extract_clap_features.py`` and
     # ``scripts/extract_audio_embeddings.py`` for these stems first to
     # pick them up.
-    "stage-shots-tallmilan-2026-stage2-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage4-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage5-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage6-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage7-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro",
+    "stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro",
     # Phone-cam (PR #152, anchored against the blacksmith headcam fixtures
     # to land cross-match acoustic variation -- issue #149's near-term ask).
-    "stage-shots-blacksmith-2026-stage1-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage2-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage3-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage5-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage6-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage7-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage8-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage2-s97dcec94-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage3-s97dcec94-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage5-s97dcec94-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro",
+    "stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro",
 ]
 
 # Fixtures whose promote-report flagged ``wrong_clip_suspected: true`` --
@@ -97,8 +97,8 @@ DEFAULT_FIXTURES = [
 # re-anchor plan.
 WRONG_CLIP_FIXTURES: frozenset[str] = frozenset(
     {
-        "stage-shots-blacksmith-2026-stage6-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage4-apple-iphone17pro",
+        "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
+        "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro",
     }
 )
 FIXTURES_DIR = Path("tests/fixtures")
