@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from . import detect_tools, tools, write_tools
+from . import detect_tools, export_tools, tools, write_tools
 
 
 def create_server(name: str = "splitsmith") -> FastMCP:
@@ -253,6 +253,108 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             project_root,
             stage_number=stage_number,
             reset=reset,
+        )
+
+    # ----------------------------------------------------------------
+    # Export tools (layer 3e). Templates are read-only; export_stage
+    # writes per-stage artefacts; export_match stitches them.
+    # ----------------------------------------------------------------
+
+    @mcp.tool()
+    def list_templates(user_dir: str | None = None) -> list[dict]:
+        """List the export-template catalogue.
+
+        Returns merged builtin + user templates (user wins on id
+        collision). ``user_dir`` defaults to
+        ``~/.splitsmith/templates``. Each row carries the resolved
+        ``settings`` dict the agent forwards to ``export_stage`` /
+        ``export_match`` -- fields the template didn't set come back
+        as ``None`` so agent code can fall back to tool defaults.
+        """
+        return export_tools.list_templates_tool(user_dir=user_dir)
+
+    @mcp.tool()
+    def export_stage(
+        project_root: str,
+        stage_number: int,
+        write_trim: bool = True,
+        write_csv: bool = True,
+        write_fcpxml: bool = True,
+        write_report: bool = True,
+        write_overlay: bool = False,
+        overlay_codec: str = "auto",
+        overlay_max_height: int | None = None,
+        overlay_max_fps: float | None = None,
+    ) -> dict:
+        """Run a single stage's export.
+
+        Writes (subject to flags): the lossless trim under
+        ``<project>/exports/stage<N>_<slug>_trimmed.mp4``, splits CSV,
+        FCPXML, report, and optional overlay MOV. Preconditions:
+        primary has ``beep_time``; ``audit/stage<N>.json`` exists
+        with at least one shot (run ``detect_shots`` first).
+        """
+        return export_tools.export_stage_tool(
+            project_root,
+            stage_number=stage_number,
+            write_trim=write_trim,
+            write_csv=write_csv,
+            write_fcpxml=write_fcpxml,
+            write_report=write_report,
+            write_overlay=write_overlay,
+            overlay_codec=overlay_codec,  # type: ignore[arg-type]
+            overlay_max_height=overlay_max_height,
+            overlay_max_fps=overlay_max_fps,
+        )
+
+    @mcp.tool()
+    def export_match(
+        project_root: str,
+        stage_numbers: list[int],
+        head_pad_seconds: float = 5.0,
+        tail_pad_seconds: float = 5.0,
+        include_secondaries: bool = True,
+        include_overlay: bool = True,
+        project_name: str | None = None,
+        pip_layout: str = "stacked",
+        output_format: str = "fcpxml",
+        transition_kind: str = "none",
+        transition_duration_seconds: float = 0.5,
+        title_kind: str = "none",
+        title_duration_seconds: float = 1.5,
+        intro_path: str | None = None,
+        outro_path: str | None = None,
+        youtube_sidecar: bool = False,
+        youtube_preset: bool = False,
+    ) -> dict:
+        """Stitch N stages into one match-level export (FCPXML / FCP7
+        / MP4) plus optional YouTube sidecar.
+
+        Mirror of ``POST /api/match/export``. Composes from each
+        stage's already-written per-stage export -- run
+        ``export_stage`` for every stage first; this tool errors when
+        any required artefact is missing rather than auto-building
+        them inline (the explicit-step shape matches the rest of the
+        MCP surface and keeps timing predictable).
+        """
+        return export_tools.export_match_tool(
+            project_root,
+            stage_numbers=stage_numbers,
+            head_pad_seconds=head_pad_seconds,
+            tail_pad_seconds=tail_pad_seconds,
+            include_secondaries=include_secondaries,
+            include_overlay=include_overlay,
+            project_name=project_name,
+            pip_layout=pip_layout,  # type: ignore[arg-type]
+            output_format=output_format,  # type: ignore[arg-type]
+            transition_kind=transition_kind,  # type: ignore[arg-type]
+            transition_duration_seconds=transition_duration_seconds,
+            title_kind=title_kind,  # type: ignore[arg-type]
+            title_duration_seconds=title_duration_seconds,
+            intro_path=intro_path,
+            outro_path=outro_path,
+            youtube_sidecar=youtube_sidecar,
+            youtube_preset=youtube_preset,
         )
 
     @mcp.tool()
