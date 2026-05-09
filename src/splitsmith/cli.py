@@ -56,9 +56,11 @@ app = typer.Typer(
 )
 console = Console()
 
+from .compare.cli import compare_app  # noqa: E402
 from .lab_cli import app as _lab_app  # noqa: E402
 
 app.add_typer(_lab_app, name="lab")
+app.add_typer(compare_app, name="compare")
 
 
 # ---------------------------------------------------------------------------
