@@ -2690,8 +2690,6 @@ function StageCard({
               stageNumber={stage.stage_number}
               video={primary}
               bare
-              busy={busy}
-              setBusy={setBusy}
               setError={setError}
               onProjectUpdate={onProjectUpdate}
             />
@@ -2728,8 +2726,6 @@ function StageCard({
               stageNumber={stage.stage_number}
               video={v}
               bare
-              busy={busy}
-              setBusy={setBusy}
               setError={setError}
               onProjectUpdate={onProjectUpdate}
             />
