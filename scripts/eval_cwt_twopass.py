@@ -49,10 +49,10 @@ from splitsmith.shot_detect import _POST_BEEP_SKIP_S, detect_shots
 
 FIX = Path("tests/fixtures")
 NAMES = [
-    "stage-shots-tallmilan-2026-stage3",
-    "stage-shots-blacksmith-2026-stage7",
-    "stage-shots-tallmilan-2026-stage2",
-    "stage-shots-tallmilan-2026-stage7",
+    "stage-shots-tallmilan-2026-stage3-s97dcec94",
+    "stage-shots-blacksmith-2026-stage7-s97dcec94",
+    "stage-shots-tallmilan-2026-stage2-s97dcec94",
+    "stage-shots-tallmilan-2026-stage7-s97dcec94",
 ]
 TOL_MS = 75.0
 

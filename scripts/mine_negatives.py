@@ -25,7 +25,7 @@ already sees, and avoids baking in the current ensemble's blind spots.
 
 Run:
     uv run python scripts/mine_negatives.py
-    uv run python scripts/mine_negatives.py --fixture stage-shots-blacksmith-2026-stage1
+    uv run python scripts/mine_negatives.py --fixture stage-shots-blacksmith-2026-stage1-s97dcec94
 """
 
 from __future__ import annotations

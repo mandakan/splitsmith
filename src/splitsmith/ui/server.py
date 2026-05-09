@@ -5398,11 +5398,14 @@ def create_app(
                         "whose run this is) via the Ingest page first."
                     ),
                 )
-            shooter_payload: dict[str, Any] = {
-                "id": f"ssi-{project.selected_shooter_id}",
-                "ssi_shooter_id": project.selected_shooter_id,
-                "name": project.competitor_name,
-            }
+            # PII-free shooter stamp: just the deterministic token.
+            # SSI ID + competitor name stay in the private project file.
+            token = lab_module.shooter_token(project.selected_shooter_id)
+            shooter_payload: dict[str, Any] = {"id": token}
+            # Defence in depth: ensure the slug carries the token even
+            # when an older client builds a slug from project.name alone.
+            if token not in slug:
+                slug = f"{slug}-{token}"
             try:
                 rec = lab_module.promote_stage_to_fixture(
                     lab_module.PromoteRequest(
@@ -5411,7 +5414,6 @@ def create_app(
                         fixture_slug=slug,
                         overwrite=overwrite,
                         extra_metadata={
-                            "project_root": str(state.project_root),
                             "stage_number": stage_n,
                             "stage_name": getattr(stg, "name", None),
                         },
@@ -5812,8 +5814,22 @@ def create_app(
                     detail="secondary has no beep_time; detect or align beep first",
                 )
 
+            # Anchor lookup needs the shooter token suffix because the
+            # primary fixture was promoted with it. Without a pinned
+            # shooter we can't construct the slug -- bail with the same
+            # message used by lab_promote.
+            if project.selected_shooter_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "this project has no SSI shooter pinned; "
+                        "cannot resolve anchor fixture slug."
+                    ),
+                )
+            anchor_token = lab_module.shooter_token(project.selected_shooter_id)
             primary_slug = (
                 f"stage-shots-{export_helpers._slugify(project.name)}-stage{stage_number}"
+                f"-{anchor_token}"
             )
             fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
             anchor_path = fixtures_root / f"{primary_slug}.json"
@@ -5874,7 +5890,11 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-            secondary_source_desc = str(source)
+            # Strip home-dir prefix so the published fixture carries no
+            # OS-username PII; ``scrub_local_path`` drops the
+            # ``/Users/<name>/matches/<match>/`` head and keeps the
+            # meaningful tail (``raw/<file>``).
+            secondary_source_desc = lab_module.scrub_local_path(str(source)) or source.name
             # Use the audited in-stream beep time from the project so the
             # promote engine can skip cross-correlation entirely. The
             # ingest screen owns this value (auto + manual + review); we
@@ -6089,7 +6109,11 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-            secondary_source_desc = str(source)
+            # Strip home-dir prefix so the published fixture carries no
+            # OS-username PII; ``scrub_local_path`` drops the
+            # ``/Users/<name>/matches/<match>/`` head and keeps the
+            # meaningful tail (``raw/<file>``).
+            secondary_source_desc = lab_module.scrub_local_path(str(source)) or source.name
             known_secondary_beep = float(video.beep_time)
 
             def _run(handle: JobHandle) -> None:

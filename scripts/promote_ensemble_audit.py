@@ -11,7 +11,7 @@ A ``.json.before-promote`` backup of the canonical file is written first.
 
 Run:
     uv run python scripts/promote_ensemble_audit.py \\
-        --ensemble build/ensemble-review/stage-shots-blacksmith-2026-stage2-ensemble-3of3.json
+        --ensemble build/ensemble-review/stage-shots-blacksmith-2026-stage2-s97dcec94-ensemble-3of3.json
 """
 
 from __future__ import annotations

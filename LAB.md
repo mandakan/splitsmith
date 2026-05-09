@@ -135,7 +135,7 @@ uv run splitsmith lab fixtures --no-pretty | jq '.[] | {slug, n_shots, expected_
 uv run splitsmith lab eval --summary-only
 
 # Run on a subset (matches what selecting rows would do in the UI).
-uv run splitsmith lab eval -s stage-shots-blacksmith-2026-stage1 -s stage-shots-tallmilan-2026-stage5 --summary-only
+uv run splitsmith lab eval -s stage-shots-blacksmith-2026-stage1-s97dcec94 -s stage-shots-tallmilan-2026-stage5-s97dcec94 --summary-only
 
 # Tweak knobs from the CLI; --save persists under build/lab/runs/.
 uv run splitsmith lab eval --consensus 2 --apriori-boost 1.5 --summary-only
@@ -591,7 +591,7 @@ name: tighter-d
 provenance:
   built_at: 2026-05-03T...
   config_hash: abc123abc123
-  fixtures: [stage-shots-blacksmith-2026-stage1, ...]
+  fixtures: [stage-shots-blacksmith-2026-stage1-s97dcec94, ...]
   note: Cut tallmilan FPs without losing blacksmith recall
   universe_path: build/lab/runs/latest.json
 summary:

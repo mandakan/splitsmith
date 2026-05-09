@@ -5,256 +5,256 @@ fixtures:
   ground_truth_in_clip: 4.877
   tolerance_ms: 20.0
   tags: []
-- stem: stage-shots-blacksmith-2026-stage1-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage1-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage1
+- stem: stage-shots-blacksmith-2026-stage1-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage1.wav
+  clip_wav: stage-shots-blacksmith-2026-stage1-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage1_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage1-s97dcec94_full.wav
   ground_truth_in_full: 22.9417
   full_duration_s: 104.337567
   tags:
   - headcam
   - late-beep
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage2-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage2-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage2-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage2-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
-- stem: stage-shots-blacksmith-2026-stage2
+- stem: stage-shots-blacksmith-2026-stage2-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage2.wav
+  clip_wav: stage-shots-blacksmith-2026-stage2-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage2_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage2-s97dcec94_full.wav
   ground_truth_in_full: 17.6261
   full_duration_s: 276.409467
   tags:
   - headcam
   - late-beep
-- stem: stage-shots-blacksmith-2026-stage3-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage3-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage3-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage3-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage3
+- stem: stage-shots-blacksmith-2026-stage3-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage3.wav
+  clip_wav: stage-shots-blacksmith-2026-stage3-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage3_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage3-s97dcec94_full.wav
   ground_truth_in_full: 25.4267
   full_duration_s: 85.12
   tags:
   - headcam
   - late-beep
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage5-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage5-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage5-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage5-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage5
+- stem: stage-shots-blacksmith-2026-stage5-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage5.wav
+  clip_wav: stage-shots-blacksmith-2026-stage5-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage5_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage5-s97dcec94_full.wav
   ground_truth_in_full: 6.522
   full_duration_s: 191.14
   tags:
   - headcam
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage6-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage6-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 3.292
   tolerance_ms: 15.0
   tags:
   - handheld
-- stem: stage-shots-blacksmith-2026-stage6
+- stem: stage-shots-blacksmith-2026-stage6-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage6.wav
+  clip_wav: stage-shots-blacksmith-2026-stage6-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage6_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage6-s97dcec94_full.wav
   ground_truth_in_full: 14.1252
   full_duration_s: 61.14
   tags:
   - headcam
   - late-beep
-- stem: stage-shots-blacksmith-2026-stage7-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage7-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
-- stem: stage-shots-blacksmith-2026-stage7
+- stem: stage-shots-blacksmith-2026-stage7-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage7.wav
+  clip_wav: stage-shots-blacksmith-2026-stage7-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage7_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage7-s97dcec94_full.wav
   ground_truth_in_full: 17.3027
   full_duration_s: 77.143733
   tags:
   - headcam
   - late-beep
-- stem: stage-shots-blacksmith-2026-stage8-apple-iphone17pro
+- stem: stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-blacksmith-2026-stage8-apple-iphone17pro.wav
+  clip_wav: stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
   - steel-prone
-- stem: stage-shots-blacksmith-2026-stage8
+- stem: stage-shots-blacksmith-2026-stage8-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-blacksmith-2026-stage8.wav
+  clip_wav: stage-shots-blacksmith-2026-stage8-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-blacksmith-2026-stage8_full.wav
+  full_wav: full/stage-shots-blacksmith-2026-stage8-s97dcec94_full.wav
   ground_truth_in_full: 25.3944
   full_duration_s: 113.246467
   tags:
   - headcam
   - late-beep
   - steel-prone
-- stem: stage-shots-tallmilan-2026-stage2-apple-iphone17pro
+- stem: stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-tallmilan-2026-stage2-apple-iphone17pro.wav
+  clip_wav: stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
-- stem: stage-shots-tallmilan-2026-stage2
+- stem: stage-shots-tallmilan-2026-stage2-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-tallmilan-2026-stage2.wav
+  clip_wav: stage-shots-tallmilan-2026-stage2-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-tallmilan-2026-stage2_full.wav
+  full_wav: full/stage-shots-tallmilan-2026-stage2-s97dcec94_full.wav
   ground_truth_in_full: 28.7817
   full_duration_s: 122.889433
   tags:
   - headcam
   - late-beep
-- stem: stage-shots-tallmilan-2026-stage3
+- stem: stage-shots-tallmilan-2026-stage3-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-tallmilan-2026-stage3.wav
+  clip_wav: stage-shots-tallmilan-2026-stage3-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
   tags:
   - headcam
   - steel-prone
-- stem: stage-shots-tallmilan-2026-stage4-apple-iphone17pro
+- stem: stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-tallmilan-2026-stage4-apple-iphone17pro.wav
+  clip_wav: stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
-- stem: stage-shots-tallmilan-2026-stage4
+- stem: stage-shots-tallmilan-2026-stage4-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-tallmilan-2026-stage4.wav
+  clip_wav: stage-shots-tallmilan-2026-stage4-s97dcec94.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
   tags:
   - headcam
-- stem: stage-shots-tallmilan-2026-stage5-apple-iphone17pro
+- stem: stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-tallmilan-2026-stage5-apple-iphone17pro.wav
+  clip_wav: stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 1.1507
   tolerance_ms: 15.0
   tags:
   - handheld
-- stem: stage-shots-tallmilan-2026-stage5
+- stem: stage-shots-tallmilan-2026-stage5-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-tallmilan-2026-stage5.wav
+  clip_wav: stage-shots-tallmilan-2026-stage5-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-tallmilan-2026-stage5_full.wav
+  full_wav: full/stage-shots-tallmilan-2026-stage5-s97dcec94_full.wav
   ground_truth_in_full: 15.0302
   full_duration_s: 172.839333
   tags:
   - headcam
   - late-beep
-- stem: stage-shots-tallmilan-2026-stage6-apple-iphone17pro
+- stem: stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-tallmilan-2026-stage6-apple-iphone17pro.wav
+  clip_wav: stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
   - steel-prone
-- stem: stage-shots-tallmilan-2026-stage6
+- stem: stage-shots-tallmilan-2026-stage6-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-tallmilan-2026-stage6.wav
+  clip_wav: stage-shots-tallmilan-2026-stage6-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-tallmilan-2026-stage6_full.wav
+  full_wav: full/stage-shots-tallmilan-2026-stage6-s97dcec94_full.wav
   ground_truth_in_full: 20.454
   full_duration_s: 399.565833
   tags:
   - headcam
   - late-beep
   - steel-prone
-- stem: stage-shots-tallmilan-2026-stage7-apple-iphone17pro
+- stem: stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
-  clip_wav: stage-shots-tallmilan-2026-stage7-apple-iphone17pro.wav
+  clip_wav: stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 15.0
   tags:
   - handheld
   - steel-prone
-- stem: stage-shots-tallmilan-2026-stage7
+- stem: stage-shots-tallmilan-2026-stage7-s97dcec94
   camera_kind: head
   camera_id: go3s
-  clip_wav: stage-shots-tallmilan-2026-stage7.wav
+  clip_wav: stage-shots-tallmilan-2026-stage7-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
-  full_wav: full/stage-shots-tallmilan-2026-stage7_full.wav
+  full_wav: full/stage-shots-tallmilan-2026-stage7-s97dcec94_full.wav
   ground_truth_in_full: 21.879
   full_duration_s: 101.5014
   tags:

@@ -20,7 +20,7 @@ def fixtures_dir() -> Path:
 def test_refine_recovers_stage3_reverb_anchor(fixtures_dir: Path) -> None:
     """Stage-3 cand #35 was generated 144 ms late on a reverb peak.
     Refinement must pull it back within ~5 ms of the audited onset."""
-    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3.wav")
+    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3-s97dcec94.wav")
     audit_t = 12.5538
     detector_t = 12.6984
 
@@ -38,7 +38,7 @@ def test_refine_keeps_already_clean_shot(fixtures_dir: Path) -> None:
     """When the original anchor is already on a local envelope peak the
     refinement must NOT re-anchor (otherwise it pulls clean shots toward
     nearby reverb peaks and timing regresses)."""
-    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3.wav")
+    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3-s97dcec94.wav")
     # Stage-3 audited shot t=2.5271 already coincides with cand #4 at the
     # same time (drift 0 ms in the refresh-script output).
     audit_t = 2.5271
@@ -54,7 +54,7 @@ def test_refine_keeps_already_clean_shot(fixtures_dir: Path) -> None:
 def test_refine_at_audio_boundary_does_not_crash(fixtures_dir: Path) -> None:
     """Refining near the start of the audio (where the search window is
     truncated) must not crash and must return the original time."""
-    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3.wav")
+    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3-s97dcec94.wav")
     result = refine_shot_time(audio, sr, 0.0, ShotRefineConfig())
     assert result.time == 0.0
     assert result.method.startswith("envelope")
@@ -75,7 +75,7 @@ def test_refine_rejects_non_mono() -> None:
 def test_refine_aic_method_runs(fixtures_dir: Path) -> None:
     """AIC method should not crash and should return a finite confidence
     even when the result is rejected (busy reverb backgrounds)."""
-    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3.wav")
+    audio, sr = load_audio(fixtures_dir / "stage-shots-blacksmith-2026-stage3-s97dcec94.wav")
     cfg = ShotRefineConfig(method="aic")
     result = refine_shot_time(audio, sr, 12.6984, cfg)
     assert np.isfinite(result.confidence)

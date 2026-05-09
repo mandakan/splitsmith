@@ -1438,10 +1438,10 @@ export function Audit() {
                       <Save className="size-4" />
                     )}
                   </Button>
-                  {labEnabled && stageNumber != null && stage && (
+                  {labEnabled && stageNumber != null && stage && project?.shooter_token && (
                     <PromoteFixtureButton
                       stageNumber={stageNumber}
-                      defaultSlug={`stage-shots-${slugify(project?.name ?? "match")}-stage${stageNumber}`}
+                      defaultSlug={`stage-shots-${slugify(project.name)}-stage${stageNumber}-${project.shooter_token}`}
                     />
                   )}
                   {labEnabled && stageNumber != null && stage && videos.length > 1 && (

@@ -17,7 +17,26 @@ from splitsmith.lab.core import (
     event_id_from_payload,
     list_fixtures,
     match_stage_from_slug,
+    shooter_token,
 )
+
+
+def test_shooter_token_is_stable_and_non_pii() -> None:
+    # Same SSI ID -> same token, regardless of how it's typed.
+    assert shooter_token(41643) == shooter_token("41643")
+    # Format: 's' + 8 hex chars.
+    tok = shooter_token(41643)
+    assert tok.startswith("s")
+    assert len(tok) == 9
+    int(tok[1:], 16)  # parses as hex
+    # Different IDs -> different tokens.
+    assert shooter_token(41643) != shooter_token(44346)
+
+
+def test_shooter_token_known_value() -> None:
+    # Pinned so a repo-wide migration produces stable filenames; if this
+    # changes every fixture path in tests/fixtures/ also has to change.
+    assert shooter_token(41643) == "s97dcec94"
 
 
 def test_match_stage_from_slug_parses_canonical_pattern() -> None:

@@ -1,0 +1,179 @@
+{
+  "slug": "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
+  "secondary_source": "raw/IMG_2992.MOV",
+  "anchor_slug": "vid-20260412-105215-00-036-mp4-stage-6-h4-audio-extracted-at",
+  "cross_align": {
+    "method": "known_beeps",
+    "secondary_beep_time": 3.292,
+    "offset_seconds": 2.792,
+    "confidence": null,
+    "peak_correlation": 1.0
+  },
+  "snap_window_ms": 60.0,
+  "drift_ms_per_minute": -94.913,
+  "counts": {
+    "anchor_shots": 13,
+    "snapped": 13,
+    "missed": 0,
+    "monotonicity_flagged": 0,
+    "min_spacing_flagged": 0,
+    "voter_a_candidates": 24,
+    "total_candidates": 26
+  },
+  "displacement_stats": {
+    "mean_ms": -15.06,
+    "stdev_ms": 38.03,
+    "p95_ms": 49.63,
+    "min_ms": -54.79,
+    "max_ms": 59.18
+  },
+  "amplitude_stats": {
+    "median": 0.0176,
+    "p10": 0.0047,
+    "low_amplitude_shots": 8
+  },
+  "quality": {
+    "wrong_clip_suspected": true,
+    "snap_rate": 1.0,
+    "warnings": [
+      "residual displacement std 38.0 ms is high; snaps may be landing on noise rather than actual shots",
+      "median snap amplitude 0.018 is very low; the secondary may be silent at shot positions (wrong stage / occluded mic / wrong video)"
+    ]
+  },
+  "per_shot": [
+    {
+      "shot_number": 1,
+      "anchor_time": 1.75,
+      "predicted_time": 4.534791229166666,
+      "snapped_time": 4.523,
+      "displacement_ms": -11.79122916666664,
+      "snap_confidence": 0.02618408203125,
+      "time_since_beep_s": 1.25,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 2,
+      "anchor_time": 2.077,
+      "predicted_time": 4.859905414716667,
+      "snapped_time": 4.845,
+      "displacement_ms": -14.905414716666954,
+      "snap_confidence": 0.02386474609375,
+      "time_since_beep_s": 1.577,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 3,
+      "anchor_time": 4.398,
+      "predicted_time": 7.167520169033333,
+      "snapped_time": 7.141,
+      "displacement_ms": -26.520169033332763,
+      "snap_confidence": 0.01763916015625,
+      "time_since_beep_s": 3.8979999999999997,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 4,
+      "anchor_time": 4.725,
+      "predicted_time": 7.492634354583333,
+      "snapped_time": 7.443,
+      "displacement_ms": -49.63435458333354,
+      "snap_confidence": 0.00665283203125,
+      "time_since_beep_s": 4.225,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 5,
+      "anchor_time": 5.228,
+      "predicted_time": 7.992733545199999,
+      "snapped_time": 8.036,
+      "displacement_ms": 43.26645480000035,
+      "snap_confidence": 0.4940185546875,
+      "time_since_beep_s": 4.728,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 6,
+      "anchor_time": 5.769,
+      "predicted_time": 8.530613589183332,
+      "snapped_time": 8.484,
+      "displacement_ms": -46.61358918333214,
+      "snap_confidence": 0.01385498046875,
+      "time_since_beep_s": 5.269,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 7,
+      "anchor_time": 5.994,
+      "predicted_time": 8.754316010433332,
+      "snapped_time": 8.796,
+      "displacement_ms": 41.683989566667634,
+      "snap_confidence": 0.004241943359375,
+      "time_since_beep_s": 5.494,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 8,
+      "anchor_time": 6.779,
+      "predicted_time": 9.53478890235,
+      "snapped_time": 9.48,
+      "displacement_ms": -54.78890234999945,
+      "snap_confidence": 0.0023193359375,
+      "time_since_beep_s": 6.279,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 9,
+      "anchor_time": 7.294,
+      "predicted_time": 10.046818888766666,
+      "snapped_time": 10.106,
+      "displacement_ms": 59.18111123333425,
+      "snap_confidence": 0.048980712890625,
+      "time_since_beep_s": 6.794,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 10,
+      "anchor_time": 7.615,
+      "predicted_time": 10.365967676416666,
+      "snapped_time": 10.312,
+      "displacement_ms": -53.96767641666678,
+      "snap_confidence": 0.480255126953125,
+      "time_since_beep_s": 7.115,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 11,
+      "anchor_time": 7.903,
+      "predicted_time": 10.652306775616665,
+      "snapped_time": 10.633,
+      "displacement_ms": -19.306775616666272,
+      "snap_confidence": 0.020172119140625,
+      "time_since_beep_s": 7.403,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 12,
+      "anchor_time": 9.261,
+      "predicted_time": 12.002475166983332,
+      "snapped_time": 11.99,
+      "displacement_ms": -12.475166983332286,
+      "snap_confidence": 0.0086669921875,
+      "time_since_beep_s": 8.761,
+      "sanity_flag": "low-amplitude"
+    },
+    {
+      "shot_number": 13,
+      "anchor_time": 9.526,
+      "predicted_time": 12.265946907566667,
+      "snapped_time": 12.216,
+      "displacement_ms": -49.94690756666742,
+      "snap_confidence": 0.00714111328125,
+      "time_since_beep_s": 9.026,
+      "sanity_flag": "low-amplitude"
+    }
+  ],
+  "warnings": [
+    "residual displacement std 38.0 ms is high; snaps may be landing on noise rather than actual shots",
+    "median snap amplitude 0.018 is very low; the secondary may be silent at shot positions (wrong stage / occluded mic / wrong video)"
+  ]
+}

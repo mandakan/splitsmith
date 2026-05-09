@@ -44,6 +44,45 @@ _SLUG_PATTERN = re.compile(r"^stage-shots-(?P<match>.+)-stage(?P<n>\d+)(?:-.+)?$
 DEFAULT_SHOOTER_KEY: str = "self"
 
 
+def shooter_token(ssi_shooter_id: int | str) -> str:
+    """Compute the public, stable, non-PII token for an SSI shooter.
+
+    The token is ``"s" + sha256("ssi-<id>").hexdigest()[:8]``. It is the
+    only shooter identifier ever written into the public fixtures repo
+    -- raw SSI IDs and competitor names stay in private project files.
+    The same shooter always yields the same token across all matches
+    and stages, so a fixture corpus can be filtered by shooter without
+    leaking identity.
+    """
+    raw = f"ssi-{ssi_shooter_id}".encode()
+    return "s" + hashlib.sha256(raw).hexdigest()[:8]
+
+
+_LOCAL_HOME_PREFIX = re.compile(r"^/(Users|home)/[^/]+/")
+_MATCH_DIR_TAIL = re.compile(r"^matches/[^/]+/")
+
+
+def scrub_local_path(value: str | None) -> str | None:
+    """Strip the user's home-dir prefix from a path string for PII safety.
+
+    Removes ``/Users/<name>/`` or ``/home/<name>/`` and the
+    ``matches/<match>/`` segment that follows it in this project's
+    layout, leaving the meaningful tail (e.g. ``raw/IMG_3005.MOV``).
+    Strings that don't start with a user-home prefix pass through; this
+    is a labelling helper, not a security boundary.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    m = _LOCAL_HOME_PREFIX.match(value)
+    if not m:
+        return value
+    tail = value[m.end() :]
+    m2 = _MATCH_DIR_TAIL.match(tail)
+    if m2:
+        tail = tail[m2.end() :]
+    return tail
+
+
 def match_stage_from_slug(slug: str) -> tuple[str, int] | None:
     """Parse ``stage-shots-<match>-stage<N>(-<extra>)?`` -> ``(match, N)``.
 
@@ -948,9 +987,17 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
 
     payload = json.loads(req.audit_json_path.read_text(encoding="utf-8"))
     payload["promoted_at"] = datetime.now(UTC).isoformat()
-    payload["promoted_from"] = str(req.audit_json_path)
+    # ``promoted_from`` is omitted from the public fixture: it would
+    # carry the user's home dir. The audit JSON name is recoverable
+    # from the slug + the project the user can identify locally.
     if req.extra_metadata:
         payload.setdefault("provenance", {}).update(req.extra_metadata)
+    # Strip local home-dir prefixes from human-readable path fields so
+    # the published fixture carries no OS-username PII.
+    if "source" in payload:
+        payload["source"] = scrub_local_path(payload.get("source"))
+    if "source_video" in payload:
+        payload["source_video"] = scrub_local_path(payload.get("source_video"))
 
     # Shooter identity + event_id stamping. Caller-supplied shooter wins
     # over whatever's in the source audit JSON (project-promote provides
