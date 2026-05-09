@@ -3457,20 +3457,16 @@ def create_app(
     ) -> audio_helpers.AuditAudioResult:
         """Per-video version of :func:`_resolve_audit_audio`.
 
-        Primary delegates to the audit-audio resolver so the existing
-        cache + trim-clip preference is preserved. Non-primary returns
-        the full per-cam WAV (``stage<N>_cam_<vid>.wav``) -- there's no
-        per-secondary trim clip, and the picker needs the whole clip
-        anyway so the user can find the buzzer / first shot regardless
-        of where the current beep estimate sits.
+        Always returns the full source WAV, regardless of role. The picker
+        is where the user *questions* the current beep -- if it shows the
+        trimmed audit clip, a beep that fell outside the trim window is
+        invisible and can't be moved onto. The audit screen still reaches
+        for the trimmed clip via the per-stage `/audio` + `/peaks`
+        endpoints, which is the right consumer for that cache.
 
-        ``beep_in_clip`` mirrors the primary path: the WAV is full source
-        time, so it's just ``video.beep_time`` (no trim offset). Audit
-        callers that need clip-local time should keep using the primary
-        endpoint -- this resolver is for the per-video beep picker.
+        ``beep_in_clip`` is just ``video.beep_time``; the WAV is in source
+        time so no trim offset applies.
         """
-        if video.role == "primary":
-            return _resolve_audit_audio(project, stage_number)
         source = project.resolve_video_path(state.project_root, video.path)
         try:
             audio_path = audio_helpers.ensure_video_audio(

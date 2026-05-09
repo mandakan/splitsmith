@@ -1532,6 +1532,54 @@ def test_video_audio_endpoint_serves_secondary_wav(tmp_path: Path, monkeypatch) 
     assert resp.content.startswith(b"RIFF")
 
 
+def test_video_peaks_endpoint_serves_primary_full_wav_even_when_trimmed_exists(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The per-video picker endpoint always returns the full source WAV,
+    even for primaries that already have a trimmed audit clip cached.
+
+    Regression: the picker is where the user *questions* the current beep,
+    so a beep that fell outside the trim window must still be visible on
+    the waveform. The audit screen reaches for the trimmed clip via the
+    per-stage endpoint -- different consumer, different cache.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    primary = client.get("/api/project").json()["stages"][0]["videos"][0]
+    primary_id = primary["video_id"]
+
+    # Cache both the trimmed audit WAV (short) and the full primary WAV
+    # (long). If the picker mistakenly uses the audit clip the response
+    # duration will be 1s; with the fix it's 2s.
+    audit_wav = audio_dir / "stage1_audit.wav"
+    sf.write(audit_wav, np.zeros(48_000, dtype="float32"), 48_000)
+    primary_wav = audio_dir / "stage1_primary.wav"
+    sf.write(primary_wav, np.zeros(96_000, dtype="float32"), 48_000)
+
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00fake_mp4")
+
+    from splitsmith.ui import audio as audio_helpers
+
+    def fake_ensure_video(root, n, video, source, **kwargs):  # type: ignore[no-untyped-def]
+        return primary_wav
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure_video)
+
+    resp = client.get(f"/api/stages/1/videos/{primary_id}/peaks?bins=64")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trimmed"] is False
+    assert body["duration"] == pytest.approx(2.0)
+
+
 def test_video_peaks_endpoint_404_for_unknown_video(tmp_path: Path) -> None:
     """The per-video endpoint 404s when video_id isn't on the stage --
     same shape as the per-video beep endpoints."""
