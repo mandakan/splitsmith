@@ -409,3 +409,81 @@ def _atomic_write_audit_json(audit_file: Any, payload: dict[str, Any]) -> None:
             backup.unlink()
         audit_file.replace(backup)
     tmp.replace(audit_file)
+
+
+def trim_audit_clip(
+    project_root: str,
+    *,
+    stage_number: int,
+    video_id: str | None = None,
+) -> dict[str, Any]:
+    """Build (or return cached) the audit-mode short-GOP trim for a stage's
+    video.
+
+    Mirror of the trim half of ``POST /api/stages/{n}/detect-beep`` plus the
+    SPA's invalidate / re-trim flow. ``video_id=None`` targets the stage's
+    primary; pass an explicit ID to trim a secondary instead. The trim
+    window is ``[max(0, beep - pre_buffer), beep + stage_time +
+    post_buffer]``, anchored to the video's own ``beep_time``.
+
+    Idempotent: returns the cached path when source mtime + trim params
+    match. Re-runs ffmpeg on a params mismatch (beep moved, buffer
+    settings changed) without the agent having to invalidate first --
+    the helper handles cache invalidation transparently.
+
+    Preconditions: video has ``beep_time``, stage has
+    ``time_seconds > 0``, source video exists on disk. Raises
+    ``ValueError`` / ``FileNotFoundError`` otherwise. Sets
+    ``video.processed["trim"] = True`` on success and saves the project.
+    """
+    root = resolve_project_root(project_root)
+    project = MatchProject.load(root)
+    try:
+        stage = project.stage(stage_number)
+    except KeyError as exc:
+        raise ValueError(f"stage {stage_number} not found") from exc
+    if stage.time_seconds <= 0:
+        raise ValueError(
+            f"stage {stage_number} has time_seconds=0; set the stage time " "before trimming"
+        )
+    if video_id is None:
+        target = next((v for v in stage.videos if v.role == "primary"), None)
+        if target is None:
+            raise ValueError(f"stage {stage_number} has no primary video")
+    else:
+        target = next((v for v in stage.videos if v.video_id == video_id), None)
+        if target is None:
+            raise ValueError(
+                f"video {video_id} not on stage {stage_number}; "
+                f"available: {[v.video_id for v in stage.videos]}"
+            )
+    if target.beep_time is None:
+        raise ValueError(
+            f"video {target.video_id} on stage {stage_number} has no "
+            "beep_time yet; run detect_beep or set_beep_manual first"
+        )
+    source = project.resolve_video_path(root, target.path)
+    if not source.exists():
+        raise FileNotFoundError(
+            f"source video missing for stage {stage_number} " f"video {target.video_id}: {source}"
+        )
+
+    output = audio_helpers.ensure_video_audit_trim(
+        root,
+        stage_number,
+        target,
+        source,
+        target.beep_time,
+        stage.time_seconds,
+        project=project,
+    )
+    target.processed["trim"] = True
+    project.save(root)
+    return {
+        "video_id": target.video_id,
+        "role": target.role,
+        "stage_number": stage_number,
+        "beep_time": target.beep_time,
+        "stage_time_seconds": stage.time_seconds,
+        "output_path": str(output),
+    }

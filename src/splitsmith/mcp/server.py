@@ -255,4 +255,35 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             reset=reset,
         )
 
+    @mcp.tool()
+    def trim_audit_clip(
+        project_root: str,
+        stage_number: int,
+        video_id: str | None = None,
+    ) -> dict:
+        """Build (or return cached) the audit-mode short-GOP trim
+        for a stage's video.
+
+        ``video_id=None`` targets the stage's primary; pass an
+        explicit ID to trim a secondary. The trim window is
+        anchored to the chosen video's ``beep_time`` and spans
+        ``[max(0, beep - pre_buffer), beep + stage_time +
+        post_buffer]``.
+
+        Idempotent: returns the cached output when source mtime +
+        trim params match. Re-runs ffmpeg transparently on a
+        params mismatch (beep moved, buffer settings changed) so
+        the agent doesn't have to invalidate first. Sets
+        ``processed["trim"] = True`` on the video and saves the
+        project.
+
+        Preconditions: video has ``beep_time``, stage has
+        ``time_seconds > 0``, source video exists on disk.
+        """
+        return detect_tools.trim_audit_clip(
+            project_root,
+            stage_number=stage_number,
+            video_id=video_id,
+        )
+
     return mcp
