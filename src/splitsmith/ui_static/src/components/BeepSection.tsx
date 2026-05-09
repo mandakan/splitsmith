@@ -63,9 +63,7 @@ interface Props {
    *  per-video API endpoints carry ``video.video_id`` so jobs and caches
    *  stay scoped to one camera at a time. */
   video: StageVideo;
-  busy: boolean;
   onProjectUpdate: (next: MatchProject) => void;
-  setBusy: (b: boolean) => void;
   setError: (msg: string | null) => void;
   /** Drop the section's own border/background when nested inside a video
    *  panel that already provides the single visual frame. */
@@ -75,12 +73,18 @@ interface Props {
 export function BeepSection({
   stageNumber,
   video,
-  busy,
   onProjectUpdate,
-  setBusy,
   setError,
   bare = false,
 }: Props) {
+  // Section-local busy. Each video's beep section runs its own
+  // independent jobs (auto-queued on assignment, or user-initiated via
+  // Detect / Save / Clear), so disabling controls page-wide while one
+  // section's job is in flight blocks unrelated work like assigning the
+  // next video from the unassigned tray. Keeping busy local means each
+  // section disables only its own buttons; the JobsPanel still surfaces
+  // the running job globally.
+  const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(video.beep_time?.toFixed(3) ?? "");
   // Brief background highlight on the draft input whenever its value is
@@ -157,7 +161,7 @@ export function BeepSection({
     return () => {
       cancelled = true;
     };
-  }, [stageNumber, videoId, onProjectUpdate, setBusy, setError]);
+  }, [stageNumber, videoId, onProjectUpdate, setError]);
 
   const detect = async (force: boolean) => {
     setBusy(true);
