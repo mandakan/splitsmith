@@ -34,6 +34,10 @@ WRITE_TOOLS = {
     "mark_beep_reviewed",
 }
 
+DETECT_TOOLS = {
+    "detect_beep",
+}
+
 
 def test_server_registers_read_only_tools() -> None:
     names = _list_tool_names()
@@ -44,6 +48,12 @@ def test_server_registers_write_tools() -> None:
     """Layer 3b adds the four mutating tools alongside the read-only set."""
     names = _list_tool_names()
     assert WRITE_TOOLS <= names
+
+
+def test_server_registers_detect_tools() -> None:
+    """Layer 3c adds detection tools (just detect_beep for now)."""
+    names = _list_tool_names()
+    assert DETECT_TOOLS <= names
 
 
 def test_server_tools_have_descriptions() -> None:
@@ -59,5 +69,5 @@ def test_server_tools_have_descriptions() -> None:
 def test_server_has_no_unexpected_tools() -> None:
     """Bump this set when a new layer adds tools -- silent extension
     would skip the design conversation about the new surface."""
-    expected = READ_ONLY_TOOLS | WRITE_TOOLS
+    expected = READ_ONLY_TOOLS | WRITE_TOOLS | DETECT_TOOLS
     assert _list_tool_names() == expected

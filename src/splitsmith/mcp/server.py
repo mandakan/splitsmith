@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from . import tools, write_tools
+from . import detect_tools, tools, write_tools
 
 
 def create_server(name: str = "splitsmith") -> FastMCP:
@@ -185,6 +185,42 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             stage_number=stage_number,
             video_id=video_id,
             reviewed=reviewed,
+        )
+
+    # ----------------------------------------------------------------
+    # Detection tools (layer 3c). Synchronous -- the call returns when
+    # the detector finishes. Beep detection takes ~5 s on a 100 s
+    # primary clip; the agent waits inline. Shot detection (heavier;
+    # CLAP / GBDT / PANN) lands in a future layer.
+    # ----------------------------------------------------------------
+
+    @mcp.tool()
+    def detect_beep(
+        project_root: str,
+        stage_number: int,
+        video_id: str,
+        force: bool = False,
+    ) -> dict:
+        """Run beep detection against a stage's video; persist the
+        result on the project.
+
+        Returns the detected ``beep_time``, calibrated ``confidence``,
+        and the ranked candidate list. Honours the
+        ``automation.beep_low_confidence_threshold`` auto-trust gate
+        (#219): detections at or above the threshold flip
+        ``beep_reviewed=True`` so the downstream chain can fire;
+        below it the beep lands in the HITL queue.
+
+        Skips when the video already has a beep unless ``force=True``.
+        Manual entries (``beep_source="manual"``) are NEVER auto-
+        rerun -- the agent must clear them via ``set_beep_manual``
+        with ``time_seconds=None`` first.
+        """
+        return detect_tools.detect_beep_for_video(
+            project_root,
+            stage_number=stage_number,
+            video_id=video_id,
+            force=force,
         )
 
     return mcp
