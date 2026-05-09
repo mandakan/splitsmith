@@ -19,15 +19,31 @@ def _list_tool_names() -> set[str]:
     return {t.name for t in tools}
 
 
+READ_ONLY_TOOLS = {
+    "probe_video",
+    "discover_videos",
+    "get_project",
+    "list_stages",
+    "get_hitl_queue",
+}
+
+WRITE_TOOLS = {
+    "assign_video",
+    "set_beep_manual",
+    "select_beep_candidate",
+    "mark_beep_reviewed",
+}
+
+
 def test_server_registers_read_only_tools() -> None:
     names = _list_tool_names()
-    assert {
-        "probe_video",
-        "discover_videos",
-        "get_project",
-        "list_stages",
-        "get_hitl_queue",
-    } <= names
+    assert READ_ONLY_TOOLS <= names
+
+
+def test_server_registers_write_tools() -> None:
+    """Layer 3b adds the four mutating tools alongside the read-only set."""
+    names = _list_tool_names()
+    assert WRITE_TOOLS <= names
 
 
 def test_server_tools_have_descriptions() -> None:
@@ -41,15 +57,7 @@ def test_server_tools_have_descriptions() -> None:
 
 
 def test_server_has_no_unexpected_tools() -> None:
-    """Layer 1 only ships the read-only surface. A new tool landing
-    here without an updated test signals a missing layering decision
-    -- bump this set when adding to the server, don't silently extend.
-    """
-    expected = {
-        "probe_video",
-        "discover_videos",
-        "get_project",
-        "list_stages",
-        "get_hitl_queue",
-    }
+    """Bump this set when a new layer adds tools -- silent extension
+    would skip the design conversation about the new surface."""
+    expected = READ_ONLY_TOOLS | WRITE_TOOLS
     assert _list_tool_names() == expected
