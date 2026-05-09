@@ -95,6 +95,15 @@ export function BeepSection({
   // tailwind transition-colors fade; see the input className below.
   const [draftFlashing, setDraftFlashing] = useState(false);
   const [jobStatus, setJobStatus] = useState<Job | null>(null);
+  // After a beep change on a primary that already had shots detected,
+  // surface an inline banner offering to re-run shot detection. Captured
+  // from props pre-change because the override endpoint flips
+  // ``processed.shot_detect`` to false as part of clearing stale state,
+  // so the post-call shape can't tell us shots existed before.
+  const [pendingShotRedetect, setPendingShotRedetect] = useState<{
+    deltaMs: number;
+  } | null>(null);
+  const [redetecting, setRedetecting] = useState(false);
   const flashDraftInput = useCallback(() => {
     // Drop-then-set across an rAF tick so a second pick in quick
     // succession re-triggers the fade instead of being a no-op (state
@@ -195,6 +204,37 @@ export function BeepSection({
     }
   };
 
+  // Capture pre-change "had shots" so we can offer a re-detect after the
+  // override clears the flag. Primary-only: shot detection is anchored
+  // on the primary's trim, so secondaries never invalidate shots.
+  const queueShotRedetectIfNeeded = useCallback(
+    (prevBeepTime: number | null, prevHadShots: boolean, nextBeepTime: number | null) => {
+      if (!isPrimary || !prevHadShots || nextBeepTime == null) return;
+      const deltaMs = Math.round(((nextBeepTime - (prevBeepTime ?? nextBeepTime)) * 1000));
+      setPendingShotRedetect({ deltaMs });
+    },
+    [isPrimary],
+  );
+
+  const runShotRedetect = useCallback(async () => {
+    setRedetecting(true);
+    setError(null);
+    try {
+      const job = await api.detectShots(stageNumber, { reset: true });
+      const final = await api.pollJob(job.id);
+      if (final.status === "failed") {
+        setError(final.error ?? "Shot detection failed");
+      } else {
+        onProjectUpdate(await api.getProject());
+      }
+      setPendingShotRedetect(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRedetecting(false);
+    }
+  }, [stageNumber, onProjectUpdate, setError]);
+
   const save = async () => {
     const trimmed = draft.trim();
     if (!trimmed) {
@@ -206,12 +246,15 @@ export function BeepSection({
       setError("Beep time must be a non-negative number of seconds");
       return;
     }
+    const prevBeepTime = video.beep_time;
+    const prevHadShots = isPrimary && video.processed.shot_detect;
     setBusy(true);
     try {
       const updated = await api.overrideBeepForVideo(stageNumber, videoId, value);
       onProjectUpdate(updated);
       setError(null);
       setEditing(false);
+      queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, value);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -234,11 +277,14 @@ export function BeepSection({
   };
 
   const selectCandidate = async (time: number) => {
+    const prevBeepTime = video.beep_time;
+    const prevHadShots = isPrimary && video.processed.shot_detect;
     setBusy(true);
     try {
       const updated = await api.selectBeepCandidateForVideo(stageNumber, videoId, time);
       onProjectUpdate(updated);
       setError(null);
+      queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, time);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -424,6 +470,15 @@ export function BeepSection({
     }
   };
 
+  const shotRedetectBanner = pendingShotRedetect ? (
+    <ShotRedetectBanner
+      deltaMs={pendingShotRedetect.deltaMs}
+      busy={redetecting}
+      onRedetect={() => void runShotRedetect()}
+      onDismiss={() => setPendingShotRedetect(null)}
+    />
+  ) : null;
+
   if (collapsed) {
     return (
       <div
@@ -432,6 +487,7 @@ export function BeepSection({
           !bare && "rounded-md border border-border/60 bg-muted/20",
         )}
       >
+        {shotRedetectBanner}
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={pillVariant} className="gap-1">
             <Check className="size-3" />
@@ -460,6 +516,7 @@ export function BeepSection({
         !bare && "rounded-md border border-border/60 bg-muted/20",
       )}
     >
+      {shotRedetectBanner}
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={pillVariant} className="gap-1" title={pillTitle}>
           <Check className="size-3" />
@@ -534,6 +591,8 @@ export function BeepSection({
           deltaMs={deltaMs!}
           confidence={conf}
           onUseCrossAlign={async () => {
+            const prevBeepTime = video.beep_time;
+            const prevHadShots = isPrimary && video.processed.shot_detect;
             setBusy(true);
             try {
               const updated = await api.overrideBeepForVideo(
@@ -543,6 +602,7 @@ export function BeepSection({
               );
               onProjectUpdate(updated);
               setError(null);
+              queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, crossAlignSuggestion);
             } catch (e) {
               setError(e instanceof Error ? e.message : String(e));
             } finally {
@@ -1277,6 +1337,49 @@ function AlignmentDisagreement({
             ariaLabel={`Cross-align preview at ${crossAlignTime.toFixed(3)}s`}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Shown after a primary's beep moves while shot detection had already
+ *  run for the stage. Shot times are anchored to the previous trim, so
+ *  the user has to decide: re-run detection now, or keep the current
+ *  list (e.g. when the change is sub-frame and won't affect anything).
+ *  Stays inline -- the user just changed a value above and the prompt
+ *  needs to be obviously connected to that action, not floated as a
+ *  toast. */
+function ShotRedetectBanner({
+  deltaMs,
+  busy,
+  onRedetect,
+  onDismiss,
+}: {
+  deltaMs: number;
+  busy: boolean;
+  onRedetect: () => void;
+  onDismiss: () => void;
+}) {
+  const absMs = Math.abs(deltaMs);
+  const direction = deltaMs > 0 ? "later" : deltaMs < 0 ? "earlier" : "unchanged";
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-2 py-1.5 text-xs text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+    >
+      <span className="font-medium">Shot times are now stale.</span>
+      <span>
+        Beep moved {absMs} ms {direction}; existing shot timestamps were
+        detected against the old trim.
+      </span>
+      <div className="ml-auto flex gap-1">
+        <Button size="sm" variant="default" onClick={onRedetect} disabled={busy}>
+          {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          Re-detect shots
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDismiss} disabled={busy}>
+          Keep existing
+        </Button>
       </div>
     </div>
   );
