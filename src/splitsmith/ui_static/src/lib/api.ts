@@ -1506,8 +1506,12 @@ export const api = {
   unbindProject: () =>
     request<ServerHealth>("/api/user/recent-projects/unbind", { method: "POST" }),
 
-  listJobs: () => request<Job[]>("/api/jobs"),
-  getJob: (jobId: string) => request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`),
+  listJobs: (opts?: { signal?: AbortSignal }) =>
+    request<Job[]>("/api/jobs", { signal: opts?.signal }),
+  getJob: (jobId: string, opts?: { signal?: AbortSignal }) =>
+    request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`, {
+      signal: opts?.signal,
+    }),
 
   /** Request cooperative cancellation. Idempotent: a finished job is returned
    *  as-is. For a running trim job the server terminates the underlying
@@ -1531,12 +1535,17 @@ export const api = {
   pollJob: async (
     jobId: string,
     onUpdate: (job: Job) => void,
-    opts: { intervalMs?: number; timeoutMs?: number } = {},
+    opts: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<Job> => {
     const interval = opts.intervalMs ?? 750;
     const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60 * 1000);
+    const { signal } = opts;
     while (true) {
-      const job = await request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`);
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+      const job = await request<Job>(
+        `/api/jobs/${encodeURIComponent(jobId)}`,
+        { signal },
+      );
       onUpdate(job);
       if (
         job.status === "succeeded" ||
@@ -1546,7 +1555,19 @@ export const api = {
       if (Date.now() > deadline) {
         throw new Error(`Timed out waiting for job ${jobId}`);
       }
-      await new Promise((r) => setTimeout(r, interval));
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, interval);
+        if (signal) {
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        }
+      });
     }
   },
 

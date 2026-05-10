@@ -29,7 +29,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { AlertCircle, LayoutGrid, LayoutList, Loader2 } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import type { StageVideo } from "@/lib/api";
 
 const BUFFER_FLASH_DELAY_MS = 150;
@@ -73,9 +73,14 @@ function SecondarySlot({ label, src, onRef, onBuffering }: SecondarySlotProps) {
   const [status, setStatus] = useState<LoadStatus>("idle");
   const [showBufferIndicator, setShowBufferIndicator] = useState(false);
 
+  // Internal ref shadows the parent's callback ref so we can free decoded
+  // buffers on unmount even after React clears the parent's reference.
+  const internalRef = useRef<HTMLVideoElement | null>(null);
   const setRef = useCallback((el: HTMLVideoElement | null) => {
+    internalRef.current = el;
     onRefLatest.current(el);
   }, []);
+  useReleaseMediaOnUnmount(internalRef);
 
   useEffect(() => {
     if (!src) {
@@ -172,6 +177,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
   ) {
     const internalRef = useRef<HTMLVideoElement | null>(null);
     useImperativeHandle(ref, () => internalRef.current as HTMLVideoElement, []);
+    useReleaseMediaOnUnmount(internalRef);
 
     const [status, setStatus] = useState<LoadStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);

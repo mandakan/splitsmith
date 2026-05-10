@@ -2424,9 +2424,11 @@ function PromoteAgainstFixtureButton({
   useEffect(() => {
     if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") return;
     const id = job.id;
+    const controller = new AbortController();
     const interval = setInterval(async () => {
       try {
-        const updated = await api.getJob(id);
+        const updated = await api.getJob(id, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         setJob(updated);
         if (
           updated.status === "succeeded" ||
@@ -2436,10 +2438,13 @@ function PromoteAgainstFixtureButton({
           setBusy(false);
         }
       } catch {
-        // ignore -- next tick retries
+        // ignore -- next tick retries (or we've been aborted)
       }
     }, 500);
-    return () => clearInterval(interval);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [job]);
 
   useEffect(() => {
