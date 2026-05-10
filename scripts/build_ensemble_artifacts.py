@@ -87,6 +87,19 @@ DEFAULT_FIXTURES = [
     "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
     "stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro",
     "stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro",
+    # Cross-shooter headcam fixtures at the tallmilan-2026 match (PR
+    # #279). Same physical match as the s97dcec94 tallmilan set, so
+    # they carry the same bay acoustics but a different shooter's
+    # cadence -- including them lets calibration distinguish shooter
+    # drift from match acoustics. Camera info absent in the audit
+    # JSONs; ``camera_class_from_mount`` falls back to headcam.
+    "stage-shots-tallmilan-2026-stage1-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage2-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage3-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage4-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
 ]
 
 # Fixtures whose promote-report flagged ``wrong_clip_suspected: true`` --

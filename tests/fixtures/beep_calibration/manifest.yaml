@@ -152,6 +152,18 @@ fixtures:
   - headcam
   - late-beep
   - steel-prone
+- stem: stage-shots-tallmilan-2026-stage1-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage1-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
+- stem: stage-shots-tallmilan-2026-stage2-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage2-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
 - stem: stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -172,15 +184,31 @@ fixtures:
   tags:
   - headcam
   - late-beep
+- stem: stage-shots-tallmilan-2026-stage3-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage3-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
 - stem: stage-shots-tallmilan-2026-stage3-s97dcec94
   camera_kind: head
   camera_id: go3s
   clip_wav: stage-shots-tallmilan-2026-stage3-s97dcec94.wav
   ground_truth_in_clip: 0.5
   tolerance_ms: 15.0
+  full_wav: full/stage-shots-tallmilan-2026-stage3-s97dcec94_full.wav
+  ground_truth_in_full: 19.8924
+  full_duration_s: 46.112733
   tags:
   - headcam
+  - late-beep
   - steel-prone
+- stem: stage-shots-tallmilan-2026-stage4-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage4-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
 - stem: stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -197,6 +225,12 @@ fixtures:
   tolerance_ms: 100.0
   tags:
   - headcam
+- stem: stage-shots-tallmilan-2026-stage5-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage5-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
 - stem: stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -217,6 +251,12 @@ fixtures:
   tags:
   - headcam
   - late-beep
+- stem: stage-shots-tallmilan-2026-stage6-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage6-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
 - stem: stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -239,6 +279,12 @@ fixtures:
   - headcam
   - late-beep
   - steel-prone
+- stem: stage-shots-tallmilan-2026-stage7-s36ed6e4e
+  camera_kind: unknown
+  clip_wav: stage-shots-tallmilan-2026-stage7-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags: []
 - stem: stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro

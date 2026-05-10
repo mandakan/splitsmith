@@ -417,6 +417,36 @@
       "error_kind": null
     },
     {
+      "stem": "stage-shots-tallmilan-2026-stage1-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.983145833333333,
+      "detected_score": 1.7222005449838949,
+      "detected_confidence": 0.48393938427247635,
+      "error_s": -0.016854166666666615,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage2-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 22.463166666666666,
+      "detected_score": 34.41471957163007,
+      "detected_confidence": 0.8520415115114469,
+      "error_s": 17.463166666666666,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 4,
+      "error_kind": null
+    },
+    {
       "stem": "stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro",
       "track": "clip",
       "tags": [
@@ -470,10 +500,26 @@
       "error_kind": null
     },
     {
+      "stem": "stage-shots-tallmilan-2026-stage3-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000375,
+      "detected_score": 65.45328128362016,
+      "detected_confidence": 0.7974626874817706,
+      "error_s": 0.0003750000000000142,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
       "stem": "stage-shots-tallmilan-2026-stage3-s97dcec94",
       "track": "clip",
       "tags": [
         "headcam",
+        "late-beep",
         "steel-prone"
       ],
       "ground_truth_s": 0.5,
@@ -483,6 +529,40 @@
       "detected_confidence": 0.982969453650499,
       "error_s": 2.0833333333358794e-05,
       "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage3-s97dcec94",
+      "track": "full",
+      "tags": [
+        "headcam",
+        "late-beep",
+        "steel-prone"
+      ],
+      "ground_truth_s": 19.8924,
+      "tolerance_s": 0.015,
+      "detected_time_s": 19.89239583333333,
+      "detected_score": 405.75861911503364,
+      "detected_confidence": 0.9968902108566835,
+      "error_s": -4.166666666804986e-06,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage4-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 23.285125,
+      "detected_score": 78.73328086327722,
+      "detected_confidence": 0.5813449908746634,
+      "error_s": 18.285125,
+      "correct_top1": false,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -516,6 +596,21 @@
       "detected_score": 12.529855775136062,
       "detected_confidence": 0.5446643814139381,
       "error_s": 14.044125000000001,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 25.793625,
+      "detected_score": 17.994373267235574,
+      "detected_confidence": 0.4537911810887535,
+      "error_s": 20.793625,
       "correct_top1": false,
       "correct_in_topn": true,
       "candidate_count": 5,
@@ -575,6 +670,21 @@
       "error_kind": null
     },
     {
+      "stem": "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 8.706958333333333,
+      "detected_score": 26.385798766532577,
+      "detected_confidence": 0.4987217570813735,
+      "error_s": 3.7069583333333327,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
       "stem": "stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro",
       "track": "clip",
       "tags": [
@@ -625,6 +735,21 @@
       "detected_score": 13.58621618943227,
       "detected_confidence": 0.6447548917893097,
       "error_s": -3.5869791666666657,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
+      "track": "clip",
+      "tags": [],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 17.87752083333333,
+      "detected_score": 74.78957122159696,
+      "detected_confidence": 0.5810693315871533,
+      "error_s": 12.877520833333332,
       "correct_top1": false,
       "correct_in_topn": true,
       "candidate_count": 5,
@@ -688,13 +813,13 @@
     }
   ],
   "summary": {
-    "total": 37,
-    "top1_hits": 26,
-    "topn_hits": 35,
+    "total": 45,
+    "top1_hits": 29,
+    "topn_hits": 42,
     "not_found": 0,
     "exceptions": 0,
-    "recall_top1": 0.7027027027027027,
-    "recall_topn": 0.9459459459459459,
+    "recall_top1": 0.6444444444444445,
+    "recall_topn": 0.9333333333333333,
     "by_tag": {
       "handheld": {
         "total": 12,
@@ -706,30 +831,30 @@
         "recall_topn": 0.8333333333333334
       },
       "steel-prone": {
-        "total": 19,
-        "top1_hits": 14,
-        "topn_hits": 18,
+        "total": 20,
+        "top1_hits": 15,
+        "topn_hits": 19,
         "not_found": 0,
         "exceptions": 0,
-        "recall_top1": 0.7368421052631579,
-        "recall_topn": 0.9473684210526315
+        "recall_top1": 0.75,
+        "recall_topn": 0.95
       },
       "headcam": {
-        "total": 24,
-        "top1_hits": 19,
-        "topn_hits": 24,
-        "not_found": 0,
-        "exceptions": 0,
-        "recall_top1": 0.7916666666666666,
-        "recall_topn": 1.0
-      },
-      "late-beep": {
-        "total": 20,
-        "top1_hits": 16,
-        "topn_hits": 20,
+        "total": 25,
+        "top1_hits": 20,
+        "topn_hits": 25,
         "not_found": 0,
         "exceptions": 0,
         "recall_top1": 0.8,
+        "recall_topn": 1.0
+      },
+      "late-beep": {
+        "total": 22,
+        "top1_hits": 18,
+        "topn_hits": 22,
+        "not_found": 0,
+        "exceptions": 0,
+        "recall_top1": 0.8181818181818182,
         "recall_topn": 1.0
       }
     }

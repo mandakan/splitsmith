@@ -965,6 +965,16 @@ class PromoteRequest:
     # optional ``name`` + ``ssi_shooter_id`` so the resulting fixture
     # groups under its shooter rather than the legacy ``self`` sentinel.
     shooter: dict[str, Any] | None = None
+    # Visual/source provenance the calibrator + Voter E need. Caller
+    # derives these from the project (primary video path, trim window,
+    # camera mount + position + audio source). When ``require_provenance``
+    # is True, ``promote_stage_to_fixture`` refuses any of these missing
+    # so the published fixture is calibration-ready out of the gate
+    # rather than needing a later manual backfill.
+    source_video: Path | str | None = None
+    fixture_window_in_source: tuple[float, float] | list[float] | None = None
+    camera: dict[str, Any] | None = None
+    require_provenance: bool = True
 
 
 def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
@@ -992,12 +1002,49 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
     # from the slug + the project the user can identify locally.
     if req.extra_metadata:
         payload.setdefault("provenance", {}).update(req.extra_metadata)
+
+    # Caller-supplied source/window/camera win over the audit JSON.
+    # The promote-from-project endpoint derives these from the live
+    # project (primary path, beep_time, trim buffers, camera mount);
+    # the audit JSON itself only carries shot/beep data because that's
+    # what the SPA writes. ``require_provenance`` defends the lab
+    # corpus from another silent half-labelled fixture landing.
+    if req.source_video is not None:
+        payload["source_video"] = str(req.source_video)
+    if req.fixture_window_in_source is not None:
+        payload["fixture_window_in_source"] = [
+            round(float(req.fixture_window_in_source[0]), 4),
+            round(float(req.fixture_window_in_source[1]), 4),
+        ]
+    if req.camera is not None:
+        payload["camera"] = dict(req.camera)
+
     # Strip local home-dir prefixes from human-readable path fields so
     # the published fixture carries no OS-username PII.
     if "source" in payload:
         payload["source"] = scrub_local_path(payload.get("source"))
     if "source_video" in payload:
         payload["source_video"] = scrub_local_path(payload.get("source_video"))
+
+    if req.require_provenance:
+        missing = []
+        if not isinstance(payload.get("source_video"), str) or not payload["source_video"]:
+            missing.append("source_video")
+        fwis = payload.get("fixture_window_in_source")
+        if not (isinstance(fwis, (list, tuple)) and len(fwis) == 2):
+            missing.append("fixture_window_in_source")
+        cam = payload.get("camera")
+        if not (isinstance(cam, dict) and cam.get("mount")):
+            missing.append("camera.mount")
+        if missing:
+            raise ValueError(
+                "promote_stage_to_fixture: audit data is incomplete; the "
+                f"following provenance fields are missing: {', '.join(missing)}. "
+                "Caller must derive these from the project (primary video "
+                "path, trim window, camera mount) and pass them on the "
+                "PromoteRequest, or set require_provenance=False for legacy "
+                "promotes."
+            )
 
     # Shooter identity + event_id stamping. Caller-supplied shooter wins
     # over whatever's in the source audit JSON (project-promote provides
