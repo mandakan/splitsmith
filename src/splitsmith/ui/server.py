@@ -5406,6 +5406,70 @@ def create_app(
             # when an older client builds a slug from project.name alone.
             if token not in slug:
                 slug = f"{slug}-{token}"
+
+            # Visual/source provenance (#220 follow-up). The audit JSON
+            # the SPA writes only carries shot/beep data; the calibrator
+            # also wants source_video, the trim window, and the camera
+            # block. Derive them from the project so the published
+            # fixture is calibration-ready instead of needing a manual
+            # backfill later (which is what landed s36ed6e4e + the
+            # tallmilan iPhone secondaries with empty provenance).
+            primary = stg.primary()
+            if primary is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"stage {stage_n} has no primary video; cannot promote",
+                )
+            if primary.beep_time is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"stage {stage_n} primary has no beep_time; "
+                        "detect or set the beep before promoting"
+                    ),
+                )
+            if not primary.camera_mount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"stage {stage_n} primary has no camera_mount; "
+                        "set it on the Ingest screen so the fixture lands "
+                        "in the right per-camera-class bucket."
+                    ),
+                )
+            stage_time_seconds = getattr(stg, "time_seconds", None)
+            if stage_time_seconds is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"stage {stage_n} has no time_seconds; cannot "
+                        "compute the trim window."
+                    ),
+                )
+            source_video_path = project.resolve_video_path(
+                state.project_root, primary.path
+            )
+            trim_start = max(
+                0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds)
+            )
+            trim_end = (
+                float(primary.beep_time)
+                + float(stage_time_seconds)
+                + float(project.trim_post_buffer_seconds)
+            )
+            camera_payload: dict[str, Any] = {
+                "id": "unknown",
+                "make": None,
+                "model": None,
+                "mount": str(primary.camera_mount),
+                "position": "shooter",
+                "audio_source": "internal",
+                "agc_state": "unknown",
+                "sample_rate": None,
+                "bit_depth": None,
+                "audio_codec": None,
+            }
+
             try:
                 rec = lab_module.promote_stage_to_fixture(
                     lab_module.PromoteRequest(
@@ -5418,12 +5482,17 @@ def create_app(
                             "stage_name": getattr(stg, "name", None),
                         },
                         shooter=shooter_payload,
+                        source_video=source_video_path,
+                        fixture_window_in_source=(trim_start, trim_end),
+                        camera=camera_payload,
                     )
                 )
             except FileExistsError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             return JSONResponse(rec.model_dump(mode="json"))
 
         @app.post("/api/lab/labels")

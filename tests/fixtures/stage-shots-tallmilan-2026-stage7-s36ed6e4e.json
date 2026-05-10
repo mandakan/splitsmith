@@ -944,5 +944,22 @@
   "shooter": {
     "id": "s36ed6e4e"
   },
-  "event_id": "tallmilan-2026:7:s36ed6e4e"
+  "event_id": "tallmilan-2026:7:s36ed6e4e",
+  "camera": {
+    "id": "unknown",
+    "make": null,
+    "model": null,
+    "mount": "hand",
+    "position": "shooter",
+    "audio_source": "internal",
+    "agc_state": "unknown",
+    "sample_rate": null,
+    "bit_depth": null,
+    "audio_codec": null
+  },
+  "source_video": "raw/martin_stage_7.MOV",
+  "fixture_window_in_source": [
+    11.3514,
+    37.1714
+  ]
 }

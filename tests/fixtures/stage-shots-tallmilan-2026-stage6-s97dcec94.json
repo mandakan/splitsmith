@@ -1,6 +1,6 @@
 {
   "source": "/Volumes/GO 3S/DCIM/Camera01/VID_20260426_145548_00_044.mp4 stage 6 'Swing and a miss' (audio extracted at 48 kHz mono)",
-  "source_video": "/Volumes/GO 3S/DCIM/Camera01/VID_20260426_145548_00_044.mp4",
+  "source_video": "raw/VID_20260426_145548_00_044.mp4",
   "stage_number": 6,
   "stage_name": "Swing and a miss",
   "fixture_window_in_source": [

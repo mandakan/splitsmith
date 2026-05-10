@@ -183,6 +183,16 @@ def promote(
     fixtures_root: Path | None = typer.Option(None, "--fixtures-root"),
     overwrite: bool = typer.Option(False, "--overwrite"),
     pretty: bool = typer.Option(True, "--pretty/--no-pretty"),
+    require_provenance: bool = typer.Option(
+        False,
+        "--require-provenance/--no-require-provenance",
+        help=(
+            "Refuse if audit JSON lacks source_video / fixture_window_in_source "
+            "/ camera. The CLI doesn't derive these from project context, so "
+            "the default is OFF (legacy escape hatch). The /api/lab/promote "
+            "endpoint always derives + enforces."
+        ),
+    ),
 ) -> None:
     """Copy an in-project audit JSON + WAV into tests/fixtures/ as a new fixture."""
     rec = lab_module.promote_stage_to_fixture(
@@ -192,6 +202,7 @@ def promote(
             fixture_slug=slug,
             fixtures_root=fixtures_root.expanduser().resolve() if fixtures_root else None,
             overwrite=overwrite,
+            require_provenance=require_provenance,
         )
     )
     _emit(rec.model_dump(mode="json"), pretty=pretty)

@@ -58,6 +58,14 @@ DEFAULT_FIXTURES = [
     "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
     "stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro",
     "stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro",
+    # Cross-shooter headcam fixtures at tallmilan-2026 (PR #279).
+    "stage-shots-tallmilan-2026-stage1-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage2-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage3-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage4-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
+    "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
 ]
 FIXTURES_DIR = Path("tests/fixtures")
 CACHE_DIR = FIXTURES_DIR / ".cache"
