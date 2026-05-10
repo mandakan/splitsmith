@@ -5442,16 +5442,11 @@ def create_app(
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        f"stage {stage_n} has no time_seconds; cannot "
-                        "compute the trim window."
+                        f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."
                     ),
                 )
-            source_video_path = project.resolve_video_path(
-                state.project_root, primary.path
-            )
-            trim_start = max(
-                0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds)
-            )
+            source_video_path = project.resolve_video_path(state.project_root, primary.path)
+            trim_start = max(0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds))
             trim_end = (
                 float(primary.beep_time)
                 + float(stage_time_seconds)
