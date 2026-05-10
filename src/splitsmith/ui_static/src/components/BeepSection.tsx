@@ -21,7 +21,14 @@
  * visible in the preview).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type VideoHTMLAttributes,
+} from "react";
 import { Link } from "react-router-dom";
 import {
   Check,
@@ -43,7 +50,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Waveform } from "@/components/Waveform";
-import { cn } from "@/lib/utils";
+import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import {
   ApiError,
   api,
@@ -55,6 +62,16 @@ import {
   type PeaksResult,
   type StageVideo,
 } from "@/lib/api";
+
+// Wraps a <video> with the buffer-release hook so conditional preview
+// clips don't leak decoded frames when they unmount on key/state change.
+function ReleasingPreviewVideo(
+  props: VideoHTMLAttributes<HTMLVideoElement>,
+) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useReleaseMediaOnUnmount(ref);
+  return <video ref={ref} {...props} />;
+}
 
 interface Props {
   stageNumber: number;
@@ -683,6 +700,7 @@ function BeepWaveformPicker({
   const [snapping, setSnapping] = useState(false);
   const [proposal, setProposal] = useState<BeepSnapResult | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  useReleaseMediaOnUnmount(audioRef);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -1010,7 +1028,7 @@ function ProposalPreview({
     );
   }
   return (
-    <video
+    <ReleasingPreviewVideo
       key={`${stageNumber}:${videoId}:${time.toFixed(3)}`}
       src={api.videoBeepPreviewUrl(stageNumber, videoId, time)}
       className="h-32 w-56 rounded-md border border-border/60 bg-black object-cover"
@@ -1120,7 +1138,7 @@ function BeepCandidates({
                   Preview unavailable (no cached clip yet)
                 </div>
               ) : (
-                <video
+                <ReleasingPreviewVideo
                   key={`${stageNumber}:${videoId}:${candidates[previewIndex].time.toFixed(3)}`}
                   src={api.videoBeepPreviewUrl(
                     stageNumber,
@@ -1236,7 +1254,7 @@ function BeepPreview({
           Preview unavailable
         </div>
       ) : (
-        <video
+        <ReleasingPreviewVideo
           key={`${stageNumber}:${videoId}:${beepTime.toFixed(3)}`}
           src={api.videoBeepPreviewUrl(stageNumber, videoId, beepTime)}
           className="h-40 w-64 rounded-md border border-border/60 bg-black object-cover"

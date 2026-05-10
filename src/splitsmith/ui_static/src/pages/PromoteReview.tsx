@@ -40,6 +40,7 @@ import {
   type PromoteReport,
   type StageAudit,
 } from "@/lib/api";
+import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const NUDGE_MS = 5;
@@ -183,6 +184,8 @@ export function PromoteReview() {
   const [waveWidth, setWaveWidth] = useState(0);
   const anchorAudioRef = useRef<HTMLAudioElement | null>(null);
   const secondaryAudioRef = useRef<HTMLAudioElement | null>(null);
+  useReleaseMediaOnUnmount(anchorAudioRef);
+  useReleaseMediaOnUnmount(secondaryAudioRef);
 
   useEffect(() => {
     const el = waveColumnRef.current;

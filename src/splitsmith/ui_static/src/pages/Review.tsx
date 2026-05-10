@@ -61,6 +61,7 @@ import {
   type StageAudit,
 } from "@/lib/api";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
+import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
@@ -110,6 +111,8 @@ export function Review() {
   // video at audio_t + offset (and vice versa).
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseMediaOnUnmount(audioRef);
+  useReleaseMediaOnUnmount(videoRef);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [loopMode, setLoopMode] = useState(false);

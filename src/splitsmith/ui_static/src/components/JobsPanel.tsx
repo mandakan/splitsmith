@@ -39,6 +39,10 @@ const IDLE_POLL_MS = 5000;
 // push the unread errors out of view.
 const FAILED_VISIBLE_LIMIT = 6;
 const SECTION_VISIBLE_LIMIT = 8;
+// Cap the in-memory job list. The backend retains full history; the
+// panel only renders the most-recent rows per section, so anything
+// beyond this is dead weight that grows with session length.
+const JOBS_RETENTION = 64;
 const POPOVER_ID = "jobs-panel-popover";
 
 const KIND_LABEL: Record<string, string> = {
@@ -122,11 +126,14 @@ export function JobsPanel() {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const failedSectionRef = useRef<HTMLElement | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
-      const next = await api.listJobs();
-      setJobs(next);
+      const next = await api.listJobs({ signal });
+      // Only display the most recent N; the backend may keep an
+      // unbounded history but we don't need to retain it client-side.
+      setJobs(next.slice(0, JOBS_RETENTION));
     } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
       // Network blip: keep last snapshot. The next poll will retry.
       if (err instanceof ApiError) {
         // ignore
@@ -141,18 +148,18 @@ export function JobsPanel() {
   const activeRef = useRef(false);
   activeRef.current = jobs.some(isActive);
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
-      if (cancelled) return;
-      await refresh();
-      if (cancelled) return;
+      if (controller.signal.aborted) return;
+      await refresh(controller.signal);
+      if (controller.signal.aborted) return;
       const interval = activeRef.current ? ACTIVE_POLL_MS : IDLE_POLL_MS;
       timer = setTimeout(tick, interval);
     };
     void tick();
     return () => {
-      cancelled = true;
+      controller.abort();
       if (timer != null) clearTimeout(timer);
     };
   }, [refresh]);
