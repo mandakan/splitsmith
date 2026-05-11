@@ -223,7 +223,8 @@ def test_voter_c_feature_matrix_dimensions() -> None:
     hand = np.zeros((n, HAND_FEATURE_DIM))
     sims = np.zeros((n, len(CLAP_PROMPTS)))
     diff = np.zeros(n)
-    x = voter_c_feature_matrix(hand, sims, diff)
+    gunshot = np.zeros(n)
+    x = voter_c_feature_matrix(hand, sims, diff, gunshot)
     assert x.shape == (n, VOTER_C_FEATURE_DIM)
 
 
@@ -231,7 +232,8 @@ def test_voter_c_feature_matrix_empty_returns_zero_rows() -> None:
     hand = np.zeros((0, HAND_FEATURE_DIM))
     sims = np.zeros((0, len(CLAP_PROMPTS)))
     diff = np.zeros(0)
-    x = voter_c_feature_matrix(hand, sims, diff)
+    gunshot = np.zeros(0)
+    x = voter_c_feature_matrix(hand, sims, diff, gunshot)
     assert x.shape == (0, VOTER_C_FEATURE_DIM)
 
 
@@ -693,23 +695,24 @@ def test_voter_c_feature_matrix_appends_camera_class_one_hot() -> None:
     hand = np.zeros((n, HAND_FEATURE_DIM), dtype=np.float64)
     sims = np.zeros((n, len(CLAP_PROMPTS)), dtype=np.float32)
     diffs = np.zeros(n, dtype=np.float32)
+    gunshot = np.zeros(n, dtype=np.float32)
 
     # Default (no camera_class) -> all rows tagged headcam (column 0).
-    x_default = voter_c_feature_matrix(hand, sims, diffs)
+    x_default = voter_c_feature_matrix(hand, sims, diffs, gunshot)
     assert x_default.shape == (n, VOTER_C_FEATURE_DIM)
     cam_block = x_default[:, -CAMERA_CLASS_FEATURE_DIM:]
     assert np.array_equal(cam_block[:, 0], np.ones(n))
     assert cam_block[:, 1].sum() == 0
 
     # Single string -> broadcast to every row.
-    x_phone = voter_c_feature_matrix(hand, sims, diffs, camera_classes="handheld")
+    x_phone = voter_c_feature_matrix(hand, sims, diffs, gunshot, camera_classes="handheld")
     cam_block = x_phone[:, -CAMERA_CLASS_FEATURE_DIM:]
     assert np.array_equal(cam_block[:, 1], np.ones(n))
     assert cam_block[:, 0].sum() == 0
 
     # Per-row mix.
     x_mix = voter_c_feature_matrix(
-        hand, sims, diffs, camera_classes=["headcam", "handheld", "future-class"]
+        hand, sims, diffs, gunshot, camera_classes=["headcam", "handheld", "future-class"]
     )
     cam_block = x_mix[:, -CAMERA_CLASS_FEATURE_DIM:]
     # Unknown class falls back to headcam (column 0).

@@ -226,7 +226,7 @@ def build_signals(
             audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
         )
         x = feat.voter_c_feature_matrix(
-            hand, clap_sims, clap_diff, camera_classes=cam_class
+            hand, clap_sims, clap_diff, gunshot_prob, camera_classes=cam_class
         )
         score_c = voter_c_model.predict_proba(x)[:, 1].astype(np.float64)
 

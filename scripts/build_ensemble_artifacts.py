@@ -258,15 +258,19 @@ def _split_by_camera_class(universe: list[dict]) -> dict[str, list[dict]]:
 
 
 def _x_from(universe: list[dict]) -> np.ndarray:
-    """Stack per-row Voter C features: ``[hand | clap_sims | clap_diff | camera_class_onehot]``.
+    """Stack per-row Voter C features: ``[hand | clap_sims | clap_diff | gunshot_prob | camera_class_onehot]``.
 
     Camera-class one-hot is appended last so the column order matches
-    ``voter_c_feature_matrix`` at runtime.
+    ``voter_c_feature_matrix`` at runtime. ``gunshot_prob`` is folded in
+    as a feature column (voter D collapsed into voter C).
     """
     if not universe:
         return np.zeros((0, feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
     base = np.array(
-        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in universe],
+        [
+            c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]]
+            for c in universe
+        ],
         dtype=np.float64,
     )
     classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]

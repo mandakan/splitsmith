@@ -111,7 +111,10 @@ _CAMERA_CLASS_TO_INDEX: dict[str, int] = {
     name: idx for idx, name in enumerate(CAMERA_CLASS_FEATURE_NAMES)
 }
 
-VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + CAMERA_CLASS_FEATURE_DIM
+# +1 for clap_diff, +1 for gunshot_prob (folded in from voter D).
+VOTER_C_FEATURE_DIM: int = (
+    HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM
+)
 
 
 def camera_class_one_hot(camera_classes: list[str] | np.ndarray, n_rows: int) -> np.ndarray:
@@ -418,13 +421,21 @@ def voter_c_feature_matrix(
     hand_features: np.ndarray,
     clap_sims: np.ndarray,
     clap_diff: np.ndarray,
+    gunshot_prob: np.ndarray,
     camera_classes: list[str] | np.ndarray | str | None = None,
 ) -> np.ndarray:
-    """Stack the GBDT input vector ``[hand | clap_sims | clap_diff | camera_class_onehot]``.
+    """Stack the GBDT input vector ``[hand | clap_sims | clap_diff | gunshot_prob | camera_class_onehot]``.
 
     Column order matches the calibration script. Drift here -- adding
     features, reordering CLAP prompts, reordering camera classes -- silently
     desyncs voter C, so any change requires rebuilding the shipped GBDT.
+
+    ``gunshot_prob`` is the PANN ``Gunshot, gunfire`` class probability
+    (formerly voter D's signal). Folded into voter C as a feature so the
+    GBDT can learn its interaction with the other columns rather than
+    casting an independent vote -- on the 30-fixture corpus voter D's
+    threshold was a dead axis under ``c_required=True`` (see
+    ``docs/ensemble_dashboard/findings/2026-05-11_voter_abd_have_no_leverage.md``).
 
     ``camera_classes`` (issue #139) is a per-row class label (or a single
     string broadcast to every row). ``None`` and unknown classes fall back
@@ -444,6 +455,7 @@ def voter_c_feature_matrix(
             hand_features,
             clap_sims.astype(np.float64),
             clap_diff.astype(np.float64)[:, None],
+            gunshot_prob.astype(np.float64)[:, None],
             cam_block,
         ],
         axis=1,
