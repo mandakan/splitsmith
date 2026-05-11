@@ -1,0 +1,5 @@
+# 2D sweep: consensus level x apriori boost magnitude.
+# Useful for checking whether boosting top-K candidates can recover
+# recall at higher consensus levels without poisoning precision.
+consensus: [1, 2, 3, 4]
+apriori_boost: [0.0, 0.5, 1.0, 1.5]

@@ -1,0 +1,5 @@
+# 1D sweep: Voter C adaptive slack fraction.
+# 0.10 was the original, 0.25 is current production. Sweep wider to see
+# the precision/recall trade-off without changing anything else.
+voter_c_mode: [adaptive]
+voter_c_slack_frac: [0.05, 0.10, 0.15, 0.20, 0.25, 0.35, 0.50]

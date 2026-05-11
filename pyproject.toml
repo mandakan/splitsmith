@@ -72,6 +72,11 @@ dev = [
     "black>=24.0.0",
     "mypy>=1.10.0",
     "respx>=0.21.1",
+    # Ensemble sweep analysis (issue #281 follow-up). pyarrow for the
+    # signals/runs parquet store, matplotlib for the PNG plot layer.
+    # Dev-only: the production API does not read these files.
+    "pyarrow>=17.0.0",
+    "matplotlib>=3.9.0",
 ]
 
 [tool.ruff]
