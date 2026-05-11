@@ -751,10 +751,11 @@ class MatchProject(BaseModel):
                 if primary is not None
                 else None
             )
+            audit_trim_exists = audit_trim_p is not None and audit_trim_p.exists()
             trimmed_p = (
                 lossless_trim_p
                 if lossless_trim_p.exists()
-                else (audit_trim_p if audit_trim_p is not None and audit_trim_p.exists() else lossless_trim_p)
+                else (audit_trim_p if audit_trim_exists else lossless_trim_p)
             )
 
             csv_exists = csv_p.exists()
@@ -1513,9 +1514,7 @@ class MatchProject(BaseModel):
         if stage_number is not None:
             vid = video.video_id
             audio_cache = self.audio_path(root) / f"stage{stage_number}_cam_{vid}.wav"
-            trimmed_cache = (
-                self.trimmed_path(root) / f"stage{stage_number}_cam_{vid}_trimmed.mp4"
-            )
+            trimmed_cache = self.trimmed_path(root) / f"stage{stage_number}_cam_{vid}_trimmed.mp4"
 
         audit_path: Path | None = None
         audit_reset = False
