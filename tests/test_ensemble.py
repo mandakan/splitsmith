@@ -35,7 +35,6 @@ from splitsmith.ensemble.voters import (
     vote_b,
     vote_c_adaptive,
     vote_c_global,
-    vote_d,
     vote_e,
 )
 
@@ -140,12 +139,6 @@ def test_vote_c_adaptive_target_exceeds_universe_keeps_everything() -> None:
     probs = np.array([0.1, 0.5])
     out = vote_c_adaptive(probs, expected_rounds=10)
     assert out.tolist() == [1, 1]
-
-
-def test_vote_d_pann_threshold() -> None:
-    probs = np.array([0.001, 0.01, 0.1])
-    out = vote_d(probs, voter_d_threshold=0.01)
-    assert out.tolist() == [0, 1, 1]
 
 
 def test_vote_e_visual_probe_threshold() -> None:
@@ -267,7 +260,6 @@ def _build_stub_runtime() -> EnsembleRuntime:
         voter_a_floor=0.05,
         voter_b_threshold=0.0,
         voter_c_threshold=0.5,
-        voter_d_threshold=0.0,
         voter_c_target_recall=0.95,
         tolerance_ms=75.0,
         clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
@@ -330,19 +322,17 @@ def test_detect_shots_ensemble_full_universe_with_stubs(monkeypatch) -> None:
     )
     assert len(result.candidates) == 4
     assert all(c.kept for c in result.candidates)
-    assert all(c.vote_total == 4 for c in result.candidates)
-    assert result.consensus == 3
+    assert all(c.vote_total == 3 for c in result.candidates)
+    assert result.consensus == 2
 
 
 def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
-    """When the GBDT and CLAP/PANN signals all reject the universe but
+    """When the GBDT and CLAP signal both reject the universe but
     expected_rounds=2 is provided, the apriori boost + adaptive voter C
     keep the top-2 candidates by detector confidence."""
     runtime = _build_stub_runtime()
-    # Push voter B and D thresholds high so no candidate clears them.
-    runtime.calibration = runtime.calibration.model_copy(
-        update={"voter_b_threshold": 99.0, "voter_d_threshold": 99.0}
-    )
+    # Push voter B threshold high so no candidate clears it.
+    runtime.calibration = runtime.calibration.model_copy(update={"voter_b_threshold": 99.0})
 
     confidences = [0.9, 0.4, 0.7, 0.3]
     fake_shots = [
@@ -629,8 +619,8 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
     fake_video = tmp_path / "fake.mp4"
     fake_video.write_bytes(b"")
 
-    # All audio voters approve every candidate (vote_total=4) under the stub
-    # runtime. With audio_strong_min_votes=4, Voter E's veto is fully
+    # All audio voters approve every candidate (vote_total=3) under the stub
+    # runtime. With audio_strong_min_votes=3, Voter E's veto is fully
     # suppressed -> all candidates pass even though Voter E rejected each.
     result_strong = detect_shots_ensemble(
         audio,
@@ -639,17 +629,17 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
         stage_time=10.0,
         runtime=runtime,
         ensemble_config=EnsembleConfig(
-            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=4
+            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=3
         ),
         video_path=fake_video,
         source_beep_time=5.0,
     )
-    assert all(c.vote_total == 4 for c in result_strong.candidates)
+    assert all(c.vote_total == 3 for c in result_strong.candidates)
     assert all(c.vote_e == 0 for c in result_strong.candidates)
     assert all(c.kept for c in result_strong.candidates)
 
-    # Sanity: with the gate set to 5 (no audio total can satisfy it under
-    # the 4-voter audio side), the unconditional veto fires and all are
+    # Sanity: with the gate set to 4 (no audio total can satisfy it under
+    # the 3-voter audio side), the unconditional veto fires and all are
     # dropped.
     result_strict = detect_shots_ensemble(
         audio,
@@ -658,7 +648,7 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
         stage_time=10.0,
         runtime=runtime,
         ensemble_config=EnsembleConfig(
-            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=5
+            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=4
         ),
         video_path=fake_video,
         source_beep_time=5.0,
@@ -756,7 +746,6 @@ def test_calibration_thresholds_for_class_returns_class_thresholds() -> None:
         voter_a_floor=0.05,
         voter_b_threshold=0.0,
         voter_c_threshold=0.5,
-        voter_d_threshold=0.0,
         voter_c_target_recall=0.95,
         tolerance_ms=75.0,
         clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
@@ -772,7 +761,6 @@ def test_calibration_thresholds_for_class_returns_class_thresholds() -> None:
                 voter_a_floor=0.05,
                 voter_b_threshold=0.0,
                 voter_c_threshold=0.5,
-                voter_d_threshold=0.0,
                 n_calibration_candidates=8,
                 n_calibration_positives=4,
                 calibration_fixtures=["a"],
@@ -781,7 +769,6 @@ def test_calibration_thresholds_for_class_returns_class_thresholds() -> None:
                 voter_a_floor=0.10,
                 voter_b_threshold=0.20,
                 voter_c_threshold=0.30,
-                voter_d_threshold=0.40,
                 n_calibration_candidates=2,
                 n_calibration_positives=1,
                 calibration_fixtures=["b"],
@@ -803,7 +790,6 @@ def test_calibration_thresholds_for_legacy_artifact_synthesizes_single_class() -
         voter_a_floor=0.07,
         voter_b_threshold=0.08,
         voter_c_threshold=0.42,
-        voter_d_threshold=0.09,
         voter_c_target_recall=0.95,
         tolerance_ms=75.0,
         clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
@@ -841,7 +827,6 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
                     voter_a_floor=0.05,
                     voter_b_threshold=0.0,
                     voter_c_threshold=0.5,
-                    voter_d_threshold=0.0,
                     n_calibration_candidates=10,
                     n_calibration_positives=5,
                     calibration_fixtures=["stub"],
@@ -850,7 +835,6 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
                     voter_a_floor=0.20,
                     voter_b_threshold=0.0,
                     voter_c_threshold=0.5,
-                    voter_d_threshold=0.0,
                     n_calibration_candidates=5,
                     n_calibration_positives=2,
                     calibration_fixtures=["stub-phone"],

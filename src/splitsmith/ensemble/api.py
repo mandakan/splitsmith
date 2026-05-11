@@ -33,13 +33,17 @@ class EnsembleConfig(BaseModel):
     """Tunable parameters that don't depend on the calibration set."""
 
     consensus: int = Field(
-        default=3,
+        default=2,
         ge=1,
-        le=5,
+        le=4,
         description=(
             "Keep when ``vote_total + apriori_boost >= consensus``. "
-            "Default 3-of-4 -- preserves recall on the calibration set "
-            "while culling the bulk of voter-A's false positives."
+            "Default 2-of-3 (voter D was folded into voter C as a "
+            "feature, so the ensemble runs A+B+C) -- with "
+            "``c_required=True`` this requires C plus at least one of "
+            "{A, B}. Voter A's lowest-positive floor makes A=1 on "
+            "every calibration positive, so the typical kept candidate "
+            "has A and C voting yes."
         ),
     )
     apriori_boost: float = Field(
@@ -57,10 +61,10 @@ class EnsembleConfig(BaseModel):
             "Issue #103: require voter C to say yes for a candidate to "
             "be kept (in addition to consensus). On the 281-FP labeled "
             "set, voter C correctly rejected 100 % of hand-labeled FPs "
-            "while voters A/B/D were calibrated for high recall and "
+            "while voters A/B were calibrated for high recall and "
             "rubber-stamped most of them. Pairing C-veto with the "
             "broadened voter-C adaptive slack (see ``vote_c_adaptive``) "
-            "holds recall at 100 % while suppressing 278 / 281 FPs."
+            "holds recall at 100 % while suppressing the bulk of FPs."
         ),
     )
     enable_voter_e: bool = Field(
@@ -82,21 +86,17 @@ class EnsembleConfig(BaseModel):
         ),
     )
     e_audio_strong_min_votes: int | None = Field(
-        default=4,
+        default=3,
         description=(
             "Issue #185: when set, suppress Voter E's veto on candidates "
-            "whose audio-side ``vote_total`` (A+B+C+D) is at or above "
-            "this value. Default ``4`` skips Voter E whenever all four "
-            "audio voters already agreed -- that's the 'audio unanimous' "
-            "signal most reliably correlated with a true shot, and "
-            "applying Voter E on top of it triggered the 50%-recall "
-            "regression on tallmilan-2026-stage2 in #183. Sweep on the "
-            "11 audited head-mount fixtures: ``4`` removes the per-"
-            "fixture regression entirely while preserving aggregate "
-            "precision lift; ``3`` makes Voter E a no-op (nothing "
-            "passes consensus with vote_total < 3); ``None`` reproduces "
-            "the unconditional veto from #183. Only takes effect when "
-            "both ``enable_voter_e`` and ``e_required`` are True."
+            "whose audio-side ``vote_total`` (A+B+C) is at or above this "
+            "value. Default ``3`` skips Voter E whenever all three audio "
+            "voters already agreed -- that's the 'audio unanimous' "
+            "signal most reliably correlated with a true shot. Was ``4`` "
+            "while voter D existed (A+B+C+D unanimous); after the fold "
+            "the equivalent rule is ``3``. ``None`` reproduces the "
+            "unconditional veto from #183. Only takes effect when both "
+            "``enable_voter_e`` and ``e_required`` are True."
         ),
     )
 
@@ -117,7 +117,6 @@ class EnsembleCandidate(BaseModel):
     vote_a: int
     vote_b: int
     vote_c: int
-    vote_d: int
     vote_e: int = Field(
         default=0,
         description=(
@@ -131,7 +130,13 @@ class EnsembleCandidate(BaseModel):
     ensemble_score: float
     score_c: float
     clap_diff: float
-    gunshot_prob: float
+    gunshot_prob: float = Field(
+        description=(
+            "PANN ``Gunshot, gunfire`` class probability. Folded into "
+            "voter C as a feature; surfaced here for audit-trail "
+            "interpretability."
+        ),
+    )
     voter_e_signal: float = Field(
         default=0.0,
         description=(
@@ -282,7 +287,6 @@ def detect_shots_ensemble(
         vc = voters.vote_c_adaptive(score_c, expected_rounds)
     else:
         vc = voters.vote_c_global(score_c, thresholds.voter_c_threshold)
-    vd = voters.vote_d(gunshot_prob, thresholds.voter_d_threshold)
 
     voter_e_signal = np.zeros(n, dtype=np.float32)
     ve = np.zeros(n, dtype=np.int64)
@@ -310,7 +314,7 @@ def detect_shots_ensemble(
         voter_e_signal = vis.score_visual_candidates(features, runtime.visual)
         ve = voters.vote_e(voter_e_signal, float(thresholds.voter_e_threshold))
 
-    vote_total = va + vb + vc + vd
+    vote_total = va + vb + vc
     boost = voters.apriori_boost(confidences, expected_rounds, cfg.apriori_boost)
     ensemble_score = vote_total.astype(np.float64) + boost
     keep_mask = voters.consensus_keep(
@@ -339,7 +343,6 @@ def detect_shots_ensemble(
                 vote_a=int(va[i]),
                 vote_b=int(vb[i]),
                 vote_c=int(vc[i]),
-                vote_d=int(vd[i]),
                 vote_e=int(ve[i]),
                 vote_total=int(vote_total[i]),
                 apriori_boost=float(boost[i]),

@@ -63,17 +63,18 @@ def camera_class_from_mount(mount: str | None) -> str:
 class ClassThresholds(BaseModel):
     """Per-camera-class voter thresholds + the slice of provenance they were derived from.
 
-    Voter A/B/D thresholds use the lowest-positive rule on this class's
+    Voter A/B thresholds use the lowest-positive rule on this class's
     slice of the calibration universe. Voter C uses the shared GBDT but
     its operating threshold is picked from per-class CV predictions to
     hit ``voter_c_target_recall`` *on this class*, so a class with a
-    different score distribution doesn't drag the cutoff with it.
+    different score distribution doesn't drag the cutoff with it. The
+    PANN gunshot probability is now a feature column on voter C rather
+    than a separate vote, so there is no voter_d threshold.
     """
 
     voter_a_floor: float
     voter_b_threshold: float
     voter_c_threshold: float
-    voter_d_threshold: float
     voter_e_threshold: float | None = Field(
         default=None,
         description=(
@@ -116,12 +117,6 @@ class EnsembleCalibration(BaseModel):
             "GBDT probability threshold for voter C. Picked from "
             "5-fold CV predictions on the calibration set to hit "
             "``voter_c_target_recall``."
-        ),
-    )
-    voter_d_threshold: float = Field(
-        description=(
-            "PANN ``Gunshot, gunfire`` class-probability threshold. "
-            "Calibrated to the minimum value across labelled positives."
         ),
     )
     voter_e_threshold: float | None = Field(
@@ -249,7 +244,6 @@ class EnsembleCalibration(BaseModel):
                 voter_a_floor=self.voter_a_floor,
                 voter_b_threshold=self.voter_b_threshold,
                 voter_c_threshold=self.voter_c_threshold,
-                voter_d_threshold=self.voter_d_threshold,
                 voter_e_threshold=self.voter_e_threshold,
                 n_calibration_candidates=self.n_calibration_candidates,
                 n_calibration_positives=self.n_calibration_positives,

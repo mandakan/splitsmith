@@ -10,5 +10,5 @@
 # if c_required is the lever, sweeping consensus under c_required=True
 # should show a flat F1, while under c_required=False the curve should
 # move noticeably.
-consensus: [1, 2, 3, 4, 5]
+consensus: [1, 2, 3, 4]
 c_required: [true, false]
