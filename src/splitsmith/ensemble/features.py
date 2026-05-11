@@ -112,9 +112,7 @@ _CAMERA_CLASS_TO_INDEX: dict[str, int] = {
 }
 
 # +1 for clap_diff, +1 for gunshot_prob (folded in from voter D).
-VOTER_C_FEATURE_DIM: int = (
-    HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM
-)
+VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM
 
 
 def camera_class_one_hot(camera_classes: list[str] | np.ndarray, n_rows: int) -> np.ndarray:
@@ -424,7 +422,10 @@ def voter_c_feature_matrix(
     gunshot_prob: np.ndarray,
     camera_classes: list[str] | np.ndarray | str | None = None,
 ) -> np.ndarray:
-    """Stack the GBDT input vector ``[hand | clap_sims | clap_diff | gunshot_prob | camera_class_onehot]``.
+    """Stack the GBDT input vector.
+
+    Columns in order: ``hand | clap_sims | clap_diff | gunshot_prob |
+    camera_class_onehot``.
 
     Column order matches the calibration script. Drift here -- adding
     features, reordering CLAP prompts, reordering camera classes -- silently
