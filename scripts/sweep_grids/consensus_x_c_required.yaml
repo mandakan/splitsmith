@@ -1,0 +1,14 @@
+# 2D sweep: consensus level x C-veto switch.
+#
+# Hypothesis: with ``c_required=True`` (production default), voter C
+# absorbs all precision-veto work and the consensus level becomes a
+# dead axis. With ``c_required=False`` the ensemble falls back to a
+# simple majority vote and consensus matters again.
+#
+# This is the inverse-direction confirmation of the A/B/D leverage
+# finding (docs/ensemble_dashboard/findings/2026-05-11_voter_abd_have_no_leverage.md):
+# if c_required is the lever, sweeping consensus under c_required=True
+# should show a flat F1, while under c_required=False the curve should
+# move noticeably.
+consensus: [1, 2, 3, 4, 5]
+c_required: [true, false]
