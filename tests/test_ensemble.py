@@ -332,9 +332,7 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     keep the top-2 candidates by detector confidence."""
     runtime = _build_stub_runtime()
     # Push voter B threshold high so no candidate clears it.
-    runtime.calibration = runtime.calibration.model_copy(
-        update={"voter_b_threshold": 99.0}
-    )
+    runtime.calibration = runtime.calibration.model_copy(update={"voter_b_threshold": 99.0})
 
     confidences = [0.9, 0.4, 0.7, 0.3]
     fake_shots = [
