@@ -1760,7 +1760,7 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(
         time = 6.5
         peak_amplitude = 0.42
         duration_ms = 350.0
-        confidence = 0.92  # well above the 0.6 default threshold
+        confidence = 0.96  # above the 0.95 default threshold
         candidates: list = []
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
@@ -1780,7 +1780,7 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(
     assert resp.status_code == 200
     _wait_for_job(client, resp.json()["id"])
     primary_after = client.get("/api/project").json()["stages"][0]["videos"][0]
-    assert primary_after["beep_confidence"] == pytest.approx(0.92)
+    assert primary_after["beep_confidence"] == pytest.approx(0.96)
     assert primary_after["beep_reviewed"] is True
 
 
@@ -5233,7 +5233,7 @@ def test_hitl_queue_lists_low_confidence_auto_beep(tmp_path: Path) -> None:
     resp = client.get("/api/hitl-queue")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["threshold"] == 0.6
+    assert body["threshold"] == 0.95
     assert len(body["items"]) == 1
     item = body["items"][0]
     assert item["kind"] == "beep_low_confidence"

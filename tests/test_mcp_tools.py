@@ -211,7 +211,7 @@ def test_get_hitl_queue_lists_low_confidence(tmp_path: Path) -> None:
         ],
     )
     result = tools.get_hitl_queue(str(root))
-    assert result["threshold"] == 0.6
+    assert result["threshold"] == 0.95
     assert len(result["items"]) == 1
     item = result["items"][0]
     assert item["kind"] == "beep_low_confidence"
