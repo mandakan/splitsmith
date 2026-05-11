@@ -2229,9 +2229,7 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
-def test_shot_detect_endpoint_ensures_trim_before_detection(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_shot_detect_endpoint_ensures_trim_before_detection(tmp_path: Path, monkeypatch) -> None:
     """Re-detect on a project whose trims were wiped (e.g. by the v1->v2
     cache migration in #298) must rebuild the trimmed MP4. Without this
     the audit page falls through to streaming the raw source clip and
