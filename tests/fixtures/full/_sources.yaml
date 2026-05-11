@@ -1,37 +1,60 @@
-# Source-video map for wide-window fixture audio extraction (issue #87).
+# Source-video map (issue #299 -- post GO 3S migration).
 #
-# scripts/extract_full_fixture_audio.py reads this file to locate the original
-# .mp4 for each audited fixture. The wide-window WAVs it writes here under
-# tests/fixtures/full/ feed scripts/mine_negatives.py, which harvests
-# pre-beep / post-stage hard negatives from regions outside the audited
-# stage window. Those WAVs are gitignored; only this YAML is checked in.
+# Each fixture lists the absolute path to its source mp4/mov under
+# the canonical /Volumes/mathias/skytte/video/raw/ layout. Drop entries
+# (or set them to a fallback) when a file no longer exists.
 #
-# Usage:
-#   1. Set ``video_dir`` to the absolute path of the directory holding the
-#      source .mp4 files (typically the user's USB drive).
-#   2. Add a per-fixture ``overrides`` entry only when a video lives outside
-#      ``video_dir`` (e.g. the in-repo legacy ``stage_sample.mp4``).
-#   3. Run ``uv run python scripts/extract_full_fixture_audio.py``.
-#
-# Mapping below is seeded from each audit JSON's ``source`` field. Edit
-# basenames here when re-recording (audit JSONs are the source of truth for
-# the per-fixture ``fixture_window_in_source`` mapping).
+# scripts/extract_full_fixture_audio.py reads this file via the
+# ``overrides`` block; the previous ``video_dir + basename`` scheme
+# is removed because the new layout has per-match/shooter subdirs.
 
-video_dir: /Volumes/GO 3S/DCIM/Camera01
-
-fixtures:
-  stage-shots-blacksmith-2026-stage1-s97dcec94: VID_20260412_132733_00_040.mp4
-  stage-shots-blacksmith-2026-stage2-s97dcec94: VID_20260412_140158_00_041.mp4
-  stage-shots-blacksmith-2026-stage3-s97dcec94: VID_20260412_091752_00_034.mp4
-  stage-shots-blacksmith-2026-stage5-s97dcec94: VID_20260412_102637_00_035.mp4
-  stage-shots-blacksmith-2026-stage6-s97dcec94: VID_20260412_105215_00_036.mp4
-  stage-shots-blacksmith-2026-stage8-s97dcec94: VID_20260412_125853_00_039.mp4
-  stage-shots-blacksmith-2026-stage7-s97dcec94: VID_20260412_112131_00_038.mp4
-  stage-shots-tallmilan-2026-stage5-s97dcec94: VID_20260426_141808_00_043.mp4
-  stage-shots-tallmilan-2026-stage6-s97dcec94: VID_20260426_145548_00_044.mp4
-  stage-shots-tallmilan-2026-stage2-s97dcec94: VID_20260426_162417_00_048.mp4
-  stage-shots-tallmilan-2026-stage7-s97dcec94: VID_20260426_152210_00_045.mp4
-
-# Override entries take precedence over ``video_dir`` + ``fixtures`` lookup.
 overrides:
-  stage-shots: tests/fixtures/stage_sample.mp4  # in-repo legacy fixture
+  stage-shots: tests/fixtures/stage_sample.mp4
+  stage-shots-blacksmith-2026-stage1-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_132733_00_040.mp4
+  stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_3005.MOV
+  stage-shots-blacksmith-2026-stage2-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_140158_00_041.mp4
+  stage-shots-blacksmith-2026-stage2-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_3008.MOV
+  stage-shots-blacksmith-2026-stage3-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_091752_00_034.mp4
+  stage-shots-blacksmith-2026-stage3-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_2979.MOV
+  stage-shots-blacksmith-2026-stage5-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_102637_00_035.mp4
+  stage-shots-blacksmith-2026-stage5-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_2989.MOV
+  stage-shots-blacksmith-2026-stage6-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_105215_00_036.mp4
+  stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_2992.MOV
+  stage-shots-blacksmith-2026-stage7-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_112131_00_038.mp4
+  stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_2995.MOV
+  stage-shots-blacksmith-2026-stage8-s97dcec94: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/headcam/VID_20260412_125853_00_039.mp4
+  stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_3003.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1223_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_3007.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1225_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_3009.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1126_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_2978.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1175_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_2983.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1187_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_2987.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1173_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_2990.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1177_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_2993.MOV
+  stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1221_singular_display.mov
+  stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/martin/handheld/IMG_3002.MOV
+  stage-shots-tallmilan-2026-stage1-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_1.MOV
+  stage-shots-tallmilan-2026-stage2-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_2.MOV
+  stage-shots-tallmilan-2026-stage2-s97dcec94: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/headcam/VID_20260426_162417_00_048.mp4
+  stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/handheld/IMG_3133.MOV
+  stage-shots-tallmilan-2026-stage3-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_3.MOV
+  stage-shots-tallmilan-2026-stage3-s97dcec94: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/headcam/VID_20260426_165837_00_049.mp4
+  stage-shots-tallmilan-2026-stage4-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_4.MOV
+  stage-shots-tallmilan-2026-stage4-s97dcec94: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/headcam/VID_20260426_135341_00_042.mp4
+  stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/mathias/handheld/IMG_2986.MOV
+  stage-shots-tallmilan-2026-stage5-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_5.MOV
+  stage-shots-tallmilan-2026-stage5-s97dcec94: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/headcam/VID_20260426_141808_00_043.mp4
+  stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/handheld/IMG_3123.MOV
+  stage-shots-tallmilan-2026-stage6-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_6.MOV
+  stage-shots-tallmilan-2026-stage6-s97dcec94: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/headcam/VID_20260426_145548_00_044.mp4
+  stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/handheld/IMG_3126.MOV
+  stage-shots-tallmilan-2026-stage7-s36ed6e4e: /Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_7.MOV
+  stage-shots-tallmilan-2026-stage7-s97dcec94: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/headcam/VID_20260426_152210_00_045.mp4
+  stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro: /Volumes/mathias/skytte/video/raw/tallmilan-2026/mathias/handheld/IMG_3129.MOV
