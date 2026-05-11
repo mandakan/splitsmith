@@ -120,7 +120,14 @@ def _build_universe(fixtures, tol_ms):
             audio, sr, truth["beep_time"], truth["stage_time_seconds"], cand_arr
         )
         feats_matrix = compute_hand_features(
-            audio, sr, cand_arr, truth["beep_time"], confs_arr, peaks_arr, tta_arr
+            audio,
+            sr,
+            cand_arr,
+            truth["beep_time"],
+            confs_arr,
+            peaks_arr,
+            tta_arr,
+            expected_rounds=(truth.get("stage_rounds") or {}).get("expected"),
         )
         for i, sh in enumerate(shots):
             universe.append({

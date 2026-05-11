@@ -164,7 +164,14 @@ def _build_universe(
             audio, sr, truth["beep_time"], truth["stage_time_seconds"], times
         )
         hand = feat.compute_hand_features(
-            audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
+            audio,
+            sr,
+            times,
+            truth["beep_time"],
+            confidences,
+            peak_amps,
+            tta_agreement,
+            expected_rounds=(truth.get("stage_rounds") or {}).get("expected"),
         )
 
         for i, shot in enumerate(shots):
@@ -334,8 +341,21 @@ def _load_mined_negatives(
         # is OFF by default in production calibration; if it ever turns
         # back on this needs a full-fixture detector pass.
         tta_agreement = np.ones(len(cand_t), dtype=np.float64)
+        # Mined negatives sit outside the stage window so there's no
+        # meaningful per-stage anchor for ``peak_amp_within_stage_ratio``.
+        # ``expected_rounds=None`` falls back to p75 of these candidates,
+        # giving the GBDT a constant ~1.0 column for negatives -- it
+        # learns the feature is uninformative on this slice. Mining is
+        # OFF by default in production calibration anyway.
         hand = feat.compute_hand_features(
-            audio, sr, cand_t, beep_in_full, cand_conf, cand_peak, tta_agreement
+            audio,
+            sr,
+            cand_t,
+            beep_in_full,
+            cand_conf,
+            cand_peak,
+            tta_agreement,
+            expected_rounds=None,
         )
 
         for k, ci in enumerate(kept_cache_idx):

@@ -219,6 +219,14 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
             "CLAP_PROMPTS. Rebuild artifacts via "
             "scripts/build_ensemble_artifacts.py."
         )
+    if calibration.voter_c_feature_dim != feat.VOTER_C_FEATURE_DIM:
+        raise RuntimeError(
+            f"ensemble calibration was built for "
+            f"voter_c_feature_dim={calibration.voter_c_feature_dim} but the "
+            f"current code expects {feat.VOTER_C_FEATURE_DIM}. The shipped "
+            "voter_c_gbdt.joblib is stale; rebuild artifacts via "
+            "scripts/build_ensemble_artifacts.py."
+        )
     clap = feat.load_clap_runtime()
     pann = feat.load_pann_runtime()
 
@@ -303,7 +311,14 @@ def detect_shots_ensemble(
     # Per-voter signals.
     tta_agreement = compute_tta_agreement(audio, sample_rate, beep_time, stage_time, times)
     hand = feat.compute_hand_features(
-        audio, sample_rate, times, beep_time, confidences, peak_amps, tta_agreement
+        audio,
+        sample_rate,
+        times,
+        beep_time,
+        confidences,
+        peak_amps,
+        tta_agreement,
+        expected_rounds=expected_rounds,
     )
     clap_sims = feat.compute_clap_similarities(audio, sample_rate, times, runtime.clap)
     clap_diff = feat.clap_diff_from_similarities(clap_sims)

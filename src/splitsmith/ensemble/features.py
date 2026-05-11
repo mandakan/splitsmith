@@ -86,6 +86,17 @@ _HAND_FEATURE_NAMES: tuple[str, ...] = (
     # Real shots are robust to small perturbations; FPs barely clearing the
     # smoothed-envelope threshold drop out under one or more.
     "tta_agreement",
+    # Within-stage amplitude ratio (#304-followup). peak_amp divided by
+    # the per-stage anchor: median of the top-K candidates by peak_amp,
+    # where K = stage_rounds.expected, falling back to the 75th
+    # percentile when no prior is available. The mic moves with the
+    # gun on a headcam so TPs cluster around a stable amplitude;
+    # cross-bay shots and reload/handling noises arrive much quieter
+    # and end up with ratios well below 1.0. Handheld GBDTs still see
+    # the column (so the artifact dims match per-class), but the
+    # anchor is meaningless when the mic is decoupled from the gun --
+    # the handheld branch is expected to learn to ignore this feature.
+    "peak_amp_within_stage_ratio",
 )
 
 # Onset window for spectral features (issue #108): 50 ms gives ~20 Hz
@@ -206,6 +217,29 @@ def _spectral_flatness_and_peak_ratio(seg: np.ndarray, sr: int) -> tuple[float, 
     return flatness, peak_ratio
 
 
+def within_stage_amp_anchor(
+    peak_amplitudes: np.ndarray,
+    expected_rounds: int | None,
+    *,
+    fallback_percentile: float = 75.0,
+) -> float:
+    """Per-stage anchor for the ``peak_amp_within_stage_ratio`` feature.
+
+    Returns ``median(top-K candidates by peak_amp)`` where
+    ``K = min(expected_rounds, n)``. When ``expected_rounds`` is ``None``
+    or ``<= 0`` we fall back to the ``fallback_percentile`` of the input
+    -- a robust proxy when no round-count prior is available.
+
+    Returns ``1.0`` on empty input so downstream division stays safe.
+    """
+    if peak_amplitudes.size == 0:
+        return 1.0
+    if expected_rounds and expected_rounds > 0:
+        k = min(int(expected_rounds), peak_amplitudes.size)
+        return float(np.median(np.sort(peak_amplitudes)[-k:]))
+    return float(np.percentile(peak_amplitudes, fallback_percentile))
+
+
 def compute_hand_features(
     audio: np.ndarray,
     sample_rate: int,
@@ -214,6 +248,7 @@ def compute_hand_features(
     confidences: np.ndarray,
     peak_amplitudes: np.ndarray,
     tta_agreement: np.ndarray,
+    expected_rounds: int | None = None,
 ) -> np.ndarray:
     """Per-candidate hand-crafted feature matrix, shape ``(N, HAND_FEATURE_DIM)``.
 
@@ -225,6 +260,11 @@ def compute_hand_features(
     ``splitsmith.ensemble.tta.compute_tta_agreement`` (range 1..5). Required
     rather than defaulted so a calling site can't silently feed zeros into a
     GBDT that was trained against real agreement counts.
+
+    ``expected_rounds`` is the stage's expected shot count (from the
+    audit JSON's ``stage_rounds.expected``). It drives the within-stage
+    amplitude anchor: when present we use ``median(top-K peak_amps)``;
+    when ``None`` we fall back to the 75th percentile.
     """
     n = audio.size
     sorted_t = np.sort(candidate_times)
@@ -235,6 +275,7 @@ def compute_hand_features(
 
     agc = compute_agc_features(audio, sample_rate, candidate_times, peak_amplitudes)
     spectral_half = int(round(_SPECTRAL_WINDOW_MS * 1e-3 * sample_rate / 2.0))
+    amp_anchor = within_stage_amp_anchor(peak_amplitudes, expected_rounds)
 
     for k, t in enumerate(candidate_times):
         idx = int(round(float(t) * sample_rate))
@@ -307,6 +348,7 @@ def compute_hand_features(
         out[k, 14] = flatness
         out[k, 15] = peak_ratio
         out[k, 16] = float(tta_agreement[k])
+        out[k, 17] = peak_amp / (amp_anchor + 1e-9)
     return out
 
 

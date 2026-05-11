@@ -84,7 +84,9 @@ def test_compute_hand_features_emits_expected_dim_and_finite_values() -> None:
     )
     assert out.shape == (2, HAND_FEATURE_DIM)
     assert np.all(np.isfinite(out))
-    # The TTA column is the last one; the two spectral columns sit just before it.
-    assert out[0, -1] == 3.0
-    assert out[1, -1] == 1.0
-    assert out[:, -3:-1].shape == (2, 2)
+    # TTA is now the second-to-last column (peak_amp_within_stage_ratio
+    # is appended last in #304's follow-up); the two spectral columns sit
+    # just before TTA.
+    assert out[0, -2] == 3.0
+    assert out[1, -2] == 1.0
+    assert out[:, -4:-2].shape == (2, 2)

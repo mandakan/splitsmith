@@ -98,7 +98,14 @@ def build_in_stage_rows(fix: str) -> list[dict]:
         audio, sr, truth["beep_time"], truth["stage_time_seconds"], times
     )
     hand = feat.compute_hand_features(
-        audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_arr
+        audio,
+        sr,
+        times,
+        truth["beep_time"],
+        confidences,
+        peak_amps,
+        tta_arr,
+        expected_rounds=(truth.get("stage_rounds") or {}).get("expected"),
     )
 
     rows: list[dict] = []
@@ -157,8 +164,17 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
     # Mined negatives sit outside any stage window; TTA agreement isn't
     # meaningful here, so use the 1.0 floor (matches build_ensemble_artifacts).
     tta_arr = np.ones(len(cand_t), dtype=np.float64)
+    # Mined negatives have no per-stage anchor; see the matching note in
+    # build_ensemble_artifacts.py.
     hand = feat.compute_hand_features(
-        audio, sr, cand_t, beep_in_full, cand_conf, cand_peak, tta_arr
+        audio,
+        sr,
+        cand_t,
+        beep_in_full,
+        cand_conf,
+        cand_peak,
+        tta_arr,
+        expected_rounds=None,
     )
 
     rows: list[dict] = []

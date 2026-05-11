@@ -235,7 +235,14 @@ def main() -> None:
             audio, sr, truth["beep_time"], truth["stage_time_seconds"], cand_times_arr
         )
         feats_matrix = compute_hand_features(
-            audio, sr, cand_times_arr, truth["beep_time"], confs_arr, peaks_arr, tta_arr
+            audio,
+            sr,
+            cand_times_arr,
+            truth["beep_time"],
+            confs_arr,
+            peaks_arr,
+            tta_arr,
+            expected_rounds=(truth.get("stage_rounds") or {}).get("expected"),
         )
         for i, shot in enumerate(all_shots):
             universe.append(

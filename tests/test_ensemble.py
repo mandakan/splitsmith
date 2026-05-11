@@ -25,8 +25,11 @@ from splitsmith.ensemble.features import (
     CLAP_PROMPTS_SHOT,
     HAND_FEATURE_DIM,
     VOTER_C_FEATURE_DIM,
+    _HAND_FEATURE_NAMES,
     clap_diff_from_similarities,
+    compute_hand_features,
     voter_c_feature_matrix,
+    within_stage_amp_anchor,
 )
 from splitsmith.ensemble.voters import (
     apriori_boost,
@@ -193,6 +196,55 @@ def test_consensus_keep_c_required_without_vote_c_raises() -> None:
     boost = np.array([0.0])
     with pytest.raises(ValueError, match="c_required=True"):
         consensus_keep(vote_total, boost, threshold=3, c_required=True)
+
+
+def test_within_stage_amp_anchor_top_k_median() -> None:
+    """K=4: anchor = median([1.0, .9, .8, .7]) = 0.85."""
+    amps = np.array([1.0, 0.9, 0.8, 0.7, 0.1, 0.05, 0.02])
+    anchor = within_stage_amp_anchor(amps, expected_rounds=4)
+    assert anchor == pytest.approx(0.85)
+
+
+def test_within_stage_amp_anchor_falls_back_to_p75_when_no_prior() -> None:
+    """Without ``expected_rounds`` the anchor is the 75th percentile."""
+    amps = np.array([0.05, 0.1, 0.3, 0.6, 0.9])
+    anchor = within_stage_amp_anchor(amps, expected_rounds=None)
+    assert anchor == pytest.approx(np.percentile(amps, 75))
+
+
+def test_within_stage_amp_anchor_handles_empty_input() -> None:
+    """Empty input returns 1.0 so the downstream ratio stays well-defined."""
+    assert within_stage_amp_anchor(np.array([]), expected_rounds=5) == 1.0
+
+
+def test_within_stage_amp_anchor_caps_k_at_n() -> None:
+    """``expected_rounds > n`` shouldn't blow up; effective K = n."""
+    amps = np.array([1.0, 0.5, 0.2])
+    anchor = within_stage_amp_anchor(amps, expected_rounds=100)
+    # All three rows make it into the "top-K", so the anchor is the
+    # median of the whole sequence.
+    assert anchor == pytest.approx(0.5)
+
+
+def test_within_stage_amp_ratio_column_populated() -> None:
+    """Last hand-feature column is peak_amp / within-stage anchor."""
+    sr = 48_000
+    audio = np.zeros(sr * 5, dtype=np.float32)
+    # Synthesize four short bursts at known times. peak amplitudes are
+    # what we feed via the dedicated array, so audio content doesn't
+    # matter for the ratio check.
+    times = np.array([1.0, 2.0, 3.0, 4.0])
+    confidences = np.array([0.5, 0.5, 0.5, 0.5])
+    peaks = np.array([1.0, 0.9, 0.8, 0.1])
+    tta = np.array([5.0, 5.0, 5.0, 5.0])
+    feats = compute_hand_features(
+        audio, sr, times, beep_time=0.5, confidences=confidences,
+        peak_amplitudes=peaks, tta_agreement=tta, expected_rounds=3,
+    )
+    # Anchor = median(top-3 of [1, .9, .8, .1]) = median([1, .9, .8]) = 0.9.
+    ratios = feats[:, _HAND_FEATURE_NAMES.index("peak_amp_within_stage_ratio")]
+    expected = peaks / 0.9
+    assert np.allclose(ratios, expected, atol=1e-6)
 
 
 def test_within_stage_amp_veto_drops_quiet_kept_candidates() -> None:
