@@ -180,17 +180,16 @@ def _make_minimal_ensemble_result():
             vote_a=1,
             vote_b=1,
             vote_c=1,
-            vote_d=1,
-            vote_total=4,
+            vote_total=3,
             apriori_boost=0.0,
-            ensemble_score=4.0,
+            ensemble_score=3.0,
             score_c=0.9,
             clap_diff=0.5,
             gunshot_prob=0.8,
             kept=True,
         )
     ]
-    return EnsembleResult(candidates=cands, consensus=3)
+    return EnsembleResult(candidates=cands, consensus=2)
 
 
 def test_build_fixture_includes_camera_anchor_history() -> None:

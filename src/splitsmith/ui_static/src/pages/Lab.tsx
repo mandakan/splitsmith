@@ -63,14 +63,13 @@ import {
 import { cn } from "@/lib/utils";
 
 const DEFAULT_CONFIG: LabEvalConfig = {
-  consensus: 3,
+  consensus: 2,
   apriori_boost: 1.0,
   tolerance_ms: 75.0,
   use_expected_rounds: true,
   voter_a_floor_override: null,
   voter_b_threshold_override: null,
   voter_c_threshold_override: null,
-  voter_d_threshold_override: null,
 };
 
 /** Build the /review URL for a fixture, threading the source video
@@ -518,15 +517,6 @@ function TuningCard({
                 min={0}
                 max={1}
                 step={0.005}
-              />
-              <ThresholdRow
-                label="Voter D threshold"
-                calibrated={cal.voter_d_threshold}
-                value={config.voter_d_threshold_override}
-                onChange={(v) => onChange({ voter_d_threshold_override: v })}
-                min={0}
-                max={0.5}
-                step={0.001}
               />
             </div>
           </details>
@@ -1225,13 +1215,13 @@ function Pin({
 }
 
 function VoterRecallTable({ metrics }: { metrics: LabEvalFixture["metrics"] }) {
-  const order: Array<keyof typeof metrics.voter_recall> = ["vote_a", "vote_b", "vote_c", "vote_d"];
+  const order: Array<keyof typeof metrics.voter_recall> = ["vote_a", "vote_b", "vote_c"];
   return (
     <div className="rounded border border-border/60 p-3">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Per-voter recall on this fixture
       </div>
-      <div className="grid grid-cols-4 gap-2 text-center">
+      <div className="grid grid-cols-3 gap-2 text-center">
         {order.map((k) => (
           <div key={String(k)}>
             <div className="text-[10px] uppercase text-muted-foreground">{String(k).slice(-1).toUpperCase()}</div>
@@ -1324,7 +1314,6 @@ function CandidateTable({
               <th className="px-2 py-1 text-right font-medium">A</th>
               <th className="px-2 py-1 text-right font-medium">B</th>
               <th className="px-2 py-1 text-right font-medium">C</th>
-              <th className="px-2 py-1 text-right font-medium">D</th>
               <th className="px-2 py-1 text-right font-medium">score</th>
               <th className="px-2 py-1 text-center font-medium">kept</th>
               <th className="px-2 py-1 text-center font-medium">truth</th>
@@ -1357,7 +1346,6 @@ function CandidateTable({
                   <td className="px-2 py-1 text-right">{c.vote_a}</td>
                   <td className="px-2 py-1 text-right">{c.vote_b}</td>
                   <td className="px-2 py-1 text-right">{c.vote_c}</td>
-                  <td className="px-2 py-1 text-right">{c.vote_d}</td>
                   <td className="px-2 py-1 text-right">{c.ensemble_score.toFixed(2)}</td>
                   <td className="px-2 py-1 text-center">{c.kept ? "Y" : ""}</td>
                   <td className="px-2 py-1 text-center">{c.truth ? "Y" : ""}</td>
@@ -2670,7 +2658,6 @@ function VoterChips({
     { key: "a", label: "A", on: candidate.vote_a === 1 },
     { key: "b", label: "B", on: candidate.vote_b === 1 },
     { key: "c", label: "C", on: candidate.vote_c === 1 },
-    { key: "d", label: "D", on: candidate.vote_d === 1 },
   ];
   return (
     <div className="flex gap-0.5">

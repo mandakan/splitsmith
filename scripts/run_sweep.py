@@ -13,7 +13,7 @@ multiple sweeps coexist in the same file (filter on it before plotting).
 
 Tunable parameters the grid can vary (default unchanged when omitted):
 
-* ``consensus`` (int 1..5)
+* ``consensus`` (int 1..4)
 * ``c_required`` (bool)
 * ``e_required`` (bool)
 * ``enable_voter_e`` (bool)
@@ -22,7 +22,6 @@ Tunable parameters the grid can vary (default unchanged when omitted):
 * ``voter_a_floor`` (float)             -- absolute override
 * ``voter_b_threshold`` (float)         -- absolute override
 * ``voter_c_threshold`` (float)         -- absolute override
-* ``voter_d_threshold`` (float)         -- absolute override
 * ``voter_e_threshold`` (float)         -- absolute override
 * ``voter_c_mode`` ("global" / "adaptive")
 * ``voter_c_slack_min`` (int)
@@ -77,12 +76,10 @@ PARAM_KEYS: tuple[str, ...] = (
     "voter_a_floor",
     "voter_b_threshold",
     "voter_c_threshold",
-    "voter_d_threshold",
     "voter_e_threshold",
     "voter_a_floor_offset",
     "voter_b_threshold_offset",
     "voter_c_threshold_offset",
-    "voter_d_threshold_offset",
     "voter_e_threshold_offset",
     "voter_c_mode",
     "voter_c_slack_min",
@@ -94,21 +91,19 @@ PARAM_KEYS: tuple[str, ...] = (
 
 # Conservative defaults that mirror the production ensemble config.
 DEFAULTS: dict[str, Any] = {
-    "consensus": 3,
+    "consensus": 2,
     "c_required": True,
     "e_required": False,
     "enable_voter_e": False,
-    "e_audio_strong_min_votes": 4,
+    "e_audio_strong_min_votes": 3,
     "apriori_boost": 1.0,
     "voter_a_floor": None,             # use calibration
     "voter_b_threshold": None,
     "voter_c_threshold": None,
-    "voter_d_threshold": None,
     "voter_e_threshold": None,
     "voter_a_floor_offset": 0.0,
     "voter_b_threshold_offset": 0.0,
     "voter_c_threshold_offset": 0.0,
-    "voter_d_threshold_offset": 0.0,
     "voter_e_threshold_offset": 0.0,
     "voter_c_mode": "adaptive",
     "voter_c_slack_min": 3,
@@ -151,7 +146,7 @@ def _resolve_thresholds(
     """Apply absolute/offset overrides on top of the calibrated baseline."""
     base = cal.thresholds_for(camera_class)
     out: dict[str, float | None] = {}
-    for v in ("a_floor", "b_threshold", "c_threshold", "d_threshold", "e_threshold"):
+    for v in ("a_floor", "b_threshold", "c_threshold", "e_threshold"):
         baseline = getattr(base, f"voter_{v}")
         abs_v = combo.get(f"voter_{v}")
         offset = combo.get(f"voter_{v}_offset", 0.0)
@@ -188,7 +183,6 @@ def _evaluate_combo(
         conf = signals["confidence"][idx]
         clap_diff = signals["clap_diff"][idx]
         score_c = signals["score_c"][idx]
-        gunshot_prob = signals["gunshot_prob"][idx]
         voter_e_sig = signals["voter_e_signal"][idx]
         label = signals["label"][idx]
         expected = signals["expected_rounds"][idx[0]]
@@ -218,7 +212,6 @@ def _evaluate_combo(
             )
         else:
             vc = voters.vote_c_global(score_c, thresholds["c_threshold"] or 0.0)
-        vd = voters.vote_d(gunshot_prob, thresholds["d_threshold"] or -np.inf)
 
         ve_active = (
             combo["enable_voter_e"]
@@ -231,7 +224,7 @@ def _evaluate_combo(
         else:
             ve = np.zeros_like(va)
 
-        vote_total = va + vb + vc + vd
+        vote_total = va + vb + vc
         eff_expected = (
             int(expected) if (combo["use_expected_rounds"] and expected is not None) else None
         )
@@ -260,7 +253,7 @@ def _evaluate_combo(
         f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) else 0.0
 
         solo = {}
-        for name, vec in (("a", va), ("b", vb), ("c", vc), ("d", vd), ("e", ve)):
+        for name, vec in (("a", va), ("b", vb), ("c", vc), ("e", ve)):
             solo[f"solo_{name}"] = int(
                 ((label == 1) & (vec == 1) & (vote_total + ve == 1)).sum()
             )
@@ -285,7 +278,6 @@ def _evaluate_combo(
             "voter_a_floor_eff": thresholds["a_floor"],
             "voter_b_threshold_eff": thresholds["b_threshold"],
             "voter_c_threshold_eff": thresholds["c_threshold"],
-            "voter_d_threshold_eff": thresholds["d_threshold"],
             "voter_e_threshold_eff": thresholds["e_threshold"],
         })
 
@@ -322,12 +314,10 @@ def _evaluate_combo(
             "solo_a": np.nan,
             "solo_b": np.nan,
             "solo_c": np.nan,
-            "solo_d": np.nan,
             "solo_e": np.nan,
             "voter_a_floor_eff": np.nan,
             "voter_b_threshold_eff": np.nan,
             "voter_c_threshold_eff": np.nan,
-            "voter_d_threshold_eff": np.nan,
             "voter_e_threshold_eff": np.nan,
         }
 

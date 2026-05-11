@@ -88,18 +88,12 @@ def vote_c_adaptive(
     return keep
 
 
-def vote_d(gunshot_prob: np.ndarray, voter_d_threshold: float) -> np.ndarray:
-    """Pass when the PANN gunshot-class probability clears the threshold."""
-    return (gunshot_prob >= voter_d_threshold).astype(np.int64)
-
-
 def vote_e(probe_score: np.ndarray, voter_e_threshold: float) -> np.ndarray:
     """Pass when the CLIP visual probe's ``P(shot)`` clears the threshold.
 
-    Mirrors :func:`vote_d`. Voter E is calibrated to a target recall
-    (default 0.95) on the labeled corpus -- it's a precision veto, not
-    a recall preserver. Candidates with ``probe_score < voter_e_threshold``
-    fail Voter E.
+    Voter E is calibrated to a target recall (default 0.95) on the
+    labeled corpus -- it's a precision veto, not a recall preserver.
+    Candidates with ``probe_score < voter_e_threshold`` fail Voter E.
     """
     return (probe_score >= voter_e_threshold).astype(np.int64)
 

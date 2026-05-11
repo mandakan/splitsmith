@@ -50,7 +50,7 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 
 ## Detection pipeline
 
-The shot-detection pipeline is a 4-voter ensemble, not raw signal processing:
+The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
 
 - **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
   auto-calibrated ``min_confidence`` floor (the lowest positive-shot
@@ -59,13 +59,15 @@ The shot-detection pipeline is a 4-voter ensemble, not raw signal processing:
 - **Voter B** -- threshold on the CLAP shot-vs-not-shot prompt similarity
   differential; calibrated against labeled fixtures.
 - **Voter C** -- trained ``sklearn`` ``GradientBoostingClassifier`` over
-  hand-crafted features + CLAP per-prompt similarities; calibrated to a
-  target recall on the same set. Switches to a per-stage adaptive
-  top-(K+slack) mode when the audit JSON has ``stage_rounds.expected``.
-- **Voter D** -- PANN audio-tagging gunshot-class probability thresholded
-  against the calibration distribution.
+  hand-crafted features + CLAP per-prompt similarities + PANN gunshot
+  probability; calibrated to a target recall on the same set. Switches
+  to a per-stage adaptive top-(K+slack) mode when the audit JSON has
+  ``stage_rounds.expected``. The PANN gunshot-class probability used to
+  be a separate voter D; it is now a feature column on voter C so the
+  GBDT learns its interaction with the other inputs instead of casting
+  an independent vote.
 - **Consensus** -- a candidate is kept when ``vote_total + apriori_boost
-  >= consensus`` (default 3-of-4). The apriori boost biases toward
+  >= consensus`` (default 2-of-3). The apriori boost biases toward
   expected-shot-count regions when prior info is known.
 
 The pipeline lives in ``src/splitsmith/ensemble/`` and is wired into the

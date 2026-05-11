@@ -359,7 +359,6 @@ def _candidate_dict(cand: Any) -> dict[str, Any]:
         "vote_a": cand.vote_a,
         "vote_b": cand.vote_b,
         "vote_c": cand.vote_c,
-        "vote_d": cand.vote_d,
         "vote_e": cand.vote_e,
         "vote_total": cand.vote_total,
         "apriori_boost": cand.apriori_boost,

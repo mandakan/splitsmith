@@ -247,7 +247,6 @@ class EvalConfig(BaseModel):
     voter_a_floor_override: float | None = None
     voter_b_threshold_override: float | None = None
     voter_c_threshold_override: float | None = None
-    voter_d_threshold_override: float | None = None
 
     def to_ensemble_config(self) -> EnsembleConfig:
         return EnsembleConfig(
@@ -289,7 +288,6 @@ class EvalCandidate(BaseModel):
     vote_a: int
     vote_b: int
     vote_c: int
-    vote_d: int
     vote_total: int
     apriori_boost: float
     ensemble_score: float
@@ -369,7 +367,6 @@ class EvalUniverse(BaseModel):
     voter_a_floor: float
     voter_b_threshold: float
     voter_c_threshold: float
-    voter_d_threshold: float
     tolerance_ms: float
 
 
@@ -455,10 +452,10 @@ def _metrics(
     voter_recall: dict[str, float] = {}
     if n_truth:
         truth_caps = [c for c in candidates if c.truth == 1]
-        for key in ("vote_a", "vote_b", "vote_c", "vote_d"):
+        for key in ("vote_a", "vote_b", "vote_c"):
             voter_recall[key] = sum(getattr(c, key) for c in truth_caps) / n_truth
     else:
-        voter_recall = {"vote_a": 0.0, "vote_b": 0.0, "vote_c": 0.0, "vote_d": 0.0}
+        voter_recall = {"vote_a": 0.0, "vote_b": 0.0, "vote_c": 0.0}
 
     fp_by_reason: dict[str, int] = {}
     for c in kept:
@@ -749,7 +746,6 @@ def run_eval(
                 vote_a=c.vote_a,
                 vote_b=c.vote_b,
                 vote_c=c.vote_c,
-                vote_d=c.vote_d,
                 vote_total=c.vote_total,
                 apriori_boost=c.apriori_boost,
                 ensemble_score=c.ensemble_score,
@@ -784,7 +780,6 @@ def run_eval(
         voter_a_floor=cal.voter_a_floor,
         voter_b_threshold=cal.voter_b_threshold,
         voter_c_threshold=cal.voter_c_threshold,
-        voter_d_threshold=cal.voter_d_threshold,
         tolerance_ms=cfg.tolerance_ms,
     )
     summary = _summary(fixtures)
@@ -844,7 +839,7 @@ def relabel_run(run: EvalRun) -> EvalRun:
 def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
     """Recompute votes / consensus / metrics from a cached universe.
 
-    Voter B/C/D get the calibrated thresholds (or per-voter overrides
+    Voter B/C get the calibrated thresholds (or per-voter overrides
     if the config supplies them). Voter A uses the calibrated floor
     (or the override). No model calls; sub-100 ms for the full set.
     """
@@ -863,11 +858,6 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
         if config.voter_c_threshold_override is not None
         else universe.voter_c_threshold
     )
-    d_thr = (
-        config.voter_d_threshold_override
-        if config.voter_d_threshold_override is not None
-        else universe.voter_d_threshold
-    )
 
     rescored: list[EvalFixture] = []
     for fix in universe.fixtures:
@@ -878,11 +868,9 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
         confs = np.array([c.confidence for c in fix.candidates], dtype=np.float64)
         clap_diff = np.array([c.clap_diff for c in fix.candidates], dtype=np.float64)
         score_c = np.array([c.score_c for c in fix.candidates], dtype=np.float64)
-        gun = np.array([c.gunshot_prob for c in fix.candidates], dtype=np.float64)
 
         vote_a = (confs >= a_floor).astype(np.int64)
         vote_b = (clap_diff >= b_thr).astype(np.int64)
-        vote_d = (gun >= d_thr).astype(np.int64)
 
         expected = fix.expected_rounds if config.use_expected_rounds else None
         if expected and expected > 0:
@@ -905,7 +893,7 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
         if expected and expected > 0:
             top = np.argsort(-confs)[:expected]
             boost[top] = config.apriori_boost
-        vote_total = vote_a + vote_b + vote_c + vote_d
+        vote_total = vote_a + vote_b + vote_c
         ensemble_score = vote_total.astype(np.float64) + boost
         kept_mask = ensemble_score >= config.consensus
         if config.c_required:
@@ -919,7 +907,6 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
                         "vote_a": int(vote_a[i]),
                         "vote_b": int(vote_b[i]),
                         "vote_c": int(vote_c[i]),
-                        "vote_d": int(vote_d[i]),
                         "vote_total": int(vote_total[i]),
                         "apriori_boost": float(boost[i]),
                         "ensemble_score": round(float(ensemble_score[i]), 2),

@@ -122,13 +122,12 @@ def rescore(
         "--universe",
         help="Path to a saved run JSON (e.g. build/lab/runs/latest.json).",
     ),
-    consensus: int = typer.Option(3, "--consensus", min=1, max=5),
+    consensus: int = typer.Option(2, "--consensus", min=1, max=4),
     apriori_boost: float = typer.Option(1.0, "--apriori-boost", min=0.0),
     no_expected_rounds: bool = typer.Option(False, "--no-expected-rounds"),
     voter_a_floor: float | None = typer.Option(None, "--voter-a-floor"),
     voter_b_threshold: float | None = typer.Option(None, "--voter-b-threshold"),
     voter_c_threshold: float | None = typer.Option(None, "--voter-c-threshold"),
-    voter_d_threshold: float | None = typer.Option(None, "--voter-d-threshold"),
     save: bool = typer.Option(True, "--save/--no-save"),
     summary_only: bool = typer.Option(False, "--summary-only"),
     pretty: bool = typer.Option(True, "--pretty/--no-pretty"),
@@ -143,7 +142,6 @@ def rescore(
         voter_a_floor_override=voter_a_floor,
         voter_b_threshold_override=voter_b_threshold,
         voter_c_threshold_override=voter_c_threshold,
-        voter_d_threshold_override=voter_d_threshold,
     )
     run = lab_module.rescore_universe(prior.universe, cfg)
     if save:
@@ -693,7 +691,6 @@ def promote_from_anchor_cmd(
                 "vote_a",
                 "vote_b",
                 "vote_c",
-                "vote_d",
                 "kept",
             ]
         )
@@ -718,7 +715,6 @@ def promote_from_anchor_cmd(
                     c.vote_a,
                     c.vote_b,
                     c.vote_c,
-                    c.vote_d,
                     "Y" if c.kept else "",
                 ]
             )
