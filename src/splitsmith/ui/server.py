@@ -2414,14 +2414,15 @@ def create_app(
                 v_fresh.processed["trim"] = True
             fresh.save(state.project_root)
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
-            # Shot detection is primary-only AND gated on the user
-            # confirming the beep (#71). Auto-detect always leaves
-            # ``beep_reviewed=False`` so this branch only fires for
-            # manual-override paths or after the user explicitly clicked
-            # "Mark reviewed" (which re-triggers chaining via
-            # ``set_beep_reviewed``). Saves the heavy CLAP / GBDT / PANN
-            # ensemble work when the beep timestamp is wrong, since
-            # everything downstream of it would be garbage anyway.
+            # Shot detection is primary-only AND gated on
+            # ``beep_reviewed`` (#71). That flag is True either because
+            # the user explicitly clicked "Mark reviewed" (which
+            # re-triggers chaining via ``set_beep_reviewed``) or because
+            # the auto-trust gate cleared (#219 layer 3b: confidence at
+            # or above ``beep_low_confidence_threshold``). Saves the
+            # heavy CLAP / GBDT / PANN ensemble work when the beep
+            # timestamp is wrong, since everything downstream of it
+            # would be garbage anyway.
             #
             # Layered automation gate (#215): users can disable the
             # auto-trigger globally or per project. ``cli_override`` is

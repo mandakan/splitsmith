@@ -69,7 +69,7 @@ class AutomationSettings(BaseSettings):
     shot_detect_on_beep_verified: bool = True
     """When the user marks a beep reviewed, fire shot detection."""
 
-    beep_low_confidence_threshold: float = 0.6
+    beep_low_confidence_threshold: float = 0.95
     """Minimum auto-detector confidence in [0, 1] required to auto-trust a beep.
 
     Joins issue #219: an auto-detected beep with confidence at or above
@@ -79,11 +79,13 @@ class AutomationSettings(BaseSettings):
     queue and the user (or an agent driving the workflow) is asked to
     pick the right candidate from the ranked list.
 
-    Empirically the labelled fixture set has ~95% top-1 precision in the
-    ``confidence >= 0.7`` band; 0.6 is the conservative default that
-    keeps a few ambiguous cases in HITL rather than wasting CLAP / GBDT
-    / PANN cycles on a beep the agent will end up correcting. Manual
-    entries always clamp confidence to 1.0 and bypass this gate.
+    Manual entries always clamp confidence to 1.0 and bypass this gate.
+
+    History: the original default was 0.6, calibrated against the
+    labelled fixture set (~95% top-1 precision in the ``>= 0.7`` band).
+    Field use surfaced too many incorrectly-auto-trusted beeps on
+    recursive-scan ingests, so the default was raised to 0.95 pending
+    a re-calibration with more data.
     """
 
 
