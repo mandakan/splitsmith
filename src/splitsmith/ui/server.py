@@ -6291,6 +6291,46 @@ def create_app(
                 }
             )
 
+        # ------------------------------------------------------------------
+        # Lab: ensemble parameter sweeps (read-only dashboard)
+        # ------------------------------------------------------------------
+        #
+        # Backed by ``build/sweeps/runs.parquet`` + ``build/sweeps/<run_id>/``
+        # written by ``scripts/run_sweep.py`` + ``scripts/plot_sweep.py``.
+        # No launch endpoint yet -- sweeps stay on the CLI for now.
+
+        from .. import lab as _lab_module_for_sweeps  # noqa: F401  (silences mypy)
+        from ..lab import sweeps as _sweeps_module
+
+        @app.get("/api/lab/sweeps")
+        def lab_sweeps_list() -> JSONResponse:
+            """List one row per ``run_id`` with best-F1 highlights."""
+            return JSONResponse(
+                [s.model_dump(mode="json") for s in _sweeps_module.list_runs()]
+            )
+
+        @app.get("/api/lab/sweeps/{run_id}")
+        def lab_sweeps_detail(run_id: str) -> JSONResponse:
+            """Return the full payload for one run: every combo + per-fixture rows."""
+            detail = _sweeps_module.get_run(run_id)
+            if detail is None:
+                raise HTTPException(status_code=404, detail=f"no sweep run {run_id!r}")
+            return JSONResponse(detail.model_dump(mode="json"))
+
+        @app.get("/api/lab/sweeps/{run_id}/plot/{plot_name}.png")
+        def lab_sweeps_plot(run_id: str, plot_name: str) -> FileResponse:
+            """Serve one PNG from ``build/sweeps/<run_id>/``.
+
+            The plot_name is restricted to alnum + underscore by the
+            ``sweeps`` helper so a malicious caller can't traverse
+            outside the run dir. Returns 404 when the plot doesn't
+            exist (e.g. a 2D plot requested for a 1D sweep).
+            """
+            path = _sweeps_module.plot_path(run_id, plot_name)
+            if path is None:
+                raise HTTPException(status_code=404, detail="plot not found")
+            return FileResponse(path, media_type="image/png", filename=path.name)
+
     if lab_enabled:
         _setup_lab()
 

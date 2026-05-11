@@ -37,6 +37,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { SweepsCard } from "@/components/SweepsCard";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -259,6 +260,8 @@ export function Lab() {
           evalLoading={evalLoading}
         />
       ) : null}
+
+      <SweepsCard />
     </div>
   );
 }

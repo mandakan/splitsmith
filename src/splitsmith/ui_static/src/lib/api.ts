@@ -1904,6 +1904,20 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  /** Ensemble parameter-sweep dashboard (read-only). Backed by
+   *  ``build/sweeps/runs.parquet`` written by ``scripts/run_sweep.py``. */
+  listSweepRuns: () => request<SweepRunSummary[]>("/api/lab/sweeps"),
+
+  /** Full per-combo + per-fixture detail for one sweep run. */
+  getSweepRun: (runId: string) =>
+    request<SweepRunDetail>(`/api/lab/sweeps/${encodeURIComponent(runId)}`),
+
+  /** Build a URL the SPA can drop into an ``<img src>`` -- request goes
+   *  through FastAPI so the gitignored build/ tree is never directly
+   *  exposed. ``plotName`` is the file stem without ``.png``. */
+  sweepPlotUrl: (runId: string, plotName: string): string =>
+    `/api/lab/sweeps/${encodeURIComponent(runId)}/plot/${encodeURIComponent(plotName)}.png`,
+
   promoteSecondary: (
     stageNumber: number,
     videoId: string,
@@ -2151,6 +2165,56 @@ export interface LabEvalRun {
   universe: LabEvalUniverse;
   config_hash: string;
   built_at: string;
+}
+
+/**
+ * Ensemble parameter-sweep types. Mirrors ``src/splitsmith/lab/sweeps.py``.
+ * Sweeps are produced by ``scripts/run_sweep.py`` and lurk in
+ * ``build/sweeps/runs.parquet``; the Lab tab reads them through
+ * ``/api/lab/sweeps``.
+ */
+export interface SweepFixtureRow {
+  fixture: string;
+  camera_class: string;
+  n_candidates: number;
+  n_positives: number;
+  n_kept: number;
+  true_pos: number;
+  false_pos: number;
+  false_neg: number;
+  precision: number;
+  recall: number;
+  f1: number;
+}
+
+export interface SweepComboRow {
+  combo_idx: number;
+  params: Record<string, unknown>;
+  aggregate: SweepFixtureRow;
+  per_class: SweepFixtureRow[];
+  per_fixture: SweepFixtureRow[];
+}
+
+export interface SweepRunSummary {
+  run_id: string;
+  signals_build_id: string;
+  swept_keys: string[];
+  n_combos: number;
+  n_fixtures: number;
+  best_f1: number;
+  best_precision: number;
+  best_recall: number;
+  best_kept: number;
+  best_true_pos: number;
+  best_false_pos: number;
+  best_false_neg: number;
+  best_combo_idx: number;
+}
+
+export interface SweepRunDetail {
+  summary: SweepRunSummary;
+  combos: SweepComboRow[];
+  available_plots: string[];
 }
 
 export { ApiError };
