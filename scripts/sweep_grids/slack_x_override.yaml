@@ -1,0 +1,15 @@
+# 2D sweep: voter C's two real knobs against each other.
+#
+# Hypothesis: ``slack_frac`` and ``confidence_override`` are
+# independent because they operate on disjoint candidate populations:
+# * ``slack_frac`` controls the rank cap (top-K+slack by GBDT prob)
+# * ``confidence_override`` rescues high-prob candidates outside that
+#   rank cap
+#
+# If independent the heatmap should be additive (best F1 ~= production
+# slack=0.10 + override=0.60). If not, there's a joint optimum that
+# single-axis sweeps missed.
+#
+# Production (post-#286, #290): slack=0.10, override=0.60
+voter_c_slack_frac: [0.05, 0.075, 0.10, 0.125, 0.15, 0.20]
+voter_c_confidence_override: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75]
