@@ -61,8 +61,10 @@ def test_vote_c_global_threshold() -> None:
 def test_vote_c_adaptive_top_k_plus_slack() -> None:
     """K=5 with default slack_min=3 -> keep top-8 candidates by GBDT prob.
 
-    Default ``slack_frac=0.25`` (issue #103) → ``max(3, 5*0.25=1.25)=3``,
-    so K + slack = 8. Wider K would tip into the fractional regime.
+    Default ``slack_frac=0.10`` (retuned on the 30-fixture corpus;
+    see ``docs/ensemble_dashboard/findings/2026-05-11_voter_c_slack.md``)
+    yields ``max(3, round(5*0.10))=3``, so K + slack = 8. Wider K
+    would tip into the fractional regime.
     """
     probs = np.linspace(0.0, 1.0, 20)
     out = vote_c_adaptive(probs, expected_rounds=5)

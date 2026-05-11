@@ -32,7 +32,7 @@ def vote_c_adaptive(
     expected_rounds: int,
     *,
     slack_min: int = 3,
-    slack_frac: float = 0.25,
+    slack_frac: float = 0.10,
     confidence_override: float | None = 0.75,
 ) -> np.ndarray:
     """Voter C in adaptive mode: keep the top-(K+slack) probabilities.
@@ -41,10 +41,20 @@ def vote_c_adaptive(
     stages get a tighter cutoff than the global threshold; clean stages
     stay lenient. Returns a ``(N,)`` 0/1 array.
 
-    Default ``slack_frac=0.25`` was tuned (issue #103) on 281 hand-
-    labeled FPs across 4 fixtures: it recovers 100 % of audited truth
-    shots while letting only 3 / 281 labeled FPs slip past voter C
-    (vs the original 0.10 which missed 4 truth shots).
+    Default ``slack_frac=0.10`` retuned on the 30-fixture corpus
+    (576 positives, 1713 candidates) via the dashboard sweep at
+    ``docs/ensemble_dashboard/findings/2026-05-11_voter_c_slack.md``.
+    The previous value 0.25 was tuned in #103 on 4 fixtures / 281 FPs
+    where 0.10 lost 4 truth shots; on the broader corpus the recall gap
+    closes -- both 0.10 and 0.25 land the same 9 audio-side FNs, but
+    0.25 imports 18 extra FPs voter C should reject. Per-camera-class
+    sweep confirmed the same plateau holds for headcam and handheld.
+    Three stage7 truth shots score below the K-cap at 0.10 and would
+    be silenced if not for the audit UI's rejected-marker flow: every
+    voter-A candidate stays on the timeline as a rejected marker the
+    user can toggle back to ``detected`` with one click, so the FN
+    cost there is one click each vs the 18 unattended FPs the wider
+    slack imports.
 
     ``confidence_override`` (issue #103 follow-up): high-scoring
     candidates pass voter C regardless of rank. The K-cap can otherwise

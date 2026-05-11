@@ -112,7 +112,7 @@ DEFAULTS: dict[str, Any] = {
     "voter_e_threshold_offset": 0.0,
     "voter_c_mode": "adaptive",
     "voter_c_slack_min": 3,
-    "voter_c_slack_frac": 0.25,
+    "voter_c_slack_frac": 0.10,
     "voter_c_confidence_override": 0.75,
     "use_expected_rounds": True,
     "camera_class_filter": "all",

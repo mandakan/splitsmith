@@ -1,0 +1,5 @@
+# Fine-resolution sweep around the candidate retune region.
+# Initial coarse sweep showed F1 climbing as slack_frac drops below the
+# current production 0.25. This grid zooms in to find the actual best
+# and check whether any per-fixture regressions hide in the aggregate.
+voter_c_slack_frac: [0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.20, 0.225, 0.25, 0.275, 0.30]
