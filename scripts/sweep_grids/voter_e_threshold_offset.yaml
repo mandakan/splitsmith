@@ -1,0 +1,14 @@
+# 1D sweep: shift voter E's CLIP-probe P(shot) threshold.
+#
+# Requires:
+# * ``signals.parquet`` rebuilt WITHOUT ``--skip-voter-e`` (so the
+#   ``voter_e_signal`` column is populated -- the default --skip flow
+#   stores NaN and the sweep will silently no-op).
+# * Source videos still reachable for the audited fixtures (the visual
+#   probe re-extracts frames at candidate times).
+#
+# Voter E is calibrated to a TARGET RECALL (not lowest-positive) so it
+# has more headroom than B/D -- non-zero offset is a real knob.
+enable_voter_e: [true]
+e_required: [true]
+voter_e_threshold_offset: [-0.05, 0.0, 0.05, 0.10, 0.15, 0.20]
