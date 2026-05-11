@@ -1,0 +1,9 @@
+# 1D sweep: magnitude of the apriori boost for top-K candidates.
+#
+# When ``expected_rounds`` is provided, the top-N candidates by
+# detector confidence get ``+apriori_boost`` added to their consensus
+# score. Boost=1.0 (production) is equivalent to one extra vote;
+# boost=0.0 disables. Under c_required=True the consensus threshold
+# is already absorbed (see the consensus_x_c_required finding), so
+# this knob may also be a dead axis.
+apriori_boost: [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
