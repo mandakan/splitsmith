@@ -2750,6 +2750,43 @@ def create_app(
             )
         source = proj.resolve_video_path(state.project_root, prim.path)
 
+        # Re-detect-all on an old project (and the v1->v2 cache migration in
+        # #298) leaves stages with no trimmed MP4 cached. Without that file,
+        # ensure_audit_audio falls back to the full source WAV -- shot
+        # detection still works, but the audit page then streams the raw
+        # source clip into <video>, where long-GOP 4K MOVs wedge in buffering
+        # on first play. Force the trim here so every shot-detect run leaves
+        # the audit cache in the same state the beep-detect path would have.
+        handle.update(progress=0.05, message="Ensuring audit trim...")
+        try:
+            audio_helpers.ensure_video_audit_trim(
+                state.project_root,
+                stage_number,
+                prim,
+                source,
+                prim.beep_time,
+                stg.time_seconds,
+                project=proj,
+                runner=_cancellable_runner(handle),
+            )
+            trim_fresh = state.load()
+            try:
+                v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
+            except KeyError:
+                v_fresh = None
+            if v_fresh is not None and not v_fresh.processed.get("trim"):
+                v_fresh.processed["trim"] = True
+                trim_fresh.save(state.project_root)
+        except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+            # Soft failure: detection can still proceed against the source
+            # WAV. ensure_audit_audio's fallback handles the missing trim,
+            # so we log and continue rather than abort the whole job.
+            logger.warning(
+                "shot_detect could not (re)build trim for stage %d: %s",
+                stage_number,
+                exc,
+            )
+
         handle.update(progress=0.1, message="Preparing audio...")
         audit = audio_helpers.ensure_audit_audio(
             state.project_root,
