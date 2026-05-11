@@ -56,6 +56,62 @@ def test_init_creates_layout(tmp_path: Path) -> None:
         assert (tmp_path / "match-a" / sub).is_dir()
 
 
+def test_load_migrates_v1_caches_to_v2(tmp_path: Path) -> None:
+    """Opening a v1 project deletes the legacy role-named cache files so
+    the new per-video naming can take over without serving stale audio.
+
+    Regression for the bug where a primary swap silently reused
+    ``stage<N>_primary.wav`` content from the previous primary.
+    """
+    root = tmp_path / "legacy-match"
+    # Bootstrap a project, then forge an on-disk v1 representation so the
+    # load() migration path runs against it.
+    project = MatchProject.init(root, name="Legacy")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary")],
+        )
+    ]
+    project.save(root)
+    data = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    (root / PROJECT_FILE).write_text(json.dumps(data), encoding="utf-8")
+
+    audio = root / "audio"
+    audio.mkdir(exist_ok=True)
+    legacy_full = audio / "stage1_primary.wav"
+    legacy_full.write_bytes(b"OLD")
+    legacy_audit = audio / "stage1_audit.wav"
+    legacy_audit.write_bytes(b"OLD")
+    legacy_peaks = audio / "stage1_primary.peaks-1200.json"
+    legacy_peaks.write_bytes(b"[]")
+    trimmed = root / "trimmed"
+    trimmed.mkdir(exist_ok=True)
+    legacy_trim = trimmed / "stage1_trimmed.mp4"
+    legacy_trim.write_bytes(b"OLD")
+    legacy_params = trimmed / "stage1_trimmed.params.json"
+    legacy_params.write_bytes(b"{}")
+    # A pre-existing v2 cam-cache must survive the migration untouched.
+    survivor = audio / "stage1_cam_abc123_audit.wav"
+    survivor.write_bytes(b"KEEP")
+
+    reloaded = MatchProject.load(root)
+
+    assert reloaded.schema_version == 2
+    assert not legacy_full.exists()
+    assert not legacy_audit.exists()
+    assert not legacy_peaks.exists()
+    assert not legacy_trim.exists()
+    assert not legacy_params.exists()
+    assert survivor.exists()
+    # And the version bump is persisted, so a second load is a no-op.
+    persisted = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+    assert persisted["schema_version"] == 2
+
+
 def test_init_is_idempotent(tmp_path: Path) -> None:
     root = tmp_path / "match-b"
     first = MatchProject.init(root, name="Match B")
@@ -713,12 +769,14 @@ def test_remove_primary_includes_audio_and_trimmed_paths(tmp_path: Path) -> None
     project.assign_video(video.path, to_stage_number=1, role="primary")
     project.stages[0].videos[0].processed = {"beep": True, "shot_detect": True, "trim": True}
 
+    vid = project.stages[0].videos[0].video_id
+
     plan = project.remove_video(video.path, root)
 
     assert plan.was_primary is True
     assert plan.stage_number == 1
-    assert plan.audio_cache_path == (root / "audio" / "stage1_primary.wav")
-    assert plan.trimmed_cache_path == (root / "trimmed" / "stage1_trimmed.mp4")
+    assert plan.audio_cache_path == (root / "audio" / f"stage1_cam_{vid}.wav")
+    assert plan.trimmed_cache_path == (root / "trimmed" / f"stage1_cam_{vid}_trimmed.mp4")
     assert plan.audit_path is None  # default: preserve audit
     assert plan.audit_reset is False
     assert project.stages[0].videos == []

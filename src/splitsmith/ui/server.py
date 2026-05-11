@@ -3555,9 +3555,9 @@ def create_app(
     def stage_audio(stage_number: int) -> FileResponse:
         """Serve the audit-clip WAV for ``stage_number``.
 
-        Prefers ``stage<N>_audit.wav`` (extracted from the short-GOP trimmed
+        Prefers the primary's audit WAV (extracted from the short-GOP trimmed
         MP4 produced by Sub 5 / #16) so the waveform timeline matches what
-        the user is auditing. Falls back to the full ``stage<N>_primary.wav``
+        the user is auditing. Falls back to the primary's full source WAV
         when no trimmed clip exists yet -- the SPA surfaces this with a
         "trim required" hint.
         """
@@ -4151,8 +4151,8 @@ def create_app(
         """Serve a registered video file with HTTP Range support.
 
         For the primary of a stage, prefers the short-GOP trimmed MP4
-        produced by Sub 5 / #16 (``<trimmed>/stage<N>_trimmed.mp4``). The
-        re-encoded clip seeks frame-accurately, which is what makes the
+        produced by Sub 5 / #16 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``).
+        The re-encoded clip seeks frame-accurately, which is what makes the
         audit screen's drag-scrubbing feel responsive. Secondaries fall
         through to their source file -- per-video trim runs aren't wired
         through the production UI yet.
