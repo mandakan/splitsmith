@@ -1,0 +1,4 @@
+# 1D sweep: shift Voter A's confidence floor relative to the calibrated
+# value. Negative offsets accept lower-confidence candidates (recall up,
+# precision down); positive offsets tighten the floor.
+voter_a_floor_offset: [-0.02, -0.01, -0.005, 0.0, 0.005, 0.01, 0.02, 0.05]

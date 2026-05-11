@@ -404,6 +404,54 @@ Each shot has a `confidence` score = geometric mean of normalized onset strength
 
 Real shots that come right after a long pause are AGC-ducked and rank lower in confidence, so don't blindly delete the bottom-N rows. Eyeball timestamps too.
 
+## Ensemble performance dashboard
+
+The 4-voter shot-detection ensemble is parameterised on a dozen knobs
+(consensus level, per-voter thresholds, apriori boost, Voter C slack,
+...). Sweep them over the audited fixture set and render plots + a
+detailed report:
+
+```bash
+# 1. Build the per-candidate signal table (slow; redo after corpus or
+#    feature changes). Without --skip-voter-e it also pulls the CLIP
+#    visual probe scores for fixtures whose source video is reachable.
+uv run python scripts/build_sweep_signals.py --skip-voter-e
+
+# 2. Replay the voters over a parameter grid (fast; pure numpy).
+uv run python scripts/run_sweep.py \
+    --grid scripts/sweep_grids/consensus_x_apriori.yaml
+
+# 3. Render plots + a markdown report under build/sweeps/<run_id>/.
+uv run python scripts/plot_sweep.py
+```
+
+The latest sweep's overview PNG lands at
+`build/sweeps/latest_overview.png` and its detailed report at
+`build/sweeps/latest_report.md` (with per-fixture P/R/F1 tables and the
+full parameter dump). Pre-built grids live in `scripts/sweep_grids/`;
+the full key vocabulary is documented in `scripts/run_sweep.py`. Two
+parquet files back the dashboard:
+
+- `build/sweeps/signals.parquet` -- one row per (fixture, candidate)
+  with every raw voter signal + ground-truth label. Invariant under
+  threshold sweeps.
+- `build/sweeps/runs.parquet` -- one row per (run_id, parameter combo,
+  fixture) with precision / recall / F1, per-voter solo-correct counts,
+  and effective thresholds.
+
+Latest snapshot:
+
+![latest sweep overview](docs/ensemble_dashboard/latest_overview.png)
+
+(See [`docs/ensemble_dashboard/latest_report.md`](docs/ensemble_dashboard/latest_report.md)
+for the full per-fixture breakdown + parameter dump that produced it.)
+
+The natural next step for a live dashboard is extending the existing
+**Algorithm Lab** page (`splitsmith ui --lab`) to read `runs.parquet`
+directly -- it already owns the fixture-eval + live-tuning surface.
+Standing up a separate Streamlit / marimo app would duplicate that
+infrastructure.
+
 ## Configuration
 
 Defaults live in `src/splitsmith/config.py`. Override via `--config path/to/config.yaml`:
