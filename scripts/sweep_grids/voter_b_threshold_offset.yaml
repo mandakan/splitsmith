@@ -1,0 +1,8 @@
+# 1D sweep: shift voter B's CLAP shot-vs-not-shot differential threshold.
+#
+# Calibration sets the threshold to the lowest clap_diff seen on an
+# audited positive -- 100 % recall by construction. Negative offsets
+# can't help (would just keep more non-positives). Positive offsets
+# trade recall for precision; a sweet spot exists only if voter B's
+# precision-veto power outweighs its recall cost relative to consensus.
+voter_b_threshold_offset: [0.0, 0.01, 0.025, 0.05, 0.075, 0.10, 0.15]

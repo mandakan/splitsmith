@@ -1,0 +1,7 @@
+# 1D sweep: shift voter D's PANN gunshot-class probability threshold.
+#
+# Same shape as voter B: calibrated to lowest positive (100 % recall).
+# Positive offsets sacrifice recall for precision; useful for finding
+# the gunshot-prob value where real shots stop benefiting from voter D
+# and FPs start dominating.
+voter_d_threshold_offset: [0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.10]
