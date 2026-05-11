@@ -4,14 +4,14 @@ For each input fixture, produces TWO sibling fixtures under
 ``build/ensemble-review/``:
 
 * ``{stem}-baseline.json``         -- shots[] = baseline (cwt + min_confidence=0.03)
-* ``{stem}-ensemble-{N}of4.json``  -- shots[] = N-of-4 ensemble consensus
+* ``{stem}-ensemble-{N}of3.json``  -- shots[] = N-of-3 ensemble consensus
 
 Voters
 ------
 A. Baseline detector + min_confidence=0.03  (calibrated, 100 % recall)
 B. CLAP zero-shot, threshold = min(clap_diff over positives)  (100 % recall)
-C. GBDT classifier, threshold for --gbdt-target-recall (default 95 %)
-D. PANNs gunshot_prob, threshold = min(over positives)  (100 % recall)
+C. GBDT classifier (PANN gunshot_prob folded in as a feature),
+   threshold for --gbdt-target-recall (default 95 %)
 
 Both written variants share the same ``_candidates_pending_audit`` (the full
 max-recall candidate set), so opening either in the review SPA shows every
@@ -276,14 +276,13 @@ def _vote_b_threshold(calib_universe) -> float:
     return min(pos) if pos else 0.0
 
 
-def _vote_d_threshold(calib_universe) -> float:
-    pos = [c["gunshot_prob"] for c in calib_universe if c["label"] == 1]
-    return min(pos) if pos else 0.0
-
-
 def _x_from(cands) -> np.ndarray:
     return np.array(
-        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in cands], dtype=np.float64
+        [
+            c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]]
+            for c in cands
+        ],
+        dtype=np.float64,
     )
 
 
@@ -361,9 +360,9 @@ def main() -> None:
         default=[],
         help="Apply the trained ensemble to this fixture too (no labels needed). Repeatable.",
     )
-    p.add_argument("--consensus", type=int, default=3, choices=[1, 2, 3, 4],
-                   help="Consensus threshold for the *-ensemble-{N}of4.json variant. "
-                   "Default 3 (= 3-of-4 strict majority, preserves 100 %% recall). "
+    p.add_argument("--consensus", type=int, default=2, choices=[1, 2, 3],
+                   help="Consensus threshold for the *-ensemble-{N}of3.json variant. "
+                   "Default 2 (= 2-of-3 strict majority, preserves 100 %% recall). "
                    "Keep if (vote_total + apriori_boost) >= consensus.")
     p.add_argument(
         "--gbdt-target-recall",
@@ -409,11 +408,9 @@ def main() -> None:
     )
 
     clap_thr = _vote_b_threshold(calib_universe)
-    pann_thr = _vote_d_threshold(calib_universe)
     clf_c, c_thr = _train_voter_c(calib_universe, target_recall=args.gbdt_target_recall)
     print(f"Voter B threshold (CLAP shot-notshot, calibrated): {clap_thr:.4f}")
     print(f"Voter C threshold (GBDT, target recall {args.gbdt_target_recall*100:.0f} %): {c_thr:.4f}")
-    print(f"Voter D threshold (PANN gunshot_prob, calibrated): {pann_thr:.4f}")
 
     # Apply voter C to the FULL universe using the model trained on calibration.
     X_all = _x_from(universe)
@@ -422,7 +419,6 @@ def main() -> None:
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_thr)
         c["vote_c"] = int(probs[i] >= c_thr)
-        c["vote_d"] = int(c["gunshot_prob"] >= pann_thr)
         c["score_c"] = float(probs[i])
 
     # Per-stage adaptive voter C override: when a fixture's JSON has
@@ -455,7 +451,7 @@ def main() -> None:
             print(f"  {line}")
 
     for c in universe:
-        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
+        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"]
 
     # Apply per-fixture soft apriori boost (only for --include-fixture targets;
     # calibration fixtures are unmodified so their existing eval numbers stand).
@@ -527,14 +523,14 @@ def main() -> None:
         # Materialize both.
         wav_src = FIXTURES_DIR / f"{fix}.wav"
         baseline_json = OUTPUT_DIR / f"{fix}-baseline.json"
-        ensemble_json = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of4.json"
+        ensemble_json = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"
 
         _materialize(baseline_json, wav_src, _build_fixture_json(
             truth, baseline_shots, all_candidates, label="baseline (cwt + min_confidence=0.03)"
         ))
         _materialize(ensemble_json, wav_src, _build_fixture_json(
             truth, ensemble_shots, all_candidates,
-            label=f"ensemble {args.consensus}-of-4 consensus (A=baseline+0.03, B=CLAP, C=GBDT, D=PANN)",
+            label=f"ensemble {args.consensus}-of-3 consensus (A=baseline+0.03, B=CLAP, C=GBDT+PANN)",
         ))
 
         n_total = len(all_candidates)
@@ -567,7 +563,7 @@ def main() -> None:
     print(f"\nOpen in the review UI -- one fixture per browser tab/window:")
     for fix in apply_fixtures:
         b = OUTPUT_DIR / f"{fix}-baseline.json"
-        e = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of4.json"
+        e = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"
         print(f"\n  uv run splitsmith review --fixture {b}")
         print(f"  uv run splitsmith review --fixture {e} --port 5174")
 

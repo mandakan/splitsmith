@@ -2835,7 +2835,6 @@ def create_app(
                     "vote_a": cand.vote_a,
                     "vote_b": cand.vote_b,
                     "vote_c": cand.vote_c,
-                    "vote_d": cand.vote_d,
                     "vote_e": cand.vote_e,
                     "vote_total": cand.vote_total,
                     "apriori_boost": cand.apriori_boost,
@@ -2850,10 +2849,10 @@ def create_app(
         handle.update(progress=0.85, message="Saving audit JSON...")
         existing_json["_candidates_pending_audit"] = {
             "_note": (
-                "4-voter ensemble (issue #31). vote_a/b/c/d=1 means the "
-                "voter kept the candidate; ensemble_score = vote_total + "
-                "apriori_boost. shots[] is seeded from candidates with "
-                "ensemble_score >= consensus."
+                "3-voter ensemble (PANN gunshot folded into voter C). "
+                "vote_a/b/c=1 means the voter kept the candidate; "
+                "ensemble_score = vote_total + apriori_boost. shots[] is "
+                "seeded from candidates with ensemble_score >= consensus."
             ),
             "consensus": result.consensus,
             "expected_rounds": result.expected_rounds,

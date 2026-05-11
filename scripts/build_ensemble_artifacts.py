@@ -244,11 +244,6 @@ def _voter_b_threshold(universe: list[dict]) -> float:
     return float(min(pos)) if pos else 0.0
 
 
-def _voter_d_threshold(universe: list[dict]) -> float:
-    pos = [c["gunshot_prob"] for c in universe if c["label"] == 1]
-    return float(min(pos)) if pos else 0.0
-
-
 def _split_by_camera_class(universe: list[dict]) -> dict[str, list[dict]]:
     """Group universe rows by ``camera_class``."""
     grouped: dict[str, list[dict]] = {}
@@ -816,7 +811,6 @@ def build_artifacts(
 
         cls_a = _voter_a_floor(rows)
         cls_b = _voter_b_threshold(rows)
-        cls_d = _voter_d_threshold(rows)
 
         # Voter C: pick the threshold from the CV slice that belongs to
         # this class (positives + the negatives that came from the same
@@ -835,7 +829,6 @@ def build_artifacts(
             "voter_a_floor": cls_a,
             "voter_b_threshold": cls_b,
             "voter_c_threshold": cls_c,
-            "voter_d_threshold": cls_d,
             "n_calibration_candidates": len(rows),
             "n_calibration_positives": len(rows_pos),
             "calibration_fixtures": sorted({r["fixture"] for r in rows}),
@@ -863,7 +856,7 @@ def build_artifacts(
         }
 
         log(
-            f"  {cls}: A={cls_a:.4f}  B={cls_b:.4f}  C={cls_c:.4f}  D={cls_d:.4f}  "
+            f"  {cls}: A={cls_a:.4f}  B={cls_b:.4f}  C={cls_c:.4f}  "
             f"(n={len(rows)} cands / {len(rows_pos)} pos)  "
             f"voter-C CV P/R/F1={precision:.3f}/{recall:.3f}/{f1:.3f}"
         )
@@ -912,8 +905,7 @@ def build_artifacts(
         f"Default class for legacy callers: {default_cls!r} "
         f"(A={default_thresholds['voter_a_floor']:.4f} "
         f"B={default_thresholds['voter_b_threshold']:.4f} "
-        f"C={default_thresholds['voter_c_threshold']:.4f} "
-        f"D={default_thresholds['voter_d_threshold']:.4f})"
+        f"C={default_thresholds['voter_c_threshold']:.4f})"
     )
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -925,7 +917,6 @@ def build_artifacts(
         "voter_a_floor": default_thresholds["voter_a_floor"],
         "voter_b_threshold": default_thresholds["voter_b_threshold"],
         "voter_c_threshold": default_thresholds["voter_c_threshold"],
-        "voter_d_threshold": default_thresholds["voter_d_threshold"],
         "voter_e_threshold": default_thresholds.get("voter_e_threshold"),
         "voter_c_target_recall": target_recall,
         "voter_e_target_recall": voter_e_target_recall if voter_e_probe is not None else None,
@@ -939,7 +930,7 @@ def build_artifacts(
         "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
         "voter_e_frame_offsets": list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None,
         "voter_e_probe_artifact": DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None,
-        "voter_e_audio_strong_min_votes_recommended": 4 if voter_e_probe is not None else None,
+        "voter_e_audio_strong_min_votes_recommended": 3 if voter_e_probe is not None else None,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "default_camera_class": default_cls,
         "thresholds_by_camera_class": thresholds_by_class,

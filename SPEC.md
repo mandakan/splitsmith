@@ -39,9 +39,9 @@ raw videos + stage JSON
     │   re-encode for SPA scrub
     ▼
 [4] Detect shots                   (shot_detect.py / ensemble/)
-    │   4-voter ensemble (envelope + CLAP + GBDT + PANN) with
-    │   per-camera-class thresholds + adaptive priors from
-    │   stage_rounds; consensus seeds shots[]
+    │   3-voter ensemble (envelope + CLAP + GBDT; PANN folded into
+    │   GBDT as a feature) with per-camera-class thresholds +
+    │   adaptive priors from stage_rounds; consensus seeds shots[]
     ▼
 [5] Generate outputs               (csv_gen.py, fcpxml_gen.py,
     │                              ui/exports.py, ui/match_exports.py,

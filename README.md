@@ -406,10 +406,10 @@ Real shots that come right after a long pause are AGC-ducked and rank lower in c
 
 ## Ensemble performance dashboard
 
-The 4-voter shot-detection ensemble is parameterised on a dozen knobs
-(consensus level, per-voter thresholds, apriori boost, Voter C slack,
-...). Sweep them over the audited fixture set and render plots + a
-detailed report:
+The 3-voter shot-detection ensemble is parameterised on a handful of
+knobs (consensus level, per-voter thresholds, apriori boost, Voter C
+slack, ...). Sweep them over the audited fixture set and render plots
++ a detailed report:
 
 ```bash
 # 1. Build the per-candidate signal table (slow; redo after corpus or

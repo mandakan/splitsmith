@@ -2065,7 +2065,6 @@ export interface LabEvalConfig {
   voter_a_floor_override: number | null;
   voter_b_threshold_override: number | null;
   voter_c_threshold_override: number | null;
-  voter_d_threshold_override: number | null;
 }
 
 export interface LabEvalCandidate {
@@ -2080,7 +2079,6 @@ export interface LabEvalCandidate {
   vote_a: number;
   vote_b: number;
   vote_c: number;
-  vote_d: number;
   vote_total: number;
   apriori_boost: number;
   ensemble_score: number;
@@ -2155,7 +2153,6 @@ export interface LabEvalUniverse {
   voter_a_floor: number;
   voter_b_threshold: number;
   voter_c_threshold: number;
-  voter_d_threshold: number;
   tolerance_ms: number;
 }
 

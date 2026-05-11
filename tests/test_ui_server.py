@@ -2114,10 +2114,9 @@ def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
             vote_a=c.get("vote_a", 1),
             vote_b=c.get("vote_b", 1),
             vote_c=c.get("vote_c", 1),
-            vote_d=c.get("vote_d", 1),
-            vote_total=c.get("vote_total", 4),
+            vote_total=c.get("vote_total", 3),
             apriori_boost=c.get("apriori_boost", 0.0),
-            ensemble_score=c.get("ensemble_score", 4.0),
+            ensemble_score=c.get("ensemble_score", 3.0),
             score_c=c.get("score_c", 0.9),
             clap_diff=c.get("clap_diff", 0.5),
             gunshot_prob=c.get("gunshot_prob", 0.7),
@@ -2129,7 +2128,7 @@ def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
 
 
 def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> None:
-    """The shot-detect job runs the 4-voter ensemble on the audit clip and
+    """The shot-detect job runs the 3-voter ensemble on the audit clip and
     merges per-voter signals into <project>/audit/stage<N>.json. Heavy
     models (CLAP, PANN, GBDT) are stubbed via the ensemble module entry
     points so the test runs offline."""
@@ -2172,10 +2171,11 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
     fake_result = _fake_ensemble_result(
         [
-            {"time": 5.5, "confidence": 0.8, "ensemble_score": 4.0, "kept": True},
-            {"time": 6.1, "confidence": 0.6, "ensemble_score": 3.0, "kept": True},
-            {"time": 6.9, "confidence": 0.9, "ensemble_score": 4.0, "kept": True},
-        ]
+            {"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True},
+            {"time": 6.1, "confidence": 0.6, "ensemble_score": 2.0, "kept": True},
+            {"time": 6.9, "confidence": 0.9, "ensemble_score": 3.0, "kept": True},
+        ],
+        consensus=2,
     )
     monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
 
@@ -2187,7 +2187,7 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert audit_file.exists()
     saved = _json.loads(audit_file.read_text(encoding="utf-8"))
     block = saved["_candidates_pending_audit"]
-    assert block["consensus"] == 3
+    assert block["consensus"] == 2
     cands = block["candidates"]
     assert len(cands) == 3
     assert cands[0]["candidate_number"] == 1
@@ -2195,13 +2195,13 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert cands[0]["ms_after_beep"] == 500
     # Per-voter signals should reach the audit JSON.
     assert cands[0]["vote_a"] == 1
-    assert cands[0]["vote_total"] == 4
+    assert cands[0]["vote_total"] == 3
     assert "score_c" in cands[0]
     # shots[] is seeded from the consensus subset.
     shots = saved["shots"]
     assert len(shots) == 3
     assert shots[0]["source"] == "detected"
-    assert shots[0]["ensemble_votes"] == 4
+    assert shots[0]["ensemble_votes"] == 3
     # processed.shot_detect flips on the primary so the SPA can show status.
     proj_after = client.get("/api/project").json()
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
