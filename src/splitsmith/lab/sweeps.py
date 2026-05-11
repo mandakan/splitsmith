@@ -111,11 +111,7 @@ def _load_all_rows() -> list[dict[str, Any]]:
 
 def _params_for(combo_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Extract the ``param_*`` columns from any row of the combo."""
-    return {
-        k.removeprefix("param_"): v
-        for k, v in combo_rows[0].items()
-        if k.startswith("param_")
-    }
+    return {k.removeprefix("param_"): v for k, v in combo_rows[0].items() if k.startswith("param_")}
 
 
 def _swept_keys_for(rows: list[dict[str, Any]]) -> list[str]:
@@ -194,11 +190,7 @@ def get_run(run_id: str) -> SweepRunDetail | None:
             for r in combo_rows
             if r["fixture"].startswith("__class_")
         ]
-        per_fixture = [
-            _row_to_fixture(r)
-            for r in combo_rows
-            if not r["fixture"].startswith("__")
-        ]
+        per_fixture = [_row_to_fixture(r) for r in combo_rows if not r["fixture"].startswith("__")]
         combos.append(
             SweepComboRow(
                 combo_idx=idx,

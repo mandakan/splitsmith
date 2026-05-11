@@ -6305,9 +6305,7 @@ def create_app(
         @app.get("/api/lab/sweeps")
         def lab_sweeps_list() -> JSONResponse:
             """List one row per ``run_id`` with best-F1 highlights."""
-            return JSONResponse(
-                [s.model_dump(mode="json") for s in _sweeps_module.list_runs()]
-            )
+            return JSONResponse([s.model_dump(mode="json") for s in _sweeps_module.list_runs()])
 
         @app.get("/api/lab/sweeps/{run_id}")
         def lab_sweeps_detail(run_id: str) -> JSONResponse:
