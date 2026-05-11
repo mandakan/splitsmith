@@ -26,7 +26,7 @@
  * never flash the spinner.
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, LayoutGrid, LayoutList, Loader2 } from "lucide-react";
 
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
@@ -175,9 +175,30 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
     },
     ref,
   ) {
+    // Callback ref so we can (a) forward to the parent's ref AND (b) release
+    // demux/decoded-frame buffers on the OLD <video> when `key={videoSrc}`
+    // forces a remount on stage change. useReleaseMediaOnUnmount only fires
+    // on component unmount, not on per-element replacement, so we'd otherwise
+    // leak the prior stage's buffers and wedge the new element's first play.
     const internalRef = useRef<HTMLVideoElement | null>(null);
-    useImperativeHandle(ref, () => internalRef.current as HTMLVideoElement, []);
-    useReleaseMediaOnUnmount(internalRef);
+    const setVideoEl = useCallback(
+      (el: HTMLVideoElement | null) => {
+        const prev = internalRef.current;
+        if (prev && prev !== el) {
+          try {
+            prev.pause();
+            prev.removeAttribute("src");
+            prev.load();
+          } catch {
+            /* element already detached */
+          }
+        }
+        internalRef.current = el;
+        if (typeof ref === "function") ref(el);
+        else if (ref) ref.current = el;
+      },
+      [ref],
+    );
 
     const [status, setStatus] = useState<LoadStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -324,7 +345,8 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
               </div>
             ) : null}
             <video
-              ref={internalRef}
+              key={videoSrc}
+              ref={setVideoEl}
               src={videoSrc}
               preload="metadata"
               playsInline
