@@ -1,7 +1,7 @@
 {
   "voter_a_floor": 0.01847127532497797,
   "voter_b_threshold": 0.03676433116197586,
-  "voter_c_threshold": 0.25465663648918596,
+  "voter_c_threshold": 0.26342958854803156,
   "voter_d_threshold": 0.00018919698777608573,
   "voter_e_threshold": 0.43199207377244186,
   "voter_c_target_recall": 0.95,
@@ -59,20 +59,20 @@
   ],
   "n_calibration_candidates": 1713,
   "n_calibration_positives": 576,
-  "voter_c_feature_dim": 30,
+  "voter_c_feature_dim": 31,
   "voter_e_clip_model_id": "openai/clip-vit-base-patch32",
   "voter_e_frame_offsets": [
     0.0
   ],
   "voter_e_probe_artifact": "voter_e_visual_probe.joblib",
   "voter_e_audio_strong_min_votes_recommended": 4,
-  "built_at": "2026-05-10T06:09:20.254315+00:00",
+  "built_at": "2026-05-11T08:05:57.868056+00:00",
   "default_camera_class": "headcam",
   "thresholds_by_camera_class": {
     "handheld": {
       "voter_a_floor": 0.014766008911448754,
       "voter_b_threshold": 0.05559200793504715,
-      "voter_c_threshold": 0.6577515816403373,
+      "voter_c_threshold": 0.6212608087613051,
       "voter_d_threshold": 0.0005709670367650688,
       "n_calibration_candidates": 701,
       "n_calibration_positives": 333,
@@ -99,7 +99,7 @@
     "headcam": {
       "voter_a_floor": 0.01847127532497797,
       "voter_b_threshold": 0.03676433116197586,
-      "voter_c_threshold": 0.25465663648918596,
+      "voter_c_threshold": 0.26342958854803156,
       "voter_d_threshold": 0.00018919698777608573,
       "n_calibration_candidates": 1012,
       "n_calibration_positives": 243,
@@ -123,19 +123,19 @@
   },
   "voter_c_metrics_by_camera_class": {
     "handheld": {
-      "voter_c_precision_cv": 0.9724,
+      "voter_c_precision_cv": 0.9665,
       "voter_c_recall_cv": 0.952,
-      "voter_c_f1_cv": 0.9621,
+      "voter_c_f1_cv": 0.9592,
       "voter_c_tp": 317,
-      "voter_c_fp": 9,
+      "voter_c_fp": 11,
       "voter_c_fn": 16
     },
     "headcam": {
-      "voter_c_precision_cv": 0.8684,
+      "voter_c_precision_cv": 0.8619,
       "voter_c_recall_cv": 0.9506,
-      "voter_c_f1_cv": 0.9077,
+      "voter_c_f1_cv": 0.9041,
       "voter_c_tp": 231,
-      "voter_c_fp": 35,
+      "voter_c_fp": 37,
       "voter_c_fn": 12
     }
   },
