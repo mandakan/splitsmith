@@ -33,6 +33,12 @@ import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import type { StageVideo } from "@/lib/api";
 
 const BUFFER_FLASH_DELAY_MS = 150;
+// Cadence for the buffering-state watchdog. Some browsers (Chrome on a
+// long-GOP source served with Range requests) drop `canplay`/`playing`
+// after a stall recovers, leaving the overlay stuck until reload. We
+// poll `readyState` + `currentTime` and clear the state ourselves when
+// the element is demonstrably playable again.
+const BUFFER_WATCHDOG_INTERVAL_MS = 500;
 
 type LoadStatus = "idle" | "loading" | "buffering" | "ready" | "error";
 
@@ -97,6 +103,31 @@ function SecondarySlot({ label, src, onRef, onBuffering }: SecondarySlotProps) {
     }
     setShowBufferIndicator(false);
     return undefined;
+  }, [status]);
+
+  // Watchdog: when stuck in "buffering", poll readyState / currentTime so
+  // we can recover even if the browser doesn't emit a clearing event.
+  useEffect(() => {
+    if (status !== "buffering") return undefined;
+    const startTime = internalRef.current?.currentTime ?? 0;
+    let lastTime = startTime;
+    const id = window.setInterval(() => {
+      const el = internalRef.current;
+      if (!el) return;
+      // HAVE_FUTURE_DATA (3) or better is enough to play.
+      if (el.readyState >= 3) {
+        setStatus("ready");
+        onBufferingLatest.current(false);
+        return;
+      }
+      if (!el.paused && el.currentTime !== lastTime) {
+        setStatus("ready");
+        onBufferingLatest.current(false);
+        return;
+      }
+      lastTime = el.currentTime;
+    }, BUFFER_WATCHDOG_INTERVAL_MS);
+    return () => window.clearInterval(id);
   }, [status]);
 
   const handleWaiting = useCallback(() => {
@@ -227,6 +258,32 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       }
       setShowBufferIndicator(false);
       return undefined;
+    }, [status]);
+
+    // Watchdog: when the element is stuck in "buffering", poll
+    // readyState / currentTime so the overlay can clear even if the
+    // browser swallows the canplay / playing / seeked event. Without
+    // this, a single onWaiting against a long-GOP 4K source (the
+    // fallback path when the audit trim is missing) wedges the spinner
+    // until a full page reload.
+    useEffect(() => {
+      if (status !== "buffering") return undefined;
+      const startVideo = internalRef.current;
+      let lastTime = startVideo?.currentTime ?? 0;
+      const id = window.setInterval(() => {
+        const el = internalRef.current;
+        if (!el) return;
+        if (el.readyState >= 3) {
+          setStatus("ready");
+          return;
+        }
+        if (!el.paused && el.currentTime !== lastTime) {
+          setStatus("ready");
+          return;
+        }
+        lastTime = el.currentTime;
+      }, BUFFER_WATCHDOG_INTERVAL_MS);
+      return () => window.clearInterval(id);
     }, [status]);
 
     if (videos.length === 0) {

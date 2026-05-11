@@ -2229,6 +2229,73 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
+def test_shot_detect_endpoint_ensures_trim_before_detection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Re-detect on a project whose trims were wiped (e.g. by the v1->v2
+    cache migration in #298) must rebuild the trimmed MP4. Without this
+    the audit page falls through to streaming the raw source clip and
+    long-GOP MOVs wedge in <video> buffering on first play."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(project_root)
+    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = project_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    trim_calls: list[tuple] = []
+
+    def fake_trim(root, stage_n, video, source, beep, stage_t, **kwargs):
+        trim_calls.append((stage_n, video.video_id, beep, stage_t))
+        return None
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", fake_trim)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(
+        ensemble_module,
+        "detect_shots_ensemble",
+        lambda *a, **kw: _fake_ensemble_result([]),
+    )
+
+    resp = client.post("/api/stages/1/shot-detect")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    # Trim was invoked once with the right (stage, video, beep, stage_time).
+    assert len(trim_calls) == 1
+    stage_n, video_id, beep, stage_t = trim_calls[0]
+    assert stage_n == 1
+    assert video_id == primary.video_id
+    assert beep == pytest.approx(5.0)
+    assert stage_t == pytest.approx(10.0)
+
+    # processed.trim flips on the primary so the SPA reflects the rebuilt cache.
+    proj_after = client.get("/api/project").json()
+    assert proj_after["stages"][0]["videos"][0]["processed"].get("trim") is True
+
+
 def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2268,6 +2335,7 @@ def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
 
     captured: dict = {}
@@ -2320,6 +2388,7 @@ def test_shot_detect_endpoint_passes_default_class_when_mount_missing(
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
 
     captured: dict = {}
@@ -2398,6 +2467,7 @@ def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, mon
             self.trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda root, n, *a, **kw: FakeAudit(n))
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
     monkeypatch.setattr(
         ensemble_module,
@@ -2461,6 +2531,7 @@ def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
 
     captured: dict = {}
@@ -2550,6 +2621,7 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
 
     proceed = threading.Event()
