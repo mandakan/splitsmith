@@ -33,7 +33,7 @@ def vote_c_adaptive(
     *,
     slack_min: int = 3,
     slack_frac: float = 0.10,
-    confidence_override: float | None = 0.75,
+    confidence_override: float | None = 0.60,
 ) -> np.ndarray:
     """Voter C in adaptive mode: keep the top-(K+slack) probabilities.
 
@@ -60,9 +60,19 @@ def vote_c_adaptive(
     candidates pass voter C regardless of rank. The K-cap can otherwise
     silence voter C even when its GBDT is very confident -- e.g. real
     shots that score 0.8-0.9 get cut off by the rank cutoff while the
-    median FP scores ~0.005. The default 0.75 was tuned on 334 labeled
-    FPs (max score 0.73, 13 / 334 ≥ 0.10) and 226 truth shots (the two
-    rank-cut FNs scored 0.80 / 0.90). Pass ``None`` to disable.
+    median FP scores ~0.005. Pass ``None`` to disable.
+
+    Default ``0.60`` retuned on the 30-fixture corpus via
+    ``docs/ensemble_dashboard/findings/2026-05-11_override_lift_apriori_dead.md``.
+    The previous value 0.75 was tuned on the smaller #103 set (334
+    FPs, max FP score 0.73). On the broader corpus the override sweep
+    plateaus in [0.60, 0.75] for headcam and rises monotonically as
+    you drop it for handheld -- lowering to 0.60 rescues 3 truth
+    shots on the handheld iPhone17pro fixtures with **zero new FPs**
+    on either class. Per-class evidence is Pareto-clean, which is why
+    we land at 0.60 rather than 0.50 (the F1-optimal value, but 0.50
+    trades 1 headcam FP for 1 headcam TP -- worse than 0.60 under
+    the FP-is-more-dangerous UX argument).
     """
     if gbdt_probs.size == 0 or expected_rounds <= 0:
         return np.zeros_like(gbdt_probs, dtype=np.int64)

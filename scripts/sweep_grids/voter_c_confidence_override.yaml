@@ -1,0 +1,12 @@
+# 1D sweep: voter C's "high-score override" floor.
+#
+# When a candidate's GBDT prob clears ``confidence_override``, voter C
+# accepts it even when ranked outside the top-(K+slack). #103's
+# follow-up shipped 0.75 because two rank-cut FNs scored 0.80 / 0.90.
+# Sweeping reveals where the boundary actually matters on the
+# 30-fixture corpus: dropping it pulls more candidates past the
+# rank cap (recall up, precision down), raising it disables the
+# override entirely (the rank cap alone).
+#
+# null disables the override (rank cap only).
+voter_c_confidence_override: [null, 0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
