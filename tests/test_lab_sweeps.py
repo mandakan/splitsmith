@@ -131,7 +131,9 @@ def test_plot_path_rejects_traversal_segments(synthetic_runs_parquet: Path) -> N
     assert sweeps_module.plot_path("runA", "../runA/overview") is None
     assert sweeps_module.plot_path("runA", "..") is None
     assert sweeps_module.plot_path("runA", "a/b") is None
-    assert sweeps_module.plot_path("runA", "overview.png") is None  # extension already added by helper
+    # plot_path appends ``.png`` itself; passing it leaves a stray dot
+    # that fails the alnum + underscore filter.
+    assert sweeps_module.plot_path("runA", "overview.png") is None
 
 
 def test_plot_path_missing_file_returns_none(synthetic_runs_parquet: Path) -> None:
