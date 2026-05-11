@@ -1840,8 +1840,14 @@ def create_app(
                 raise HTTPException(status_code=400, detail=f"source dir not found: {source}")
             if not source.is_dir():
                 raise HTTPException(status_code=400, detail=f"not a directory: {source}")
-            for entry in sorted(source.iterdir()):
-                if entry.is_dir() or entry.suffix.lower() not in VIDEO_EXTENSIONS:
+            # Walk recursively so the picker can accept a top-level folder
+            # whose videos live in subdirectories (mirrors the relink
+            # scanner's behaviour). ``rglob`` does not follow directory
+            # symlinks by default, which avoids cycles on network shares.
+            for entry in sorted(source.rglob("*")):
+                if not entry.is_file():
+                    continue
+                if entry.suffix.lower() not in VIDEO_EXTENSIONS:
                     continue
                 candidates.append(entry)
             last_dir = source.resolve()
