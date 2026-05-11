@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -38,6 +39,8 @@ from .. import video_match
 from ..automation import AutomationOverride
 from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from ..video_match import match_videos_to_stages
+
+logger = logging.getLogger(__name__)
 
 # Camera-make heuristic for the default ``StageVideo.camera_mount``
 # (issue #143). The fixture schema's full ``CameraMount`` enum is much
@@ -130,7 +133,66 @@ PROJECT_FILE = "project.json"
 SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard", "probes", "thumbs")
 
 # Bumped when the on-disk schema changes in a backwards-incompatible way.
-SCHEMA_VERSION = 1
+#
+# Version history:
+#   1 -- initial.
+#   2 -- audio/trim caches keyed per-video (``stage<N>_cam_<video_id>.*``)
+#        for every role. v1 projects had role-based legacy names
+#        (``stage<N>_primary.wav`` / ``_audit.wav`` / ``_trimmed.mp4``)
+#        which could alias to a previous primary's audio after a reassignment.
+#        Migration deletes the legacy files so the next access re-extracts
+#        under the new naming.
+SCHEMA_VERSION = 2
+
+
+def _migrate_v1_to_v2(root: Path, project: MatchProject) -> None:
+    """Delete v1 legacy role-named caches so v2's per-video keys take over.
+
+    v1 cached the primary's audio/trim under role-based names
+    (``stage<N>_primary.wav``, ``stage<N>_audit.wav``,
+    ``stage<N>_trimmed.mp4``) plus the matching ``.peaks-*.json`` and
+    ``.params.json`` sidecars. After a primary swap or stage move those
+    files could hold a previous primary's data with no way to tell from
+    mtime alone, so we delete them outright and let the next access
+    re-extract under ``stage<N>_cam_<video_id>.*``.
+
+    Idempotent: missing files are ignored. Logs a one-line summary on
+    completion so the upgrade is visible in the server log.
+    """
+    audio_dir = project.audio_path(root)
+    trimmed_dir = project.trimmed_path(root)
+
+    removed = 0
+    patterns: list[tuple[Path, str]] = [
+        (audio_dir, "stage*_primary.wav"),
+        (audio_dir, "stage*_primary.peaks-*.json"),
+        (audio_dir, "stage*_audit.wav"),
+        (audio_dir, "stage*_audit.peaks-*.json"),
+        (trimmed_dir, "stage*_trimmed.mp4"),
+        (trimmed_dir, "stage*_trimmed.params.json"),
+        (trimmed_dir, "stage*_trimmed.partial.mp4"),
+    ]
+    for directory, pattern in patterns:
+        if not directory.exists():
+            continue
+        for victim in directory.glob(pattern):
+            # The new naming uses ``stage<N>_cam_<id>_trimmed.mp4`` /
+            # ``..._audit.wav``. The legacy globs above happen to also
+            # match those (``stage*_trimmed.mp4`` matches per-cam too),
+            # so guard against deleting the new artifacts.
+            if "_cam_" in victim.name:
+                continue
+            try:
+                victim.unlink()
+                removed += 1
+            except OSError:
+                continue
+
+    logger.info(
+        "schema migration v1->v2 on %s: removed %d legacy audio/trim cache file(s)",
+        project.name,
+        removed,
+    )
 
 
 VideoRole = Literal["primary", "secondary", "ignored"]
@@ -559,12 +621,24 @@ class MatchProject(BaseModel):
 
     @classmethod
     def load(cls, root: Path) -> MatchProject:
-        """Load the project from ``root``. Raises ``FileNotFoundError`` if missing."""
+        """Load the project from ``root``. Raises ``FileNotFoundError`` if missing.
+
+        Runs forward-only schema migrations when the on-disk
+        ``schema_version`` lags :data:`SCHEMA_VERSION`. The project file is
+        rewritten with the new version after a successful migration so the
+        upgrade is a one-shot cost on first open.
+        """
         path = root / PROJECT_FILE
         if not path.exists():
             raise FileNotFoundError(f"no project.json in {root}")
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls.model_validate(data)
+        on_disk_version = int(data.get("schema_version", 1))
+        project = cls.model_validate(data)
+        if on_disk_version < 2:
+            _migrate_v1_to_v2(root, project)
+            project.schema_version = 2
+            project.save(root)
+        return project
 
     def save(self, root: Path) -> None:
         """Atomically persist the project to ``root/project.json``."""
@@ -672,11 +746,16 @@ class MatchProject(BaseModel):
             # Reference trimmed_dir only when the lossless one is missing
             # so the row at least shows the user *something* trimmed.
             lossless_trim_p = exports_dir / f"{base}_trimmed.mp4"
-            audit_trim_p = trimmed_dir / f"stage{stage.stage_number}_trimmed.mp4"
+            audit_trim_p: Path | None = (
+                trimmed_dir / f"stage{stage.stage_number}_cam_{primary.video_id}_trimmed.mp4"
+                if primary is not None
+                else None
+            )
+            audit_trim_exists = audit_trim_p is not None and audit_trim_p.exists()
             trimmed_p = (
                 lossless_trim_p
                 if lossless_trim_p.exists()
-                else (audit_trim_p if audit_trim_p.exists() else lossless_trim_p)
+                else (audit_trim_p if audit_trim_exists else lossless_trim_p)
             )
 
             csv_exists = csv_p.exists()
@@ -1428,23 +1507,14 @@ class MatchProject(BaseModel):
 
         raw_link = self.resolve_video_path(root, video.path)
 
-        # Cache files are keyed on role: primary keeps the legacy
-        # ``stage<N>_primary.wav`` / ``stage<N>_trimmed.mp4`` filenames;
-        # non-primary cameras live under ``stage<N>_cam_<video_id>.*`` so
-        # each angle has its own slot. Either way the removal plan points
-        # at the per-video files so the endpoint sweeps them on disk.
+        # Cache files are keyed per-video for every role (stage<N>_cam_<id>.*)
+        # so swapping a primary cannot alias to a previous primary's cache.
         audio_cache: Path | None = None
         trimmed_cache: Path | None = None
         if stage_number is not None:
-            if was_primary:
-                audio_cache = self.audio_path(root) / f"stage{stage_number}_primary.wav"
-                trimmed_cache = self.trimmed_path(root) / f"stage{stage_number}_trimmed.mp4"
-            else:
-                vid = video.video_id
-                audio_cache = self.audio_path(root) / f"stage{stage_number}_cam_{vid}.wav"
-                trimmed_cache = (
-                    self.trimmed_path(root) / f"stage{stage_number}_cam_{vid}_trimmed.mp4"
-                )
+            vid = video.video_id
+            audio_cache = self.audio_path(root) / f"stage{stage_number}_cam_{vid}.wav"
+            trimmed_cache = self.trimmed_path(root) / f"stage{stage_number}_cam_{vid}_trimmed.mp4"
 
         audit_path: Path | None = None
         audit_reset = False

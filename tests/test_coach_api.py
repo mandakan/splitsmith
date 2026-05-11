@@ -141,10 +141,13 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
     )
 
     # Place a non-empty file at the trimmed-clip path so the helper
-    # detects "trim exists" without running ffmpeg.
+    # detects "trim exists" without running ffmpeg. Path is per-video in v2.
     trimmed_dir = project.trimmed_path(root)
     trimmed_dir.mkdir(parents=True, exist_ok=True)
-    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"not really a video, but non-empty")
+    primary_id = project.stages[0].videos[0].video_id
+    (trimmed_dir / f"stage1_cam_{primary_id}_trimmed.mp4").write_bytes(
+        b"not really a video, but non-empty"
+    )
 
     app = create_app(project_root=root, project_name="Trimmed Match")
     client = TestClient(app)

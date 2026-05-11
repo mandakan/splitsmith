@@ -202,17 +202,19 @@ def _setup_promote_endpoint_project(
     project.save(root)
     # Drop a primary stub + trimmed MP4 stub + audit WAV stub so
     # ``_resolve_audit_audio`` finds the trimmed-video branch and skips
-    # ffmpeg re-extraction (audit WAV mtime newer than trim).
+    # ffmpeg re-extraction (audit WAV mtime newer than trim). Caches are
+    # keyed per-video in v2 so derive the names from the primary's id.
     raw = root / "raw"
     raw.mkdir(exist_ok=True)
     (raw / "v.mp4").write_bytes(b"\x00" * 16)
+    primary_id = project.stages[0].videos[0].video_id
     trimmed = root / "trimmed"
     trimmed.mkdir(exist_ok=True)
-    trim_path = trimmed / "stage1_trimmed.mp4"
+    trim_path = trimmed / f"stage1_cam_{primary_id}_trimmed.mp4"
     trim_path.write_bytes(b"\x00" * 16)
     audio = root / "audio"
     audio.mkdir(exist_ok=True)
-    audit_wav = audio / "stage1_audit.wav"
+    audit_wav = audio / f"stage1_cam_{primary_id}_audit.wav"
     audit_wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
     # Make audit WAV newer than the trimmed MP4 so ffmpeg-extract is skipped.
     future = time.time() + 10

@@ -64,7 +64,7 @@ def test_health_returns_project_info(tmp_path: Path) -> None:
     body = resp.json()
     assert body["status"] == "ok"
     assert body["project_name"] == "Test Match"
-    assert body["schema_version"] == 1
+    assert body["schema_version"] == 2
 
 
 def test_get_project_returns_full_dump(tmp_path: Path) -> None:
@@ -903,6 +903,26 @@ def test_scan_persists_last_scanned_dir(tmp_path: Path) -> None:
     assert project["last_scanned_dir"] == str(src_dir.resolve())
 
 
+def _primary_cache_paths(project_root: Path, stage_number: int = 1) -> tuple[Path, Path, Path]:
+    """Schema v2 cache paths for the stage's primary.
+
+    Returns ``(full_wav, audit_wav, trimmed_mp4)`` keyed by the primary's
+    ``video_id`` so tests don't have to hard-code the legacy
+    ``stage<N>_primary.wav`` filename (which was retired in v2).
+    """
+    project = MatchProject.load(project_root)
+    primary = project.stage(stage_number).primary()
+    assert primary is not None, f"stage {stage_number} has no primary"
+    vid = primary.video_id
+    audio_dir = project_root / "audio"
+    trimmed_dir = project_root / "trimmed"
+    return (
+        audio_dir / f"stage{stage_number}_cam_{vid}.wav",
+        audio_dir / f"stage{stage_number}_cam_{vid}_audit.wav",
+        trimmed_dir / f"stage{stage_number}_cam_{vid}_trimmed.mp4",
+    )
+
+
 def _seed_project_with_primary(tmp_path: Path) -> tuple[TestClient, Path]:
     """Boot a server with one stage and a primary video assigned. Returns
     ``(client, video_source_path)`` so the caller can mutate the source if
@@ -1248,7 +1268,7 @@ def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
 
     project_root = tmp_path / "match"
-    fake_wav = project_root / "audio" / "stage1_primary.wav"
+    fake_wav, _audit, _trim = _primary_cache_paths(project_root)
     fake_wav.parent.mkdir(parents=True, exist_ok=True)
     # Minimal RIFF header + tiny data chunk; the test only checks that bytes flow.
     fake_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00" + b"\x00" * 16)
@@ -1437,13 +1457,13 @@ def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypa
     # Create a fake "trimmed" mp4 placeholder so the existence check passes.
     trimmed_dir = project_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
-    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00fake_mp4")
+    _full, audit_wav, trimmed_mp4 = _primary_cache_paths(project_root)
+    trimmed_mp4.write_bytes(b"\x00fake_mp4")
 
     # Stub _extract_audio so we don't actually shell out; drop a known WAV
     # at the audit-cache path.
     audio_dir = project_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    audit_wav = audio_dir / "stage1_audit.wav"
     audio = np.zeros(48_000, dtype="float32")
     audio[20_000:21_000] = 0.7
     sf.write(audit_wav, audio, 48_000)
@@ -1557,14 +1577,13 @@ def test_video_peaks_endpoint_serves_primary_full_wav_even_when_trimmed_exists(
     # Cache both the trimmed audit WAV (short) and the full primary WAV
     # (long). If the picker mistakenly uses the audit clip the response
     # duration will be 1s; with the fix it's 2s.
-    audit_wav = audio_dir / "stage1_audit.wav"
+    primary_wav, audit_wav, trimmed_mp4 = _primary_cache_paths(project_root)
     sf.write(audit_wav, np.zeros(48_000, dtype="float32"), 48_000)
-    primary_wav = audio_dir / "stage1_primary.wav"
     sf.write(primary_wav, np.zeros(96_000, dtype="float32"), 48_000)
 
     trimmed_dir = project_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
-    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00fake_mp4")
+    trimmed_mp4.write_bytes(b"\x00fake_mp4")
 
     from splitsmith.ui import audio as audio_helpers
 
@@ -1598,7 +1617,7 @@ def test_peaks_endpoint_falls_back_to_full_when_no_trim(tmp_path: Path, monkeypa
     project_root = tmp_path / "match"
     audio_dir = project_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    wav = audio_dir / "stage1_primary.wav"
+    wav, _audit, _trim = _primary_cache_paths(project_root)
     audio = np.zeros(24_000, dtype="float32")
     audio[5_000:6_000] = 0.3
     sf.write(wav, audio, 48_000)
@@ -1631,7 +1650,8 @@ def test_stream_video_serves_trimmed_for_primary(tmp_path: Path) -> None:
 
     trimmed_dir = project_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
-    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"TRIMMED_MP4")
+    _full, _audit, trimmed_mp4 = _primary_cache_paths(project_root)
+    trimmed_mp4.write_bytes(b"TRIMMED_MP4")
 
     resp = client.get(f"/api/videos/stream?path={primary.path}")
     assert resp.status_code == 200
@@ -1651,7 +1671,7 @@ def test_peaks_endpoint_returns_normalized_bins(tmp_path: Path, monkeypatch) -> 
     project_root = tmp_path / "match"
     audio_dir = project_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    wav = audio_dir / "stage1_primary.wav"
+    wav, _audit, _trim = _primary_cache_paths(project_root)
     audio = np.zeros(48_000, dtype="float32")
     audio[10_000:11_000] = 0.5
     sf.write(wav, audio, 48_000)
@@ -1733,7 +1753,8 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     project_after = client.get("/api/project").json()
     assert project_after["stages"][0]["videos"][0]["beep_time"] == pytest.approx(6.5)
     assert project_after["stages"][0]["videos"][0]["processed"]["trim"] is True
-    assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
+    _full, _audit, expected_trim = _primary_cache_paths(project_root)
+    assert expected_trim.exists()
     assert len(trim_calls) == 1
     assert trim_calls[0]["mode"] == "audit"
     assert trim_calls[0]["beep_time"] == pytest.approx(6.5)
@@ -1899,7 +1920,8 @@ def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
     assert final["status"] == "succeeded", final
     project_after = client.get("/api/project").json()
     assert project_after["stages"][0]["videos"][0]["processed"]["trim"] is True
-    assert (project_root / "trimmed" / "stage1_trimmed.mp4").exists()
+    _full, _audit, expected_trim = _primary_cache_paths(project_root)
+    assert expected_trim.exists()
 
 
 def test_trim_invalidates_when_beep_changes(tmp_path: Path, monkeypatch) -> None:
@@ -3239,11 +3261,11 @@ def test_remove_primary_clears_caches_and_keeps_audit(tmp_path: Path) -> None:
     )
     project = MatchProject.load(root)
     project.assign_video(Path("raw/clip.mp4"), to_stage_number=1, role="primary")
+    project.save(root)
     # Simulate processed state: write fake cached files audit/audio/trimmed.
-    audio_cache = root / "audio" / "stage1_primary.wav"
+    audio_cache, _audit_wav, trimmed_cache = _primary_cache_paths(root)
     audio_cache.parent.mkdir(parents=True, exist_ok=True)
     audio_cache.write_bytes(b"wav")
-    trimmed_cache = root / "trimmed" / "stage1_trimmed.mp4"
     trimmed_cache.parent.mkdir(parents=True, exist_ok=True)
     trimmed_cache.write_bytes(b"mp4")
     audit = root / "audit" / "stage1.json"
