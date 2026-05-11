@@ -594,7 +594,7 @@
     "bit_depth": null,
     "audio_codec": null
   },
-  "source_video": "raw/martin_stage_3.MOV",
+  "source_video": "/Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_3.MOV",
   "fixture_window_in_source": [
     52.693,
     75.943
