@@ -32,6 +32,7 @@ from sklearn.model_selection import StratifiedKFold
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
+from splitsmith.ensemble.fixtures import fixture_stems
 from splitsmith.shot_detect import detect_shots
 
 FIXTURES_DIR = Path("tests/fixtures")
@@ -47,20 +48,7 @@ TIME_TOL_S = 1e-3
 CONSENSUS = 3
 APRIORI_BOOST = 1.0  # only applied when expected_rounds is set; not for these fixtures
 
-DEFAULT_FIXTURES = [
-    "stage-shots-tallmilan-2026-stage3-s97dcec94",
-    "stage-shots-blacksmith-2026-stage7-s97dcec94",
-    "stage-shots-blacksmith-2026-stage1-s97dcec94",
-    "stage-shots-blacksmith-2026-stage2-s97dcec94",
-    "stage-shots-blacksmith-2026-stage3-s97dcec94",
-    "stage-shots-blacksmith-2026-stage5-s97dcec94",
-    "stage-shots-blacksmith-2026-stage6-s97dcec94",
-    "stage-shots-blacksmith-2026-stage8-s97dcec94",
-    "stage-shots-tallmilan-2026-stage2-s97dcec94",
-    "stage-shots-tallmilan-2026-stage7-s97dcec94",
-    "stage-shots-tallmilan-2026-stage5-s97dcec94",
-    "stage-shots-tallmilan-2026-stage6-s97dcec94",
-]
+DEFAULT_FIXTURES = fixture_stems(mount="head", shooter_id="s97dcec94")
 
 
 def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[int]:

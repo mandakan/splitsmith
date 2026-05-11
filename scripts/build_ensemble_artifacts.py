@@ -51,83 +51,19 @@ from splitsmith.ensemble.calibration import (
     DEFAULT_VOTER_E_PROBE_FILENAME,
     camera_class_from_mount,
 )
+from splitsmith.ensemble.fixtures import (
+    WRONG_CLIP_FIXTURES,
+    fixture_stems,
+)
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
-DEFAULT_FIXTURES = [
-    "stage-shots-tallmilan-2026-stage3-s97dcec94",
-    "stage-shots-blacksmith-2026-stage7-s97dcec94",
-    "stage-shots-blacksmith-2026-stage1-s97dcec94",
-    "stage-shots-blacksmith-2026-stage2-s97dcec94",
-    "stage-shots-blacksmith-2026-stage3-s97dcec94",
-    "stage-shots-blacksmith-2026-stage5-s97dcec94",
-    "stage-shots-blacksmith-2026-stage6-s97dcec94",
-    "stage-shots-blacksmith-2026-stage8-s97dcec94",
-    "stage-shots-tallmilan-2026-stage2-s97dcec94",
-    "stage-shots-tallmilan-2026-stage7-s97dcec94",
-    "stage-shots-tallmilan-2026-stage4-s97dcec94",
-    "stage-shots-tallmilan-2026-stage5-s97dcec94",
-    "stage-shots-tallmilan-2026-stage6-s97dcec94",
-    # Phone-cam (issue #137 / promote-secondary, PR #134). Calibration
-    # script auto-skips fixtures missing CLAP / PANN caches; run
-    # ``scripts/extract_clap_features.py`` and
-    # ``scripts/extract_audio_embeddings.py`` for these stems first to
-    # pick them up.
-    "stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro",
-    "stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro",
-    # Phone-cam (PR #152, anchored against the blacksmith headcam fixtures
-    # to land cross-match acoustic variation -- issue #149's near-term ask).
-    "stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage2-s97dcec94-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage3-s97dcec94-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage5-s97dcec94-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro",
-    "stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro",
-    # Cross-shooter headcam fixtures at the tallmilan-2026 match (PR
-    # #279). Same physical match as the s97dcec94 tallmilan set, so
-    # they carry the same bay acoustics but a different shooter's
-    # cadence -- including them lets calibration distinguish shooter
-    # drift from match acoustics. Camera info absent in the audit
-    # JSONs; ``camera_class_from_mount`` falls back to headcam.
-    "stage-shots-tallmilan-2026-stage1-s36ed6e4e",
-    "stage-shots-tallmilan-2026-stage2-s36ed6e4e",
-    "stage-shots-tallmilan-2026-stage3-s36ed6e4e",
-    "stage-shots-tallmilan-2026-stage4-s36ed6e4e",
-    "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
-    "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
-    "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
-    # Cross-shooter handheld fixtures at the blacksmith handgun open 2026
-    # match (camera.mount=hand, bucketed as handheld). Different bay
-    # acoustics from tallmilan; same shooter token as the tallmilan-2026
-    # set above. First non-phone handheld batch -- adds bare-mic
-    # handheld variation to a class previously dominated by the
-    # iphone17pro internal-mic set.
-    "stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e",
-    "stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e",
-]
-
-# Fixtures whose promote-report flagged ``wrong_clip_suspected: true`` --
-# the phone clip linked to that stage is silent at the snapped shot
-# positions (probably the wrong clip / occluded mic). Keeping them in
-# repo for inspection, skipping them in calibration so they don't pull
-# the GBDT toward labelling silence as positive. See issue #154 for the
-# re-anchor plan.
-WRONG_CLIP_FIXTURES: frozenset[str] = frozenset(
-    {
-        "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro",
-    }
-)
+# Every audited fixture; the discovery is filesystem-driven so adding a
+# new audited JSON + WAV under tests/fixtures/ picks it up automatically.
+# WRONG_CLIP_FIXTURES still applies as a Voter E exclusion -- those
+# fixtures have valid audio but mismatched video, so the audio-side
+# voters keep them while the visual probe ignores them.
+DEFAULT_FIXTURES = fixture_stems()
 FIXTURES_DIR = Path("tests/fixtures")
 FULL_DIR = FIXTURES_DIR / "full"
 CACHE_DIR = FIXTURES_DIR / ".cache"
