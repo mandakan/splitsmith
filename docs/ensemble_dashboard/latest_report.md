@@ -1,11 +1,11 @@
-# Ensemble sweep report -- `2026-05-11T06-05-20Z_b13c755_voter_c_slack`
+# Ensemble sweep report -- `2026-05-11T06-18-27Z_902c641_voter_c_slack_fine`
 
 ![overview](latest_overview.png)
 
 ## Summary
 
 - Swept parameters: `voter_c_slack_frac`
-- Combos evaluated: 7
+- Combos evaluated: 11
 - Fixtures in corpus: 30
 
 ### Best aggregate F1
