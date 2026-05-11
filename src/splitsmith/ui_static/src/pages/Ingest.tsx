@@ -1514,6 +1514,8 @@ function ScanSection({
               onScanFiles(files.map((f) => f.path));
             }}
             onCancel={() => setOpen(false)}
+            allowEmptyFolder
+            selectLabel="Scan this folder"
           />
         )}
         {disabled ? (

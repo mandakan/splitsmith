@@ -3168,6 +3168,33 @@ def test_scan_videos_with_explicit_source_paths(tmp_path: Path) -> None:
     assert project["last_scanned_dir"] == str(src_dir.resolve())
 
 
+def test_scan_videos_walks_subdirectories(tmp_path: Path) -> None:
+    """source_dir recurses into subfolders so users can point at a parent
+    folder whose videos live inside dated/per-card subdirectories
+    (mirrors the relink scanner's behaviour)."""
+    project_root = tmp_path / "match"
+    app = create_app(project_root=project_root, project_name="x")
+    client = TestClient(app)
+
+    src_dir = tmp_path / "videos"
+    (src_dir / "card-a").mkdir(parents=True)
+    (src_dir / "card-b" / "nested").mkdir(parents=True)
+    nested_a = src_dir / "card-a" / "A.mp4"
+    nested_b = src_dir / "card-b" / "nested" / "B.mp4"
+    nested_a.write_bytes(b"")
+    nested_b.write_bytes(b"")
+    # Non-video sibling at root should be ignored.
+    (src_dir / "notes.txt").write_text("hi")
+
+    resp = client.post(
+        "/api/videos/scan",
+        json={"source_dir": str(src_dir), "auto_assign_primary": False},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert sorted(body["registered"]) == ["raw/A.mp4", "raw/B.mp4"]
+
+
 def test_scan_400_when_neither_source_dir_nor_paths(tmp_path: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)
