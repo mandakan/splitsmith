@@ -36,6 +36,7 @@ from splitsmith.ensemble.voters import (
     vote_c_adaptive,
     vote_c_global,
     vote_e,
+    within_stage_amp_veto,
 )
 
 
@@ -192,6 +193,105 @@ def test_consensus_keep_c_required_without_vote_c_raises() -> None:
     boost = np.array([0.0])
     with pytest.raises(ValueError, match="c_required=True"):
         consensus_keep(vote_total, boost, threshold=3, c_required=True)
+
+
+def test_within_stage_amp_veto_drops_quiet_kept_candidates() -> None:
+    """5 kept candidates, expected_rounds=4. Top-4 by peak_amp are
+    [1.0, 0.9, 0.8, 0.7] -> median anchor = 0.85. At floor_ratio=0.20
+    the cutoff is 0.17. The 0.1-amp candidate falls below; the others stay.
+    """
+    peak_amps = np.array([1.0, 0.9, 0.8, 0.7, 0.1])
+    keep_mask = np.array([True, True, True, True, True])
+    out = within_stage_amp_veto(
+        peak_amps,
+        keep_mask,
+        expected_rounds=4,
+        floor_ratio=0.20,
+    )
+    assert out.tolist() == [True, True, True, True, False]
+
+
+def test_within_stage_amp_veto_uses_only_kept_for_anchor() -> None:
+    """Anchor is built from peak_amps[keep_mask], not the full array. So
+    a loud non-kept candidate does not inflate the cutoff."""
+    peak_amps = np.array([10.0, 1.0, 0.9, 0.8, 0.7, 0.1])
+    keep_mask = np.array([False, True, True, True, True, True])
+    out = within_stage_amp_veto(
+        peak_amps,
+        keep_mask,
+        expected_rounds=4,
+        floor_ratio=0.20,
+    )
+    # Anchor = median(top-4 of kept=[1,.9,.8,.7,.1]) = median([1,.9,.8,.7]) = 0.85
+    # Cutoff = 0.17 -> 0.1 dropped, rest kept. 10.0 stays not-kept.
+    assert out.tolist() == [False, True, True, True, True, False]
+
+
+def test_within_stage_amp_veto_p75_fallback_when_no_expected_rounds() -> None:
+    """Without expected_rounds, anchor falls back to p75 of kept amps."""
+    peak_amps = np.array([1.0, 0.5, 0.4, 0.3, 0.05])
+    keep_mask = np.array([True, True, True, True, True])
+    # p75 of [1, .5, .4, .3, .05] = 0.5; floor 0.20 -> cutoff 0.1.
+    out = within_stage_amp_veto(
+        peak_amps,
+        keep_mask,
+        expected_rounds=None,
+        floor_ratio=0.20,
+    )
+    assert out.tolist() == [True, True, True, True, False]
+
+
+def test_within_stage_amp_veto_skipped_when_too_few_kept() -> None:
+    """Anchor is unreliable with very few kept candidates; the function
+    is a no-op below ``min_kept_for_filter`` (default 4)."""
+    peak_amps = np.array([1.0, 0.5, 0.01])
+    keep_mask = np.array([True, True, True])
+    out = within_stage_amp_veto(
+        peak_amps,
+        keep_mask,
+        expected_rounds=2,
+        floor_ratio=0.50,
+    )
+    # All kept survive despite 0.01 being well below the cutoff.
+    assert out.tolist() == [True, True, True]
+
+
+def test_within_stage_amp_veto_never_adds_back_dropped_candidates() -> None:
+    """A consensus-dropped candidate stays dropped even if its amplitude
+    happens to exceed the post-veto cutoff."""
+    peak_amps = np.array([1.0, 0.9, 0.8, 0.7, 0.6])
+    keep_mask = np.array([False, True, True, True, True])
+    out = within_stage_amp_veto(
+        peak_amps,
+        keep_mask,
+        expected_rounds=4,
+        floor_ratio=0.20,
+    )
+    assert out[0] == False  # 1.0 was already not kept; veto can't resurrect
+    assert out[1:].tolist() == [True, True, True, True]
+
+
+def test_within_stage_amp_veto_floor_zero_or_none_is_noop() -> None:
+    """floor_ratio=0 (or any non-positive) returns the mask unchanged."""
+    peak_amps = np.array([1.0, 0.5, 0.01, 0.001, 0.0])
+    keep_mask = np.array([True, True, True, True, True])
+    out = within_stage_amp_veto(
+        peak_amps,
+        keep_mask,
+        expected_rounds=4,
+        floor_ratio=0.0,
+    )
+    assert out.tolist() == [True, True, True, True, True]
+
+
+def test_within_stage_amp_veto_empty_input() -> None:
+    out = within_stage_amp_veto(
+        np.array([], dtype=np.float64),
+        np.array([], dtype=bool),
+        expected_rounds=4,
+        floor_ratio=0.20,
+    )
+    assert out.shape == (0,)
 
 
 def test_clap_diff_subtracts_not_shot_mean_from_shot_mean() -> None:
@@ -389,6 +489,113 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     # consensus while the bottom 2 do not.
     kept_idx = [c.candidate_number - 1 for c in result.candidates if c.kept]
     assert kept_idx == [0, 2]
+
+
+def test_detect_shots_ensemble_within_stage_amp_floor_drops_quiet_headcam(
+    monkeypatch,
+) -> None:
+    """End-to-end: 5 stub candidates that all clear consensus. The lone
+    candidate at peak_amplitude=0.05 falls below the 0.15 * anchor cutoff
+    (top-K-by-amp anchor with K=4 -> median([1.0,.9,.8,.7])=0.85; cutoff
+    ~0.128). It gets ``amp_floor_vetoed`` and ``kept=False`` while the
+    other four stay kept.
+    """
+    runtime = _build_stub_runtime()
+    peak_amps = [1.0, 0.9, 0.8, 0.7, 0.05]
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=amp,
+            confidence=0.6,
+            notes="",
+        )
+        for i, amp in enumerate(peak_amps)
+    ]
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    result = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        expected_rounds=4,
+        camera_class="headcam",
+    )
+    kept = [c.kept for c in result.candidates]
+    vetoed = [c.amp_floor_vetoed for c in result.candidates]
+    assert kept == [True, True, True, True, False]
+    assert vetoed == [False, False, False, False, True]
+
+
+def test_detect_shots_ensemble_within_stage_amp_floor_skipped_on_handheld(
+    monkeypatch,
+) -> None:
+    """The within-stage anchor breaks when the mic is decoupled from the
+    gun -- the veto must be a no-op for any camera class != ``headcam``,
+    regardless of how quiet a candidate is."""
+    runtime = _build_stub_runtime()
+    peak_amps = [1.0, 0.9, 0.8, 0.7, 0.05]
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=amp,
+            confidence=0.6,
+            notes="",
+        )
+        for i, amp in enumerate(peak_amps)
+    ]
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    result = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        expected_rounds=4,
+        camera_class="handheld",
+    )
+    assert all(c.kept for c in result.candidates)
+    assert not any(c.amp_floor_vetoed for c in result.candidates)
 
 
 # ---------------------------------------------------------------------------

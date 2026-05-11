@@ -99,6 +99,28 @@ class EnsembleConfig(BaseModel):
             "``enable_voter_e`` and ``e_required`` are True."
         ),
     )
+    within_stage_amp_floor: float | None = Field(
+        default=0.15,
+        ge=0.0,
+        description=(
+            "Headcam-only post-consensus veto: drop kept candidates whose "
+            "peak amplitude is below ``within_stage_amp_floor * anchor``, "
+            "where ``anchor = median(top-K kept by peak_amp)`` and "
+            "``K = stage_rounds.expected`` (fallback: p75 of kept "
+            "peak_amps). The mic moves with the gun on a headcam, so "
+            "TPs cluster around a stable amplitude within a stage; "
+            "cross-bay shots and handling noises arrive much quieter. "
+            "Skipped for any camera class != ``headcam`` because the "
+            "mic-follows-gun assumption breaks when the mic position is "
+            "decoupled from the shooter. ``None`` disables. Default "
+            "0.15 was picked across two headcam shooters (s97dcec94, "
+            "s0fe3d797) on 21 audited stages: holds TP loss at ~3% on "
+            "both while cutting 19% and 47% of post-consensus FPs "
+            "respectively. The threshold sweep falls off a cliff at "
+            "0.20 on s0fe3d797 (TP loss jumps to 14.5%), so do not "
+            "raise without per-camera-model validation."
+        ),
+    )
 
 
 class EnsembleCandidate(BaseModel):
@@ -147,6 +169,16 @@ class EnsembleCandidate(BaseModel):
     )
     kept: bool = Field(
         description="True when this candidate is part of the consensus shots set.",
+    )
+    amp_floor_vetoed: bool = Field(
+        default=False,
+        description=(
+            "True when this candidate would have been kept by consensus "
+            "but was dropped by the headcam within-stage amplitude floor "
+            "(see ``EnsembleConfig.within_stage_amp_floor``). Lets the "
+            "audit UI distinguish 'lost the vote' from 'too quiet for "
+            "this stage' on otherwise high-vote candidates."
+        ),
     )
 
 
@@ -332,6 +364,18 @@ def detect_shots_ensemble(
             veto_mask = veto_mask & ~audio_strong
         keep_mask = keep_mask & ~veto_mask
 
+    effective_cam_class = camera_class or cal.default_camera_class
+    amp_floor_vetoed = np.zeros(n, dtype=bool)
+    if cfg.within_stage_amp_floor is not None and effective_cam_class == "headcam":
+        new_keep = voters.within_stage_amp_veto(
+            peak_amps,
+            keep_mask,
+            expected_rounds=expected_rounds,
+            floor_ratio=cfg.within_stage_amp_floor,
+        )
+        amp_floor_vetoed = keep_mask & ~new_keep
+        keep_mask = new_keep
+
     candidates: list[EnsembleCandidate] = []
     for i in range(n):
         candidates.append(
@@ -353,6 +397,7 @@ def detect_shots_ensemble(
                 gunshot_prob=round(float(gunshot_prob[i]), 4),
                 voter_e_signal=round(float(voter_e_signal[i]), 4),
                 kept=bool(keep_mask[i]),
+                amp_floor_vetoed=bool(amp_floor_vetoed[i]),
             )
         )
     return EnsembleResult(
