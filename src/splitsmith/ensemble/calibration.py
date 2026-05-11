@@ -272,8 +272,13 @@ def load_calibration() -> EnsembleCalibration:
         return EnsembleCalibration.model_validate(json.load(fh))
 
 
-def load_voter_c_model() -> Any:
-    """Load the serialised GradientBoostingClassifier for voter C."""
+def load_voter_c_model() -> dict[str, Any]:
+    """Load voter C's per-class GradientBoostingClassifiers (issue #297).
+
+    Returns a dict keyed by ``camera_class`` -- callers pick the right
+    model via ``models[camera_class]`` (with the calibration's
+    ``default_camera_class`` as fallback for unknown classes).
+    """
     import joblib
 
     resource = files(_DATA_PACKAGE).joinpath(_VOTER_C_MODEL_FILENAME)

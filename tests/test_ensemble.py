@@ -272,7 +272,7 @@ def _build_stub_runtime() -> EnsembleRuntime:
     )
     return EnsembleRuntime(
         calibration=cal,
-        voter_c_model=_StubGBDT(),
+        voter_c_model={"headcam": _StubGBDT(), "handheld": _StubGBDT()},
         clap=_StubClapRuntime(),  # type: ignore[arg-type]
         pann=_StubPannRuntime(),  # type: ignore[arg-type]
         expected_prompts=tuple(CLAP_PROMPTS),
@@ -355,7 +355,7 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
             out[:, 1] = 0.01
             return out
 
-    runtime.voter_c_model = _RejectingGBDT()
+    runtime.voter_c_model = {"headcam": _RejectingGBDT(), "handheld": _RejectingGBDT()}
 
     from splitsmith.ensemble import api as ensemble_api
     from splitsmith.ensemble import features as ensemble_features

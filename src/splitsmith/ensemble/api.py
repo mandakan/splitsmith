@@ -163,7 +163,7 @@ class EnsembleRuntime:
     """Loaded heavy state. Build once via ``load_ensemble_runtime``; reuse."""
 
     calibration: EnsembleCalibration
-    voter_c_model: Any
+    voter_c_model: dict[str, Any]
     clap: feat.ClapRuntime
     pann: feat.PannRuntime
     # Track the prompt list the calibration was built against so we can
@@ -279,7 +279,8 @@ def detect_shots_ensemble(
     voter_c_x = feat.voter_c_feature_matrix(
         hand, clap_sims, clap_diff, gunshot_prob, camera_classes=camera_class
     )
-    score_c = runtime.voter_c_model.predict_proba(voter_c_x)[:, 1].astype(np.float64)
+    cls_key = camera_class if camera_class in runtime.voter_c_model else cal.default_camera_class
+    score_c = runtime.voter_c_model[cls_key].predict_proba(voter_c_x)[:, 1].astype(np.float64)
 
     va = voters.vote_a(confidences, thresholds.voter_a_floor)
     vb = voters.vote_b(clap_diff, thresholds.voter_b_threshold)

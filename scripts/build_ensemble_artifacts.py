@@ -100,6 +100,20 @@ DEFAULT_FIXTURES = [
     "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
     "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
     "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
+    # Cross-shooter handheld fixtures at the blacksmith handgun open 2026
+    # match (camera.mount=hand, bucketed as handheld). Different bay
+    # acoustics from tallmilan; same shooter token as the tallmilan-2026
+    # set above. First non-phone handheld batch -- adds bare-mic
+    # handheld variation to a class previously dominated by the
+    # iphone17pro internal-mic set.
+    "stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e",
 ]
 
 # Fixtures whose promote-report flagged ``wrong_clip_suspected: true`` --
@@ -271,22 +285,6 @@ def _x_from(universe: list[dict]) -> np.ndarray:
     classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]
     cam_block = feat.camera_class_one_hot(classes, base.shape[0])
     return np.concatenate([base, cam_block], axis=1)
-
-
-def _sample_weights(universe: list[dict], phone_upweight: float) -> np.ndarray:
-    """Per-row sample weights: phone-class rows get ``phone_upweight`` to
-    counterbalance the headcam-dominated corpus.
-
-    Returns a uniform vector when only one class is present (single-class
-    builds get the same training behaviour they did pre-#139).
-    """
-    classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]
-    if len(set(classes)) <= 1:
-        return np.ones(len(classes), dtype=np.float64)
-    return np.array(
-        [phone_upweight if c != DEFAULT_CAMERA_CLASS else 1.0 for c in classes],
-        dtype=np.float64,
-    )
 
 
 def _load_mined_negatives(
@@ -461,26 +459,21 @@ def _threshold_for_recall(probs: np.ndarray, labels: np.ndarray, target_recall: 
     return threshold
 
 
-def _train_voter_c(universe: list[dict], target_recall: float, *, phone_upweight: float):
-    """Fit GBDT; return ``(model, global_threshold, cv_probs)``.
+def _train_voter_c_for_class(rows: list[dict], target_recall: float):
+    """Fit one GBDT per camera class; return ``(model, threshold, cv_probs, y)``.
 
-    ``cv_probs`` is the held-out probability for each row from 5-fold
-    CV -- callers use it to pick per-camera-class thresholds without
-    refitting. ``global_threshold`` is the single-class fallback used
-    when an artifact has no per-class calibration on file.
-
-    ``phone_upweight`` (issue #139) multiplies the sample weight on
-    handheld rows to counterbalance the headcam-dominated corpus.
-    1.0 disables weighting (legacy behaviour); 3-5 is reasonable when
-    the phone class is roughly 1/4 the size of headcam.
+    Trained on rows from a single camera class only -- decouples each
+    class's decision boundary from the others, so adding fixtures to one
+    class can no longer drag the other class's precision down (issue
+    #297). ``cv_probs`` are 5-fold CV held-out probabilities used for
+    both threshold selection and the per-class metrics block.
     """
-    X = _x_from(universe)
-    y = np.array([c["label"] for c in universe], dtype=np.int64)
-    sample_weight = _sample_weights(universe, phone_upweight)
+    X = _x_from(rows)
+    y = np.array([c["label"] for c in rows], dtype=np.int64)
     if y.sum() < 5:
         raise SystemExit(
-            f"need at least 5 positives for 5-fold CV; got {int(y.sum())}. "
-            "Add more audited fixtures."
+            f"need at least 5 positives per class for 5-fold CV; got {int(y.sum())}. "
+            "Add more audited fixtures for this camera class."
         )
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -489,7 +482,7 @@ def _train_voter_c(universe: list[dict], target_recall: float, *, phone_upweight
         f = GradientBoostingClassifier(
             n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
         )
-        f.fit(X[tr], y[tr], sample_weight=sample_weight[tr])
+        f.fit(X[tr], y[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
     threshold = _threshold_for_recall(cv_probs, y, target_recall)
@@ -497,11 +490,8 @@ def _train_voter_c(universe: list[dict], target_recall: float, *, phone_upweight
     clf = GradientBoostingClassifier(
         n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
     )
-    clf.fit(X, y, sample_weight=sample_weight)
-    return clf, threshold, cv_probs
-
-
-DEFAULT_PHONE_UPWEIGHT: float = 4.0
+    clf.fit(X, y)
+    return clf, threshold, cv_probs, y
 DEFAULT_VOTER_E_TARGET_RECALL: float = 0.95
 VISUAL_CACHE_SUFFIX = "_visual.npz"
 
@@ -735,7 +725,6 @@ def build_artifacts(
     tolerance_ms: float = 75.0,
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
     use_mined_negatives: bool = False,
-    phone_upweight: float = DEFAULT_PHONE_UPWEIGHT,
     voter_e: bool = True,
     voter_e_target_recall: float = DEFAULT_VOTER_E_TARGET_RECALL,
     rebuild_visual: bool = False,
@@ -775,31 +764,22 @@ def build_artifacts(
             "n_mined_negatives_used": 0,
             "mining_source_fixtures": [],
         }
+    # Mined negatives keep their ``camera_class`` field; rows without one
+    # fall through to DEFAULT_CAMERA_CLASS so they land in that class's
+    # training set (matching how detection-time callers look them up).
     voter_c_universe = universe + mined_rows
     if mined_rows:
         log(
             f"Voter C training set: {len(universe)} stage-window + "
             f"{len(mined_rows)} mined negatives = {len(voter_c_universe)} rows."
         )
+    by_class_train = _split_by_camera_class(voter_c_universe)
 
-    clf, voter_c_global, cv_probs = _train_voter_c(
-        voter_c_universe, target_recall=target_recall, phone_upweight=phone_upweight
-    )
-    if phone_upweight != 1.0 and any(
-        row.get("camera_class", DEFAULT_CAMERA_CLASS) != DEFAULT_CAMERA_CLASS
-        for row in voter_c_universe
-    ):
-        log(f"Voter C trained with phone-class sample weight x{phone_upweight:g}")
-
-    # Per-class thresholds. The shared GBDT's CV predictions are sliced
-    # by class so the operating point hits target_recall *on that class*
-    # rather than on the dominant one. Voter A/B/D still use the lowest-
-    # positive rule, computed per class for the same reason.
-    cv_universe_classes = [
-        row.get("camera_class", DEFAULT_CAMERA_CLASS) for row in voter_c_universe
-    ]
-    cv_universe_labels = np.array([row["label"] for row in voter_c_universe], dtype=np.int64)
-
+    # Per-class GBDTs (issue #297): one model per camera class. Decouples
+    # each class's decision boundary so adding fixtures to one class can't
+    # drag the other class's precision down via shared trees + sample
+    # weighting (the old joint-GBDT failure mode that prompted the split).
+    voter_c_models: dict[str, Any] = {}
     thresholds_by_class: dict[str, dict] = {}
     metrics_by_class: dict[str, dict] = {}
     for cls in sorted(by_class):
@@ -812,18 +792,11 @@ def build_artifacts(
         cls_a = _voter_a_floor(rows)
         cls_b = _voter_b_threshold(rows)
 
-        # Voter C: pick the threshold from the CV slice that belongs to
-        # this class (positives + the negatives that came from the same
-        # camera class). Mined negatives without an explicit class fall
-        # back to DEFAULT_CAMERA_CLASS, matching how detection-time
-        # callers will look them up.
-        cls_mask = np.array([c == cls for c in cv_universe_classes], dtype=bool)
-        if cls_mask.sum() == 0 or cv_universe_labels[cls_mask].sum() == 0:
-            cls_c = voter_c_global
-        else:
-            cls_c = _threshold_for_recall(
-                cv_probs[cls_mask], cv_universe_labels[cls_mask], target_recall
-            )
+        train_rows = by_class_train.get(cls, rows)
+        cls_model, cls_c, cls_cv_probs, cls_cv_labels = _train_voter_c_for_class(
+            train_rows, target_recall=target_recall
+        )
+        voter_c_models[cls] = cls_model
 
         thresholds_by_class[cls] = {
             "voter_a_floor": cls_a,
@@ -834,11 +807,8 @@ def build_artifacts(
             "calibration_fixtures": sorted({r["fixture"] for r in rows}),
         }
 
-        # Per-class precision/recall at the picked C threshold, using CV
-        # predictions so it's a held-out metric. Helps spot regressions
-        # in the dominant class as new classes get added.
-        cls_cv_probs = cv_probs[cls_mask]
-        cls_cv_labels = cv_universe_labels[cls_mask]
+        # Per-class precision/recall at the picked C threshold, from this
+        # class's own CV predictions (held-out within-class).
         kept = cls_cv_probs >= cls_c
         tp = int(((kept) & (cls_cv_labels == 1)).sum())
         fp = int(((kept) & (cls_cv_labels == 0)).sum())
@@ -939,7 +909,7 @@ def build_artifacts(
         **mining_provenance,
     }
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
-    joblib.dump(clf, model_path)
+    joblib.dump(voter_c_models, model_path)
     if voter_e_probe is not None:
         joblib.dump(voter_e_probe, voter_e_path)
         log(f"Wrote {voter_e_path}")
@@ -959,17 +929,6 @@ def main() -> None:
         default=DEFAULT_NEG_CAP_RATIO,
         help="Per-fixture cap on mined negatives, as a multiple of that fixture's "
         "positive count. Hardest survivors (highest Voter A confidence) win.",
-    )
-    p.add_argument(
-        "--phone-upweight",
-        type=float,
-        default=DEFAULT_PHONE_UPWEIGHT,
-        help=(
-            "Sample-weight multiplier on handheld-class rows when fitting "
-            "voter C. Counterbalances the headcam-dominated corpus. 1.0 "
-            "disables weighting; 3-5 is reasonable when the phone class is "
-            "roughly 1/4 the size of headcam."
-        ),
     )
     p.add_argument(
         "--with-mining",
@@ -1018,7 +977,6 @@ def main() -> None:
         tolerance_ms=args.tolerance_ms,
         mining_cap_ratio=args.mining_cap_ratio,
         use_mined_negatives=args.with_mining,
-        phone_upweight=args.phone_upweight,
         voter_e=args.voter_e,
         voter_e_target_recall=args.voter_e_target_recall,
         rebuild_visual=args.rebuild_visual,

@@ -73,6 +73,15 @@ DEFAULT_FIXTURES = [
     "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
     "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
     "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
+    # Cross-shooter handheld fixtures at the blacksmith handgun open 2026 match.
+    "stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e",
+    "stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e",
 ]
 FIXTURES_DIR = Path("tests/fixtures")
 CACHE_DIR = FIXTURES_DIR / ".cache"

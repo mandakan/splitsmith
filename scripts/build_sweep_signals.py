@@ -228,7 +228,8 @@ def build_signals(
         x = feat.voter_c_feature_matrix(
             hand, clap_sims, clap_diff, gunshot_prob, camera_classes=cam_class
         )
-        score_c = voter_c_model.predict_proba(x)[:, 1].astype(np.float64)
+        cls_key = cam_class if cam_class in voter_c_model else cal.default_camera_class
+        score_c = voter_c_model[cls_key].predict_proba(x)[:, 1].astype(np.float64)
 
         n = len(shots)
         voter_e_signal = np.full(n, np.nan, dtype=np.float64)
