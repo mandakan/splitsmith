@@ -1621,8 +1621,8 @@
   ],
   "camera": {
     "id": "unknown",
-    "make": null,
-    "model": null,
+    "make": "Meta",
+    "model": "Vanguard",
     "mount": "head",
     "position": "shooter",
     "audio_source": "internal",
