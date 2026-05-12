@@ -60,6 +60,25 @@ def camera_class_from_mount(mount: str | None) -> str:
     return _MOUNT_TO_CLASS.get(str(mount), DEFAULT_CAMERA_CLASS)
 
 
+def normalize_camera_model_key(make: str | None, model: str | None) -> str | None:
+    """Canonical lookup key for the per-model amplitude-floor table.
+
+    ``"Insta360", "GO 3S"`` becomes ``"insta360 go 3s"`` -- lower-cased
+    and whitespace-collapsed so ffprobe quirks ("INSTA360" vs "Insta360",
+    multiple spaces, trailing newlines) don't fragment the lookup.
+
+    Returns ``None`` when either input is missing or empty, signalling
+    the caller to fall back to the class default.
+    """
+    if not make or not model:
+        return None
+    norm_make = " ".join(str(make).strip().lower().split())
+    norm_model = " ".join(str(model).strip().lower().split())
+    if not norm_make or not norm_model:
+        return None
+    return f"{norm_make} {norm_model}"
+
+
 class ClassThresholds(BaseModel):
     """Per-camera-class voter thresholds + the slice of provenance they were derived from.
 
@@ -227,6 +246,45 @@ class EnsembleCalibration(BaseModel):
             "rebuilds to protect the dominant class."
         ),
     )
+    amp_floor_by_camera_model: dict[str, float] | None = Field(
+        default=None,
+        description=(
+            "Issue #304: per-camera-model within-stage amplitude floor. "
+            "Keys come from :func:`normalize_camera_model_key` (lower-cased "
+            '``"<make> <model>"``). Models present here override the '
+            "engine-side ``EnsembleConfig.within_stage_amp_floor`` default; "
+            "unknown models fall back to the config default (the "
+            "generic-headcam value). ``None`` on artifacts built before "
+            "per-model calibration -- everything falls back to the config "
+            "default, byte-identical to pre-#304 behaviour."
+        ),
+    )
+
+    def amp_floor_for(
+        self,
+        camera_make: str | None,
+        camera_model: str | None,
+        *,
+        default: float | None,
+    ) -> float | None:
+        """Resolve the within-stage amplitude floor for a given camera.
+
+        Lookup order:
+
+        1. ``amp_floor_by_camera_model[normalize_camera_model_key(...)]``
+           when both make and model are known and the key is calibrated.
+        2. ``default`` -- the caller's class-level / engine-side fallback
+           (Phase 1's ``EnsembleConfig.within_stage_amp_floor`` value, or
+           ``None`` to disable the veto entirely).
+
+        Returning ``None`` (only possible when ``default`` is ``None``)
+        means "no floor"; the veto is skipped.
+        """
+        if self.amp_floor_by_camera_model:
+            key = normalize_camera_model_key(camera_make, camera_model)
+            if key is not None and key in self.amp_floor_by_camera_model:
+                return self.amp_floor_by_camera_model[key]
+        return default
 
     def thresholds_for(self, camera_class: str | None) -> ClassThresholds:
         """Return calibrated thresholds for ``camera_class``, falling back to the default class.

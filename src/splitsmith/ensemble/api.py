@@ -251,6 +251,8 @@ def detect_shots_ensemble(
     expected_rounds: int | None = None,
     ensemble_config: EnsembleConfig | None = None,
     camera_class: str | None = None,
+    camera_make: str | None = None,
+    camera_model: str | None = None,
     video_path: Path | None = None,
     source_beep_time: float | None = None,
 ) -> EnsembleResult:
@@ -271,6 +273,13 @@ def detect_shots_ensemble(
     calibration (issue #137). ``None`` falls back to the artifact's
     default class -- for existing projects that's ``headcam``, byte-
     identical to pre-#137 behaviour.
+
+    ``camera_make`` + ``camera_model`` are routed to the within-stage
+    amplitude floor lookup (issue #304). When both are set and the
+    calibrated ``amp_floor_by_camera_model`` table knows them, the veto
+    uses the per-model value; otherwise it falls back to
+    ``ensemble_config.within_stage_amp_floor`` (the generic-headcam
+    default). The veto itself remains headcam-only.
 
     ``video_path`` + ``source_beep_time`` enable Voter E (issue #183)
     when ``ensemble_config.enable_voter_e`` is True and ``runtime.visual``
@@ -366,15 +375,24 @@ def detect_shots_ensemble(
 
     effective_cam_class = camera_class or cal.default_camera_class
     amp_floor_vetoed = np.zeros(n, dtype=bool)
-    if cfg.within_stage_amp_floor is not None and effective_cam_class == "headcam":
-        new_keep = voters.within_stage_amp_veto(
-            peak_amps,
-            keep_mask,
-            expected_rounds=expected_rounds,
-            floor_ratio=cfg.within_stage_amp_floor,
+    if effective_cam_class == "headcam":
+        # Per-model override (#304) wins when the camera is calibrated;
+        # otherwise fall back to the engine-side generic-headcam default
+        # so any new model that shows up still gets the safe floor.
+        resolved_floor = cal.amp_floor_for(
+            camera_make,
+            camera_model,
+            default=cfg.within_stage_amp_floor,
         )
-        amp_floor_vetoed = keep_mask & ~new_keep
-        keep_mask = new_keep
+        if resolved_floor is not None:
+            new_keep = voters.within_stage_amp_veto(
+                peak_amps,
+                keep_mask,
+                expected_rounds=expected_rounds,
+                floor_ratio=resolved_floor,
+            )
+            amp_floor_vetoed = keep_mask & ~new_keep
+            keep_mask = new_keep
 
     candidates: list[EnsembleCandidate] = []
     for i in range(n):
