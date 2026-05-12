@@ -107,6 +107,40 @@ export interface StageVideo {
    *  and overridable via PATCH .../camera-mount. ``null`` falls back to
    *  the artifact's default class. */
   camera_mount: CameraMount | null;
+  /** Camera make/model from ffprobe, or null when the QuickTime tag is
+   *  missing (Meta Vanguard glasses are the present example). Drives the
+   *  per-camera-model amplitude-floor lookup (#304); unknown values fall
+   *  back to the generic-headcam floor. Overridable via PATCH
+   *  .../camera-model when ffprobe yielded nothing. */
+  camera_make: string | null;
+  camera_model: string | null;
+}
+
+/** Mirror of ``splitsmith.ensemble.calibration.normalize_camera_model_key``.
+ *  Lower-cases and whitespace-collapses both fields so the SPA can
+ *  cross-reference a project's saved make/model against the calibration's
+ *  lookup table without round-tripping to the server. */
+export function normalizeCameraModelKey(
+  make: string | null | undefined,
+  model: string | null | undefined,
+): string | null {
+  if (!make || !model) return null;
+  const norm = (s: string) => s.trim().toLowerCase().split(/\s+/).join(" ");
+  const m = norm(make);
+  const mo = norm(model);
+  if (!m || !mo) return null;
+  return `${m} ${mo}`;
+}
+
+export interface CalibratedCameraModel {
+  /** Canonical lookup key the runtime uses (lower-cased ``"<make> <model>"``). */
+  key: string;
+  /** Original-case make/model for display. */
+  make: string;
+  model: string;
+  /** Per-model within-stage amplitude floor (#304). Informational on the
+   *  dropdown -- the runtime resolves it from the calibration. */
+  amp_floor: number;
 }
 
 export type CameraMount =
@@ -1320,6 +1354,32 @@ export const api = {
         method: "PATCH",
         json: { mount },
       },
+    ),
+
+  /** Override the ffprobed camera make + model on a single video
+   *  (#303-followup). Pass ``null`` for both to clear back to "Other
+   *  (generic headcam)" -- the runtime then falls back to the
+   *  generic-headcam amplitude floor. ``make`` and ``model`` must be
+   *  supplied together or both ``null``. */
+  setCameraModel: (
+    stageNumber: number,
+    videoId: string,
+    make: string | null,
+    model: string | null,
+  ) =>
+    request<MatchProject>(
+      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/camera-model`,
+      {
+        method: "PATCH",
+        json: { make, model },
+      },
+    ),
+
+  /** List the camera models calibrated in the shipped artifact. The SPA
+   *  presents these as the camera-model dropdown options on Ingest. */
+  getCalibratedCameraModels: () =>
+    request<{ models: CalibratedCameraModel[] }>(
+      "/api/calibrated-camera-models",
     ),
 
   swapPrimary: (videoPath: string, stageNumber: number, confirm = false) =>

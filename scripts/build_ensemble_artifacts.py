@@ -194,6 +194,27 @@ def _build_universe(
     return universe
 
 
+def _camera_model_metadata(universe: list[dict]) -> dict[str, dict[str, str]]:
+    """Map normalized model key -> ``{make, model}`` for the UI dropdown.
+
+    Picks the first non-empty pair seen for each key; the build script
+    walks fixtures in stable sorted order so the result is reproducible.
+    Skips rows whose normalized key is ``None`` (handheld or missing
+    metadata) -- the dropdown is calibrated-headcam only today.
+    """
+    out: dict[str, dict[str, str]] = {}
+    for row in universe:
+        if row.get("camera_class") != CAMERA_CLASS_HEADCAM:
+            continue
+        make = row.get("camera_make")
+        model = row.get("camera_model")
+        key = normalize_camera_model_key(make, model)
+        if key is None or key in out:
+            continue
+        out[key] = {"make": str(make), "model": str(model)}
+    return out
+
+
 def _amp_floors_by_camera_model(
     universe: list[dict],
     *,
@@ -871,6 +892,7 @@ def build_artifacts(
     # Per-camera-model within-stage amplitude floor (#304).
     log("Per-model within-stage amplitude floor:")
     amp_floor_by_model = _amp_floors_by_camera_model(universe, log=log)
+    camera_model_meta = _camera_model_metadata(universe)
 
     # Default-class top-level fields. Existing code paths that haven't
     # migrated to ``thresholds_for(camera_class)`` keep reading the
@@ -919,6 +941,7 @@ def build_artifacts(
         "default_camera_class": default_cls,
         "thresholds_by_camera_class": thresholds_by_class,
         "amp_floor_by_camera_model": amp_floor_by_model or None,
+        "camera_model_metadata": camera_model_meta or None,
         "voter_c_metrics_by_camera_class": metrics_by_class,
         "voter_e_provenance": voter_e_provenance,
         **mining_provenance,

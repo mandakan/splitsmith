@@ -930,6 +930,29 @@ class CameraMountRequest(BaseModel):
     mount: str | None
 
 
+class CameraModelRequest(BaseModel):
+    """Body for PATCH /api/stages/{n}/videos/{vid}/camera-model (#303-followup).
+
+    Override the ffprobed ``camera_make`` / ``camera_model``. Both must
+    be supplied together or both ``None`` (clearing back to the probe
+    default). Drives the per-camera-model within-stage amplitude floor
+    dispatch (#304) -- known calibrated models get their tuned floor,
+    unknown values fall back to the generic-headcam default.
+    """
+
+    make: str | None
+    model: str | None
+
+
+class CalibratedCameraModel(BaseModel):
+    """One row in the dropdown the SPA presents on the Ingest screen."""
+
+    key: str
+    make: str
+    model: str
+    amp_floor: float
+
+
 class BeepSnapRequest(BaseModel):
     """Body for POST /api/stages/{n}/videos/{vid}/beep/snap.
 
@@ -3440,6 +3463,66 @@ def create_app(
         video.camera_mount = req.mount
         project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
+
+    @app.patch("/api/stages/{stage_number}/videos/{video_id}/camera-model")
+    def set_camera_model(stage_number: int, video_id: str, req: CameraModelRequest) -> JSONResponse:
+        """Override the ffprobed camera make + model (#303-followup).
+
+        Used when ffprobe couldn't read the QuickTime tag (e.g. Meta
+        Vanguard glasses) or guessed wrong. The SPA's Ingest screen
+        presents a dropdown sourced from
+        ``GET /api/calibrated-camera-models`` plus an "Other (generic
+        headcam)" sentinel that clears back to ``None`` / ``None`` --
+        the runtime then falls back to the engine-side generic-headcam
+        amp floor (#304).
+
+        Both fields must be supplied together or both ``None``: a
+        half-filled pair would produce no usable lookup key but isn't
+        what the UI ever sends, so we refuse it as a 400.
+        """
+        if (req.make is None) != (req.model is None):
+            raise HTTPException(
+                status_code=400,
+                detail="camera-model: 'make' and 'model' must be supplied together or both null",
+            )
+        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        video.camera_make = req.make
+        video.camera_model = req.model
+        project.save(state.project_root)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.get("/api/calibrated-camera-models")
+    def list_calibrated_camera_models() -> JSONResponse:
+        """Enumerate the camera models present in the shipped calibration.
+
+        The SPA shows these as the dropdown options on the Ingest screen.
+        Unknown models still get the runtime's generic-headcam fallback
+        floor, but offering an explicit pick lets the user steer a
+        Vanguard-shaped fixture to its tuned threshold even when
+        ffprobe yielded nothing.
+
+        Result order is descending floor (most aggressive cut first)
+        so the most-trusted model sorts to the top; ties broken
+        alphabetically.
+        """
+        runtime = _get_ensemble_runtime()
+        floors = runtime.calibration.amp_floor_by_camera_model or {}
+        displays = runtime.calibration.camera_model_metadata or {}
+        rows: list[dict[str, Any]] = []
+        for key, floor in floors.items():
+            meta = displays.get(key) or {}
+            rows.append(
+                {
+                    "key": key,
+                    "make": meta.get("make", key.split(" ", 1)[0].title()),
+                    "model": meta.get(
+                        "model", key.split(" ", 1)[1].title() if " " in key else key.title()
+                    ),
+                    "amp_floor": float(floor),
+                }
+            )
+        rows.sort(key=lambda r: (-r["amp_floor"], r["key"]))
+        return JSONResponse({"models": rows})
 
     @app.post("/api/stages/{stage_number}/beep/select")
     def select_beep_candidate(stage_number: int, req: BeepSelectRequest) -> JSONResponse:

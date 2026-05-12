@@ -246,6 +246,16 @@ class EnsembleCalibration(BaseModel):
             "rebuilds to protect the dominant class."
         ),
     )
+    camera_model_metadata: dict[str, dict[str, str]] | None = Field(
+        default=None,
+        description=(
+            "Issue #303-followup: human-readable make + model for each "
+            "calibrated camera-model key. The key matches "
+            ":attr:`amp_floor_by_camera_model` so the UI can present a "
+            "dropdown of calibrated cameras with their original casing. "
+            'Schema: ``{normalized_key: {"make": str, "model": str}}``.'
+        ),
+    )
     amp_floor_by_camera_model: dict[str, float] | None = Field(
         default=None,
         description=(
