@@ -1614,15 +1614,15 @@
     "stage_number": 5,
     "stage_name": null
   },
-  "source_video": "raw/video-1187_singular_display.mov",
+  "source_video": "/Volumes/mathias/skytte/video/raw/blacksmith-handgun-2026/anton/headcam/video-1187_singular_display.mov",
   "fixture_window_in_source": [
     18.4514,
     50.7314
   ],
   "camera": {
     "id": "unknown",
-    "make": null,
-    "model": null,
+    "make": "Meta",
+    "model": "Vanguard",
     "mount": "head",
     "position": "shooter",
     "audio_source": "internal",
