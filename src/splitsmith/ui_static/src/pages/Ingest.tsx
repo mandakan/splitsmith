@@ -42,6 +42,7 @@ import { CleanupDialog } from "@/components/CleanupDialog";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { FolderPicker } from "@/components/FolderPicker";
 import { HitlQueuePanel } from "@/components/HitlQueuePanel";
+import { CameraModelSelect } from "@/components/CameraModelSelect";
 import { MountSelect } from "@/components/MountSelect";
 import { SettingProvenance } from "@/components/SettingProvenance";
 import { Badge } from "@/components/ui/badge";
@@ -2856,14 +2857,29 @@ function VideoRow({
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {stage && setBusy && setError && onProjectUpdate ? (
-              <MountSelect
-                video={video}
-                stageNumber={stage.stage_number}
-                disabled={busy}
-                setBusy={setBusy}
-                setError={setError}
-                onProjectUpdate={onProjectUpdate}
-              />
+              <>
+                <MountSelect
+                  video={video}
+                  stageNumber={stage.stage_number}
+                  disabled={busy}
+                  setBusy={setBusy}
+                  setError={setError}
+                  onProjectUpdate={onProjectUpdate}
+                />
+                {video.camera_mount === "head" ||
+                video.camera_mount === "chest" ||
+                video.camera_mount === "helmet" ||
+                video.camera_mount === "belt" ? (
+                  <CameraModelSelect
+                    video={video}
+                    stageNumber={stage.stage_number}
+                    disabled={busy}
+                    setBusy={setBusy}
+                    setError={setError}
+                    onProjectUpdate={onProjectUpdate}
+                  />
+                ) : null}
+              </>
             ) : null}
             <Button
               size="sm"

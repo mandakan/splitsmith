@@ -178,5 +178,15 @@
     "missing_video_fixtures": []
   },
   "n_mined_negatives_used": 0,
-  "mining_source_fixtures": []
+  "mining_source_fixtures": [],
+  "camera_model_metadata": {
+    "insta360 go 3s": {
+      "make": "Insta360",
+      "model": "GO 3S"
+    },
+    "meta vanguard": {
+      "make": "Meta",
+      "model": "Vanguard"
+    }
+  }
 }
