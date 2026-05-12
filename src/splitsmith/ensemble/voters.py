@@ -117,6 +117,31 @@ def apriori_boost(
     return out
 
 
+def within_stage_amp_anchor(
+    peak_amps: np.ndarray,
+    expected_rounds: int | None,
+    *,
+    fallback_percentile: float = 75.0,
+) -> float:
+    """Per-stage amplitude anchor used by the within-stage veto + per-model floor sweep.
+
+    Returns ``median(top-K peak_amps)`` where ``K = min(expected_rounds, n)``.
+    When ``expected_rounds`` is ``None`` or ``<= 0``, falls back to the
+    ``fallback_percentile`` of the input -- a robust proxy when no
+    round-count prior is available.
+
+    Returns ``0.0`` on empty input; callers either guard or treat the
+    zero as "no anchor, skip the veto".
+    """
+    if peak_amps.size == 0:
+        return 0.0
+    if expected_rounds and expected_rounds > 0:
+        k = min(int(expected_rounds), peak_amps.size)
+        top = np.sort(peak_amps)[-k:]
+        return float(np.median(top))
+    return float(np.percentile(peak_amps, fallback_percentile))
+
+
 def within_stage_amp_veto(
     peak_amps: np.ndarray,
     keep_mask: np.ndarray,
@@ -129,9 +154,7 @@ def within_stage_amp_veto(
     """Drop kept candidates whose peak_amp is too small for the stage.
 
     Headcam-only filter (the caller decides whether to invoke it).
-    Anchor: median of the top-K kept by peak_amp where
-    ``K = min(expected_rounds, n_kept)``. When ``expected_rounds`` is
-    ``None`` or 0, falls back to ``fallback_percentile`` of kept peak_amps.
+    Anchor: :func:`within_stage_amp_anchor` over the kept slice.
 
     Skipped when ``n_kept < min_kept_for_filter`` -- the anchor is too
     fragile on near-empty stages. Returns an updated keep_mask; never
@@ -144,12 +167,9 @@ def within_stage_amp_veto(
     if n_kept < min_kept_for_filter:
         return keep_mask
     kept_amps = peak_amps[kept_idx]
-    if expected_rounds and expected_rounds > 0:
-        k = min(int(expected_rounds), n_kept)
-        top = np.sort(kept_amps)[-k:]
-        anchor = float(np.median(top))
-    else:
-        anchor = float(np.percentile(kept_amps, fallback_percentile))
+    anchor = within_stage_amp_anchor(
+        kept_amps, expected_rounds, fallback_percentile=fallback_percentile
+    )
     if anchor <= 0.0:
         return keep_mask
     cutoff = floor_ratio * anchor

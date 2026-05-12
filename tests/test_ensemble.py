@@ -195,6 +195,71 @@ def test_consensus_keep_c_required_without_vote_c_raises() -> None:
         consensus_keep(vote_total, boost, threshold=3, c_required=True)
 
 
+def test_normalize_camera_model_key_canonicalizes_whitespace_and_case() -> None:
+    from splitsmith.ensemble.calibration import normalize_camera_model_key
+
+    assert normalize_camera_model_key("Insta360", "GO 3S") == "insta360 go 3s"
+    assert normalize_camera_model_key("INSTA360", "  GO  3S\n") == "insta360 go 3s"
+    assert normalize_camera_model_key("Meta", "Vanguard") == "meta vanguard"
+
+
+def test_normalize_camera_model_key_returns_none_when_either_input_missing() -> None:
+    from splitsmith.ensemble.calibration import normalize_camera_model_key
+
+    assert normalize_camera_model_key(None, "GO 3S") is None
+    assert normalize_camera_model_key("Insta360", None) is None
+    assert normalize_camera_model_key("", "GO 3S") is None
+    assert normalize_camera_model_key("Insta360", "  ") is None
+
+
+def test_amp_floor_for_prefers_per_model_over_default() -> None:
+    cal = EnsembleCalibration(
+        voter_a_floor=0.0,
+        voter_b_threshold=0.0,
+        voter_c_threshold=0.5,
+        voter_c_target_recall=0.95,
+        tolerance_ms=75.0,
+        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
+        clap_prompts=list(CLAP_PROMPTS),
+        calibration_fixtures=["stub"],
+        n_calibration_candidates=10,
+        n_calibration_positives=5,
+        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
+        built_at="1970-01-01T00:00:00Z",
+        amp_floor_by_camera_model={"insta360 go 3s": 0.20, "meta vanguard": 0.15},
+    )
+    # Known model -> per-model value.
+    assert cal.amp_floor_for("Insta360", "GO 3S", default=0.30) == 0.20
+    # Known model with different casing still matches the canonical key.
+    assert cal.amp_floor_for("insta360", "go 3s", default=0.30) == 0.20
+    # Unknown model -> default.
+    assert cal.amp_floor_for("Random", "Camera", default=0.15) == 0.15
+    # Missing metadata -> default.
+    assert cal.amp_floor_for(None, None, default=0.15) == 0.15
+
+
+def test_amp_floor_for_returns_default_when_per_model_table_absent() -> None:
+    """Pre-#304 calibration artifacts have no per-model table; the lookup
+    must still hand back the caller's default rather than crashing."""
+    cal = EnsembleCalibration(
+        voter_a_floor=0.0,
+        voter_b_threshold=0.0,
+        voter_c_threshold=0.5,
+        voter_c_target_recall=0.95,
+        tolerance_ms=75.0,
+        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
+        clap_prompts=list(CLAP_PROMPTS),
+        calibration_fixtures=["stub"],
+        n_calibration_candidates=10,
+        n_calibration_positives=5,
+        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
+        built_at="1970-01-01T00:00:00Z",
+    )
+    assert cal.amp_floor_by_camera_model is None
+    assert cal.amp_floor_for("Insta360", "GO 3S", default=0.15) == 0.15
+    assert cal.amp_floor_for("Insta360", "GO 3S", default=None) is None
+
+
 def test_within_stage_amp_veto_drops_quiet_kept_candidates() -> None:
     """5 kept candidates, expected_rounds=4. Top-4 by peak_amp are
     [1.0, 0.9, 0.8, 0.7] -> median anchor = 0.85. At floor_ratio=0.20
@@ -596,6 +661,73 @@ def test_detect_shots_ensemble_within_stage_amp_floor_skipped_on_handheld(
     )
     assert all(c.kept for c in result.candidates)
     assert not any(c.amp_floor_vetoed for c in result.candidates)
+
+
+def test_detect_shots_ensemble_within_stage_amp_floor_uses_per_model_override(
+    monkeypatch,
+) -> None:
+    """Per-model floor from the calibration (#304) wins over the
+    EnsembleConfig default. Same fixture as the headcam-drops-quiet test
+    but with a much more aggressive per-model floor (0.50) so candidates
+    that would have survived the 0.15 config default get cut here.
+    """
+    runtime = _build_stub_runtime()
+    # Inject a per-model override on the stub calibration.
+    runtime.calibration = runtime.calibration.model_copy(
+        update={"amp_floor_by_camera_model": {"meta vanguard": 0.50}}
+    )
+    peak_amps = [1.0, 0.9, 0.8, 0.7, 0.05]
+    # Anchor = median(top-4 of [1, .9, .8, .7]) = 0.85.
+    # At per-model floor 0.50: cutoff = 0.50 * 0.85 = 0.425. So 0.7
+    # survives, 0.05 doesn't, and 0.8/0.9/1.0 survive.
+    # If the config default (0.15) had been used instead, only 0.05 would
+    # have dropped (cutoff 0.1275), so anything > 0.1275 survives.
+    fake_shots = [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=amp,
+            confidence=0.6,
+            notes="",
+        )
+        for i, amp in enumerate(peak_amps)
+    ]
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: fake_shots)
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_clap_similarities",
+        lambda audio, sr, times, runtime: np.full(
+            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble_features,
+        "compute_pann_gunshot_probs",
+        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
+    )
+
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    result = detect_shots_ensemble(
+        audio,
+        48_000,
+        beep_time=5.0,
+        stage_time=10.0,
+        runtime=runtime,
+        expected_rounds=4,
+        camera_class="headcam",
+        camera_make="Meta",
+        camera_model="Vanguard",
+    )
+    kept = [c.kept for c in result.candidates]
+    vetoed = [c.amp_floor_vetoed for c in result.candidates]
+    # 0.7 survives the 0.50 floor (ratio 0.82 > 0.50); 0.05 does not (0.06 < 0.50).
+    assert kept == [True, True, True, True, False]
+    assert vetoed == [False, False, False, False, True]
 
 
 # ---------------------------------------------------------------------------
