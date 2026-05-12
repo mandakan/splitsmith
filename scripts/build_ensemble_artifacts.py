@@ -47,10 +47,13 @@ from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
 from splitsmith.ensemble import visual as vis
 from splitsmith.ensemble.calibration import (
+    CAMERA_CLASS_HEADCAM,
     DEFAULT_CAMERA_CLASS,
     DEFAULT_VOTER_E_PROBE_FILENAME,
     camera_class_from_mount,
+    normalize_camera_model_key,
 )
+from splitsmith.ensemble.voters import within_stage_amp_anchor
 from splitsmith.ensemble.fixtures import (
     WRONG_CLIP_FIXTURES,
     fixture_stems,
@@ -131,6 +134,10 @@ def _build_universe(
         truth = json.loads(truth_path.read_text())
         camera_block = truth.get("camera") or {}
         cam_class = camera_class_from_mount(camera_block.get("mount"))
+        cam_make = camera_block.get("make")
+        cam_model = camera_block.get("model")
+        stage_rounds_block = truth.get("stage_rounds") or {}
+        expected_rounds_int: int | None = stage_rounds_block.get("expected")
         audio, sr = load_audio(wav_path)
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
@@ -172,8 +179,12 @@ def _build_universe(
                 {
                     "fixture": fix,
                     "camera_class": cam_class,
+                    "camera_make": cam_make,
+                    "camera_model": cam_model,
+                    "expected_rounds": expected_rounds_int,
                     "label": labels[i],
                     "confidence": float(shot.confidence),
+                    "peak_amp": float(shot.peak_amplitude),
                     "clap_diff": float(clap_diff[i]),
                     "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": hand[i].tolist(),
@@ -181,6 +192,81 @@ def _build_universe(
                 }
             )
     return universe
+
+
+def _amp_floors_by_camera_model(
+    universe: list[dict],
+    *,
+    max_tp_loss: float = 0.05,
+    log: Callable[[str], None] = print,
+) -> dict[str, float]:
+    """Issue #304: per-camera-model safe-ceiling within-stage amplitude floor.
+
+    For each headcam-class camera model in the universe, sweep
+    ``r in [0.05, 0.35]`` and pick the *largest* value where dropping
+    candidates with ``peak_amp < r * within_stage_anchor`` would lose at
+    most ``max_tp_loss`` of that model's positives. Anchor uses each
+    fixture's ``stage_rounds.expected`` (the same logic as the runtime
+    veto), falling back to the p75 of in-fixture peaks when no prior.
+
+    Sweep operates on the full voter-A universe (no consensus pre-filter)
+    -- voters A and B preserve recall by construction and voter C is at
+    95% recall, so consensus-passing TPs are >= 95% of the universe TPs.
+    The ~5% denominator difference doesn't change which side of the
+    cliff a threshold lands on.
+
+    Models with no positives or no calibrated key (``make`` or ``model``
+    is None) are omitted; the runtime falls back to the engine default
+    for those.
+    """
+    rows_by_model: dict[str, list[dict]] = {}
+    for row in universe:
+        if row.get("camera_class") != CAMERA_CLASS_HEADCAM:
+            continue
+        key = normalize_camera_model_key(row.get("camera_make"), row.get("camera_model"))
+        if key is None:
+            continue
+        rows_by_model.setdefault(key, []).append(row)
+
+    r_grid = tuple(round(0.05 + 0.01 * i, 2) for i in range(31))  # 0.05 .. 0.35 inclusive
+    out: dict[str, float] = {}
+    for key, rows in rows_by_model.items():
+        # Group rows by fixture to compute per-stage anchors.
+        by_fix: dict[str, list[dict]] = {}
+        for r in rows:
+            by_fix.setdefault(r["fixture"], []).append(r)
+
+        ratios: list[tuple[float, int]] = []  # (peak_amp / anchor, label)
+        for fix_rows in by_fix.values():
+            peaks = np.array([r["peak_amp"] for r in fix_rows], dtype=np.float64)
+            expected = fix_rows[0].get("expected_rounds")
+            anchor = within_stage_amp_anchor(peaks, expected)
+            denom = anchor if anchor > 1e-9 else 1.0
+            for fr in fix_rows:
+                ratios.append((float(fr["peak_amp"]) / denom, int(fr["label"])))
+
+        n_pos = sum(1 for _, lbl in ratios if lbl == 1)
+        n_neg = sum(1 for _, lbl in ratios if lbl == 0)
+        if n_pos == 0:
+            log(f"  {key}: 0 positives, skipping per-model floor")
+            continue
+
+        picked: float | None = None
+        picked_fp_cut: int = 0
+        for r in r_grid:
+            tp_cut = sum(1 for ratio, lbl in ratios if lbl == 1 and ratio < r)
+            if tp_cut / n_pos <= max_tp_loss:
+                picked = r
+                picked_fp_cut = sum(1 for ratio, lbl in ratios if lbl == 0 and ratio < r)
+        if picked is None:
+            log(f"  {key}: no r meets TP-loss budget {max_tp_loss:.0%}; skipping")
+            continue
+        log(
+            f"  {key}: r={picked:.2f}  (TP loss budget={max_tp_loss:.0%}, "
+            f"cuts {picked_fp_cut}/{n_neg} FPs of {n_pos} TPs)"
+        )
+        out[key] = picked
+    return out
 
 
 def _voter_a_floor(universe: list[dict]) -> float:
@@ -212,10 +298,7 @@ def _x_from(universe: list[dict]) -> np.ndarray:
     if not universe:
         return np.zeros((0, feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
     base = np.array(
-        [
-            c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]]
-            for c in universe
-        ],
+        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]] for c in universe],
         dtype=np.float64,
     )
     classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]
@@ -428,6 +511,8 @@ def _train_voter_c_for_class(rows: list[dict], target_recall: float):
     )
     clf.fit(X, y)
     return clf, threshold, cv_probs, y
+
+
 DEFAULT_VOTER_E_TARGET_RECALL: float = 0.95
 VISUAL_CACHE_SUFFIX = "_visual.npz"
 
@@ -535,9 +620,7 @@ def _build_visual_universe(
         if embeddings is None:
             audio, sr = load_audio(wav_path)
             cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
-            shots = detect_shots(
-                audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg
-            )
+            shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
             if not shots:
                 continue
             cand_t = np.array([s.time_absolute for s in shots], dtype=np.float64)
@@ -549,9 +632,7 @@ def _build_visual_universe(
                 source_beep_time=float(window[0]) + float(truth["beep_time"]),
             )
             try:
-                embeds = vis.compute_visual_features(
-                    source_video, source_times, _ensure_runtime()
-                )
+                embeds = vis.compute_visual_features(source_video, source_times, _ensure_runtime())
             except Exception as exc:
                 log(f"  skip {fix}: visual feature extraction failed -- {exc}")
                 continue
@@ -604,9 +685,7 @@ def _train_voter_e(
         return None, None
 
     binary = [
-        row
-        for row in visual_universe
-        if row["label"] == 1 or row.get("subclass") == "cross_bay"
+        row for row in visual_universe if row["label"] == 1 or row.get("subclass") == "cross_bay"
     ]
     if len(binary) < 20 or sum(1 for r in binary if r["label"] == 1) < 5:
         log(
@@ -626,13 +705,9 @@ def _train_voter_e(
     for held in range(len(fixtures)):
         train_mask = groups != held
         test_mask = groups == held
-        if train_mask.sum() < 10 or y[train_mask].sum() == 0 or (
-            y[train_mask] == 0
-        ).sum() == 0:
+        if train_mask.sum() < 10 or y[train_mask].sum() == 0 or (y[train_mask] == 0).sum() == 0:
             continue
-        clf = LogisticRegression(
-            C=1.0, max_iter=1000, class_weight="balanced", solver="lbfgs"
-        )
+        clf = LogisticRegression(C=1.0, max_iter=1000, class_weight="balanced", solver="lbfgs")
         clf.fit(X[train_mask], y[train_mask])
         cv_probs[test_mask] = clf.predict_proba(X[test_mask])[:, 1]
     if np.isnan(cv_probs).any():
@@ -642,9 +717,7 @@ def _train_voter_e(
         y = y[valid]
     threshold = _threshold_for_recall(cv_probs.astype(np.float64), y, target_recall)
 
-    final = LogisticRegression(
-        C=1.0, max_iter=1000, class_weight="balanced", solver="lbfgs"
-    )
+    final = LogisticRegression(C=1.0, max_iter=1000, class_weight="balanced", solver="lbfgs")
     final.fit(X, y)
     log(
         f"  Voter E: trained on {len(binary)} samples "
@@ -783,10 +856,7 @@ def build_artifacts(
             fixtures, tolerance_ms, rebuild=rebuild_visual, log=log
         )
         if missing_video:
-            log(
-                "  skipped (source_video unreachable): "
-                + ", ".join(sorted(missing_video))
-            )
+            log("  skipped (source_video unreachable): " + ", ".join(sorted(missing_video)))
         voter_e_probe, voter_e_threshold = _train_voter_e(
             visual_universe, target_recall=voter_e_target_recall, log=log
         )
@@ -797,6 +867,10 @@ def build_artifacts(
         }
         if voter_e_probe is not None and DEFAULT_CAMERA_CLASS in thresholds_by_class:
             thresholds_by_class[DEFAULT_CAMERA_CLASS]["voter_e_threshold"] = voter_e_threshold
+
+    # Per-camera-model within-stage amplitude floor (#304).
+    log("Per-model within-stage amplitude floor:")
+    amp_floor_by_model = _amp_floors_by_camera_model(universe, log=log)
 
     # Default-class top-level fields. Existing code paths that haven't
     # migrated to ``thresholds_for(camera_class)`` keep reading the
@@ -834,12 +908,17 @@ def build_artifacts(
         "n_calibration_positives": int(n_pos),
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
         "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
-        "voter_e_frame_offsets": list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None,
-        "voter_e_probe_artifact": DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None,
+        "voter_e_frame_offsets": (
+            list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None
+        ),
+        "voter_e_probe_artifact": (
+            DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None
+        ),
         "voter_e_audio_strong_min_votes_recommended": 3 if voter_e_probe is not None else None,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "default_camera_class": default_cls,
         "thresholds_by_camera_class": thresholds_by_class,
+        "amp_floor_by_camera_model": amp_floor_by_model or None,
         "voter_c_metrics_by_camera_class": metrics_by_class,
         "voter_e_provenance": voter_e_provenance,
         **mining_provenance,
