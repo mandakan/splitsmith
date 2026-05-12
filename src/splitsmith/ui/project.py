@@ -291,6 +291,14 @@ class StageVideo(BaseModel):
     # shot-detect and caches the result here. The user can override via
     # the project SPA / API at any time.
     camera_mount: str | None = None
+    # Issue #304: ffprobed camera make/model surfaced at register time and
+    # persisted on the project so the detector can dispatch a per-model
+    # within-stage amplitude floor. ``None`` when ffprobe couldn't read the
+    # tag (Vanguard glasses are the present example -- no QuickTime make/
+    # model). The user can override via the videos PATCH endpoint, same as
+    # ``camera_mount``.
+    camera_make: str | None = None
+    camera_model: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -1301,9 +1309,13 @@ class MatchProject(BaseModel):
         # user can correct via the videos PATCH endpoint.
         from ..fixture_schema import probe_camera_metadata
 
+        probed_make: str | None = None
+        probed_model: str | None = None
         try:
             probe = probe_camera_metadata(source)
             mount_default = _heuristic_mount_from_make(probe.make)
+            probed_make = probe.make
+            probed_model = probe.model
         except Exception:
             mount_default = None
 
@@ -1311,6 +1323,8 @@ class MatchProject(BaseModel):
             path=stored,
             match_timestamp=match_ts,
             camera_mount=mount_default,
+            camera_make=probed_make,
+            camera_model=probed_model,
         )
         self.unassigned_videos.append(video)
         return video

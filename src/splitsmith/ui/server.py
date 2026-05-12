@@ -2863,6 +2863,8 @@ def create_app(
             expected_rounds=expected_rounds,
             ensemble_config=ensemble_cfg,
             camera_class=cam_class,
+            camera_make=prim.camera_make,
+            camera_model=prim.camera_model,
             video_path=source if enable_e else None,
             source_beep_time=prim.beep_time if enable_e else None,
         )
@@ -5495,10 +5497,18 @@ def create_app(
                 + float(stage_time_seconds)
                 + float(project.trim_post_buffer_seconds)
             )
+            # Camera make/model (#303): use the values cached on the
+            # StageVideo at register time -- those came from ffprobe and
+            # the user may have overridden them via the videos PATCH
+            # endpoint. Both are ``None`` when ffprobe couldn't read the
+            # QuickTime tag (Meta Vanguard glasses are the present
+            # example -- no tag is exposed). The per-model amplitude
+            # floor lookup (#304) handles the ``None`` case by falling
+            # back to the generic-headcam floor.
             camera_payload: dict[str, Any] = {
                 "id": "unknown",
-                "make": None,
-                "model": None,
+                "make": primary.camera_make,
+                "model": primary.camera_model,
                 "mount": str(primary.camera_mount),
                 "position": "shooter",
                 "audio_source": "internal",
