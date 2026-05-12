@@ -117,6 +117,47 @@ def apriori_boost(
     return out
 
 
+def within_stage_amp_veto(
+    peak_amps: np.ndarray,
+    keep_mask: np.ndarray,
+    *,
+    expected_rounds: int | None,
+    floor_ratio: float,
+    fallback_percentile: float = 75.0,
+    min_kept_for_filter: int = 4,
+) -> np.ndarray:
+    """Drop kept candidates whose peak_amp is too small for the stage.
+
+    Headcam-only filter (the caller decides whether to invoke it).
+    Anchor: median of the top-K kept by peak_amp where
+    ``K = min(expected_rounds, n_kept)``. When ``expected_rounds`` is
+    ``None`` or 0, falls back to ``fallback_percentile`` of kept peak_amps.
+
+    Skipped when ``n_kept < min_kept_for_filter`` -- the anchor is too
+    fragile on near-empty stages. Returns an updated keep_mask; never
+    adds back vetoed candidates.
+    """
+    if peak_amps.size == 0 or floor_ratio <= 0.0:
+        return keep_mask
+    kept_idx = np.where(keep_mask)[0]
+    n_kept = kept_idx.size
+    if n_kept < min_kept_for_filter:
+        return keep_mask
+    kept_amps = peak_amps[kept_idx]
+    if expected_rounds and expected_rounds > 0:
+        k = min(int(expected_rounds), n_kept)
+        top = np.sort(kept_amps)[-k:]
+        anchor = float(np.median(top))
+    else:
+        anchor = float(np.percentile(kept_amps, fallback_percentile))
+    if anchor <= 0.0:
+        return keep_mask
+    cutoff = floor_ratio * anchor
+    out = keep_mask.copy()
+    out[kept_idx[kept_amps < cutoff]] = False
+    return out
+
+
 def consensus_keep(
     vote_total: np.ndarray,
     apriori: np.ndarray,
