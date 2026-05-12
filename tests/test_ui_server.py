@@ -2577,6 +2577,82 @@ def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
     assert refreshed.stages[0].primary().camera_mount is None
 
 
+def test_camera_model_patch_endpoint_round_trips(tmp_path: Path) -> None:
+    """PATCH /camera-model writes both make and model and clears them together."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    video_id = primary.video_id
+
+    resp = client.patch(
+        f"/api/stages/1/videos/{video_id}/camera-model",
+        json={"make": "Meta", "model": "Vanguard"},
+    )
+    assert resp.status_code == 200, resp.text
+    refreshed = MatchProject.load(project_root)
+    refreshed_primary = refreshed.stages[0].primary()
+    assert refreshed_primary.camera_make == "Meta"
+    assert refreshed_primary.camera_model == "Vanguard"
+
+    # Clear back to None on both fields.
+    resp = client.patch(
+        f"/api/stages/1/videos/{video_id}/camera-model",
+        json={"make": None, "model": None},
+    )
+    assert resp.status_code == 200, resp.text
+    refreshed = MatchProject.load(project_root)
+    refreshed_primary = refreshed.stages[0].primary()
+    assert refreshed_primary.camera_make is None
+    assert refreshed_primary.camera_model is None
+
+
+def test_camera_model_patch_rejects_half_filled_pair(tmp_path: Path) -> None:
+    """Per-model lookup keys both fields, so a half-filled body is meaningless."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    video_id = primary.video_id
+
+    resp = client.patch(
+        f"/api/stages/1/videos/{video_id}/camera-model",
+        json={"make": "Meta", "model": None},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "supplied together" in resp.json()["detail"]
+
+    resp = client.patch(
+        f"/api/stages/1/videos/{video_id}/camera-model",
+        json={"make": None, "model": "Vanguard"},
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) -> None:
+    """GET /api/calibrated-camera-models reflects the shipped calibration.
+
+    The shipped artifact today calibrates Insta360 GO 3S and Meta Vanguard
+    (see PR #310 + #311). Future calibrations will grow the list; this
+    test only asserts the contract -- a list of objects with key, make,
+    model, amp_floor -- without locking in the exact entries.
+    """
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.get("/api/calibrated-camera-models")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, dict) and "models" in body
+    assert isinstance(body["models"], list)
+    for row in body["models"]:
+        assert set(row.keys()) >= {"key", "make", "model", "amp_floor"}
+        assert isinstance(row["key"], str) and row["key"]
+        assert isinstance(row["make"], str) and row["make"]
+        assert isinstance(row["model"], str) and row["model"]
+        assert isinstance(row["amp_floor"], float)
+
+
 def test_shot_detect_endpoint_400_when_no_beep(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
