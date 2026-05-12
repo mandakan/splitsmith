@@ -267,7 +267,7 @@ def test_within_stage_amp_veto_never_adds_back_dropped_candidates() -> None:
         expected_rounds=4,
         floor_ratio=0.20,
     )
-    assert out[0] == False  # 1.0 was already not kept; veto can't resurrect
+    assert not out[0]  # 1.0 was already not kept; veto can't resurrect
     assert out[1:].tolist() == [True, True, True, True]
 
 

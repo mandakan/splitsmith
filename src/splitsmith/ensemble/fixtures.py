@@ -26,9 +26,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 FIXTURES_DIR: Path = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 

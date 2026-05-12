@@ -38,7 +38,13 @@ def _write_audit(
         "beep_time": 0.5,
         "stage_time_seconds": 30.0,
         "shots": [{"shot_number": i + 1, "time": 1.0 + i * 0.3} for i in range(n_shots)],
-        "camera": {"mount": mount, "id": "go3s", "make": make, "model": model, "position": "shooter"},
+        "camera": {
+            "mount": mount,
+            "id": "go3s",
+            "make": make,
+            "model": model,
+            "position": "shooter",
+        },
         "shooter": {"id": shooter_id},
         "stage_rounds": {"expected": expected_rounds} if expected_rounds is not None else {},
     }
@@ -107,9 +113,15 @@ def test_audited_filter_drops_zero_shot_fixtures(tmp_path: Path) -> None:
 
 
 def test_filters_by_mount_and_shooter(tmp_path: Path, monkeypatch) -> None:
-    _write_audit(tmp_path, "stage-shots-m-2026-stage1-saaaa1111", mount="head", shooter_id="saaaa1111")
-    _write_audit(tmp_path, "stage-shots-m-2026-stage2-saaaa1111", mount="hand", shooter_id="saaaa1111")
-    _write_audit(tmp_path, "stage-shots-m-2026-stage3-sbbbb2222", mount="head", shooter_id="sbbbb2222")
+    _write_audit(
+        tmp_path, "stage-shots-m-2026-stage1-saaaa1111", mount="head", shooter_id="saaaa1111"
+    )
+    _write_audit(
+        tmp_path, "stage-shots-m-2026-stage2-saaaa1111", mount="hand", shooter_id="saaaa1111"
+    )
+    _write_audit(
+        tmp_path, "stage-shots-m-2026-stage3-sbbbb2222", mount="head", shooter_id="sbbbb2222"
+    )
     monkeypatch.setattr(registry, "FIXTURES_DIR", tmp_path)
     registry.all_fixtures.cache_clear()
 
@@ -123,9 +135,7 @@ def test_filters_by_mount_and_shooter(tmp_path: Path, monkeypatch) -> None:
     ]
 
 
-def test_exclude_wrong_clip_strips_known_bad_video_fixtures(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_exclude_wrong_clip_strips_known_bad_video_fixtures(tmp_path: Path, monkeypatch) -> None:
     bad = next(iter(registry.WRONG_CLIP_FIXTURES))
     good = "stage-shots-good-2026-stage1-s12345678"
     _write_audit(tmp_path, bad)
