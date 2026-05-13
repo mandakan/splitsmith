@@ -92,16 +92,24 @@ def project_export(
         ),
     ),
     include_trimmed: bool = typer.Option(
-        False, "--with-trimmed", help="Include trimmed/ (per-stage MP4s, regeneratable).",
+        False,
+        "--with-trimmed",
+        help="Include trimmed/ (per-stage MP4s, regeneratable).",
     ),
     include_exports: bool = typer.Option(
-        False, "--with-exports", help="Include exports/ (FCPXML, CSV, lossless trims).",
+        False,
+        "--with-exports",
+        help="Include exports/ (FCPXML, CSV, lossless trims).",
     ),
     include_raw: bool = typer.Option(
-        False, "--with-raw", help="Include the raw/ subdirectory (source video).",
+        False,
+        "--with-raw",
+        help="Include the raw/ subdirectory (source video).",
     ),
     include_audio: bool = typer.Option(
-        False, "--with-audio", help="Include the audio/ subdirectory (extracted wav).",
+        False,
+        "--with-audio",
+        help="Include the audio/ subdirectory (extracted wav).",
     ),
 ) -> None:
     """Tar the non-regeneratable parts of a project for backup or transfer.

@@ -64,7 +64,10 @@ def test_export_opts_in_trimmed_and_exports(tmp_path: Path) -> None:
     _seed_project(src)
 
     result = export_project(
-        src, tmp_path / "out", include_trimmed=True, include_exports=True,
+        src,
+        tmp_path / "out",
+        include_trimmed=True,
+        include_exports=True,
     )
     with tarfile.open(result.archive_path) as tf:
         names = tf.getnames()
@@ -207,8 +210,9 @@ def test_export_endpoint_streams_archive(tmp_path: Path) -> None:
     resp = client.get("/api/project/export")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/gzip"
-    assert "match-backup-" in resp.headers.get("content-disposition", "") or \
-        "match.tar.gz" in resp.headers.get("content-disposition", "")
+    assert "match-backup-" in resp.headers.get(
+        "content-disposition", ""
+    ) or "match.tar.gz" in resp.headers.get("content-disposition", "")
     with tarfile.open(fileobj=io.BytesIO(resp.content)) as tf:
         names = tf.getnames()
     assert f"match/{PROJECT_FILE}" in names
