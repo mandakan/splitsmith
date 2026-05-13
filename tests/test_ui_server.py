@@ -1094,6 +1094,82 @@ def test_override_beep_400_on_negative(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
+def test_set_stage_time_manual_unblocks_no_scoreboard_project(tmp_path: Path) -> None:
+    """Placeholder stage with no scoreboard data: manual time entry stamps
+    time_seconds + flags it so a later sync won't clobber, and unblocks the
+    trim / shot-detect gates that look at ``time_seconds > 0``."""
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    client.post(
+        "/api/project/placeholder-stages",
+        json={"stage_count": 1, "match_name": "Manual Times"},
+    )
+    resp = client.post("/api/stages/1/time", json={"time_seconds": 18.42})
+    assert resp.status_code == 200
+    stage = resp.json()["stages"][0]
+    assert stage["time_seconds"] == 18.42
+    assert stage["time_seconds_manual"] is True
+
+
+def test_set_stage_time_null_clears_back_to_placeholder(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    client.post("/api/project/placeholder-stages", json={"stage_count": 1})
+    client.post("/api/stages/1/time", json={"time_seconds": 12.0})
+    resp = client.post("/api/stages/1/time", json={"time_seconds": None})
+    assert resp.status_code == 200
+    stage = resp.json()["stages"][0]
+    assert stage["time_seconds"] == 0.0
+    assert stage["time_seconds_manual"] is False
+
+
+def test_set_stage_time_400_on_non_positive(tmp_path: Path) -> None:
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    client.post("/api/project/placeholder-stages", json={"stage_count": 1})
+    for bad in (0.0, -1.0):
+        resp = client.post("/api/stages/1/time", json={"time_seconds": bad})
+        assert resp.status_code == 400, f"expected 400 for {bad}, got {resp.status_code}"
+
+
+def test_manual_stage_time_survives_scoreboard_sync(tmp_path: Path) -> None:
+    """``merge_stage_times`` (the per-competitor sync path) must
+    leave manual values alone -- otherwise pinning yourself in the
+    Scoreboard would silently overwrite a duration the user typed in."""
+    from splitsmith.ui.project import MatchProject
+    from splitsmith.ui.scoreboard.models import (
+        CompetitorStageResult,
+        CompetitorStageResults,
+    )
+
+    proj = MatchProject(name="t", schema_version=1)
+    proj.init_placeholder_stages(count=2)
+    proj.stages[0].time_seconds = 9.5
+    proj.stages[0].time_seconds_manual = True
+
+    results = CompetitorStageResults(
+        competitorId=1,
+        stages=[
+            CompetitorStageResult(
+                stage_number=1,
+                time_seconds=42.0,
+                scorecard_updated_at="2026-01-01T00:00:00+00:00",
+            ),
+            CompetitorStageResult(
+                stage_number=2,
+                time_seconds=11.0,
+                scorecard_updated_at="2026-01-01T00:00:00+00:00",
+            ),
+        ]
+    )
+    proj.merge_stage_times(results)
+
+    assert proj.stages[0].time_seconds == 9.5
+    assert proj.stages[0].time_seconds_manual is True
+    assert proj.stages[1].time_seconds == 11.0
+    assert proj.stages[1].time_seconds_manual is False
+
+
 def _three_candidates() -> list:
     from splitsmith.config import BeepCandidate
 
