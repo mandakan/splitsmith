@@ -589,9 +589,7 @@ def test_dispatcher_respects_max_concurrent() -> None:
 
     jobs = [reg.submit(kind="shot_detect", fn=slow) for _ in range(3)]
     # Wait for two to be running, then release them.
-    assert _wait_until(
-        lambda: sum(reg.get(j.id).status == JobStatus.RUNNING for j in jobs) == 2
-    )
+    assert _wait_until(lambda: sum(reg.get(j.id).status == JobStatus.RUNNING for j in jobs) == 2)
     assert reg.get(jobs[2].id).status == JobStatus.PENDING
 
     proceed.set()
