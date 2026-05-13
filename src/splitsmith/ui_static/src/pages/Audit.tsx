@@ -1812,8 +1812,14 @@ function DetectShotsBadge({
   // Auto-adopt an in-flight shot-detect job after reload. Auto-trim
   // chains shot detection; the user often lands on Audit while it's
   // still mid-flight.
+  //
+  // Reset local state on stage change before the async lookup -- same
+  // reasoning as the trim badge: navigating from a stage with a running
+  // job to one without otherwise leaves the stale ``job`` in place.
   useEffect(() => {
     let cancelled = false;
+    setJob(null);
+    setError(null);
     api
       .listJobs()
       .then(async (jobs) => {
@@ -1950,8 +1956,16 @@ function TrimNowBadge({
   // Auto-adopt an in-flight trim on mount / stage change. After a page
   // reload the server still has the running job; we reattach to it
   // instead of leaving the user a "Trim now" button that double-submits.
+  //
+  // Reset local state synchronously on stage change before the async
+  // lookup -- otherwise navigating from a stage with a running trim to
+  // one without leaves the stale ``job`` in place (the effect's no-match
+  // branch never cleared it), making every other stage look like it's
+  // trimming too.
   useEffect(() => {
     let cancelled = false;
+    setJob(null);
+    setError(null);
     api
       .listJobs()
       .then(async (jobs) => {
