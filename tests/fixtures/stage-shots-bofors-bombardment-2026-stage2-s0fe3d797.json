@@ -62,125 +62,111 @@
     },
     {
       "shot_number": 9,
-      "candidate_number": 9,
-      "time": 9.672,
-      "ms_after_beep": 6834,
-      "source": "detected"
-    },
-    {
-      "shot_number": 10,
-      "candidate_number": 10,
-      "time": 10.47,
-      "ms_after_beep": 7633,
-      "source": "detected"
-    },
-    {
-      "shot_number": 11,
       "candidate_number": 11,
       "time": 11.03,
       "ms_after_beep": 8193,
       "source": "detected"
     },
     {
-      "shot_number": 12,
+      "shot_number": 10,
       "candidate_number": 12,
       "time": 11.24,
       "ms_after_beep": 8402,
       "source": "detected"
     },
     {
-      "shot_number": 13,
+      "shot_number": 11,
       "candidate_number": 13,
       "time": 11.593,
       "ms_after_beep": 8755,
       "source": "detected"
     },
     {
-      "shot_number": 14,
+      "shot_number": 12,
       "candidate_number": 14,
       "time": 11.793,
       "ms_after_beep": 8955,
       "source": "detected"
     },
     {
-      "shot_number": 15,
+      "shot_number": 13,
       "candidate_number": 15,
       "time": 12.7,
       "ms_after_beep": 9863,
       "source": "detected"
     },
     {
-      "shot_number": 16,
+      "shot_number": 14,
       "candidate_number": 16,
       "time": 12.897,
       "ms_after_beep": 10059,
       "source": "detected"
     },
     {
-      "shot_number": 17,
+      "shot_number": 15,
       "candidate_number": 17,
       "time": 13.235,
       "ms_after_beep": 10397,
       "source": "detected"
     },
     {
-      "shot_number": 18,
+      "shot_number": 16,
       "candidate_number": 18,
       "time": 13.429,
       "ms_after_beep": 10591,
       "source": "detected"
     },
     {
-      "shot_number": 19,
+      "shot_number": 17,
       "candidate_number": 20,
       "time": 16.124,
       "ms_after_beep": 13287,
       "source": "detected"
     },
     {
-      "shot_number": 20,
+      "shot_number": 18,
       "candidate_number": 23,
       "time": 18.195,
       "ms_after_beep": 15358,
       "source": "detected"
     },
     {
-      "shot_number": 21,
+      "shot_number": 19,
       "candidate_number": 24,
       "time": 18.535,
       "ms_after_beep": 15697,
       "source": "detected"
     },
     {
-      "shot_number": 22,
+      "shot_number": 20,
       "candidate_number": 25,
       "time": 18.749,
       "ms_after_beep": 15912,
       "source": "detected"
     },
     {
-      "shot_number": 23,
+      "shot_number": 21,
       "candidate_number": 26,
       "time": 19.571,
       "ms_after_beep": 16734,
       "source": "detected"
     },
     {
-      "shot_number": 24,
+      "shot_number": 22,
       "candidate_number": 27,
       "time": 19.8,
       "ms_after_beep": 16963,
       "source": "detected"
     },
     {
-      "shot_number": 25,
+      "shot_number": 23,
       "candidate_number": 28,
       "time": 20.102,
       "ms_after_beep": 17265,
       "source": "detected"
     },
     {
-      "shot_number": 26,
+      "shot_number": 24,
       "candidate_number": 29,
       "time": 20.31,
       "ms_after_beep": 17472,
@@ -748,9 +734,34 @@
       "payload": {
         "shots_count": 26
       }
+    },
+    {
+      "ts": "2026-05-13T15:42:37.339Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-9",
+        "time": 9.6717,
+        "candidate_number": 9
+      }
+    },
+    {
+      "ts": "2026-05-13T15:42:38.219Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-10",
+        "time": 10.4704,
+        "candidate_number": 10
+      }
+    },
+    {
+      "ts": "2026-05-13T15:42:41.044Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 24
+      }
     }
   ],
-  "promoted_at": "2026-05-13T12:14:38.234942+00:00",
+  "promoted_at": "2026-05-13T15:42:43.944694+00:00",
   "provenance": {
     "stage_number": 2,
     "stage_name": null
