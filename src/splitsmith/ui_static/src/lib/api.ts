@@ -2043,8 +2043,15 @@ export const api = {
    *  tab / window to trigger a download; using a real URL (not fetch)
    *  lets the browser write to disk without buffering the whole archive
    *  in memory. */
-  exportProjectUrl: (opts?: { includeRaw?: boolean; includeAudio?: boolean }) => {
+  exportProjectUrl: (opts?: {
+    includeTrimmed?: boolean;
+    includeExports?: boolean;
+    includeRaw?: boolean;
+    includeAudio?: boolean;
+  }) => {
     const params = new URLSearchParams();
+    if (opts?.includeTrimmed) params.set("include_trimmed", "true");
+    if (opts?.includeExports) params.set("include_exports", "true");
     if (opts?.includeRaw) params.set("include_raw", "true");
     if (opts?.includeAudio) params.set("include_audio", "true");
     const qs = params.toString();

@@ -22,8 +22,11 @@ interface Health {
 export function Home() {
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [includeTrimmed, setIncludeTrimmed] = useState(false);
+  const [includeExports, setIncludeExports] = useState(false);
   const [includeRaw, setIncludeRaw] = useState(false);
   const [includeAudio, setIncludeAudio] = useState(false);
+  const [preparing, setPreparing] = useState(false);
 
   useEffect(() => {
     fetch("/api/health")
@@ -33,7 +36,12 @@ export function Home() {
   }, []);
 
   function downloadBackup() {
-    const url = api.exportProjectUrl({ includeRaw, includeAudio });
+    const url = api.exportProjectUrl({
+      includeTrimmed,
+      includeExports,
+      includeRaw,
+      includeAudio,
+    });
     // Navigating in a hidden anchor keeps the user on the page while
     // the browser streams the archive to disk.
     const a = document.createElement("a");
@@ -42,6 +50,12 @@ export function Home() {
     document.body.appendChild(a);
     a.click();
     a.remove();
+    // The browser owns the download from here; we don't get a callback.
+    // Show a brief "Preparing..." state so the user sees the click
+    // registered -- generating the tarball can take a couple of seconds
+    // for a large project.
+    setPreparing(true);
+    window.setTimeout(() => setPreparing(false), 4000);
   }
 
   return (
@@ -99,13 +113,37 @@ export function Home() {
         <CardHeader>
           <CardTitle>Backup</CardTitle>
           <CardDescription>
-            Download a <code>.tar.gz</code> of the non-regeneratable parts
-            of this project (audit, scoreboard, trims, exports). Restore
-            with the import button on the project picker.
+            Download a <code>.tar.gz</code> of this project. The default
+            archive holds only the irreplaceable bits: <code>project.json</code>,{" "}
+            <code>audit/</code> (hand-labeled shot times) and{" "}
+            <code>scoreboard/</code>. Tick a box to include directories
+            that are regeneratable from the source footage.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-4 text-sm">
+          <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeTrimmed}
+                onChange={(e) => setIncludeTrimmed(e.target.checked)}
+              />
+              <span>
+                Include <code>trimmed/</code>
+                <span className="text-xs text-muted-foreground"> (per-stage MP4s)</span>
+              </span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeExports}
+                onChange={(e) => setIncludeExports(e.target.checked)}
+              />
+              <span>
+                Include <code>exports/</code>
+                <span className="text-xs text-muted-foreground"> (FCPXML, CSV)</span>
+              </span>
+            </label>
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -129,14 +167,21 @@ export function Home() {
               </span>
             </label>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={downloadBackup}
-            disabled={!health}
-          >
-            Download backup
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              onClick={downloadBackup}
+              disabled={!health || preparing}
+            >
+              {preparing ? "Preparing archive..." : "Download backup"}
+            </Button>
+            {preparing ? (
+              <span className="text-xs text-muted-foreground">
+                The browser will save the file once the server finishes
+                writing it.
+              </span>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
     </div>

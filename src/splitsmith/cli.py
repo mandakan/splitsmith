@@ -91,6 +91,12 @@ def project_export(
             "<project-slug>-backup-YYYYMMDD.tar.gz. If a file, used as-is."
         ),
     ),
+    include_trimmed: bool = typer.Option(
+        False, "--with-trimmed", help="Include trimmed/ (per-stage MP4s, regeneratable).",
+    ),
+    include_exports: bool = typer.Option(
+        False, "--with-exports", help="Include exports/ (FCPXML, CSV, lossless trims).",
+    ),
     include_raw: bool = typer.Option(
         False, "--with-raw", help="Include the raw/ subdirectory (source video).",
     ),
@@ -100,14 +106,20 @@ def project_export(
 ) -> None:
     """Tar the non-regeneratable parts of a project for backup or transfer.
 
-    Always includes ``project.json`` plus ``audit/``, ``scoreboard/``,
-    ``trimmed/``, ``exports/``. ``probes/`` and ``thumbs/`` are excluded
-    (regenerable caches).
+    Default archive contains ``project.json`` plus ``audit/`` and
+    ``scoreboard/`` -- the only artefacts that cannot be regenerated from
+    the source footage. Use the ``--with-*`` flags to opt regeneratable
+    directories into the archive.
     """
     from .backup import export_project
 
     result = export_project(
-        project_dir, output, include_raw=include_raw, include_audio=include_audio,
+        project_dir,
+        output,
+        include_trimmed=include_trimmed,
+        include_exports=include_exports,
+        include_raw=include_raw,
+        include_audio=include_audio,
     )
     size_mb = result.bytes_written / (1024 * 1024)
     console.print(f"[green]Wrote[/] {result.archive_path} ({size_mb:.1f} MB)")

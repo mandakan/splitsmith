@@ -44,19 +44,33 @@ def test_export_includes_defaults_only(tmp_path: Path) -> None:
     assert set(result.included) == {PROJECT_FILE, *DEFAULT_DIRS}
     with tarfile.open(result.archive_path) as tf:
         names = tf.getnames()
-    # Defaults are present.
+    # Defaults are present: project.json + audit + scoreboard only.
     assert f"match/{PROJECT_FILE}" in names
     assert any(n.startswith("match/audit/") for n in names)
-    assert any(n.startswith("match/trimmed/") for n in names)
-    assert any(n.startswith("match/exports/") for n in names)
     assert any(n.startswith("match/scoreboard/") for n in names)
-    # Caches and optional dirs are not.
+    # Everything else (caches + regeneratable video) is excluded by default.
+    assert not any(n.startswith("match/trimmed/") for n in names)
+    assert not any(n.startswith("match/exports/") for n in names)
     assert not any(n.startswith("match/probes/") for n in names)
     assert not any(n.startswith("match/thumbs/") for n in names)
     assert not any(n.startswith("match/raw/") for n in names)
     assert not any(n.startswith("match/audio/") for n in names)
     # Manifest is written.
     assert f"match/{MANIFEST_NAME}" in names
+
+
+def test_export_opts_in_trimmed_and_exports(tmp_path: Path) -> None:
+    src = tmp_path / "match"
+    _seed_project(src)
+
+    result = export_project(
+        src, tmp_path / "out", include_trimmed=True, include_exports=True,
+    )
+    with tarfile.open(result.archive_path) as tf:
+        names = tf.getnames()
+    assert any(n.startswith("match/trimmed/") for n in names)
+    assert any(n.startswith("match/exports/") for n in names)
+    assert {"trimmed", "exports"} <= set(result.included)
 
 
 def test_export_with_raw_and_audio(tmp_path: Path) -> None:
@@ -87,7 +101,10 @@ def test_round_trip_restores_project(tmp_path: Path) -> None:
     assert (imported.project_root / PROJECT_FILE).exists()
     assert (imported.project_root / "audit" / "stage1.json").read_text() == '{"shots": []}'
     assert (imported.project_root / "scoreboard" / "match.json").read_text() == '{"id": "abc"}'
-    # Caches and large dirs were intentionally excluded.
+    # Regeneratable dirs and caches were intentionally excluded from the
+    # default archive, so they don't reappear after restore.
+    assert not (imported.project_root / "trimmed").exists()
+    assert not (imported.project_root / "exports").exists()
     assert not (imported.project_root / "probes").exists()
     assert not (imported.project_root / "raw").exists()
 
@@ -149,9 +166,15 @@ def test_manifest_contents(tmp_path: Path) -> None:
         manifest = json.loads(member.read().decode())
 
     assert manifest["project_name"] == "Manifest Test"
-    assert manifest["options"] == {"include_raw": False, "include_audio": True}
+    assert manifest["options"] == {
+        "include_trimmed": False,
+        "include_exports": False,
+        "include_raw": False,
+        "include_audio": True,
+    }
     assert "audio" in manifest["included"]
     assert "raw" not in manifest["included"]
+    assert "trimmed" not in manifest["included"]
 
 
 def test_export_to_explicit_file_path(tmp_path: Path) -> None:
@@ -190,8 +213,11 @@ def test_export_endpoint_streams_archive(tmp_path: Path) -> None:
         names = tf.getnames()
     assert f"match/{PROJECT_FILE}" in names
     assert any(n.startswith("match/audit/") for n in names)
-    # Defaults exclude raw/audio.
+    assert any(n.startswith("match/scoreboard/") for n in names)
+    # Defaults exclude raw/audio/trimmed/exports.
     assert not any(n.startswith("match/raw/") for n in names)
+    assert not any(n.startswith("match/trimmed/") for n in names)
+    assert not any(n.startswith("match/exports/") for n in names)
 
 
 def test_import_endpoint_extracts_and_optionally_binds(tmp_path: Path) -> None:

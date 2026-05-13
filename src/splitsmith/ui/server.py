@@ -1329,22 +1329,31 @@ def create_app(
 
     @app.get("/api/project/export")
     def export_project_endpoint(
+        include_trimmed: bool = Query(False),
+        include_exports: bool = Query(False),
         include_raw: bool = Query(False),
         include_audio: bool = Query(False),
     ) -> FileResponse:
         """Stream the bound project as a ``.tar.gz`` download.
 
-        Defaults preserve audit/, scoreboard/, trimmed/, exports/ plus
-        ``project.json``. ``include_raw``/``include_audio`` opt into the
-        heavy subdirectories. The archive is written to a temp file and
-        deleted once the response finishes streaming.
+        The default archive contains only ``project.json``, ``audit/`` and
+        ``scoreboard/`` -- the artefacts that cannot be regenerated from
+        the source footage. The ``include_*`` query flags opt
+        regeneratable directories into the archive. The archive is
+        written to a temp file and deleted once the response finishes
+        streaming.
         """
         root = state.project_root
         tmp = Path(tempfile.mkdtemp(prefix="splitsmith-export-"))
         archive = tmp / f"{root.name}.tar.gz"
         try:
             result = backup_mod.export_project(
-                root, archive, include_raw=include_raw, include_audio=include_audio,
+                root,
+                archive,
+                include_trimmed=include_trimmed,
+                include_exports=include_exports,
+                include_raw=include_raw,
+                include_audio=include_audio,
             )
         except backup_mod.BackupError as exc:
             shutil.rmtree(tmp, ignore_errors=True)

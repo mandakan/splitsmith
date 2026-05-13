@@ -7,9 +7,12 @@ disaster-recovery copy.
 Inclusion policy:
 
 * Always: ``project.json``.
-* Default: ``audit/``, ``scoreboard/``, ``trimmed/``, ``exports/``.
-* Optional via flags: ``raw/`` (large source video), ``audio/`` (re-extractable
-  from raw).
+* Default: ``audit/`` (hand-labeled shot corrections) and ``scoreboard/``
+  (cached SSI data). Together these are the only artefacts that are
+  *truly* irreplaceable.
+* Optional via flags: ``trimmed/``, ``exports/``, ``raw/``, ``audio/`` -- all
+  regeneratable from the raw footage, so the user opts in when they
+  actually need them in the archive.
 * Never: ``probes/`` and ``thumbs/`` -- pure caches, trivially regenerated.
 
 Subdirectories whose path resolves outside the project root (via the absolute
@@ -38,8 +41,8 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .ui.project import PROJECT_FILE, MatchProject
 
-DEFAULT_DIRS: tuple[str, ...] = ("audit", "scoreboard", "trimmed", "exports")
-OPTIONAL_DIRS: frozenset[str] = frozenset({"raw", "audio"})
+DEFAULT_DIRS: tuple[str, ...] = ("audit", "scoreboard")
+OPTIONAL_DIRS: frozenset[str] = frozenset({"raw", "audio", "trimmed", "exports"})
 NEVER_DIRS: frozenset[str] = frozenset({"probes", "thumbs"})
 
 MANIFEST_NAME = "BACKUP_MANIFEST.json"
@@ -88,6 +91,8 @@ def export_project(
     project_root: Path,
     output: Path,
     *,
+    include_trimmed: bool = False,
+    include_exports: bool = False,
     include_raw: bool = False,
     include_audio: bool = False,
 ) -> ExportResult:
@@ -110,6 +115,10 @@ def export_project(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     wanted = list(DEFAULT_DIRS)
+    if include_trimmed:
+        wanted.append("trimmed")
+    if include_exports:
+        wanted.append("exports")
     if include_raw:
         wanted.append("raw")
     if include_audio:
@@ -152,7 +161,12 @@ def export_project(
             "project_root_name": project_root.name,
             "included": ["project.json", *included],
             "skipped": [s.model_dump() for s in skipped],
-            "options": {"include_raw": include_raw, "include_audio": include_audio},
+            "options": {
+                "include_trimmed": include_trimmed,
+                "include_exports": include_exports,
+                "include_raw": include_raw,
+                "include_audio": include_audio,
+            },
         }
         _add_bytes(tf, f"{arc_root}/{MANIFEST_NAME}", json.dumps(manifest, indent=2).encode())
 
