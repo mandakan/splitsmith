@@ -172,6 +172,10 @@ export interface StageEntry {
   videos: StageVideo[];
   skipped: boolean;
   placeholder: boolean;
+  /** True when the duration was entered manually (POST /api/stages/{n}/time)
+   *  rather than imported from a scoreboard. Preserved across scoreboard
+   *  syncs so a manual value isn't clobbered. */
+  time_seconds_manual: boolean;
 }
 
 export interface MatchProject {
@@ -1429,6 +1433,16 @@ export const api = {
     request<MatchProject>(`/api/stages/${stageNumber}/beep`, {
       method: "POST",
       json: { beep_time: beepTime },
+    }),
+
+  /** Manually set or clear a stage's duration. Used for projects without
+   *  scoreboard data, where ``time_seconds`` would otherwise stay 0 and
+   *  block the trim / shot-detect gates. Pass ``null`` to clear back to
+   *  placeholder. Does NOT chain a trim -- caller clicks Trim explicitly. */
+  setStageTime: (stageNumber: number, timeSeconds: number | null) =>
+    request<MatchProject>(`/api/stages/${stageNumber}/time`, {
+      method: "POST",
+      json: { time_seconds: timeSeconds },
     }),
 
   /** Manually set or clear ``video``'s beep timestamp. ``beepTime=null``

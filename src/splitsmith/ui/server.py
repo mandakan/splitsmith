@@ -22,6 +22,7 @@ Endpoints (locked v1 surface):
   POST /api/stages/{n}/detect-beep  -- submit a beep-detection job (runs in pool)
   POST /api/stages/{n}/beep         -- manual beep_time override (synchronous)
   POST /api/stages/{n}/beep/select  -- promote one ranked candidate (synchronous)
+  POST /api/stages/{n}/time         -- manual stage duration (no-scoreboard path)
   POST /api/stages/{n}/trim         -- submit an audit-mode trim job
   POST /api/stages/{n}/shot-detect  -- submit shot detection on the audit clip
   POST /api/stages/shot-detect      -- bulk shot detection on every eligible stage
@@ -898,6 +899,19 @@ class MoveRequest(BaseModel):
 
 class BeepOverrideRequest(BaseModel):
     beep_time: float | None  # None clears the override
+
+
+class StageTimeRequest(BaseModel):
+    """Body for POST /api/stages/{n}/time.
+
+    Manual stage-duration entry for projects without scoreboard data.
+    ``time_seconds = None`` clears back to placeholder (0.0). Positive
+    values are taken as authoritative and stamped with
+    ``time_seconds_manual=True`` so a later scoreboard sync won't
+    clobber them.
+    """
+
+    time_seconds: float | None
 
 
 class BeepSelectRequest(BaseModel):
@@ -3380,6 +3394,39 @@ def create_app(
         project.save(state.project_root)
         if req.beep_time is not None:
             _maybe_chain_trim(stage, primary)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/stages/{stage_number}/time")
+    def set_stage_time(stage_number: int, req: StageTimeRequest) -> JSONResponse:
+        """Manually set or clear the stage duration.
+
+        For projects without scoreboard data (the only source that
+        normally populates ``time_seconds``). Setting a positive value
+        stamps ``time_seconds_manual=True`` so a later scoreboard sync
+        won't clobber it. ``time_seconds = None`` clears back to 0.0
+        (and clears the manual flag), which re-blocks trim / shot
+        detection.
+
+        Does NOT auto-chain a trim job -- the user clicks Trim
+        themselves once they're satisfied with the duration.
+        """
+        project = state.load()
+        try:
+            stage = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if req.time_seconds is None:
+            stage.time_seconds = 0.0
+            stage.time_seconds_manual = False
+        else:
+            if req.time_seconds <= 0.0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="time_seconds must be > 0 (use null to clear)",
+                )
+            stage.time_seconds = float(req.time_seconds)
+            stage.time_seconds_manual = True
+        project.save(state.project_root)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/snap")

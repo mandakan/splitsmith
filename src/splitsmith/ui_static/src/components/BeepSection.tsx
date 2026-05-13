@@ -676,13 +676,17 @@ export function BeepSection({
  *  Generic over role: peaks + audio come from per-video endpoints
  *  (`/api/stages/{n}/videos/{vid}/...`) so primary and secondary use the
  *  same component, the same controls, and the same snap-to-beep flow. */
-function BeepWaveformPicker({
+export function BeepWaveformPicker({
   stageNumber,
   videoId,
   videoBeepTime,
   draftSourceTime,
   onPick,
   setError,
+  snapEnabled = true,
+  showFallbackBeepMarker = true,
+  instructions,
+  ariaLabel,
 }: {
   stageNumber: number;
   videoId: string;
@@ -690,6 +694,18 @@ function BeepWaveformPicker({
   draftSourceTime: number | null;
   onPick: (sourceTime: number) => void;
   setError: (msg: string | null) => void;
+  /** When false, hide the "Snap to beep" button. Useful for reuse cases
+   *  (e.g. manual stage-time entry) where snap semantics don't apply. */
+  snapEnabled?: boolean;
+  /** When false, the waveform shows no marker until the user picks one.
+   *  Default ``true`` falls back to the auto-detected beep_time when
+   *  draftSourceTime is null -- helpful for beep editing, misleading for
+   *  stage-end picking. */
+  showFallbackBeepMarker?: boolean;
+  /** Override the hint shown above the waveform. */
+  instructions?: string;
+  /** Override the canvas aria-label for screen readers. */
+  ariaLabel?: string;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -742,8 +758,8 @@ function BeepWaveformPicker({
       if (local >= 0 && local <= peaks.duration) return local;
       return null;
     }
-    return peaks.beep_time;
-  }, [peaks, draftSourceTime, offset]);
+    return showFallbackBeepMarker ? peaks.beep_time : null;
+  }, [peaks, draftSourceTime, offset, showFallbackBeepMarker]);
 
   // Drive the playhead from the <audio> element while playing. The
   // browser fires `timeupdate` only ~4 Hz; rAF gives us ~60 Hz so the
@@ -863,8 +879,10 @@ function BeepWaveformPicker({
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">
-          Click / drag the waveform to set the marker (input below
-          updates), then "Snap to beep"
+          {instructions ??
+            (snapEnabled
+              ? 'Click / drag the waveform to set the marker (input below updates), then "Snap to beep"'
+              : "Click / drag the waveform to set the marker (input below updates)")}
         </span>
         <div className="flex items-center gap-1">
           <Button
@@ -899,7 +917,7 @@ function BeepWaveformPicker({
         beepTime={markerLocal}
         pixelsPerSecond={pxPerSec}
         height={80}
-        ariaLabel={`Beep editor waveform for stage ${stageNumber}`}
+        ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
       />
       <audio
         ref={audioRef}
@@ -921,16 +939,18 @@ function BeepWaveformPicker({
           {playing ? <Pause /> : <Play />}
           {playing ? "Pause" : "Play"}
         </Button>
-        <Button
-          size="sm"
-          variant="default"
-          onClick={() => void requestSnap()}
-          disabled={draftSourceTime == null || snapping}
-          title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
-        >
-          {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
-          Snap to beep
-        </Button>
+        {snapEnabled ? (
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => void requestSnap()}
+            disabled={draftSourceTime == null || snapping}
+            title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
+          >
+            {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
+            Snap to beep
+          </Button>
+        ) : null}
       </div>
       {proposal != null ? (
         <SnapProposal

@@ -326,6 +326,12 @@ class StageEntry(BaseModel):
     scorecard_updated_at: datetime | None = None
     videos: list[StageVideo] = Field(default_factory=list)
     skipped: bool = False
+    # User-entered stage duration when no scoreboard data is available.
+    # Preserved across scoreboard imports so a manual value isn't clobbered
+    # by a later sync. The trim/shot-detect gates only look at
+    # ``time_seconds > 0`` -- this flag exists for auditability and to
+    # tell ``import_scoreboard`` / ``apply_stage_time_results`` to skip.
+    time_seconds_manual: bool = False
     # Placeholder stages are created without a scoreboard ("I shot 6 stages,
     # let me start ingesting"). They carry stage_number + a generic name so the
     # rest of the pipeline works; importing a real scoreboard later overlays
@@ -1213,7 +1219,7 @@ class MatchProject(BaseModel):
             if stage is None:
                 continue
             time_set = False
-            if r.time_seconds is not None:
+            if r.time_seconds is not None and not stage.time_seconds_manual:
                 stage.time_seconds = float(r.time_seconds)
                 time_set = True
             scorecard_set = False

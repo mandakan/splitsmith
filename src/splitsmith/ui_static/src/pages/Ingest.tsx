@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 
 import { BeepSection } from "@/components/BeepSection";
+import { StageTimeSection } from "@/components/StageTimeSection";
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { FolderPicker } from "@/components/FolderPicker";
@@ -2616,9 +2617,11 @@ function StageCard({
               {stage.time_seconds.toFixed(2)}s &middot;{" "}
               {stage.scorecard_updated_at
                 ? new Date(stage.scorecard_updated_at).toLocaleString()
-                : stage.placeholder
-                  ? "times pending -- pin yourself in Scoreboard"
-                  : "no scorecard time"}
+                : stage.time_seconds_manual
+                  ? "manual time"
+                  : stage.placeholder
+                    ? "times pending -- pin yourself in Scoreboard"
+                    : "no scorecard time"}
             </CardDescription>
           </div>
           <div className="flex flex-col items-end gap-1">
@@ -2693,6 +2696,13 @@ function StageCard({
               stageNumber={stage.stage_number}
               video={primary}
               bare
+              setError={setError}
+              onProjectUpdate={onProjectUpdate}
+            />
+            <StageTimeSection
+              stageNumber={stage.stage_number}
+              stage={stage}
+              primary={primary}
               setError={setError}
               onProjectUpdate={onProjectUpdate}
             />
