@@ -26,6 +26,12 @@ Design notes
 - Jobs run on a small ``ThreadPoolExecutor`` (default 2 workers). FFmpeg
   is the bottleneck; running 2 in parallel is already on the edge of
   saturating a typical CPU and disk on the user's laptop.
+- Submitted jobs are gated through an internal pending list keyed by
+  :data:`JOB_PRIORITY` (lower number wins). The registry only hands a
+  job to the executor when a worker slot frees up, so a high-priority
+  ``detect_beep`` submitted behind a queue of ``shot_detect`` runs as
+  soon as one of the slow jobs finishes -- no preemption, but no
+  head-of-line blocking either. Within a priority tier, FIFO.
 - Jobs report progress + a human-readable message via :class:`JobHandle`,
   which is the write-only view passed to the worker function.
 - Finished jobs are retained for ~50 entries so a recent failure stays
@@ -52,6 +58,20 @@ from typing import Any
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+JOB_PRIORITY: dict[str, int] = {
+    # User-facing ingest path -- responsive when a new video lands.
+    "detect_beep": 0,
+    "trim": 1,
+    # Slow ensemble; happily yields its slot to incoming beep/trim work.
+    "shot_detect": 2,
+}
+DEFAULT_JOB_PRIORITY: int = 3
+
+
+def _priority_for_kind(kind: str) -> int:
+    return JOB_PRIORITY.get(kind, DEFAULT_JOB_PRIORITY)
 
 
 class _Unset:
@@ -224,11 +244,18 @@ class JobRegistry:
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
         self._lock = threading.RLock()
+        self._max_concurrent = max_concurrent
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrent,
             thread_name_prefix="splitsmith-job",
         )
         self._retain = retain_recent
+        # Jobs awaiting dispatch. We keep this list ourselves rather than
+        # leaning on the executor's internal queue because the executor
+        # is FIFO-only; the dispatcher picks the highest-priority entry
+        # (lowest ``JOB_PRIORITY`` value) whenever a worker slot frees up.
+        self._pending: list[tuple[str, Callable[[JobHandle], None]]] = []
+        self._running_count = 0
         # Registered subprocesses keyed by job_id. The trim worker spawns
         # ffmpeg via Popen and registers it via JobHandle.attach_subprocess
         # so we can terminate it on cancel even when the worker is blocked
@@ -261,12 +288,13 @@ class JobRegistry:
         with self._lock:
             self._jobs[job.id] = job
             self._order.append(job.id)
+            self._pending.append((job.id, fn))
             self._trim_retained_locked()
             # Snapshot before releasing the lock + dispatching to the
             # executor; otherwise the worker may have already flipped
             # status to RUNNING by the time we copy.
             snapshot = job.model_copy(deep=True)
-        self._executor.submit(self._run, job.id, fn)
+            self._dispatch_locked()
         return snapshot
 
     def get(self, job_id: str) -> Job | None:
@@ -304,6 +332,18 @@ class JobRegistry:
             j.cancel_requested = True
             j.updated_at = datetime.now(UTC)
             proc_to_kill = self._subprocs.pop(job_id, None)
+            # If the job is still queued (never handed to the executor),
+            # transition it to CANCELLED right here. Otherwise it would
+            # sit in ``_pending`` as PENDING forever -- the worker that
+            # would have observed the cancel never gets scheduled.
+            for i, (jid, _fn) in enumerate(self._pending):
+                if jid == job_id:
+                    del self._pending[i]
+                    j.status = JobStatus.CANCELLED
+                    j.finished_at = datetime.now(UTC)
+                    j.updated_at = j.finished_at
+                    self._trim_retained_locked()
+                    break
             snapshot = j.model_copy(deep=True)
         # Kill outside the lock so a slow ``terminate()`` (proc held a
         # held resource etc.) can't stall other registry callers.
@@ -390,62 +430,90 @@ class JobRegistry:
     # ------------------------------------------------------------------
 
     def _run(self, job_id: str, fn: Callable[[JobHandle], None]) -> None:
-        with self._lock:
-            j = self._jobs.get(job_id)
-            if j is None:
-                return
-            # If the job was cancelled while still PENDING in the queue,
-            # don't even start the worker -- skip straight to CANCELLED.
-            if j.cancel_requested:
-                j.status = JobStatus.CANCELLED
-                j.finished_at = datetime.now(UTC)
-                j.updated_at = j.finished_at
-                self._trim_retained_locked()
-                return
-            j.status = JobStatus.RUNNING
-            j.started_at = datetime.now(UTC)
-            j.updated_at = j.started_at
         try:
-            fn(JobHandle(self, job_id))
-        except JobCancelled:
             with self._lock:
                 j = self._jobs.get(job_id)
-                if j is not None:
+                if j is None:
+                    return
+                # If the job was cancelled between dispatch and the worker
+                # picking it up, skip straight to CANCELLED. Cancels for
+                # still-queued jobs are now resolved in ``cancel()``, but
+                # this branch still covers the race where cancel() fires
+                # after dispatch and before _run acquires the lock.
+                if j.cancel_requested:
                     j.status = JobStatus.CANCELLED
                     j.finished_at = datetime.now(UTC)
                     j.updated_at = j.finished_at
-                self._subprocs.pop(job_id, None)
-                self._trim_retained_locked()
-            return
-        except Exception as exc:  # noqa: BLE001 -- worker exceptions become job state
-            logger.exception("job %s failed", job_id)
+                    self._trim_retained_locked()
+                    return
+                j.status = JobStatus.RUNNING
+                j.started_at = datetime.now(UTC)
+                j.updated_at = j.started_at
+            try:
+                fn(JobHandle(self, job_id))
+            except JobCancelled:
+                with self._lock:
+                    j = self._jobs.get(job_id)
+                    if j is not None:
+                        j.status = JobStatus.CANCELLED
+                        j.finished_at = datetime.now(UTC)
+                        j.updated_at = j.finished_at
+                    self._subprocs.pop(job_id, None)
+                    self._trim_retained_locked()
+                return
+            except Exception as exc:  # noqa: BLE001 -- worker exceptions become job state
+                logger.exception("job %s failed", job_id)
+                with self._lock:
+                    j = self._jobs.get(job_id)
+                    if j is not None:
+                        # If a cancel arrived mid-flight and the worker
+                        # surfaced the resulting ffmpeg failure as a generic
+                        # exception, prefer the CANCELLED label -- the user
+                        # asked for the abort, the noisy stderr is expected.
+                        if j.cancel_requested:
+                            j.status = JobStatus.CANCELLED
+                        else:
+                            j.status = JobStatus.FAILED
+                            j.error = str(exc)
+                        j.finished_at = datetime.now(UTC)
+                        j.updated_at = j.finished_at
+                    self._subprocs.pop(job_id, None)
+                    self._trim_retained_locked()
+                return
             with self._lock:
                 j = self._jobs.get(job_id)
-                if j is not None:
-                    # If a cancel arrived mid-flight and the worker
-                    # surfaced the resulting ffmpeg failure as a generic
-                    # exception, prefer the CANCELLED label -- the user
-                    # asked for the abort, the noisy stderr is expected.
-                    if j.cancel_requested:
-                        j.status = JobStatus.CANCELLED
-                    else:
-                        j.status = JobStatus.FAILED
-                        j.error = str(exc)
+                if j is not None and j.status == JobStatus.RUNNING:
+                    j.status = JobStatus.SUCCEEDED
+                    if j.progress is None or j.progress < 1.0:
+                        j.progress = 1.0
                     j.finished_at = datetime.now(UTC)
                     j.updated_at = j.finished_at
                 self._subprocs.pop(job_id, None)
                 self._trim_retained_locked()
-            return
-        with self._lock:
-            j = self._jobs.get(job_id)
-            if j is not None and j.status == JobStatus.RUNNING:
-                j.status = JobStatus.SUCCEEDED
-                if j.progress is None or j.progress < 1.0:
-                    j.progress = 1.0
-                j.finished_at = datetime.now(UTC)
-                j.updated_at = j.finished_at
-            self._subprocs.pop(job_id, None)
-            self._trim_retained_locked()
+        finally:
+            with self._lock:
+                self._running_count = max(0, self._running_count - 1)
+                self._dispatch_locked()
+
+    def _dispatch_locked(self) -> None:
+        """Hand the highest-priority pending job to the executor.
+
+        Called under ``self._lock``. Drains pending entries up to the
+        worker-slot ceiling; ties within a priority tier go FIFO by
+        original submission order.
+        """
+        while self._running_count < self._max_concurrent and self._pending:
+            best_idx = 0
+            best_priority = _priority_for_kind(self._jobs[self._pending[0][0]].kind)
+            for i in range(1, len(self._pending)):
+                kind = self._jobs[self._pending[i][0]].kind
+                p = _priority_for_kind(kind)
+                if p < best_priority:
+                    best_idx = i
+                    best_priority = p
+            job_id, fn = self._pending.pop(best_idx)
+            self._running_count += 1
+            self._executor.submit(self._run, job_id, fn)
 
     def _patch(self, job_id: str, **fields: Any) -> None:
         with self._lock:

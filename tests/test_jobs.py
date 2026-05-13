@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from splitsmith.ui.jobs import JobCancelled, JobRegistry, JobStatus
+from splitsmith.ui.jobs import JobCancelled, JobRegistry, JobStatus, _priority_for_kind
 
 
 def _wait_until(predicate, *, timeout=2.0, poll=0.01):
@@ -404,3 +404,195 @@ def test_retention_evicts_acked_failure_before_unacked() -> None:
     surviving = {j.id for j in reg.list()}
     assert newer.id in surviving
     assert older.id not in surviving
+
+
+# ---------------------------------------------------------------------------
+# Priority-gated dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_priority_for_kind_ranks_known_kinds() -> None:
+    """The static priority map gives detect_beep / trim / shot_detect a
+    strict ordering; everything else falls into the lowest tier."""
+    assert _priority_for_kind("detect_beep") < _priority_for_kind("trim")
+    assert _priority_for_kind("trim") < _priority_for_kind("shot_detect")
+    assert _priority_for_kind("shot_detect") < _priority_for_kind("export")
+    assert _priority_for_kind("nonsense") == _priority_for_kind("export")
+
+
+def test_pending_jobs_dispatch_in_priority_order() -> None:
+    """With one worker slot occupied, the queued jobs must dispatch in
+    JOB_PRIORITY order rather than FIFO. We pin the executor with a slow
+    blocker, queue a mix of kinds, then release the blocker and assert on
+    the order they completed."""
+    reg = JobRegistry(max_concurrent=1)
+    proceed = threading.Event()
+    blocker_started = threading.Event()
+
+    def hold(_h):
+        blocker_started.set()
+        proceed.wait(timeout=2.0)
+
+    blocker = reg.submit(kind="hold", fn=hold)
+    assert blocker_started.wait(timeout=2.0)
+
+    # Submit low-prio first, high-prio last -- a FIFO queue would run
+    # them in submission order; the priority queue must invert it.
+    completion_order: list[str] = []
+    completion_lock = threading.Lock()
+
+    def make_worker(kind: str):
+        def _w(_h):
+            with completion_lock:
+                completion_order.append(kind)
+
+        return _w
+
+    export_job = reg.submit(kind="export", fn=make_worker("export"))
+    shot_job = reg.submit(kind="shot_detect", fn=make_worker("shot_detect"))
+    trim_job = reg.submit(kind="trim", fn=make_worker("trim"))
+    beep_job = reg.submit(kind="detect_beep", fn=make_worker("detect_beep"))
+
+    for j in (export_job, shot_job, trim_job, beep_job):
+        assert reg.get(j.id).status == JobStatus.PENDING
+
+    proceed.set()
+    assert _wait_until(lambda: reg.get(blocker.id).status == JobStatus.SUCCEEDED)
+    assert _wait_until(lambda: len(completion_order) == 4)
+    assert completion_order == ["detect_beep", "trim", "shot_detect", "export"]
+
+
+def test_ties_within_priority_tier_run_fifo() -> None:
+    """Two ``detect_beep`` jobs queued behind a blocker dispatch in the
+    order they were submitted -- priority is the primary sort key, but
+    within a tier we preserve insertion order."""
+    reg = JobRegistry(max_concurrent=1)
+    proceed = threading.Event()
+    started = threading.Event()
+
+    def hold(_h):
+        started.set()
+        proceed.wait(timeout=2.0)
+
+    blocker = reg.submit(kind="hold", fn=hold)
+    assert started.wait(timeout=2.0)
+
+    order: list[str] = []
+    order_lock = threading.Lock()
+
+    def make(tag: str):
+        def _w(_h):
+            with order_lock:
+                order.append(tag)
+
+        return _w
+
+    first = reg.submit(kind="detect_beep", fn=make("first"))
+    second = reg.submit(kind="detect_beep", fn=make("second"))
+
+    proceed.set()
+    assert _wait_until(lambda: reg.get(blocker.id).status == JobStatus.SUCCEEDED)
+    assert _wait_until(lambda: reg.get(first.id).status == JobStatus.SUCCEEDED)
+    assert _wait_until(lambda: reg.get(second.id).status == JobStatus.SUCCEEDED)
+    assert order == ["first", "second"]
+
+
+def test_high_priority_submitted_after_low_priority_runs_first() -> None:
+    """The user's reported scenario: bulk shot-detect saturates the
+    worker pool, the user uploads a new video and a detect_beep is
+    submitted. As soon as a slot frees the beep runs ahead of the other
+    queued shot_detect jobs."""
+    reg = JobRegistry(max_concurrent=1)
+    proceed = threading.Event()
+    started = threading.Event()
+
+    def hold(_h):
+        started.set()
+        proceed.wait(timeout=2.0)
+
+    blocker = reg.submit(kind="shot_detect", fn=hold)
+    assert started.wait(timeout=2.0)
+
+    order: list[str] = []
+    order_lock = threading.Lock()
+
+    def make(tag: str):
+        def _w(_h):
+            with order_lock:
+                order.append(tag)
+
+        return _w
+
+    # Two shot_detect entries queued first, then a beep arrives.
+    shot_a = reg.submit(kind="shot_detect", fn=make("shot_a"))
+    shot_b = reg.submit(kind="shot_detect", fn=make("shot_b"))
+    beep = reg.submit(kind="detect_beep", fn=make("beep"))
+
+    proceed.set()
+    assert _wait_until(lambda: reg.get(blocker.id).status == JobStatus.SUCCEEDED)
+    assert _wait_until(lambda: reg.get(beep.id).status == JobStatus.SUCCEEDED)
+    assert _wait_until(lambda: reg.get(shot_a.id).status == JobStatus.SUCCEEDED)
+    assert _wait_until(lambda: reg.get(shot_b.id).status == JobStatus.SUCCEEDED)
+    assert order == ["beep", "shot_a", "shot_b"]
+
+
+def test_cancel_of_pending_job_removes_it_from_dispatch_queue() -> None:
+    """A cancel that fires while the job is still queued must transition
+    it to CANCELLED immediately (no waiting for a slot to free)."""
+    reg = JobRegistry(max_concurrent=1)
+    proceed = threading.Event()
+    started = threading.Event()
+
+    def hold(_h):
+        started.set()
+        proceed.wait(timeout=2.0)
+
+    blocker = reg.submit(kind="hold", fn=hold)
+    assert started.wait(timeout=2.0)
+
+    ran = threading.Event()
+
+    def victim(_h):
+        ran.set()
+
+    queued = reg.submit(kind="detect_beep", fn=victim)
+    snap = reg.cancel(queued.id)
+    assert snap is not None
+    # No need to wait for the blocker -- cancel of a pending job is
+    # synchronous; the registry resolves it without scheduling the worker.
+    assert reg.get(queued.id).status == JobStatus.CANCELLED
+    assert reg.get(queued.id).finished_at is not None
+
+    proceed.set()
+    assert _wait_until(lambda: reg.get(blocker.id).status == JobStatus.SUCCEEDED)
+    assert not ran.is_set(), "cancelled pending job must not run"
+
+
+def test_dispatcher_respects_max_concurrent() -> None:
+    """With max_concurrent=2 and three slow jobs queued, only two run
+    at any moment. This guards against the priority dispatcher
+    accidentally overshooting the worker ceiling."""
+    reg = JobRegistry(max_concurrent=2)
+    proceed = threading.Event()
+    running_now = 0
+    peak = 0
+    counter_lock = threading.Lock()
+
+    def slow(_h):
+        nonlocal running_now, peak
+        with counter_lock:
+            running_now += 1
+            peak = max(peak, running_now)
+        proceed.wait(timeout=2.0)
+        with counter_lock:
+            running_now -= 1
+
+    jobs = [reg.submit(kind="shot_detect", fn=slow) for _ in range(3)]
+    # Wait for two to be running, then release them.
+    assert _wait_until(lambda: sum(reg.get(j.id).status == JobStatus.RUNNING for j in jobs) == 2)
+    assert reg.get(jobs[2].id).status == JobStatus.PENDING
+
+    proceed.set()
+    for j in jobs:
+        assert _wait_until(lambda jid=j.id: reg.get(jid).status == JobStatus.SUCCEEDED)
+    assert peak == 2
