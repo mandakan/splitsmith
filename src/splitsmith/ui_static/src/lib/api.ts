@@ -1560,10 +1560,14 @@ export const api = {
   /** Switch the in-memory project. The picker calls this when the user
    *  selects an entry; the server updates ``last_opened_at`` and binds.
    */
-  bindProject: (path: string, name?: string) =>
+  bindProject: (
+    path: string,
+    name?: string,
+    opts?: { create?: boolean },
+  ) =>
     request<ServerHealth>("/api/user/recent-projects/bind", {
       method: "POST",
-      json: { path, name },
+      json: { path, name, create: opts?.create ?? false },
     }),
 
   /** Drop the bound project so the SPA returns to the picker (Cmd+P
@@ -2034,6 +2038,38 @@ export const api = {
       `/api/lab/projects/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-against-fixture`,
       { method: "POST", json: payload },
     ),
+
+  /** Build the export URL for the currently bound project. Open in a new
+   *  tab / window to trigger a download; using a real URL (not fetch)
+   *  lets the browser write to disk without buffering the whole archive
+   *  in memory. */
+  exportProjectUrl: (opts?: { includeRaw?: boolean; includeAudio?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.includeRaw) params.set("include_raw", "true");
+    if (opts?.includeAudio) params.set("include_audio", "true");
+    const qs = params.toString();
+    return `/api/project/export${qs ? `?${qs}` : ""}`;
+  },
+
+  /** Restore a previously exported project. The server extracts the
+   *  archive under ``destRoot``. When ``bind`` is true the new project
+   *  is bound + recorded so the SPA can navigate straight into it. */
+  importProject: (
+    archive: File,
+    destRoot: string,
+    opts?: { overwrite?: boolean; bind?: boolean },
+  ) => {
+    const form = new FormData();
+    form.append("archive", archive);
+    form.append("dest_root", destRoot);
+    if (opts?.overwrite) form.append("overwrite", "true");
+    if (opts?.bind) form.append("bind", "true");
+    return request<{
+      project_root: string;
+      project_name: string;
+      manifest: Record<string, unknown> | null;
+    }>("/api/project/import", { method: "POST", body: form });
+  },
 };
 
 export interface PromoteSnapResult {

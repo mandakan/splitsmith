@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
 
 interface Health {
   status: string;
@@ -21,6 +22,8 @@ interface Health {
 export function Home() {
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [includeRaw, setIncludeRaw] = useState(false);
+  const [includeAudio, setIncludeAudio] = useState(false);
 
   useEffect(() => {
     fetch("/api/health")
@@ -28,6 +31,18 @@ export function Home() {
       .then(setHealth)
       .catch((e: Error) => setError(e.message));
   }, []);
+
+  function downloadBackup() {
+    const url = api.exportProjectUrl({ includeRaw, includeAudio });
+    // Navigating in a hidden anchor keeps the user on the page while
+    // the browser streams the archive to disk.
+    const a = document.createElement("a");
+    a.href = url;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
 
   return (
     <div className="space-y-6">
@@ -79,6 +94,51 @@ export function Home() {
           <Link to="/_design">View design system</Link>
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Backup</CardTitle>
+          <CardDescription>
+            Download a <code>.tar.gz</code> of the non-regeneratable parts
+            of this project (audit, scoreboard, trims, exports). Restore
+            with the import button on the project picker.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeRaw}
+                onChange={(e) => setIncludeRaw(e.target.checked)}
+              />
+              <span>
+                Include <code>raw/</code>
+                <span className="text-xs text-muted-foreground"> (source video)</span>
+              </span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeAudio}
+                onChange={(e) => setIncludeAudio(e.target.checked)}
+              />
+              <span>
+                Include <code>audio/</code>
+                <span className="text-xs text-muted-foreground"> (extracted wav)</span>
+              </span>
+            </label>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={downloadBackup}
+            disabled={!health}
+          >
+            Download backup
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

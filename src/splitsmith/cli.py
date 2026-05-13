@@ -63,6 +63,92 @@ app.add_typer(_lab_app, name="lab")
 app.add_typer(compare_app, name="compare")
 
 
+project_app = typer.Typer(
+    name="project",
+    help="Match-project housekeeping: export/import for backup or transfer.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(project_app, name="project")
+
+
+@project_app.command("export")
+def project_export(
+    project_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help="Path to the MatchProject directory (the one containing project.json).",
+    ),
+    output: Path = typer.Option(
+        Path(),
+        "--output",
+        "-o",
+        help=(
+            "Destination. If a directory, the archive filename is "
+            "<project-slug>-backup-YYYYMMDD.tar.gz. If a file, used as-is."
+        ),
+    ),
+    include_raw: bool = typer.Option(
+        False, "--with-raw", help="Include the raw/ subdirectory (source video).",
+    ),
+    include_audio: bool = typer.Option(
+        False, "--with-audio", help="Include the audio/ subdirectory (extracted wav).",
+    ),
+) -> None:
+    """Tar the non-regeneratable parts of a project for backup or transfer.
+
+    Always includes ``project.json`` plus ``audit/``, ``scoreboard/``,
+    ``trimmed/``, ``exports/``. ``probes/`` and ``thumbs/`` are excluded
+    (regenerable caches).
+    """
+    from .backup import export_project
+
+    result = export_project(
+        project_dir, output, include_raw=include_raw, include_audio=include_audio,
+    )
+    size_mb = result.bytes_written / (1024 * 1024)
+    console.print(f"[green]Wrote[/] {result.archive_path} ({size_mb:.1f} MB)")
+    console.print(f"  included: {', '.join(result.included)}")
+    if result.skipped:
+        for s in result.skipped:
+            console.print(
+                f"  [yellow]skipped[/] {s.name} ({s.reason})"
+                + (f": {s.resolved_path}" if s.resolved_path else "")
+            )
+
+
+@project_app.command("import")
+def project_import(
+    archive: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to a .tar.gz produced by `splitsmith project export`.",
+    ),
+    dest: Path = typer.Option(
+        ...,
+        "--dest",
+        "-d",
+        help="Destination directory. The archive's top-level folder is restored under it.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="If the target directory already exists, replace it.",
+    ),
+) -> None:
+    """Restore a project archive produced by ``splitsmith project export``."""
+    from .backup import import_project
+
+    result = import_project(archive, dest, overwrite=overwrite)
+    console.print(f"[green]Restored[/] {result.project_name} -> {result.project_root}")
+
+
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------

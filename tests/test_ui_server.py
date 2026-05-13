@@ -4827,6 +4827,46 @@ def test_bind_recent_project_404_when_path_missing(tmp_path: Path, _user_config_
     assert resp.json()["detail"]["code"] == "project_path_missing"
 
 
+def test_bind_recent_project_create_scaffolds_new_dir(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """``create=true`` mkdirs the destination and scaffolds project.json so
+    the picker's "Create new project" flow can target a fresh folder.
+    """
+    app = create_app()
+    client = TestClient(app)
+    target = tmp_path / "fresh" / "new-match"
+    assert not target.exists()
+
+    resp = client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target), "name": "Fresh Match", "create": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["bound"] is True
+    assert body["project_name"] == "Fresh Match"
+    assert (target / "project.json").exists()
+
+
+def test_bind_recent_project_scaffolds_empty_existing_folder(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """An existing folder without project.json is scaffolded in place; the
+    Pick page's updated copy promises this works."""
+    app = create_app()
+    client = TestClient(app)
+    target = tmp_path / "empty-folder"
+    target.mkdir()
+
+    resp = client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target)},
+    )
+    assert resp.status_code == 200
+    assert (target / "project.json").exists()
+
+
 def test_unbind_returns_to_unbound_state(tmp_path: Path, _user_config_home: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)

@@ -75,6 +75,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -82,12 +83,14 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from .. import automation as automation_settings
+from .. import backup as backup_mod
 from .. import beep_detect, cross_align, report, user_config, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
@@ -686,10 +689,15 @@ class BindRecentProjectRequest(BaseModel):
     The server binds in-memory only; on next launch the user reopens via
     the same picker. ``name`` is optional -- the server reads the
     on-disk display name from ``project.json`` when available.
+    ``create=true`` opts into scaffolding a brand-new project at ``path``
+    (mkdir + MatchProject.init); the default of ``false`` keeps the
+    existing strict "open only" behaviour so a typo can't silently
+    create an empty project under a wrong path.
     """
 
     path: str
     name: str | None = None
+    create: bool = False
 
 
 # Request bodies ----------------------------------------------------------
@@ -1318,6 +1326,80 @@ def create_app(
     @app.get("/api/project")
     def get_project() -> JSONResponse:
         return JSONResponse(state.load().model_dump(mode="json"))
+
+    @app.get("/api/project/export")
+    def export_project_endpoint(
+        include_raw: bool = Query(False),
+        include_audio: bool = Query(False),
+    ) -> FileResponse:
+        """Stream the bound project as a ``.tar.gz`` download.
+
+        Defaults preserve audit/, scoreboard/, trimmed/, exports/ plus
+        ``project.json``. ``include_raw``/``include_audio`` opt into the
+        heavy subdirectories. The archive is written to a temp file and
+        deleted once the response finishes streaming.
+        """
+        root = state.project_root
+        tmp = Path(tempfile.mkdtemp(prefix="splitsmith-export-"))
+        archive = tmp / f"{root.name}.tar.gz"
+        try:
+            result = backup_mod.export_project(
+                root, archive, include_raw=include_raw, include_audio=include_audio,
+            )
+        except backup_mod.BackupError as exc:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        stamp = datetime.now(UTC).strftime("%Y%m%d")
+        download_name = f"{root.name}-backup-{stamp}.tar.gz"
+        return FileResponse(
+            result.archive_path,
+            media_type="application/gzip",
+            filename=download_name,
+            background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
+        )
+
+    @app.post("/api/project/import")
+    async def import_project_endpoint(
+        archive: UploadFile = File(...),
+        dest_root: str = Form(...),
+        overwrite: bool = Form(False),
+        bind: bool = Form(False),
+    ) -> JSONResponse:
+        """Restore an archive produced by ``GET /api/project/export``.
+
+        Extracts under ``dest_root``. When ``bind`` is true, the newly
+        imported project is bound and added to the recent-projects list
+        so the SPA can navigate straight into it.
+        """
+        dest = Path(dest_root).expanduser()
+        tmp = Path(tempfile.mkdtemp(prefix="splitsmith-import-"))
+        staged = tmp / "upload.tar.gz"
+        try:
+            with staged.open("wb") as out:
+                while True:
+                    chunk = await archive.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+            try:
+                result = backup_mod.import_project(staged, dest, overwrite=overwrite)
+            except backup_mod.BackupError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        if bind:
+            state.bind(result.project_root, result.project_name)
+            user_config.record_project_open(result.project_root, result.project_name)
+
+        return JSONResponse(
+            {
+                "project_root": str(result.project_root),
+                "project_name": result.project_name,
+                "manifest": result.manifest,
+            }
+        )
 
     @app.get("/api/automation")
     def get_automation() -> JSONResponse:
@@ -5313,16 +5395,21 @@ def create_app(
         """
         target = Path(req.path).expanduser()
         if not target.exists():
-            # Conservative default: don't silently scaffold a brand-new
-            # project on a typo. The dedicated "create" flow can pass a
-            # ``create=true`` body once we wire it.
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "project_path_missing",
-                    "message": f"Project path does not exist: {target}",
-                },
-            )
+            if not req.create:
+                # Conservative default: don't silently scaffold a brand-new
+                # project on a typo. The "Create new project" flow on the
+                # picker route passes ``create=true``.
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "code": "project_path_missing",
+                        "message": f"Project path does not exist: {target}",
+                    },
+                )
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             recorded = _bind_project_to_state(
                 state,
