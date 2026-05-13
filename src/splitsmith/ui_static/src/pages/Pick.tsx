@@ -1,4 +1,4 @@
-import { Crosshair, FolderOpen, Trash2 } from "lucide-react";
+import { Crosshair, FolderOpen, FolderPlus, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -28,6 +28,13 @@ export function Pick() {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [opening, setOpening] = useState<string | null>(null);
   const [openPath, setOpenPath] = useState("");
+  const [importDest, setImportDest] = useState("");
+  const [importArchive, setImportArchive] = useState<File | null>(null);
+  const [importOverwrite, setImportOverwrite] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [createPath, setCreatePath] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [creating, setCreating] = useState(false);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -99,6 +106,36 @@ export function Pick() {
       navigate("/", { replace: true });
     } catch (e: unknown) {
       setOpening(null);
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  async function runImport() {
+    if (!importArchive || !importDest.trim()) return;
+    setImporting(true);
+    setError(null);
+    try {
+      await api.importProject(importArchive, importDest.trim(), {
+        overwrite: importOverwrite,
+        bind: true,
+      });
+      navigate("/", { replace: true });
+    } catch (e: unknown) {
+      setImporting(false);
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  async function createProject() {
+    const path = createPath.trim();
+    if (!path) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await api.bindProject(path, createName.trim() || undefined, { create: true });
+      navigate("/", { replace: true });
+    } catch (e: unknown) {
+      setCreating(false);
       setError(e instanceof ApiError ? e.detail : String(e));
     }
   }
@@ -177,13 +214,112 @@ export function Pick() {
 
           <div className="rounded-md border border-border bg-card p-4">
             <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <Upload className="size-4" />
+              Import from backup
+            </div>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Restore a <code className="font-mono text-xs">.tar.gz</code> produced
+              by the Download backup button. The archive's top-level folder
+              is restored under the destination directory.
+            </p>
+            <form
+              className="space-y-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void runImport();
+              }}
+            >
+              <input
+                type="file"
+                accept=".tar.gz,.tgz,application/gzip,application/x-tar"
+                onChange={(e) =>
+                  setImportArchive(e.target.files?.[0] ?? null)
+                }
+                className="block w-full text-xs"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={importDest}
+                  onChange={(e) => setImportDest(e.target.value)}
+                  placeholder="Destination directory (e.g. /Volumes/X9/matches)"
+                  className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={
+                    !importArchive || !importDest.trim() || importing
+                  }
+                >
+                  {importing ? "Importing..." : "Import"}
+                </Button>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={importOverwrite}
+                  onChange={(e) => setImportOverwrite(e.target.checked)}
+                />
+                Overwrite if the target folder already exists
+              </label>
+            </form>
+          </div>
+
+          <div className="rounded-md border border-border bg-card p-4">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <FolderPlus className="size-4" />
+              Create a new project
+            </div>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Paste an absolute path. If the folder does not exist it is
+              created. Standard subdirs (audit, scoreboard, trimmed, ...)
+              and an empty <code className="font-mono text-xs">project.json</code>{" "}
+              are scaffolded; the project opens immediately.
+            </p>
+            <form
+              className="space-y-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void createProject();
+              }}
+            >
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={createPath}
+                  onChange={(e) => setCreatePath(e.target.value)}
+                  placeholder="/Volumes/X9/matches/new-match"
+                  className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!createPath.trim() || creating}
+                >
+                  {creating ? "Creating..." : "Create"}
+                </Button>
+              </div>
+              <input
+                type="text"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="Display name (optional, defaults to folder name)"
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
+              />
+            </form>
+          </div>
+
+          <div className="rounded-md border border-border bg-card p-4">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
               <FolderOpen className="size-4" />
               Open a folder by path
             </div>
             <p className="mb-2 text-xs text-muted-foreground">
-              Paste an absolute path to a project directory. The folder
-              must already exist; new projects are created via the CLI
-              for now.
+              Paste an absolute path to an existing project directory.
+              Pointing at an existing folder without a{" "}
+              <code className="font-mono text-xs">project.json</code> scaffolds
+              one in place. Use the create form above for a fresh folder.
             </p>
             <form
               className="flex gap-2"
