@@ -1658,6 +1658,48 @@ def test_stream_video_serves_trimmed_for_primary(tmp_path: Path) -> None:
     assert resp.content == b"TRIMMED_MP4"
 
 
+def test_stream_video_kind_pins_source_even_when_trim_exists(tmp_path: Path) -> None:
+    """``kind=source`` ignores an existing trim so the SPA can pin a live
+    <video> element to the source bytes. Without this, a background trim
+    completing mid-Range-request would switch the file under the element
+    and the next request would fall past the trim's (shorter) EOF."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_bytes(b"SOURCE_MP4")
+
+    trimmed_dir = project_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    _full, _audit, trimmed_mp4 = _primary_cache_paths(project_root)
+    trimmed_mp4.write_bytes(b"TRIMMED_MP4")
+
+    resp = client.get(f"/api/videos/stream?path={primary.path}&kind=source")
+    assert resp.status_code == 200
+    assert resp.content == b"SOURCE_MP4"
+
+
+def test_stream_video_kind_trim_404_when_not_built(tmp_path: Path) -> None:
+    """``kind=trim`` returns 404 when no trimmed clip exists yet, so the
+    SPA never falls back to source bytes when it's explicitly asking
+    for the (frame-accurate) trim."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    project = MatchProject.load(project_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_bytes(b"SOURCE_MP4")
+
+    resp = client.get(f"/api/videos/stream?path={primary.path}&kind=trim")
+    assert resp.status_code == 404
+    assert "trimmed clip not built" in resp.json()["detail"]
+
+
 def test_peaks_endpoint_returns_normalized_bins(tmp_path: Path, monkeypatch) -> None:
     """/peaks asks the audio helper for the cached WAV, then computes peaks.
 

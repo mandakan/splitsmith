@@ -1661,8 +1661,17 @@ export const api = {
   videoBeepPreviewUrl: (stageNumber: number, videoId: string, beepTime: number) =>
     `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-preview?t=${beepTime.toFixed(3)}`,
 
-  videoStreamUrl: (videoPath: string) =>
-    `/api/videos/stream?path=${encodeURIComponent(videoPath)}`,
+  /** Stream URL for a registered video.
+   *
+   *  ``kind`` selects what the server serves and is encoded into the URL
+   *  so the browser sees a different resource per kind. The audit screen
+   *  passes ``trim`` or ``source`` explicitly so a background trim job
+   *  completing mid-playback can't switch the file under an open
+   *  ``<video>`` element (which fails its next Range request with
+   *  "source not found"). Other callers default to ``auto``: trim if
+   *  present, source otherwise. */
+  videoStreamUrl: (videoPath: string, kind: "auto" | "trim" | "source" = "auto") =>
+    `/api/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
 
   getStagePeaks: (stageNumber: number, bins = 1200) =>
     request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),

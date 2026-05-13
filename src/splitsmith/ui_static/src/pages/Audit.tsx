@@ -1162,7 +1162,22 @@ export function Audit() {
     return () => flushAltNudge();
   }, [stageNumber, flushAltNudge]);
 
-  const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
+  // Pin the served file to either trim or source for the lifetime of
+  // this <video> element. Without this, a background trim job that
+  // completes mid-playback would flip the server's auto-pick from
+  // source to trim and the browser's next Range request would fall
+  // past the (shorter) trim's EOF -- the player errors out with
+  // "source not found" and only a full reload recovers. Wait for
+  // peaks to load so we know which kind to pin to; when peaks fails
+  // (no beep yet, etc.) the server's ``auto`` still does the right
+  // thing because the trim can't exist without a beep.
+  const videoSrc = activeVideo
+    ? peaks
+      ? api.videoStreamUrl(activeVideo.path, peaks.trimmed ? "trim" : "source")
+      : peaksError != null
+        ? api.videoStreamUrl(activeVideo.path)
+        : ""
+    : "";
 
   // ---- Render ------------------------------------------------------------
 
