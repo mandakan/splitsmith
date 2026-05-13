@@ -1,0 +1,450 @@
+{
+  "stage_number": 1,
+  "stage_name": "Egg Grab",
+  "stage_time_seconds": 10.34,
+  "beep_time": 5,
+  "shots": [
+    {
+      "shot_number": 1,
+      "candidate_number": 2,
+      "time": 6.173,
+      "ms_after_beep": 1173,
+      "source": "detected"
+    },
+    {
+      "shot_number": 2,
+      "candidate_number": 3,
+      "time": 6.342,
+      "ms_after_beep": 1342,
+      "source": "detected"
+    },
+    {
+      "shot_number": 3,
+      "candidate_number": 4,
+      "time": 6.627,
+      "ms_after_beep": 1627,
+      "source": "detected"
+    },
+    {
+      "shot_number": 4,
+      "candidate_number": 5,
+      "time": 6.777,
+      "ms_after_beep": 1777,
+      "source": "detected"
+    },
+    {
+      "shot_number": 5,
+      "candidate_number": 6,
+      "time": 7.96,
+      "ms_after_beep": 2960,
+      "source": "detected"
+    },
+    {
+      "shot_number": 6,
+      "candidate_number": 7,
+      "time": 8.417,
+      "ms_after_beep": 3416,
+      "source": "detected"
+    },
+    {
+      "shot_number": 7,
+      "candidate_number": 8,
+      "time": 8.877,
+      "ms_after_beep": 3877,
+      "source": "detected"
+    },
+    {
+      "shot_number": 8,
+      "candidate_number": 9,
+      "time": 9.278,
+      "ms_after_beep": 4278,
+      "source": "detected"
+    },
+    {
+      "shot_number": 9,
+      "candidate_number": 11,
+      "time": 13.1,
+      "ms_after_beep": 8100,
+      "source": "detected"
+    },
+    {
+      "shot_number": 10,
+      "candidate_number": 12,
+      "time": 13.653,
+      "ms_after_beep": 8653,
+      "source": "detected"
+    },
+    {
+      "shot_number": 11,
+      "candidate_number": 13,
+      "time": 14.343,
+      "ms_after_beep": 9343,
+      "source": "detected"
+    },
+    {
+      "shot_number": 12,
+      "candidate_number": 14,
+      "time": 14.866,
+      "ms_after_beep": 9866,
+      "source": "detected"
+    },
+    {
+      "shot_number": 13,
+      "candidate_number": 15,
+      "time": 15.336,
+      "ms_after_beep": 10336,
+      "source": "detected"
+    }
+  ],
+  "stage_rounds": {
+    "expected": 12,
+    "paper_targets": 6,
+    "steel_targets": 0
+  },
+  "_candidates_pending_audit": {
+    "_note": "3-voter ensemble (PANN gunshot folded into voter C). vote_a/b/c=1 means the voter kept the candidate; ensemble_score = vote_total + apriori_boost. shots[] is seeded from candidates with ensemble_score >= consensus.",
+    "consensus": 2,
+    "expected_rounds": 12,
+    "candidates": [
+      {
+        "candidate_number": 1,
+        "time": 5.586,
+        "ms_after_beep": 586,
+        "peak_amplitude": 0.011,
+        "confidence": 0.105,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0043,
+        "clap_diff": 0.113,
+        "gunshot_prob": 0.0001,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 2,
+        "time": 6.1725,
+        "ms_after_beep": 1173,
+        "peak_amplitude": 0.2187,
+        "confidence": 0.336,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.5611,
+        "clap_diff": 0.3957,
+        "gunshot_prob": 0.104,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 3,
+        "time": 6.3417,
+        "ms_after_beep": 1342,
+        "peak_amplitude": 0.3753,
+        "confidence": 0.335,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.7845,
+        "clap_diff": 0.4092,
+        "gunshot_prob": 0.1486,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 4,
+        "time": 6.6265,
+        "ms_after_beep": 1626,
+        "peak_amplitude": 0.2794,
+        "confidence": 0.572,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9971,
+        "clap_diff": 0.4161,
+        "gunshot_prob": 0.0952,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 5,
+        "time": 6.7774,
+        "ms_after_beep": 1777,
+        "peak_amplitude": 0.1552,
+        "confidence": 0.154,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.9975,
+        "clap_diff": 0.414,
+        "gunshot_prob": 0.0678,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 6,
+        "time": 7.9602,
+        "ms_after_beep": 2960,
+        "peak_amplitude": 0.402,
+        "confidence": 0.633,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9984,
+        "clap_diff": 0.3729,
+        "gunshot_prob": 0.1736,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 7,
+        "time": 8.4165,
+        "ms_after_beep": 3416,
+        "peak_amplitude": 0.4245,
+        "confidence": 0.467,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9973,
+        "clap_diff": 0.414,
+        "gunshot_prob": 0.0361,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 8,
+        "time": 8.8771,
+        "ms_after_beep": 3877,
+        "peak_amplitude": 0.3937,
+        "confidence": 0.434,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9981,
+        "clap_diff": 0.4174,
+        "gunshot_prob": 0.0455,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 9,
+        "time": 9.2775,
+        "ms_after_beep": 4277,
+        "peak_amplitude": 0.6155,
+        "confidence": 0.363,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9982,
+        "clap_diff": 0.3995,
+        "gunshot_prob": 0.0454,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 10,
+        "time": 10.5508,
+        "ms_after_beep": 5551,
+        "peak_amplitude": 0.0005,
+        "confidence": 0.012,
+        "vote_a": 0,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0032,
+        "clap_diff": 0.108,
+        "gunshot_prob": 0.0011,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 11,
+        "time": 13.0998,
+        "ms_after_beep": 8100,
+        "peak_amplitude": 0.4753,
+        "confidence": 0.756,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9979,
+        "clap_diff": 0.3812,
+        "gunshot_prob": 0.0196,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 12,
+        "time": 13.6532,
+        "ms_after_beep": 8653,
+        "peak_amplitude": 0.0582,
+        "confidence": 0.256,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9966,
+        "clap_diff": 0.3993,
+        "gunshot_prob": 0.0378,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 13,
+        "time": 14.3429,
+        "ms_after_beep": 9343,
+        "peak_amplitude": 0.5114,
+        "confidence": 0.464,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9982,
+        "clap_diff": 0.3657,
+        "gunshot_prob": 0.0775,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 14,
+        "time": 14.8664,
+        "ms_after_beep": 9866,
+        "peak_amplitude": 0.3751,
+        "confidence": 0.397,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9974,
+        "clap_diff": 0.39,
+        "gunshot_prob": 0.0676,
+        "voter_e_signal": 0
+      },
+      {
+        "candidate_number": 15,
+        "time": 15.3355,
+        "ms_after_beep": 10336,
+        "peak_amplitude": 0.4052,
+        "confidence": 0.458,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_e": 0,
+        "vote_total": 3,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
+        "score_c": 0.9978,
+        "clap_diff": 0.4091,
+        "gunshot_prob": 0.0445,
+        "voter_e_signal": 0
+      }
+    ]
+  },
+  "audit_events": [
+    {
+      "ts": "2026-05-13T16:30:43.918484+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "candidate_count": 15,
+        "kept_count": 15,
+        "consensus": 2,
+        "expected_rounds": 12,
+        "seeded_shots": true
+      }
+    },
+    {
+      "ts": "2026-05-13T16:35:18.497Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-10",
+        "time": 10.5508,
+        "candidate_number": 10
+      }
+    },
+    {
+      "ts": "2026-05-13T16:35:19.929Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-1",
+        "time": 5.586,
+        "candidate_number": 1
+      }
+    },
+    {
+      "ts": "2026-05-13T16:35:28.288Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    }
+  ],
+  "promoted_at": "2026-05-13T16:39:02.195249+00:00",
+  "provenance": {
+    "stage_number": 1,
+    "stage_name": null
+  },
+  "source_video": "/Volumes/X9/matches/vads-easter-shoot-2026-martin/raw/IMG_2933.MOV",
+  "fixture_window_in_source": [
+    21.8292,
+    42.1692
+  ],
+  "camera": {
+    "id": "unknown",
+    "make": "Apple",
+    "model": "iPhone 17 Pro",
+    "mount": "hand",
+    "position": "shooter",
+    "audio_source": "internal",
+    "agc_state": "unknown",
+    "sample_rate": null,
+    "bit_depth": null,
+    "audio_codec": null
+  },
+  "shooter": {
+    "id": "s36ed6e4e"
+  },
+  "event_id": "vads-easter-shoot-gotta-go-fast:1:s36ed6e4e",
+  "venue": {
+    "environment": "indoor",
+    "surface": "asphalt"
+  },
+  "history": []
+}
