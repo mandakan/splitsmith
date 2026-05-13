@@ -31,6 +31,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ChevronsRight,
   Crosshair,
   FlaskConical,
@@ -45,7 +47,6 @@ import {
   Undo2,
 } from "lucide-react";
 
-import { AnomalyPanel } from "@/components/AnomalyPanel";
 import {
   DEFAULT_FILTERS,
   FilterBar,
@@ -82,10 +83,6 @@ import {
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
-import {
-  detectAnomalies,
-  keptShotsFromMarkers,
-} from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { useLabEnabled } from "@/lib/features";
 import { cn } from "@/lib/utils";
@@ -237,6 +234,29 @@ export function Audit() {
       })),
     [stagesWithPrimary],
   );
+
+  // Neighbour stage numbers for prev/next nav. `null` at the boundaries
+  // so the header buttons disable instead of wrapping -- accidental wrap
+  // is worse than a dead key when the user is moving fast.
+  const nextStageNumberRef = useRef<number | null>(null);
+  const { prevStageNumber, nextStageNumber } = useMemo(() => {
+    if (stageNumber == null || stageSelectorOptions.length === 0) {
+      return { prevStageNumber: null, nextStageNumber: null };
+    }
+    const idx = stageSelectorOptions.findIndex((s) => s.stageNumber === stageNumber);
+    if (idx === -1) return { prevStageNumber: null, nextStageNumber: null };
+    return {
+      prevStageNumber: idx > 0 ? stageSelectorOptions[idx - 1].stageNumber : null,
+      nextStageNumber:
+        idx < stageSelectorOptions.length - 1
+          ? stageSelectorOptions[idx + 1].stageNumber
+          : null,
+    };
+  }, [stageSelectorOptions, stageNumber]);
+
+  useEffect(() => {
+    nextStageNumberRef.current = nextStageNumber;
+  }, [nextStageNumber]);
 
   useEffect(() => {
     if (stageNumber != null) return;
@@ -866,32 +886,6 @@ export function Audit() {
     [handleScrub, keptShots],
   );
 
-  // ---- Live anomalies (issue #42) ----------------------------------------
-  // Recomputed on every marker mutation -- pure function, zero detection
-  // cost. Mirrors ``report.detect_anomalies_structured`` so the panel
-  // shows what report.txt will once Generate runs.
-  const anomalies = useMemo(() => {
-    if (!stage) return [];
-    const shots = keptShotsFromMarkers(markers, auditBeep);
-    return detectAnomalies(shots, stage.time_seconds);
-  }, [markers, auditBeep, stage]);
-
-  // Anomaly rows that mention a shot number jump to that kept shot's
-  // marker on click -- the killer feature: "Shot 48 is too close" -> one
-  // click puts the playhead on shot 48 with shot 47 in view.
-  const handleAnomalyJump = useCallback(
-    (shotNumber: number) => {
-      // ``shot_number`` in the anomaly is a 1-based index into the
-      // kept-shots list (detected + manual, sorted by time) -- the same
-      // ordering ``keptShotsFromMarkers`` produces. Map back to the
-      // matching marker via that ordering.
-      const target = keptShots[shotNumber - 1];
-      if (!target) return;
-      jumpToMarker(target);
-    },
-    [keptShots, jumpToMarker],
-  );
-
   const pixelsPerSecond = useMemo(
     () => zoomToPixelsPerSecond(zoom, waveformViewport, peaks?.duration ?? 0),
     [zoom, waveformViewport, peaks],
@@ -900,7 +894,7 @@ export function Audit() {
   // ---- Save flow (Step 5) ------------------------------------------------
 
   const performSave = useCallback(
-    async (opts: { silent?: boolean } = {}): Promise<boolean> => {
+    async (opts: { silent?: boolean; advance?: boolean } = {}): Promise<boolean> => {
       if (stageNumber == null || !stage) return false;
       if (!isDirtyRef.current && opts.silent) return true; // nothing to save
       const beepInClip = peaks?.beep_time ?? primary?.beep_time ?? null;
@@ -935,6 +929,13 @@ export function Audit() {
         sessionEventsRef.current = [];
         isDirtyRef.current = false;
         setSaveStatus({ kind: "saved", at: Date.now() });
+        // Auto-advance on explicit Save (Cmd+S or the Save button): the
+        // common audit loop is "run detect -> Save -> next stage", so we
+        // jump immediately after the write returns. Silent saves (the
+        // dirty-flush during stage switch) never advance.
+        if (opts.advance && nextStageNumberRef.current != null) {
+          navigate(`/audit/${nextStageNumberRef.current}`);
+        }
         return true;
       } catch (err) {
         const message = err instanceof ApiError ? err.detail : String(err);
@@ -942,7 +943,7 @@ export function Audit() {
         return false;
       }
     },
-    [stageNumber, stage, peaks, primary, audit, markers],
+    [stageNumber, stage, peaks, primary, audit, markers, navigate],
   );
 
   // Auto-clear "saved" toast after a short hold so it stops nagging.
@@ -994,8 +995,23 @@ export function Audit() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        void performSave();
+        void performSave({ advance: true });
         return;
+      }
+      // `[` / `]` walk between stages without leaving the keyboard.
+      // navigateToStage auto-saves a dirty stage before navigating, so
+      // these can be tapped freely while auditing.
+      if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.key === "[" && prevStageNumber != null) {
+          e.preventDefault();
+          void navigateToStage(prevStageNumber);
+          return;
+        }
+        if (e.key === "]" && nextStageNumber != null) {
+          e.preventDefault();
+          void navigateToStage(nextStageNumber);
+          return;
+        }
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3")) {
         // Cmd+1 zoom in / Cmd+2 fit / Cmd+3 zoom out -- matches the old
@@ -1154,6 +1170,9 @@ export function Audit() {
     keptShots,
     currentShotIndex,
     kAutoProgress,
+    navigateToStage,
+    prevStageNumber,
+    nextStageNumber,
   ]);
 
   // Stage switch / unmount: flush any pending nudge bracket so the
@@ -1231,28 +1250,43 @@ export function Audit() {
   const rejectedCount = markers.filter((m) => m.kind === "rejected").length;
   const manualCount = markers.filter((m) => m.kind === "manual").length;
 
+  const stageNavControls = (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={() => prevStageNumber != null && void navigateToStage(prevStageNumber)}
+        disabled={prevStageNumber == null}
+        aria-label="Previous stage ([)"
+        title="Previous stage ([)"
+      >
+        <ChevronLeft className="size-4" />
+      </Button>
+      <StageSelector
+        stages={stageSelectorOptions}
+        selected={stageNumber ?? null}
+        onSelect={navigateToStage}
+      />
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={() => nextStageNumber != null && void navigateToStage(nextStageNumber)}
+        disabled={nextStageNumber == null}
+        aria-label="Next stage (])"
+        title="Next stage (])"
+      >
+        <ChevronRight className="size-4" />
+      </Button>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
-          <p className="text-sm text-muted-foreground">
-            Drag the waveform to scrub. Double-click to add a manual marker.
-            Click a marker to toggle keep/reject. Press <kbd>?</kbd> for the
-            full keyboard shortcuts.
-          </p>
-        </div>
-        <StageSelector
-          stages={stageSelectorOptions}
-          selected={stageNumber ?? null}
-          onSelect={navigateToStage}
-        />
-      </div>
-
       {stage && primary ? (
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-3">
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <div className="min-w-0 flex-1 space-y-1.5">
+            <CardTitle className="flex flex-wrap items-center gap-3">
               Stage {stage.stage_number} -- {stage.stage_name}
               {primary.beep_time != null ? (
                 <Badge variant="outline">beep at {primary.beep_time.toFixed(3)}s</Badge>
@@ -1316,6 +1350,8 @@ export function Audit() {
                 />
               ) : null}
             </CardDescription>
+            </div>
+            {stageNavControls}
           </CardHeader>
           <CardContent className="space-y-4">
             <VideoPanel
@@ -1330,27 +1366,36 @@ export function Audit() {
               onSecondaryRef={handleSecondaryRef}
               onSecondaryBuffering={handleSecondaryBuffering}
               onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
+              // Audit cares more about keeping the waveform + controls
+              // visible than about a big video tile. Cap the video at the
+              // remaining viewport above the waveform stack (~32rem of
+              // chrome) with a 180px floor so the picture stays readable
+              // on small laptops.
+              className="[&_video]:!max-h-[max(180px,calc(100vh-32rem))]"
             />
-            {peaksLoading ? (
-              <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Computing waveform...
-              </div>
-            ) : peaksError ? (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-                Couldn't load peaks: {peaksError}
-              </div>
-            ) : peaks ? (
+            {peaks ? (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <FilterBar
-                    filters={filters}
-                    counts={{
-                      detected: detectedCount,
-                      rejected: rejectedCount,
-                      manual: manualCount,
-                    }}
-                    onChange={setFilters}
-                  />
+                  <div className="flex items-center gap-3">
+                    <FilterBar
+                      filters={filters}
+                      counts={{
+                        detected: detectedCount,
+                        rejected: rejectedCount,
+                        manual: manualCount,
+                      }}
+                      onChange={setFilters}
+                    />
+                    {peaksLoading ? (
+                      <span
+                        className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                        aria-live="polite"
+                      >
+                        <Loader2 className="size-3 animate-spin" aria-hidden />
+                        Loading stage...
+                      </span>
+                    ) : null}
+                  </div>
                   <ZoomControls zoom={zoom} onZoomChange={setZoom} />
                 </div>
                 <div ref={waveformWrapperRef}>
@@ -1440,10 +1485,10 @@ export function Audit() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => void performSave()}
+                    onClick={() => void performSave({ advance: true })}
                     disabled={saveStatus.kind === "saving"}
-                    aria-label="Save (Cmd+S)"
-                    title="Save (Cmd+S)"
+                    aria-label="Save and go to next stage (Cmd+S)"
+                    title="Save and go to next stage (Cmd+S)"
                   >
                     {saveStatus.kind === "saving" ? (
                       <Loader2 className="size-4 animate-spin" />
@@ -1503,11 +1548,15 @@ export function Audit() {
                   onStep={stepShot}
                   onNoteChange={handleNoteChange}
                 />
-                <AnomalyPanel
-                  anomalies={anomalies}
-                  onJumpToShot={handleAnomalyJump}
-                />
               </>
+            ) : peaksLoading ? (
+              <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Computing waveform...
+              </div>
+            ) : peaksError ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+                Couldn't load peaks: {peaksError}
+              </div>
             ) : null}
           </CardContent>
         </Card>

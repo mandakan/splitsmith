@@ -60,14 +60,30 @@ function sections(mode: HelpMode): Section[] {
   ];
   const edit: ShortcutRow[] = [
     { keys: ["⌘", "Z"], desc: "Undo last marker change" },
-    { keys: ["⌘", "S"], desc: mode === "audit" ? "Save audit JSON" : "Save fixture JSON" },
+    {
+      keys: ["⌘", "S"],
+      desc:
+        mode === "audit"
+          ? "Save audit JSON and jump to the next stage"
+          : "Save fixture JSON",
+    },
   ];
-  return [
+  const sectionsList: Section[] = [
     { title: "Playback", rows: playback },
     { title: "Markers", rows: markers },
     { title: "View", rows: view },
     { title: "Edit", rows: edit },
   ];
+  if (mode === "audit") {
+    sectionsList.splice(3, 0, {
+      title: "Stages",
+      rows: [
+        { keys: ["["], desc: "Previous stage (auto-saves first)" },
+        { keys: ["]"], desc: "Next stage (auto-saves first)" },
+      ],
+    });
+  }
+  return sectionsList;
 }
 
 export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {

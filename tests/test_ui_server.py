@@ -1160,7 +1160,7 @@ def test_manual_stage_time_survives_scoreboard_sync(tmp_path: Path) -> None:
                 time_seconds=11.0,
                 scorecard_updated_at="2026-01-01T00:00:00+00:00",
             ),
-        ]
+        ],
     )
     proj.merge_stage_times(results)
 
