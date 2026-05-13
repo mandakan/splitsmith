@@ -24,6 +24,7 @@ import {
   Beaker,
   CheckCircle2,
   ChevronRight,
+  FlaskConical,
   Hammer,
   Headphones,
   Link2,
@@ -35,6 +36,7 @@ import {
   Save,
   Settings2,
   Trash2,
+  XCircle,
 } from "lucide-react";
 
 import { SweepsCard } from "@/components/SweepsCard";
@@ -57,9 +59,12 @@ import {
   type LabEvalFixture,
   type LabEvalRun,
   type LabFixtureRecord,
+  type MatchProject,
   type PeaksResult,
   type StageAudit,
+  type StageExportStatus,
 } from "@/lib/api";
+import { slugify } from "@/pages/Audit";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_CONFIG: LabEvalConfig = {
@@ -200,6 +205,10 @@ export function Lab() {
             </Badge>
           )}
           <SaveYamlButton run={run} />
+          <PromoteAllStagesButton
+            catalog={catalog}
+            onCatalogChanged={(next) => setCatalog(next)}
+          />
           <PromoteFromAnchorButton fixtures={catalog} />
           <RebuildCalibrationButton onCompleted={() => setRun(null)} />
           <Button onClick={runEval} disabled={evalLoading}>
@@ -1584,6 +1593,381 @@ function SaveYamlButton({ run }: { run: LabEvalRun | null }) {
 // ---------------------------------------------------------------------------
 // Promote-from-anchor trigger (issue #125)
 // ---------------------------------------------------------------------------
+
+interface BatchRow {
+  stageNumber: number;
+  stageName: string;
+  slug: string;
+  exists: boolean;
+  blockers: string[];
+  selected: boolean;
+  status: "idle" | "running" | "ok" | "error";
+  message: string | null;
+}
+
+function buildBatchRows(
+  project: MatchProject,
+  overview: StageExportStatus[],
+  catalog: LabFixtureRecord[],
+): BatchRow[] {
+  const existing = new Set(catalog.map((f) => f.slug));
+  const token = project.shooter_token;
+  const projectSlug = slugify(project.name);
+  const overviewByStage = new Map(overview.map((s) => [s.stage_number, s]));
+  const rows: BatchRow[] = [];
+  for (const stage of project.stages) {
+    if (stage.placeholder || stage.skipped) continue;
+    const ov = overviewByStage.get(stage.stage_number);
+    const primary = stage.videos[0] ?? null;
+    const blockers: string[] = [];
+    if (!ov || !ov.audit_path) blockers.push("no audit JSON (run shot-detect)");
+    if (!primary) blockers.push("no primary video");
+    else {
+      if (primary.beep_time == null) blockers.push("primary has no beep_time");
+      if (!primary.camera_mount) blockers.push("primary has no camera_mount");
+    }
+    const slug = token
+      ? `stage-shots-${projectSlug}-stage${stage.stage_number}-${token}`
+      : `stage-shots-${projectSlug}-stage${stage.stage_number}`;
+    rows.push({
+      stageNumber: stage.stage_number,
+      stageName: stage.stage_name,
+      slug,
+      exists: existing.has(slug),
+      blockers,
+      selected: blockers.length === 0,
+      status: "idle",
+      message: null,
+    });
+  }
+  return rows;
+}
+
+function PromoteAllStagesButton({
+  catalog,
+  onCatalogChanged,
+}: {
+  catalog: LabFixtureRecord[];
+  onCatalogChanged: (next: LabFixtureRecord[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [project, setProject] = useState<MatchProject | null>(null);
+  const [rows, setRows] = useState<BatchRow[]>([]);
+  const [overwrite, setOverwrite] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  // Re-derive rows when the catalog changes (so "exists" badges update after
+  // a successful batch run without re-fetching the project).
+  useEffect(() => {
+    if (!project) return;
+    setRows((prev) => {
+      const existing = new Set(catalog.map((f) => f.slug));
+      return prev.map((r) => ({ ...r, exists: existing.has(r.slug) }));
+    });
+  }, [catalog, project]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [proj, ov] = await Promise.all([
+        api.getProject(),
+        api.getExportOverview(),
+      ]);
+      setProject(proj);
+      setRows(buildBatchRows(proj, ov.stages, catalog));
+    } catch (err) {
+      setLoadError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [catalog]);
+
+  const toggleOpen = useCallback(() => {
+    setOpen((v) => {
+      const next = !v;
+      if (next) void load();
+      return next;
+    });
+  }, [load]);
+
+  const toggleRow = useCallback((stageNumber: number) => {
+    setRows((prev) =>
+      prev.map((r) =>
+        r.stageNumber === stageNumber && r.blockers.length === 0
+          ? { ...r, selected: !r.selected }
+          : r,
+      ),
+    );
+  }, []);
+
+  const setAllSelected = useCallback((selected: boolean) => {
+    setRows((prev) =>
+      prev.map((r) => (r.blockers.length === 0 ? { ...r, selected } : r)),
+    );
+  }, []);
+
+  const submit = useCallback(async () => {
+    setRunning(true);
+    const queue = rows.filter((r) => r.selected && r.blockers.length === 0);
+    setRows((prev) =>
+      prev.map((r) =>
+        queue.find((q) => q.stageNumber === r.stageNumber)
+          ? { ...r, status: "running", message: null }
+          : r,
+      ),
+    );
+    for (const row of queue) {
+      try {
+        const rec = await api.promoteFixture({
+          stage_number: row.stageNumber,
+          slug: row.slug,
+          overwrite,
+        });
+        setRows((prev) =>
+          prev.map((r) =>
+            r.stageNumber === row.stageNumber
+              ? { ...r, status: "ok", message: rec.audit_path }
+              : r,
+          ),
+        );
+      } catch (err) {
+        setRows((prev) =>
+          prev.map((r) =>
+            r.stageNumber === row.stageNumber
+              ? { ...r, status: "error", message: String(err) }
+              : r,
+          ),
+        );
+      }
+    }
+    try {
+      const next = await api.listLabFixtures();
+      onCatalogChanged(next);
+    } catch {
+      // Catalog refresh is best-effort; row-level "ok" status already
+      // confirms the server accepted each promote.
+    }
+    setRunning(false);
+  }, [rows, overwrite, onCatalogChanged]);
+
+  const eligibleCount = rows.filter((r) => r.blockers.length === 0).length;
+  const selectedCount = rows.filter(
+    (r) => r.selected && r.blockers.length === 0,
+  ).length;
+  const shooterPinned = project?.selected_shooter_id != null;
+  const allEligibleSelected = eligibleCount > 0 && selectedCount === eligibleCount;
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-1.5"
+        onClick={toggleOpen}
+        title="Promote every eligible stage in this project as a primary fixture"
+      >
+        <FlaskConical className="size-3.5" />
+        Promote all stages
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-[640px] rounded-md border border-border bg-popover p-4 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Promote all stages
+          </div>
+          <p className="text-[11px] text-muted-foreground mb-3">
+            Batch-runs the per-stage primary-fixture promote against every
+            stage that has an audit JSON, a primary beep, and a camera mount.
+            Same write path as the single-stage button on the Audit page.
+          </p>
+          {loading && (
+            <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              Loading project + export overview...
+            </div>
+          )}
+          {!loading && loadError && (
+            <div className="flex gap-1.5 rounded bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+              {loadError}
+            </div>
+          )}
+          {!loading && !loadError && project && !shooterPinned && (
+            <div className="flex gap-1.5 rounded bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+              This project has no SSI shooter pinned. Pin one via the Ingest
+              page before promoting -- the server refuses to land fixtures
+              with an unknown shooter.
+            </div>
+          )}
+          {!loading && !loadError && project && shooterPinned && rows.length === 0 && (
+            <div className="rounded bg-muted px-2 py-1.5 text-[11px] text-muted-foreground">
+              No non-placeholder stages in this project.
+            </div>
+          )}
+          {!loading && !loadError && project && shooterPinned && rows.length > 0 && (
+            <>
+              <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allEligibleSelected}
+                    onChange={(e) => setAllSelected(e.target.checked)}
+                    disabled={running || eligibleCount === 0}
+                  />
+                  Select all eligible ({eligibleCount})
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={overwrite}
+                    onChange={(e) => setOverwrite(e.target.checked)}
+                    disabled={running}
+                  />
+                  Overwrite if exists
+                </label>
+              </div>
+              <div className="max-h-80 overflow-y-auto rounded border border-border">
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 bg-muted/60 text-left text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1.5 w-6"></th>
+                      <th className="px-2 py-1.5 w-10">#</th>
+                      <th className="px-2 py-1.5">Stage / slug</th>
+                      <th className="px-2 py-1.5 w-32">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const eligible = row.blockers.length === 0;
+                      const willOverwrite = row.exists && overwrite;
+                      const blocked = !eligible;
+                      return (
+                        <tr
+                          key={row.stageNumber}
+                          className={cn(
+                            "border-t border-border align-top",
+                            blocked && "opacity-60",
+                          )}
+                        >
+                          <td className="px-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={row.selected && eligible}
+                              disabled={!eligible || running}
+                              onChange={() => toggleRow(row.stageNumber)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 font-mono">
+                            {row.stageNumber}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="font-medium">{row.stageName}</div>
+                            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground break-all">
+                              {row.slug}
+                            </div>
+                            {row.blockers.length > 0 && (
+                              <div className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                                blocked: {row.blockers.join("; ")}
+                              </div>
+                            )}
+                            {row.status === "error" && row.message && (
+                              <div className="mt-0.5 text-[10px] text-destructive break-words">
+                                {row.message}
+                              </div>
+                            )}
+                            {row.status === "ok" && row.message && (
+                              <div className="mt-0.5 font-mono text-[10px] text-emerald-700 dark:text-emerald-300 break-all">
+                                {row.message}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {row.status === "running" && (
+                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                <Loader2 className="size-3 animate-spin" />
+                                promoting
+                              </span>
+                            )}
+                            {row.status === "ok" && (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
+                                <CheckCircle2 className="size-3" />
+                                promoted
+                              </span>
+                            )}
+                            {row.status === "error" && (
+                              <span className="inline-flex items-center gap-1 text-destructive">
+                                <XCircle className="size-3" />
+                                failed
+                              </span>
+                            )}
+                            {row.status === "idle" && eligible && row.exists && (
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1",
+                                  willOverwrite
+                                    ? "text-amber-700 dark:text-amber-300"
+                                    : "text-muted-foreground",
+                                )}
+                                title={
+                                  willOverwrite
+                                    ? "A fixture with this slug exists; overwrite is on so it will be replaced."
+                                    : "A fixture with this slug exists; toggle 'Overwrite if exists' to replace it. Otherwise the server will reject this row."
+                                }
+                              >
+                                exists
+                                {willOverwrite ? " (overwrite)" : ""}
+                              </span>
+                            )}
+                            {row.status === "idle" && eligible && !row.exists && (
+                              <span className="text-muted-foreground">
+                                ready
+                              </span>
+                            )}
+                            {row.status === "idle" && !eligible && (
+                              <span className="text-muted-foreground">
+                                blocked
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          <div className="flex items-center gap-2 pt-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setOpen(false)}
+              disabled={running}
+            >
+              Close
+            </Button>
+            <span className="ml-auto text-[11px] text-muted-foreground">
+              {selectedCount} selected
+            </span>
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={running || selectedCount === 0 || !shooterPinned}
+            >
+              {running ? (
+                <Loader2 className="size-3.5 animate-spin mr-1" />
+              ) : null}
+              Promote selected
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] }) {
   const navigate = useNavigate();
