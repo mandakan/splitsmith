@@ -4366,15 +4366,29 @@ def create_app(
         return FileResponse(target, media_type=media_type, filename=target.name)
 
     @app.get("/api/videos/stream")
-    def stream_video(path: str = Query(...)) -> FileResponse:
+    def stream_video(
+        path: str = Query(...),
+        kind: Literal["auto", "trim", "source"] = Query("auto"),
+    ) -> FileResponse:
         """Serve a registered video file with HTTP Range support.
 
-        For the primary of a stage, prefers the short-GOP trimmed MP4
-        produced by Sub 5 / #16 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``).
-        The re-encoded clip seeks frame-accurately, which is what makes the
-        audit screen's drag-scrubbing feel responsive. Secondaries fall
-        through to their source file -- per-video trim runs aren't wired
-        through the production UI yet.
+        ``kind`` selects which file backs the response:
+
+        - ``trim``: per-video short-GOP MP4 produced by Sub 5 / #16
+          (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``); 404 if not
+          built yet. The re-encoded clip seeks frame-accurately, which
+          is what makes the audit screen's drag-scrubbing feel
+          responsive.
+        - ``source``: the original camera file. Used while the trim is
+          still building.
+        - ``auto`` (default, for back-compat with non-audit callers):
+          trim if present, source otherwise.
+
+        The audit screen always passes an explicit ``kind`` so the file
+        bound to a ``<video>`` element can't change mid-session when a
+        background trim job completes -- a switch from source bytes to
+        trim bytes mid-Range-request wedges the player ("source not
+        found") and forced a full reload to recover.
 
         Validates that ``path`` matches a video registered to the project
         (any stage, any role, or unassigned) so the endpoint cannot be
@@ -4390,17 +4404,21 @@ def create_app(
         stage, video = located
 
         served_path: Path | None = None
-        if stage is not None:
-            # Prefer the per-video short-GOP trim when one exists. This is
-            # the multi-cam path: each angle gets its own scrub-friendly
-            # cache cut around its own beep, so dragging the audit
-            # playhead doesn't stall on a 4K MOV from a phone.
+        if kind in ("auto", "trim") and stage is not None:
+            # Per-video short-GOP trim is keyed per role: each angle has
+            # its own scrub clip cut around its own beep, so dragging
+            # the audit playhead doesn't stall on a 4K MOV from a phone.
             trimmed = audio_helpers.trimmed_video_path(
                 state.project_root, stage.stage_number, video, project=project
             )
             if trimmed.exists():
                 served_path = trimmed.resolve()
         if served_path is None:
+            if kind == "trim":
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"trimmed clip not built yet for {path}",
+                )
             served_path = project.resolve_video_path(state.project_root, video.path).resolve()
             # Same structured shape as detect-beep / trim / preview so
             # the SPA's "reconnect external storage" surface is uniform.
