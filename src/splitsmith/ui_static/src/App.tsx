@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
-import { ThemeProvider } from "@/lib/theme";
+import { ModeProvider } from "@/lib/mode";
 import { Audit } from "@/pages/Audit";
 import { Coach } from "@/pages/Coach";
 import { Design } from "@/pages/Design";
@@ -15,7 +15,7 @@ import { Review } from "@/pages/Review";
 
 export function App() {
   return (
-    <ThemeProvider>
+    <ModeProvider>
       <BrowserRouter>
         <Routes>
           {/* Picker lives outside AppShell -- it has its own header and
@@ -40,6 +40,6 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-    </ThemeProvider>
+    </ModeProvider>
   );
 }
