@@ -96,6 +96,32 @@ The UI never says "your machine." It says "the worker pool." This
 keeps the SaaS / remote-worker future open without bending the local
 flow.
 
+### Storage choice -- reference vs copy
+
+At ingest time, the user explicitly chooses how the dropped videos
+should be stored:
+
+- **Reference in place** (default) -- Splitsmith stores links to the
+  originals. No extra disk space. Fast. The project breaks if the
+  source moves or unmounts (handled by the existing relink dialog).
+- **Copy into project folder** -- the videos are copied under
+  `raw/`. The project is self-contained and portable, and backups
+  include the raw footage. Costs disk space and a copy step before
+  processing.
+
+The choice is per-ingest-batch (not per-video). A project-wide default
+lives in Settings -> Storage; the ingest UI surfaces the current
+default but always lets the user override.
+
+**Why this is a first-class decision:**
+- Hidden defaults here cause downstream surprises (backups missing
+  source footage; broken links when an SD card is unmounted).
+- The two modes have meaningfully different cost profiles and
+  implications for the future SaaS case (where "reference" maps to a
+  remote/cloud source pointer and "copy" maps to upload).
+- Surfacing the choice with its implications at ingest time prevents
+  the user from discovering the difference at backup or relink time.
+
 ### Same ingest flow for first-time and add-shooter-later
 
 Adding the first shooter to a new match and adding a fifth shooter to

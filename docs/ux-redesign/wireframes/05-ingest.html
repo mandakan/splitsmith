@@ -299,6 +299,96 @@
 
   .footnote { margin-top: 28px; color: var(--text-subtle); font-size: 12px; text-align: center; }
 
+  /* Storage choice card */
+  .storage-choice {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .storage-choice .head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .storage-choice .head .title { font-size: 13.5px; font-weight: 600; }
+  .storage-choice .head .help-link { font-size: 12px; color: var(--accent); text-decoration: none; cursor: pointer; }
+  .storage-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .storage-option {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px;
+    background: var(--surface-2);
+    border: 1.5px solid var(--border);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .storage-option:hover { border-color: var(--border-strong); }
+  .storage-option.selected {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .storage-option .radio {
+    flex-shrink: 0;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-strong);
+    background: var(--surface);
+    margin-top: 2px;
+    position: relative;
+  }
+  .storage-option.selected .radio {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .storage-option.selected .radio::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: white;
+  }
+  .storage-option .opt-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 4px;
+  }
+  .storage-option.selected .opt-title { color: var(--accent); }
+  .storage-option .recommended {
+    background: var(--accent);
+    color: white;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 999px;
+  }
+  .storage-option .opt-desc {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .storage-option .opt-implications {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  .storage-option .opt-implications .row {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .storage-option .opt-implications .row svg.ok { color: var(--green); flex-shrink: 0; }
+  .storage-option .opt-implications .row svg.warn { color: var(--amber); flex-shrink: 0; }
+  .storage-option .opt-implications .path {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text);
+  }
+
   /* Annotation note */
   .annot {
     margin: 14px 0 0;
@@ -316,7 +406,7 @@
 
 <div class="wf-banner">
   <b>Wireframe 05</b> &nbsp;&middot;&nbsp; Ingest -- add a shooter's footage
-  &nbsp;&middot;&nbsp; Populated state after drop. Cameras inferred from filename prefix; auto-match by mtime.
+  &nbsp;&middot;&nbsp; Populated state after drop. Storage choice (reference vs copy), camera inference, auto-match by mtime.
 </div>
 
 <header class="shell">
@@ -371,6 +461,77 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 4px;"><path d="M12 5v14M5 12h14"/></svg>
         Add more
       </button>
+    </div>
+
+    <!-- Storage choice -->
+    <div class="storage-choice">
+      <div class="head">
+        <div class="title">How should these videos be stored?</div>
+        <a class="help-link">Learn more about backup &amp; portability &rarr;</a>
+      </div>
+      <div class="storage-options">
+
+        <!-- Reference (selected) -->
+        <div class="storage-option selected">
+          <div class="radio"></div>
+          <div>
+            <div class="opt-title">
+              Reference in place
+              <span class="recommended">Default</span>
+            </div>
+            <div class="opt-desc">Keep originals where they are. Splitsmith only stores links.</div>
+            <div class="opt-implications">
+              <div class="row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>
+                <span>No extra disk space &middot; <b style="color: var(--text);">0 GB added</b></span>
+              </div>
+              <div class="row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>
+                <span>Faster -- no copy step before processing</span>
+              </div>
+              <div class="row">
+                <svg class="warn" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17v.5"/><circle cx="12" cy="12" r="9"/></svg>
+                <span>If sources move or unmount, the project will need re-linking</span>
+              </div>
+              <div class="row">
+                <span style="margin-left: 19px;">Source: <span class="path">~/SD-card-04-12-2026/dcim/</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Copy -->
+        <div class="storage-option">
+          <div class="radio"></div>
+          <div>
+            <div class="opt-title">
+              Copy into project folder
+            </div>
+            <div class="opt-desc">Self-contained project. Originals can be removed afterwards.</div>
+            <div class="opt-implications">
+              <div class="row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>
+                <span>Project is portable &middot; backup includes raw footage</span>
+              </div>
+              <div class="row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>
+                <span>Survives unmounting the source media</span>
+              </div>
+              <div class="row">
+                <svg class="warn" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17v.5"/><circle cx="12" cy="12" r="9"/></svg>
+                <span>Adds <b style="color: var(--text);">14.2 GB</b> to disk &middot; ~3 min copy before processing</span>
+              </div>
+              <div class="row">
+                <span style="margin-left: 19px;">Target: <span class="path">~/Splitsmith/vads-easter-shoot-2026/raw/</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div style="margin-top: 10px; font-size: 11.5px; color: var(--text-subtle);">
+        Set a project-wide default in <a href="#" style="color: var(--accent); text-decoration: none;">Settings &rarr; Storage</a>. Change per ingest if needed.
+      </div>
     </div>
 
     <!-- Cameras -->
