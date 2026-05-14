@@ -1177,6 +1177,31 @@ export interface ShooterListResponse {
   shooters: ShooterListEntry[];
 }
 
+/** One shot point on a shooter's timeline in /compare (#328). */
+export interface CompareShotPoint {
+  shot_number: number;
+  time_after_beep: number;
+  source: "detected" | "manual";
+}
+
+/** Per-shooter data for a stage in /compare (#328). */
+export interface CompareShooterRecord {
+  slug: string;
+  name: string;
+  is_active: boolean;
+  video_path: string | null;
+  beep_offset_in_clip: number | null;
+  duration_seconds: number | null;
+  stage_time_seconds: number | null;
+  shots: CompareShotPoint[];
+}
+
+export interface CompareStageResponse {
+  stage_number: number;
+  stage_name: string;
+  shooters: CompareShooterRecord[];
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -1694,6 +1719,16 @@ export const api = {
       `/api/match/shooters/${encodeURIComponent(slug)}`,
       { method: "DELETE" },
     ),
+
+  /** Per-shooter compare data for a stage (#328). */
+  getStageCompare: (stageNumber: number) =>
+    request<CompareStageResponse>(
+      `/api/match/stage/${stageNumber}/compare`,
+    ),
+
+  /** Build a streaming URL for one shooter's lossless trim (#328). */
+  shooterVideoStreamUrl: (slug: string, path: string): string =>
+    `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`,
 
   /** Create a new match from a picked scoreboard match (#322). The SPA
    *  follows up with /api/scoreboard/fetch + /select-shooter to populate

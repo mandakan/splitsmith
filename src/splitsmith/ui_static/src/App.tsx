@@ -5,6 +5,7 @@ import { MatchShell } from "@/components/match/MatchShell";
 import { ModeProvider } from "@/lib/mode";
 import { Audit } from "@/pages/Audit";
 import { Coach } from "@/pages/Coach";
+import { Compare } from "@/pages/Compare";
 import { CreateMatch } from "@/pages/CreateMatch";
 import { Design } from "@/pages/Design";
 import { Export } from "@/pages/Export";
@@ -34,6 +35,7 @@ export function App() {
             <Route index element={<Home />} />
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
+            <Route path="compare/:stage" element={<Compare />} />
             <Route path="shooters" element={<Shooters />} />
             <Route path="export" element={<Export />} />
             <Route path="export/:stage" element={<Export />} />
