@@ -1147,6 +1147,36 @@ export interface CreateMatchScoreboardBody {
   primary_shooter_division?: string | null;
 }
 
+/** One camera inside a shooter (#324). */
+export interface ShooterCameraInfo {
+  group_key: string;
+  make: string | null;
+  model: string | null;
+  mount: string | null;
+  role: "primary" | "secondary";
+  video_count: number;
+  stage_numbers: number[];
+}
+
+/** One shooter row in the /shooters page (#324). */
+export interface ShooterListEntry {
+  slug: string;
+  name: string;
+  is_active: boolean;
+  selected_shooter_id: number | null;
+  selected_competitor_id: number | null;
+  stages_audited: number;
+  stages_total: number;
+  video_count: number;
+  cameras: ShooterCameraInfo[];
+}
+
+export interface ShooterListResponse {
+  match_root: string;
+  match_name: string;
+  shooters: ShooterListEntry[];
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -1639,6 +1669,31 @@ export const api = {
       method: "POST",
       json: body,
     }),
+
+  /** List every shooter in the currently-bound match (#324). */
+  listMatchShooters: () =>
+    request<ShooterListResponse>("/api/match/shooters"),
+
+  /** Re-bind the server to a different shooter inside the same match (#324). */
+  selectActiveShooter: (slug: string) =>
+    request<ServerHealth>(
+      `/api/match/shooters/${encodeURIComponent(slug)}/select`,
+      { method: "POST" },
+    ),
+
+  /** Add a new shooter to the bound match (#324). */
+  addMatchShooter: (body: { name: string; division?: string | null }) =>
+    request<ShooterListResponse>("/api/match/shooters", {
+      method: "POST",
+      json: body,
+    }),
+
+  /** Remove a shooter from the bound match (#324). */
+  removeMatchShooter: (slug: string) =>
+    request<ShooterListResponse>(
+      `/api/match/shooters/${encodeURIComponent(slug)}`,
+      { method: "DELETE" },
+    ),
 
   /** Create a new match from a picked scoreboard match (#322). The SPA
    *  follows up with /api/scoreboard/fetch + /select-shooter to populate

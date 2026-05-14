@@ -770,6 +770,49 @@ class CreateMatchScoreboardRequest(BaseModel):
     primary_shooter_division: str | None = None
 
 
+class ShooterCameraInfo(BaseModel):
+    """One camera entry for a shooter, derived from per-stage primaries (#324)."""
+
+    # Stable id grouping = ``camera_make|camera_model|camera_mount``; the
+    # SPA renders ordered labels (Camera A / B / ...) per shooter.
+    group_key: str
+    make: str | None
+    model: str | None
+    mount: str | None
+    role: Literal["primary", "secondary"]
+    video_count: int
+    stage_numbers: list[int]
+
+
+class ShooterListEntry(BaseModel):
+    """One row of GET /api/match/shooters (#324)."""
+
+    slug: str
+    name: str
+    is_active: bool
+    selected_shooter_id: int | None
+    selected_competitor_id: int | None
+    stages_audited: int
+    stages_total: int
+    video_count: int
+    cameras: list[ShooterCameraInfo]
+
+
+class ShooterListResponse(BaseModel):
+    """GET /api/match/shooters payload (#324)."""
+
+    match_root: str
+    match_name: str
+    shooters: list[ShooterListEntry]
+
+
+class AddShooterRequest(BaseModel):
+    """POST /api/match/shooters body (#324)."""
+
+    name: str
+    division: str | None = None
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -5883,6 +5926,221 @@ def create_app(
             project_root=str(state.project_root),
             schema_version=project.schema_version,
         )
+
+    # ----------------------------------------------------------------------
+    # Shooters management (#324)
+    # ----------------------------------------------------------------------
+
+    def _resolve_match_context() -> tuple[Path, match_model.Match, str]:
+        """Return ``(match_root, match, active_slug)`` for the bound project.
+
+        Detects whether ``state.project_root`` lives at
+        ``<match_root>/shooters/<slug>/``; if so the SPA is browsing a
+        match-as-object project. Otherwise raises a structured 409 so the
+        shooters page can hide itself (the legacy single-shooter layout
+        has no concept of swapping shooters).
+        """
+        root = state.project_root
+        parent = root.parent
+        match_root = parent.parent if parent.name == match_model.SHOOTERS_DIR else None
+        if match_root is None or not match_model.is_match_folder(match_root):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "not_a_match",
+                    "message": (
+                        "Bound project is a legacy single-shooter layout; "
+                        "shooter management is match-folder only."
+                    ),
+                },
+            )
+        match = match_model.Match.load(match_root)
+        return match_root, match, root.name
+
+    def _classify_shooter(shooter_root: Path, match: match_model.Match) -> ShooterListEntry:
+        """Build a list entry for a single shooter directory."""
+        legacy = MatchProject.load(shooter_root)
+        stages_audited = sum(1 for s in legacy.stages if s.time_seconds > 0 or s.skipped)
+        # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
+        groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
+        total_videos = 0
+        for stage in legacy.stages:
+            for video in stage.videos:
+                if video.role == "ignored":
+                    continue
+                key = (video.camera_make, video.camera_model, video.camera_mount)
+                g = groups.setdefault(
+                    key,
+                    {
+                        "role": video.role,
+                        "video_count": 0,
+                        "stages": set(),
+                    },
+                )
+                # Primary wins over secondary if any video on this camera is
+                # primary on any stage (shooters tend to keep camera roles
+                # consistent across stages).
+                if video.role == "primary":
+                    g["role"] = "primary"
+                g["video_count"] += 1
+                g["stages"].add(stage.stage_number)
+                total_videos += 1
+        cameras = [
+            ShooterCameraInfo(
+                group_key=f"{k[0] or ''}|{k[1] or ''}|{k[2] or ''}",
+                make=k[0],
+                model=k[1],
+                mount=k[2],
+                role=g["role"],
+                video_count=g["video_count"],
+                stage_numbers=sorted(g["stages"]),
+            )
+            for k, g in groups.items()
+        ]
+        return ShooterListEntry(
+            slug=shooter_root.name,
+            name=legacy.competitor_name or shooter_root.name,
+            is_active=False,
+            selected_shooter_id=legacy.selected_shooter_id,
+            selected_competitor_id=legacy.selected_competitor_id,
+            stages_audited=stages_audited,
+            stages_total=len(match.stages),
+            video_count=total_videos,
+            cameras=cameras,
+        )
+
+    @app.get("/api/match/shooters", response_model=ShooterListResponse)
+    def list_match_shooters() -> ShooterListResponse:
+        """List every shooter in the currently-bound match with coverage."""
+        match_root, match, active_slug = _resolve_match_context()
+        entries: list[ShooterListEntry] = []
+        for slug in match.shooters:
+            shooter_root = match_model.Match.shooter_root(match_root, slug)
+            try:
+                entry = _classify_shooter(shooter_root, match)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Skipping shooter %s: %s", slug, exc)
+                continue
+            entry.is_active = slug == active_slug
+            entries.append(entry)
+        return ShooterListResponse(
+            match_root=str(match_root),
+            match_name=match.name,
+            shooters=entries,
+        )
+
+    @app.post("/api/match/shooters/{slug}/select")
+    def select_active_shooter(slug: str) -> HealthResponse:
+        """Re-bind the server to a different shooter inside the same match.
+
+        After this call ``state.project_root`` points at the new shooter
+        dir; every subsequent project-bound endpoint reads that shooter's
+        data. The match folder itself stays bound in the recent-projects
+        index.
+        """
+        match_root, match, _ = _resolve_match_context()
+        if slug not in match.shooters:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "shooter_not_found",
+                    "message": f"shooter {slug!r} is not registered on this match",
+                },
+            )
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        if not shooter_root.exists():
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "shooter_dir_missing",
+                    "message": (
+                        f"shooter {slug!r} is registered but {shooter_root} "
+                        "doesn't exist on disk"
+                    ),
+                },
+            )
+        recorded = _bind_legacy_root_to_state(state, shooter_root, fallback_name=match.name)
+        project = state.load()
+        return HealthResponse(
+            bound=True,
+            project_name=recorded,
+            project_root=str(state.project_root),
+            schema_version=project.schema_version,
+        )
+
+    @app.post("/api/match/shooters", response_model=ShooterListResponse)
+    def add_match_shooter(req: AddShooterRequest) -> ShooterListResponse:
+        """Add a new shooter to the bound match.
+
+        Creates the ``<match>/shooters/<slug>/`` tree, mirrors the match's
+        stage definitions into the shooter's ``project.json``, and saves a
+        ``shooter.json`` next to it. Returns the refreshed list. Slug is
+        derived from ``name`` and disambiguated if it collides.
+        """
+        match_root, match, _ = _resolve_match_context()
+        if not req.name.strip():
+            raise HTTPException(status_code=400, detail="name is required")
+        slug = match_model.disambiguate_slug(match_model.slugify(req.name), set(match.shooters))
+        shooter = match_model.Shooter(
+            slug=slug,
+            name=req.name,
+            stages=[
+                match_model.ShooterStageData(stage_number=s.stage_number) for s in match.stages
+            ],
+        )
+        try:
+            match.add_shooter(match_root, shooter)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        legacy = MatchProject.init(shooter_root, name=match.name)
+        legacy.competitor_name = req.name
+        legacy.match_date = match.match_date
+        legacy.scoreboard_match_id = match.scoreboard_match_id
+        legacy.scoreboard_content_type = match.scoreboard_content_type
+        if not legacy.stages:
+            for sd in match.stages:
+                legacy.stages.append(
+                    StageEntry(
+                        stage_number=sd.stage_number,
+                        stage_name=sd.stage_name,
+                        time_seconds=0.0,
+                        stage_rounds=sd.stage_rounds,
+                        placeholder=sd.placeholder,
+                    )
+                )
+        legacy.save(shooter_root)
+        return list_match_shooters()
+
+    @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
+    def remove_match_shooter(slug: str) -> ShooterListResponse:
+        """Remove a shooter from the bound match.
+
+        Drops the slug from ``match.json`` and deletes
+        ``<match>/shooters/<slug>/`` from disk. Refuses if ``slug`` is
+        currently the active shooter (the SPA should switch first).
+        """
+        match_root, match, active_slug = _resolve_match_context()
+        if slug == active_slug:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "active_shooter",
+                    "message": (
+                        "Cannot remove the currently-active shooter. "
+                        "Switch to another shooter first."
+                    ),
+                },
+            )
+        if slug not in match.shooters:
+            raise HTTPException(status_code=404, detail="shooter not found")
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        if shooter_root.exists():
+            shutil.rmtree(shooter_root, ignore_errors=True)
+        match.shooters = [s for s in match.shooters if s != slug]
+        match.save(match_root)
+        return list_match_shooters()
 
     @app.post("/api/user/recent-projects/unbind")
     def unbind_recent_project() -> HealthResponse:

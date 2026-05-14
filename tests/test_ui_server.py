@@ -5168,6 +5168,122 @@ def test_bind_match_folder_routes_to_first_shooter(tmp_path: Path, _user_config_
     assert body["project_root"].endswith("/shooters/ma")
 
 
+def test_list_match_shooters_returns_active_and_others(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """The shooters endpoint surfaces every registered shooter and flags
+    which is currently active. (#324)
+    """
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Multi-shooter")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(target)
+    for slug, name in [("ma", "Mathias"), ("jl", "Johan")]:
+        sh = match_model.Shooter(slug=slug, name=name)
+        match.add_shooter(target, sh)
+        sroot = match_model.Match.shooter_root(target, slug)
+        legacy = MatchProject.init(sroot, name="Multi-shooter")
+        legacy.competitor_name = name
+        legacy.stages = [
+            StageEntry(stage_number=1, stage_name="One", time_seconds=0.0),
+            StageEntry(stage_number=2, stage_name="Two", time_seconds=0.0),
+        ]
+        legacy.save(sroot)
+
+    app = create_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    assert resp.status_code == 200
+
+    listing = client.get("/api/match/shooters")
+    assert listing.status_code == 200, listing.text
+    body = listing.json()
+    assert body["match_name"] == "Multi-shooter"
+    slugs = [s["slug"] for s in body["shooters"]]
+    assert slugs == ["ma", "jl"]
+    active = [s for s in body["shooters"] if s["is_active"]]
+    assert len(active) == 1 and active[0]["slug"] == "ma"
+
+
+def test_select_active_shooter_rebinds(tmp_path: Path, _user_config_home: Path) -> None:
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Test")
+    for slug, name in [("a", "A"), ("b", "B")]:
+        match.add_shooter(target, match_model.Shooter(slug=slug, name=name))
+        MatchProject.init(match_model.Match.shooter_root(target, slug), name="Test")
+
+    app = create_app()
+    client = TestClient(app)
+    client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    resp = client.post("/api/match/shooters/b/select")
+    assert resp.status_code == 200
+    assert resp.json()["project_root"].endswith("/shooters/b")
+    listing = client.get("/api/match/shooters").json()
+    actives = [s["slug"] for s in listing["shooters"] if s["is_active"]]
+    assert actives == ["b"]
+
+
+def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_home: Path) -> None:
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Add Test")
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    MatchProject.init(match_model.Match.shooter_root(target, "ma"), name="Add Test")
+
+    app = create_app()
+    client = TestClient(app)
+    client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    resp = client.post("/api/match/shooters", json={"name": "Johan Larsson"})
+    assert resp.status_code == 200
+    body = resp.json()
+    slugs = [s["slug"] for s in body["shooters"]]
+    assert "johan-larsson" in slugs
+    new_root = match_model.Match.shooter_root(target, "johan-larsson")
+    assert (new_root / "project.json").exists()
+    assert (new_root / "shooter.json").exists()
+
+
+def test_remove_match_shooter_refuses_active(tmp_path: Path, _user_config_home: Path) -> None:
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Rm Test")
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    match.add_shooter(target, match_model.Shooter(slug="jl", name="Johan"))
+    for slug in ("ma", "jl"):
+        MatchProject.init(match_model.Match.shooter_root(target, slug), name="Rm Test")
+
+    app = create_app()
+    client = TestClient(app)
+    client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    resp = client.delete("/api/match/shooters/ma")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "active_shooter"
+    resp = client.delete("/api/match/shooters/jl")
+    assert resp.status_code == 200
+    assert not match_model.Match.shooter_root(target, "jl").exists()
+
+
 def test_user_config_disable_flag_makes_endpoints_safe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

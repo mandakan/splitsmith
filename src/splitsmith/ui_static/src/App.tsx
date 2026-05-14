@@ -12,6 +12,7 @@ import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
 import { Lab } from "@/pages/Lab";
 import { Pick } from "@/pages/Pick";
+import { Shooters } from "@/pages/Shooters";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { Review } from "@/pages/Review";
 
@@ -33,6 +34,7 @@ export function App() {
             <Route index element={<Home />} />
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
+            <Route path="shooters" element={<Shooters />} />
             <Route path="export" element={<Export />} />
             <Route path="export/:stage" element={<Export />} />
           </Route>

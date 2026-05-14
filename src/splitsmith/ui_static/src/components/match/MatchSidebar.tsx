@@ -15,6 +15,7 @@
 import {
   ArrowDownToLine,
   ClipboardCheck,
+  Crosshair,
   LayoutGrid,
   Users,
 } from "lucide-react";
@@ -88,17 +89,29 @@ export function MatchSidebar({
         <SidebarLink to="/" icon={<LayoutGrid className="size-[15px]" />} end>
           Overview
         </SidebarLink>
-        <SidebarLink to="/coach" icon={<ClipboardCheck className="size-[15px]" />}>
+        <SidebarLink
+          to="/audit"
+          icon={<Crosshair className="size-[15px]" />}
+        >
+          Audit
+        </SidebarLink>
+        <SidebarLink
+          to="/coach"
+          icon={<ClipboardCheck className="size-[15px]" />}
+        >
           Coach
         </SidebarLink>
         <SidebarLink
-          to="/audit"
+          to="/shooters"
           icon={<Users className="size-[15px]" />}
           count={shooterCount}
         >
           Shooters
         </SidebarLink>
-        <SidebarLink to="/export" icon={<ArrowDownToLine className="size-[15px]" />}>
+        <SidebarLink
+          to="/export"
+          icon={<ArrowDownToLine className="size-[15px]" />}
+        >
           Export
         </SidebarLink>
       </div>
