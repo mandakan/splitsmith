@@ -640,7 +640,7 @@
 
 <div class="wf-banner">
   <b>Wireframe 14</b> &nbsp;&middot;&nbsp; Coach (per-stage, single shooter)
-  &nbsp;&middot;&nbsp; Stage-level deep dive. Video + per-shot list + classification + annotations + per-shot rank.
+  &nbsp;&middot;&nbsp; Stage-level deep dive. Video + per-shot list + classification + annotations + self-referential baselines.
 </div>
 
 <header class="shell">
@@ -877,14 +877,14 @@
                 <div class="delta up">+ 0.55s vs your career</div>
               </div>
               <div class="shot-stat">
-                <div class="k">Stage rank for this shot</div>
-                <div class="v">3rd</div>
-                <div class="delta">of 4 shooters</div>
+                <div class="k">Your best transition</div>
+                <div class="v" style="color: var(--fast);">0.32s</div>
+                <div class="delta">career best &middot; Standards 2025</div>
               </div>
               <div class="shot-stat">
-                <div class="k">Best on this shot</div>
-                <div class="v" style="color: #6366f1;">0.482s</div>
-                <div class="delta">Pia (PE)</div>
+                <div class="k">Career avg on transitions</div>
+                <div class="v">0.58s</div>
+                <div class="delta">across 28 transitions this match</div>
               </div>
             </div>
 
@@ -932,64 +932,8 @@
           </div>
         </div>
 
-        <!-- RIGHT: shot list + comparison -->
+        <!-- RIGHT: shot list -->
         <div class="right-stack">
-
-          <!-- Comparison: this shot across shooters -->
-          <div class="panel">
-            <div class="ph">
-              <span>This shot &middot; across shooters</span>
-              <span class="help">Shot 9</span>
-            </div>
-
-            <div class="compare-row">
-              <span class="av" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">PE</span>
-              <div>
-                <div class="name">Pia Eriksson</div>
-                <div class="sub">cam-a chest &middot; rank 1</div>
-              </div>
-              <span class="val" style="color: var(--green);">0.482s</span>
-              <span class="delta fast">&minus; 0.65</span>
-            </div>
-            <div class="compare-row">
-              <span class="av" style="background: linear-gradient(135deg, #14b8a6, #0ea5e9);">JL</span>
-              <div>
-                <div class="name">Johan Larsson</div>
-                <div class="sub">cam-a chest &middot; rank 2</div>
-              </div>
-              <span class="val">0.811s</span>
-              <span class="delta fast">&minus; 0.32</span>
-            </div>
-            <div class="compare-row you">
-              <span class="av" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">MA</span>
-              <div>
-                <div class="name">Mathias <span style="font-size: 10px; background: var(--accent); color: white; padding: 1px 5px; border-radius: 999px; margin-left: 3px; font-weight: 700; letter-spacing: 0.04em;">YOU</span></div>
-                <div class="sub">cam-a chest &middot; rank 3</div>
-              </div>
-              <span class="val" style="color: var(--vslow);">1.133s</span>
-              <span class="delta">&mdash;</span>
-            </div>
-            <div class="compare-row">
-              <span class="av" style="background: linear-gradient(135deg, #ef4444, #b91c1c);">RJ</span>
-              <div>
-                <div class="name">Robert Janson</div>
-                <div class="sub">cam-a chest &middot; rank 4</div>
-              </div>
-              <span class="val">1.298s</span>
-              <span class="delta slow">+ 0.17</span>
-            </div>
-          </div>
-
-          <!-- Career baseline -->
-          <div class="panel baseline-card">
-            <div class="baseline-row">
-              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg></span>
-              <div>
-                <div>On <b>transitions</b>, your career average is <span class="val">0.58s</span></div>
-                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">This shot was <b>0.55s slower than baseline</b> &middot; based on 28 transitions across this match's audited stages</div>
-              </div>
-            </div>
-          </div>
 
           <!-- Per-shot list -->
           <div class="panel">
@@ -1003,7 +947,7 @@
               <span class="t">0.821</span>
               <span class="split fast">&mdash;</span>
               <span class="int draw"><span class="d"></span>Draw</span>
-              <span class="rank-line">1st of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1011,7 +955,7 @@
               <span class="t">1.342</span>
               <span class="split fast">0.521</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1019,7 +963,7 @@
               <span class="t">2.118</span>
               <span class="split fast">0.776</span>
               <span class="int transition"><span class="d"></span>Transition</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1027,7 +971,7 @@
               <span class="t">3.064</span>
               <span class="split slow">0.946</span>
               <span class="int transition"><span class="d"></span>Transition</span>
-              <span class="rank-line">3rd of 4 <span class="annot-ind">&middot; 1 note</span></span>
+              <span class="rank-line"><span class="annot-ind">1 note</span></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1035,7 +979,7 @@
               <span class="t">3.812</span>
               <span class="split slow">0.748</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1043,7 +987,7 @@
               <span class="t">4.298</span>
               <span class="split fast">0.486</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1051,7 +995,7 @@
               <span class="t">4.811</span>
               <span class="split fast">0.513</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1059,7 +1003,7 @@
               <span class="t">5.701</span>
               <span class="split vslow">0.890</span>
               <span class="int reload"><span class="d"></span>Reload</span>
-              <span class="rank-line">3rd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li current">
@@ -1067,7 +1011,7 @@
               <span class="t">6.834</span>
               <span class="split vslow">1.133</span>
               <span class="int transition"><span class="d"></span>Transition</span>
-              <span class="rank-line">3rd of 4 <span class="annot-ind">&middot; 1 note</span></span>
+              <span class="rank-line"><span class="annot-ind">1 note</span></span>
               <span class="arrow" style="color: var(--accent);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1075,7 +1019,7 @@
               <span class="t">7.348</span>
               <span class="split fast">0.514</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1083,7 +1027,7 @@
               <span class="t">7.722</span>
               <span class="split fast">0.374</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1091,7 +1035,7 @@
               <span class="t">8.572</span>
               <span class="split slow">0.850</span>
               <span class="int transition"><span class="d"></span>Transition</span>
-              <span class="rank-line">3rd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1099,7 +1043,7 @@
               <span class="t">9.371</span>
               <span class="split ok">0.799</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
             <div class="shot-li">
@@ -1107,7 +1051,7 @@
               <span class="t">10.122</span>
               <span class="split ok">0.751</span>
               <span class="int fire"><span class="d"></span>Fire</span>
-              <span class="rank-line">2nd of 4</span>
+              <span class="rank-line"></span>
               <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
             </div>
           </div>
