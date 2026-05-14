@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
+import { MatchShell } from "@/components/match/MatchShell";
 import { ModeProvider } from "@/lib/mode";
 import { Audit } from "@/pages/Audit";
 import { Coach } from "@/pages/Coach";
@@ -24,8 +25,13 @@ export function App() {
               here when it sees /api/health.bound === false. */}
           <Route path="pick" element={<Pick />} />
           <Route path="pick/new" element={<CreateMatch />} />
-          <Route element={<AppShell />}>
+          {/* Match overview owns the Shot Timer shell + per-match sidebar
+              (#323). Other surfaces still mount under AppShell until their
+              respective redesign issues land. */}
+          <Route element={<MatchShell />}>
             <Route index element={<Home />} />
+          </Route>
+          <Route element={<AppShell />}>
             <Route path="ingest" element={<Ingest />} />
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
