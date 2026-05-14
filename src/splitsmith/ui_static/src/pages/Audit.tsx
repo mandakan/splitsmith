@@ -1311,9 +1311,10 @@ export function Audit() {
                 </button>
                 <button
                   type="button"
-                  disabled
-                  title="Coach arrives in #329"
-                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted/50"
+                  onClick={() =>
+                    stageNumber != null && navigate(`/coach/${stageNumber}`)
+                  }
+                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
                 >
                   Coach
                 </button>
