@@ -1,59 +1,71 @@
 /**
- * Floating jobs FAB (issues #26, #51, #73).
+ * Background jobs FAB + slide-out drawer (#321, polished/15).
  *
- * Renders a fixed bottom-right action button that summarises the job
- * registry and opens a popover with the per-job rows. The FAB lives
- * outside page scroll so multi-cam beep / trim runs stay visible on
- * long screens (audit, export).
+ * Always mounted at the shell level so the drawer state survives page
+ * navigation. The FAB sits bottom-right with a live status LED + count;
+ * clicking it slides in the drawer.
  *
- * Failures (#73) are first-class: the badge counts only failures the
- * user hasn't dismissed, the popover splits failures into a red strip
- * at the top with explicit "Dismiss" buttons, and a "Dismiss all"
- * action clears the badge in one click. Acknowledgment is server-side
- * (POST /api/jobs/{id}/acknowledge) so it survives a page reload.
+ * Drawer composition:
+ *   - Worker pool chip (display-only; backend doesn't yet expose
+ *     dynamic pool size -- we show "Local" with the live concurrency
+ *     count derived from running jobs)
+ *   - Running group: per-job rows with progress bar + ETA + worker tag
+ *   - Needs attention group: failed jobs with inline recovery actions
+ *     (Relink source, Dismiss). Source-unreachable failures get
+ *     a structured note carrying the missing path
+ *   - Queued group: capped with "+ N more" overflow
+ *   - Completed today group: collapsed by default
  *
- * Polling cadence is 1 Hz while any job is active and 5 s otherwise so
- * an idle screen barely talks to the backend.
+ * Polling: 1Hz while anything is active, 5s otherwise so an idle screen
+ * barely talks to the backend.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  AlertCircle,
   AlertTriangle,
-  CheckCircle2,
-  Loader2,
+  ArrowDownToLine,
+  Crosshair,
+  Pause,
+  Server,
+  Volume2,
   X,
-  XOctagon,
 } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ApiError, api, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
-// Cap each section so a runaway registry can't stretch the popover off
-// screen. Failures get their own quota so a flood of successes can't
-// push the unread errors out of view.
-const FAILED_VISIBLE_LIMIT = 6;
-const SECTION_VISIBLE_LIMIT = 8;
-// Cap the in-memory job list. The backend retains full history; the
-// panel only renders the most-recent rows per section, so anything
-// beyond this is dead weight that grows with session length.
-const JOBS_RETENTION = 64;
-const POPOVER_ID = "jobs-panel-popover";
+const QUEUED_VISIBLE = 4;
+const COMPLETED_VISIBLE = 4;
 
 const KIND_LABEL: Record<string, string> = {
   detect_beep: "Detect beep",
-  trim: "Trim audit clip",
+  trim: "Trim stage video",
   shot_detect: "Detect shots",
   export: "Export stage",
   match_export: "Match export",
+  audio_extract: "Audio extract",
 };
 
-function formatKind(kind: string): string {
+const KIND_ICON: Record<string, ReactNode> = {
+  detect_beep: <Volume2 className="size-3.5" />,
+  trim: <Crosshair className="size-3.5" />,
+  shot_detect: <Activity className="size-3.5" />,
+  export: <ArrowDownToLine className="size-3.5" />,
+  match_export: <ArrowDownToLine className="size-3.5" />,
+  audio_extract: <Volume2 className="size-3.5" />,
+};
+
+function kindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind;
 }
 
@@ -61,577 +73,548 @@ function isActive(job: Job): boolean {
   return job.status === "pending" || job.status === "running";
 }
 
-function isUnackedFailure(job: Job): boolean {
-  return job.status === "failed" && !job.acknowledged;
+function jobTarget(job: Job): string {
+  const bits: string[] = [];
+  if (job.stage_number != null) bits.push(`stage ${pad2(job.stage_number)}`);
+  if (job.video_id) bits.push(`cam ${job.video_id.slice(0, 6)}`);
+  return bits.join(" · ");
 }
-
-function jobLabel(job: Job): string {
-  const stage = job.stage_number != null ? ` (Stage ${job.stage_number}` : "";
-  // Per-camera jobs (multi-cam beep / trim) tag the row with the first
-  // 6 chars of the video_id so the user can tell parallel jobs apart.
-  // Stage-level jobs (shot_detect, export) don't carry a video_id, so
-  // the row falls back to "(Stage N)" alone.
-  const cam = job.video_id ? ` -- cam ${job.video_id.slice(0, 6)}` : "";
-  const close = job.stage_number != null ? ")" : "";
-  return `${formatKind(job.kind)}${stage}${cam}${close}`;
-}
-
-interface StatusIconProps {
-  job: Job;
-  className?: string;
-}
-
-function StatusIcon({ job, className }: StatusIconProps) {
-  if (job.status === "succeeded") {
-    return (
-      <CheckCircle2
-        className={cn("size-4 text-emerald-500", className)}
-        aria-hidden
-      />
-    );
-  }
-  if (job.status === "failed") {
-    return (
-      <AlertCircle className={cn("size-4 text-destructive", className)} aria-hidden />
-    );
-  }
-  if (job.status === "cancelled") {
-    return (
-      <XOctagon
-        className={cn("size-4 text-muted-foreground", className)}
-        aria-hidden
-      />
-    );
-  }
-  return (
-    <Loader2
-      className={cn("size-4 motion-safe:animate-spin text-primary", className)}
-      aria-hidden
-    />
-  );
-}
-
-type FabState = "idle" | "running" | "failed";
 
 export function JobsPanel() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [open, setOpen] = useState(false);
-  const [cancelInFlight, setCancelInFlight] = useState<Set<string>>(() => new Set());
-  // Per-row "Dismiss" click optimism: while the POST is in flight the
-  // row's button shows a spinner. The server is the source of truth
-  // for ``acknowledged`` -- we never set it client-only.
-  const [ackInFlight, setAckInFlight] = useState<Set<string>>(() => new Set());
-  const [bulkAckInFlight, setBulkAckInFlight] = useState(false);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const failedSectionRef = useRef<HTMLElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const next = await api.listJobs({ signal });
-      // Only display the most recent N; the backend may keep an
-      // unbounded history but we don't need to retain it client-side.
-      setJobs(next.slice(0, JOBS_RETENTION));
-    } catch (err) {
-      if ((err as { name?: string })?.name === "AbortError") return;
-      // Network blip: keep last snapshot. The next poll will retry.
-      if (err instanceof ApiError) {
-        // ignore
-      }
-    }
-  }, []);
-
-  // Poll the registry. Cadence shifts to ACTIVE_POLL_MS while any job is
-  // running and back to IDLE_POLL_MS when everything settles, so an idle
-  // screen barely talks to the backend. The active flag is read from a
-  // ref so we don't restart the interval each render.
-  const activeRef = useRef(false);
-  activeRef.current = jobs.some(isActive);
-  useEffect(() => {
+  const fetchJobs = useCallback(async () => {
+    abortRef.current?.abort();
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const tick = async () => {
+    abortRef.current = controller;
+    try {
+      const list = await api.listJobs({ signal: controller.signal });
+      setJobs(list);
+      setError(null);
+    } catch (e) {
       if (controller.signal.aborted) return;
-      await refresh(controller.signal);
-      if (controller.signal.aborted) return;
-      const interval = activeRef.current ? ACTIVE_POLL_MS : IDLE_POLL_MS;
-      timer = setTimeout(tick, interval);
-    };
-    void tick();
-    return () => {
-      controller.abort();
-      if (timer != null) clearTimeout(timer);
-    };
-  }, [refresh]);
-
-  const failed = useMemo(
-    () => jobs.filter(isUnackedFailure),
-    [jobs],
-  );
-  const active = useMemo(() => jobs.filter(isActive), [jobs]);
-  const finished = useMemo(
-    () => jobs.filter((j) => !isActive(j) && !isUnackedFailure(j)),
-    [jobs],
-  );
-
-  // Sort each section by recency. Failures lead with most-recent first
-  // because the user just got paged to look at them.
-  const sortedFailed = useMemo(() => {
-    const list = [...failed];
-    list.sort(
-      (a, b) =>
-        new Date(b.finished_at ?? b.updated_at).getTime() -
-        new Date(a.finished_at ?? a.updated_at).getTime(),
-    );
-    return list.slice(0, FAILED_VISIBLE_LIMIT);
-  }, [failed]);
-  const sortedActive = useMemo(() => {
-    const list = [...active];
-    list.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-    return list.slice(0, SECTION_VISIBLE_LIMIT);
-  }, [active]);
-  const sortedFinished = useMemo(() => {
-    const list = [...finished];
-    list.sort((a, b) => {
-      const at = a.finished_at ?? a.updated_at;
-      const bt = b.finished_at ?? b.updated_at;
-      return new Date(bt).getTime() - new Date(at).getTime();
-    });
-    return list.slice(0, SECTION_VISIBLE_LIMIT);
-  }, [finished]);
-
-  const activeCount = active.length;
-  const unackedFailedCount = failed.length;
-
-  // Auto-open on a new failure. Re-fires when the unacked count grows
-  // so a fresh failure always surfaces; doesn't re-open if the user
-  // closes the panel without dismissing -- they took an action.
-  const prevUnackCountRef = useRef(0);
-  useEffect(() => {
-    if (unackedFailedCount > prevUnackCountRef.current && !open) {
-      setOpen(true);
+      if (e instanceof ApiError) setError(e.detail);
+      else if (e instanceof Error) setError(e.message);
     }
-    prevUnackCountRef.current = unackedFailedCount;
-  }, [unackedFailedCount, open]);
-
-  // Close popover on outside click / Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (popoverRef.current?.contains(target)) return;
-      if (triggerRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  // Global Alt+J shortcut to open / focus the panel. Skip when an editable
-  // field is focused so the chord doesn't steal keystrokes from a textarea
-  // that wants Alt-modified input.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.altKey || e.ctrlKey || e.metaKey) return;
-      if (e.key !== "j" && e.key !== "J") return;
-      const t = e.target as HTMLElement | null;
-      const tag = t?.tagName;
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        (t && t.isContentEditable)
-      ) {
-        return;
-      }
-      e.preventDefault();
-      setOpen((v) => !v);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Focus management: pull focus into the popover on open, return it to
-  // the FAB on close, and trap Tab inside while open.
-  const prevOpenRef = useRef(open);
   useEffect(() => {
-    if (prevOpenRef.current && !open) {
-      triggerRef.current?.focus();
-    }
-    prevOpenRef.current = open;
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const root = popoverRef.current;
-    if (!root) return;
-    const queryFocusables = () =>
-      Array.from(
-        root.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      );
-    const initial = queryFocusables();
-    if (initial.length > 0) initial[0].focus();
-    else root.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const list = queryFocusables();
-      if (list.length === 0) {
-        e.preventDefault();
-        root.focus();
-        return;
-      }
-      const first = list[0];
-      const last = list[list.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (e.shiftKey && (active === first || active === root)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    root.addEventListener("keydown", onKey);
+    void fetchJobs();
     return () => {
-      root.removeEventListener("keydown", onKey);
+      abortRef.current?.abort();
     };
-  }, [open]);
+  }, [fetchJobs]);
 
-  // When the panel opens with unread failures, scroll the failures
-  // section into view inside the popover. Without this, a panel taller
-  // than the viewport could open with the failures off-screen.
+  const anyActive = jobs.some(isActive);
   useEffect(() => {
-    if (!open) return;
-    if (unackedFailedCount === 0) return;
-    failedSectionRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
-  }, [open, unackedFailedCount]);
+    const ms = anyActive ? ACTIVE_POLL_MS : IDLE_POLL_MS;
+    const id = window.setInterval(() => void fetchJobs(), ms);
+    return () => window.clearInterval(id);
+  }, [anyActive, fetchJobs]);
 
-  const cancel = async (jobId: string) => {
-    setCancelInFlight((prev) => {
-      const next = new Set(prev);
-      next.add(jobId);
-      return next;
-    });
-    try {
-      const updated = await api.cancelJob(jobId);
-      setJobs((prev) => prev.map((j) => (j.id === jobId ? updated : j)));
-    } catch {
-      /* ignore -- next poll will resync */
-    } finally {
-      setCancelInFlight((prev) => {
-        const next = new Set(prev);
-        next.delete(jobId);
-        return next;
-      });
-    }
-  };
-
-  const dismiss = async (jobId: string) => {
-    setAckInFlight((prev) => {
-      const next = new Set(prev);
-      next.add(jobId);
-      return next;
-    });
-    try {
-      const updated = await api.acknowledgeJob(jobId);
-      setJobs((prev) => prev.map((j) => (j.id === jobId ? updated : j)));
-    } catch {
-      /* ignore -- next poll will resync */
-    } finally {
-      setAckInFlight((prev) => {
-        const next = new Set(prev);
-        next.delete(jobId);
-        return next;
-      });
-    }
-  };
-
-  const dismissAll = async () => {
-    setBulkAckInFlight(true);
-    try {
-      const updated = await api.acknowledgeAllFailures();
-      if (updated.length === 0) return;
-      const byId = new Map(updated.map((j) => [j.id, j] as const));
-      setJobs((prev) => prev.map((j) => byId.get(j.id) ?? j));
-    } catch {
-      /* ignore -- next poll will resync */
-    } finally {
-      setBulkAckInFlight(false);
-    }
-  };
-
-  // Failed beats running beats idle so a failure stays loud even while
-  // a follow-up retry is in flight.
-  const fabState: FabState =
-    unackedFailedCount > 0 ? "failed" : activeCount > 0 ? "running" : "idle";
-
-  const triggerLabel =
-    fabState === "failed"
-      ? `Background jobs, ${unackedFailedCount} failed`
-      : fabState === "running"
-        ? `Background jobs, ${activeCount} running`
-        : "Background jobs";
-
-  const fabClass = cn(
-    "relative inline-flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-colors",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-    fabState === "failed" &&
-      "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-    fabState === "running" && "bg-primary text-primary-foreground hover:bg-primary/90",
-    fabState === "idle" && "bg-muted text-muted-foreground hover:bg-accent",
+  const running = jobs.filter((j) => j.status === "running");
+  const pending = jobs.filter((j) => j.status === "pending");
+  const failed = jobs.filter((j) => j.status === "failed" && !j.acknowledged);
+  const completedToday = jobs.filter(
+    (j) =>
+      j.status === "succeeded" ||
+      j.status === "cancelled" ||
+      (j.status === "failed" && j.acknowledged),
   );
+
+  const unackedFailures = failed.length;
+  const liveSummary = useMemo(() => {
+    if (running.length > 0) {
+      return `${running.length} running${
+        pending.length ? ` · ${pending.length} queued` : ""
+      }`;
+    }
+    if (pending.length > 0) return `${pending.length} queued`;
+    if (unackedFailures > 0) return `${unackedFailures} failed`;
+    return "Idle";
+  }, [running.length, pending.length, unackedFailures]);
+
+  async function dismissJob(job: Job) {
+    try {
+      const updated = await api.acknowledgeJob(job.id);
+      setJobs((prev) => prev.map((j) => (j.id === job.id ? updated : j)));
+    } catch {
+      /* swallow */
+    }
+  }
+
+  async function dismissAll() {
+    try {
+      await api.acknowledgeAllFailures();
+      void fetchJobs();
+    } catch {
+      /* swallow */
+    }
+  }
+
+  async function cancelJob(job: Job) {
+    try {
+      const updated = await api.cancelJob(job.id);
+      setJobs((prev) => prev.map((j) => (j.id === job.id ? updated : j)));
+    } catch {
+      /* swallow */
+    }
+  }
+
+  const activeWorkers = running.length;
+  const poolCapacity = Math.max(activeWorkers, 2);
 
   return (
-    <div
-      // Mobile-safe inset: respect the home-indicator and any right-edge
-      // safe area but never sit closer than 16px to the viewport edge.
-      style={{
-        bottom: "max(16px, calc(env(safe-area-inset-bottom) + 16px))",
-        right: "max(16px, calc(env(safe-area-inset-right) + 16px))",
-      }}
-      className="fixed z-50"
-    >
+    <>
+      {/* FAB */}
       <button
-        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-haspopup="dialog"
         aria-expanded={open}
-        aria-controls={POPOVER_ID}
-        aria-label={triggerLabel}
-        className={fabClass}
-      >
-        {fabState === "failed" ? (
-          <AlertTriangle className="size-5" aria-hidden />
-        ) : fabState === "running" ? (
-          <Loader2 className="size-5 motion-safe:animate-spin" aria-hidden />
-        ) : (
-          <Activity className="size-5" aria-hidden />
+        aria-controls="jobs-drawer"
+        className={cn(
+          "fixed bottom-7 right-7 z-40 inline-flex items-center gap-3 rounded-full border bg-gradient-to-br from-surface to-surface-2 px-4 py-2.5 font-display text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-ink shadow-[0_18px_36px_-12px_rgba(0,0,0,0.7)] transition-all hover:-translate-y-0.5",
+          anyActive
+            ? "border-beep shadow-[0_0_0_1px_var(--color-beep),0_0_24px_var(--color-beep-glow),0_18px_36px_-12px_rgba(0,0,0,0.7)]"
+            : unackedFailures > 0
+              ? "border-led shadow-[0_0_0_1px_var(--color-led),0_0_24px_var(--color-led-glow),0_18px_36px_-12px_rgba(0,0,0,0.7)]"
+              : "border-rule-strong",
         )}
-        {fabState !== "idle" ? (
-          <Badge
-            variant={fabState === "failed" ? "destructive" : "secondary"}
-            className="absolute -right-1 -top-1 min-w-5 justify-center px-1 py-0 text-[10px]"
+      >
+        {anyActive ? (
+          <span className="inline-block size-4 animate-spin rounded-full border-[2px] border-rule-strong border-t-beep shadow-[0_0_10px_var(--color-beep-glow)]" />
+        ) : unackedFailures > 0 ? (
+          <AlertTriangle className="size-4 text-led" />
+        ) : (
+          <Activity className="size-4 text-muted" />
+        )}
+        <span>Jobs</span>
+        {running.length + pending.length + unackedFailures > 0 && (
+          <span
+            className={cn(
+              "inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 font-mono text-[0.625rem] font-bold tabular-nums",
+              unackedFailures > 0 ? "bg-led text-bg" : "bg-beep text-bg",
+            )}
           >
-            {fabState === "failed" ? unackedFailedCount : activeCount}
-          </Badge>
-        ) : null}
+            {unackedFailures > 0
+              ? unackedFailures
+              : running.length + pending.length}
+          </span>
+        )}
       </button>
-      {/* aria-live region for assistive tech: announce count changes
-          even when the popover is closed. Empty when idle so screen
-          readers stay quiet on idle screens. */}
-      <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {fabState === "failed"
-          ? `${unackedFailedCount} background job${unackedFailedCount === 1 ? "" : "s"} failed`
-          : fabState === "running"
-            ? `${activeCount} background job${activeCount === 1 ? "" : "s"} running`
-            : ""}
-      </span>
-      {open ? (
+
+      {/* Drawer overlay */}
+      {open && (
         <div
-          ref={popoverRef}
-          id={POPOVER_ID}
-          role="dialog"
-          aria-label="Background jobs"
-          tabIndex={-1}
-          className="absolute bottom-full right-0 z-50 mb-2 flex max-h-[70vh] w-96 max-w-[calc(100vw-2rem)] flex-col rounded-md border border-border bg-popover text-popover-foreground shadow-lg focus:outline-none"
-        >
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <h2 className="text-sm font-semibold tracking-tight">Background jobs</h2>
-            <span className="text-xs text-muted-foreground">
-              {activeCount > 0 ? `${activeCount} active` : "Idle"}
-            </span>
+          aria-hidden
+          className="fixed inset-0 z-30 bg-bg/40"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
+      {/* Drawer */}
+      <aside
+        id="jobs-drawer"
+        aria-label="Background jobs"
+        aria-hidden={!open}
+        className={cn(
+          "fixed bottom-0 right-0 top-0 z-40 flex w-[400px] max-w-[100vw] flex-col border-l border-rule bg-bg-glow transition-transform",
+          open ? "translate-x-0" : "pointer-events-none translate-x-full",
+        )}
+        style={{
+          boxShadow: open ? "-24px 0 48px -12px rgba(0,0,0,0.7)" : "none",
+        }}
+      >
+        <div className="border-b border-rule bg-gradient-to-b from-surface to-bg px-5 py-4">
+          <div className="mb-2 flex items-center gap-3">
+            {anyActive ? (
+              <span
+                aria-hidden
+                className="inline-block size-2 animate-pulse rounded-full bg-beep shadow-[0_0_8px_var(--color-beep-glow)]"
+              />
+            ) : (
+              <span aria-hidden className="inline-block size-2 rounded-full bg-muted" />
+            )}
+            <h2 className="flex-1 font-display text-lg font-bold uppercase tracking-tight text-ink">
+              Jobs
+            </h2>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close drawer"
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted hover:bg-surface-3 hover:text-ink"
+            >
+              <X className="size-4" />
+            </button>
           </div>
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
-            {unackedFailedCount > 0 ? (
-              <section
-                ref={failedSectionRef}
-                aria-label="Failed jobs"
-                className="overflow-hidden rounded-md border border-destructive/40 bg-destructive/5"
-              >
-                <div className="flex items-center justify-between border-b border-destructive/30 bg-destructive/10 px-2 py-1.5">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-destructive">
-                    <AlertTriangle className="size-3.5" aria-hidden />
-                    {unackedFailedCount} failed
-                  </div>
-                  {unackedFailedCount > 1 ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => void dismissAll()}
-                      disabled={bulkAckInFlight}
-                    >
-                      {bulkAckInFlight ? (
-                        <Loader2 className="size-3 motion-safe:animate-spin" aria-hidden />
-                      ) : null}
-                      Dismiss all
-                    </Button>
-                  ) : null}
-                </div>
-                <ul className="flex flex-col gap-1 p-1.5">
-                  {sortedFailed.map((job) => (
-                    <JobRow
-                      key={job.id}
-                      job={job}
-                      cancelBusy={cancelInFlight.has(job.id)}
-                      ackBusy={ackInFlight.has(job.id)}
-                      onCancel={() => cancel(job.id)}
-                      onDismiss={() => dismiss(job.id)}
-                      tone="failed"
-                    />
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-            {sortedActive.length > 0 ? (
-              <section aria-label="Active jobs" className="flex flex-col gap-1">
-                {sortedActive.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    cancelBusy={cancelInFlight.has(job.id)}
-                    ackBusy={false}
-                    onCancel={() => cancel(job.id)}
-                    onDismiss={() => undefined}
-                    tone="default"
-                  />
-                ))}
-              </section>
-            ) : null}
-            {sortedFinished.length > 0 ? (
-              <section aria-label="Finished jobs" className="flex flex-col gap-1">
-                {sortedFinished.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    cancelBusy={false}
-                    ackBusy={false}
-                    onCancel={() => undefined}
-                    onDismiss={() => undefined}
-                    tone="default"
-                  />
-                ))}
-              </section>
-            ) : null}
-            {sortedFailed.length === 0 &&
-            sortedActive.length === 0 &&
-            sortedFinished.length === 0 ? (
-              <p className="py-6 text-center text-xs text-muted-foreground">
-                No recent jobs.
-              </p>
-            ) : null}
+          <div className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted tabular-nums">
+            {liveSummary}
           </div>
+          <WorkerChip activeWorkers={activeWorkers} capacity={poolCapacity} />
         </div>
-      ) : null}
+
+        <div className="flex-1 overflow-y-auto">
+          {error && (
+            <div className="m-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+              {error}
+            </div>
+          )}
+
+          {running.length > 0 && (
+            <Group title="Running" count={running.length} tone="running">
+              {running.map((j) => (
+                <RunningJobRow
+                  key={j.id}
+                  job={j}
+                  onCancel={() => void cancelJob(j)}
+                />
+              ))}
+            </Group>
+          )}
+
+          {failed.length > 0 && (
+            <Group
+              title="Needs attention"
+              count={failed.length}
+              tone="failed"
+              action={
+                failed.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => void dismissAll()}
+                    className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-led hover:text-led-soft"
+                  >
+                    Dismiss all
+                  </button>
+                ) : null
+              }
+            >
+              {failed.map((j) => (
+                <FailedJobRow
+                  key={j.id}
+                  job={j}
+                  onDismiss={() => void dismissJob(j)}
+                />
+              ))}
+            </Group>
+          )}
+
+          {pending.length > 0 && (
+            <Group title="Queued" count={pending.length}>
+              {pending.slice(0, QUEUED_VISIBLE).map((j, i) => (
+                <QueuedJobRow key={j.id} job={j} ahead={i} />
+              ))}
+              {pending.length > QUEUED_VISIBLE && (
+                <div className="px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+                  + {pending.length - QUEUED_VISIBLE} more queued
+                </div>
+              )}
+            </Group>
+          )}
+
+          {completedToday.length > 0 && (
+            <Group
+              title="Completed today"
+              count={completedToday.length}
+              tone="done"
+              collapsedByDefault
+            >
+              {completedToday.slice(0, COMPLETED_VISIBLE).map((j) => (
+                <DoneJobRow key={j.id} job={j} />
+              ))}
+              {completedToday.length > COMPLETED_VISIBLE && (
+                <div className="px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+                  + {completedToday.length - COMPLETED_VISIBLE} more
+                </div>
+              )}
+            </Group>
+          )}
+
+          {jobs.length === 0 && (
+            <div className="px-5 py-10 text-center text-sm text-muted">
+              No background work right now.
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-rule bg-surface px-5 py-3 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          Auto-retry failed source-bound jobs after relink.
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Worker chip                                                                */
+/* -------------------------------------------------------------------------- */
+
+function WorkerChip({
+  activeWorkers,
+  capacity,
+}: {
+  activeWorkers: number;
+  capacity: number;
+}) {
+  return (
+    <div className="mt-3 flex items-center gap-3 rounded-lg border border-rule-strong bg-surface-2 px-3 py-2">
+      <span className="inline-flex size-7 items-center justify-center rounded-md bg-bg text-beep">
+        <Server className="size-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em] text-ink">
+          Worker pool &middot; Local
+        </div>
+        <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {activeWorkers} of {capacity} active
+        </div>
+      </div>
     </div>
   );
 }
 
-interface JobRowProps {
-  job: Job;
-  cancelBusy: boolean;
-  ackBusy: boolean;
-  onCancel: () => void;
-  onDismiss: () => void;
-  tone: "default" | "failed";
+/* -------------------------------------------------------------------------- */
+/* Group                                                                      */
+/* -------------------------------------------------------------------------- */
+
+function Group({
+  title,
+  count,
+  tone,
+  action,
+  collapsedByDefault,
+  children,
+}: {
+  title: string;
+  count: number;
+  tone?: "running" | "failed" | "done";
+  action?: ReactNode;
+  collapsedByDefault?: boolean;
+  children: ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(!!collapsedByDefault);
+  return (
+    <div className="border-b border-rule">
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left font-mono text-[0.6875rem] font-bold uppercase tracking-[0.12em] text-ink hover:bg-surface-2"
+      >
+        {title}
+        <span
+          className={cn(
+            "inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[0.625rem] font-bold tabular-nums",
+            tone === "running" && "bg-beep text-bg",
+            tone === "failed" && "bg-led text-bg",
+            tone === "done" && "bg-done text-bg",
+            !tone && "bg-surface-3 text-ink-2",
+          )}
+        >
+          {count}
+        </span>
+        {action && (
+          <span className="ml-auto inline-flex items-center gap-2">{action}</span>
+        )}
+      </button>
+      {!collapsed && <div>{children}</div>}
+    </div>
+  );
 }
 
-function JobRow({ job, cancelBusy, ackBusy, onCancel, onDismiss, tone }: JobRowProps) {
-  const active = isActive(job);
-  const showDismiss = job.status === "failed" && !job.acknowledged;
-  const dismissedTag =
-    job.status === "failed" && job.acknowledged ? " (dismissed)" : "";
-  const progressPct =
-    job.progress != null ? Math.round(Math.min(1, Math.max(0, job.progress)) * 100) : null;
-  const statusLine = job.cancel_requested
-    ? "Cancelled by user"
-    : job.status === "failed"
-      ? `${job.error ?? "Failed"}${dismissedTag}`
-      : (job.message ?? job.status);
+/* -------------------------------------------------------------------------- */
+/* Job row variants                                                           */
+/* -------------------------------------------------------------------------- */
+
+function JobRowHead({
+  job,
+  badge,
+  badgeTone,
+  trailing,
+}: {
+  job: Job;
+  badge: string;
+  badgeTone: "running" | "failed" | "queued" | "done";
+  trailing?: ReactNode;
+}) {
   return (
-    <li
-      className={cn(
-        "rounded-md border p-2",
-        tone === "failed"
-          ? "border-destructive/30 bg-card"
-          : "border-border/60 bg-card/50",
-        // Acknowledged failures live in the regular finished section but
-        // visually fade so the user can tell at a glance which entries
-        // are stale.
-        job.status === "failed" && job.acknowledged && "opacity-60",
-      )}
-    >
-      <div className="flex items-start gap-2">
-        <StatusIcon job={job} className="mt-0.5" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-xs font-medium">{jobLabel(job)}</p>
-            {progressPct != null && active ? (
-              <span className="text-[10px] tabular-nums text-muted-foreground">
-                {progressPct}%
-              </span>
-            ) : null}
-          </div>
-          <p className="truncate text-[11px] text-muted-foreground">{statusLine}</p>
-          {active && progressPct != null ? (
-            <div
-              className="mt-1 h-1 w-full overflow-hidden rounded bg-muted"
-              role="progressbar"
-              aria-valuenow={progressPct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <div
-                className="h-full bg-primary transition-[width]"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
-          ) : null}
+    <div className="flex items-start gap-2.5">
+      <span
+        className={cn(
+          "inline-flex size-7 shrink-0 items-center justify-center rounded-md border",
+          badgeTone === "running" && "border-beep/40 bg-beep-tint text-beep",
+          badgeTone === "failed" && "border-led/40 bg-led/10 text-led",
+          badgeTone === "queued" && "border-rule bg-surface-3 text-muted",
+          badgeTone === "done" && "border-done/40 bg-done/10 text-done",
+        )}
+      >
+        {KIND_ICON[job.kind] ?? <Activity className="size-3.5" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-display text-[0.8125rem] font-semibold uppercase tracking-[0.04em] text-ink">
+          {kindLabel(job.kind)}
         </div>
-        {active ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 shrink-0"
-            disabled={cancelBusy || job.cancel_requested}
-            onClick={onCancel}
-            aria-label={`Cancel ${jobLabel(job)}`}
-            title="Cancel"
-          >
-            {cancelBusy ? (
-              <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden />
-            ) : (
-              <X className="size-3.5" aria-hidden />
-            )}
-          </Button>
-        ) : showDismiss ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 shrink-0 px-2 text-[11px]"
-            disabled={ackBusy}
-            onClick={onDismiss}
-            aria-label={`Dismiss failure: ${jobLabel(job)}`}
-          >
-            {ackBusy ? (
-              <Loader2 className="size-3 motion-safe:animate-spin" aria-hidden />
-            ) : null}
-            Dismiss
-          </Button>
-        ) : null}
+        <div className="mt-0.5 truncate font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {jobTarget(job) || "(no target)"}
+        </div>
       </div>
-    </li>
+      <span
+        className={cn(
+          "rounded-full px-2 py-0.5 font-display text-[0.5625rem] font-bold uppercase tracking-[0.14em]",
+          badgeTone === "running" && "bg-beep/10 text-beep",
+          badgeTone === "failed" && "bg-led/10 text-led",
+          badgeTone === "queued" && "bg-surface-3 text-subtle",
+          badgeTone === "done" && "bg-done/10 text-done",
+        )}
+      >
+        {badge}
+      </span>
+      {trailing}
+    </div>
   );
+}
+
+function RunningJobRow({
+  job,
+  onCancel,
+}: {
+  job: Job;
+  onCancel: () => void;
+}) {
+  const pct =
+    job.progress != null ? Math.max(0, Math.min(100, job.progress * 100)) : 0;
+  return (
+    <div className="border-t border-rule px-4 py-3 first:border-t-0">
+      <JobRowHead
+        job={job}
+        badge={job.cancel_requested ? "Cancelling" : "Running"}
+        badgeTone="running"
+        trailing={
+          !job.cancel_requested && (
+            <button
+              type="button"
+              onClick={onCancel}
+              title="Cancel job"
+              aria-label="Cancel job"
+              className="inline-flex size-6 items-center justify-center rounded text-subtle hover:text-led"
+            >
+              <Pause className="size-3.5" />
+            </button>
+          )
+        }
+      />
+      <div className="mt-2 flex items-center gap-3">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-surface-3">
+          <span
+            className={cn(
+              "block h-full rounded-full bg-beep shadow-[0_0_6px_var(--color-beep-glow)] transition-all",
+              !job.progress && "animate-pulse",
+            )}
+            style={{ width: job.progress != null ? `${pct}%` : "30%" }}
+          />
+        </div>
+        {job.message && (
+          <span className="font-mono text-[0.625rem] text-muted">
+            {job.message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FailedJobRow({
+  job,
+  onDismiss,
+}: {
+  job: Job;
+  onDismiss: () => void;
+}) {
+  const sourceUnreachable = job.error?.toLowerCase().includes("unreachable");
+  return (
+    <div className="border-t border-rule bg-led/[0.04] px-4 py-3 first:border-t-0">
+      <JobRowHead
+        job={job}
+        badge={job.cancel_requested ? "Cancelled" : "Failed"}
+        badgeTone="failed"
+      />
+      {job.error && (
+        <div className="mt-2 rounded-md border border-led/30 bg-led/10 px-3 py-2 text-[0.75rem] leading-relaxed text-ink-2">
+          <b className="font-bold text-led">{job.error}</b>
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {sourceUnreachable && (
+          <button
+            type="button"
+            disabled
+            title="Inline relink lands with the match-settings redesign"
+            className="inline-flex items-center gap-1.5 rounded-md border border-led/40 bg-led/10 px-2.5 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-led opacity-50"
+          >
+            Relink source
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-2.5 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-ink-2 hover:bg-surface-3 hover:text-ink"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QueuedJobRow({ job, ahead }: { job: Job; ahead: number }) {
+  return (
+    <div className="border-t border-rule px-4 py-3 first:border-t-0">
+      <JobRowHead job={job} badge="Queued" badgeTone="queued" />
+      <div className="mt-1.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+        {ahead === 0 ? "Next up" : `${ahead} ahead`}
+      </div>
+    </div>
+  );
+}
+
+function DoneJobRow({ job }: { job: Job }) {
+  const finished = job.finished_at ? new Date(job.finished_at) : null;
+  return (
+    <div className="border-t border-rule px-4 py-3 first:border-t-0">
+      <JobRowHead
+        job={job}
+        badge={
+          job.status === "succeeded"
+            ? "Done"
+            : job.status === "cancelled"
+              ? "Cancelled"
+              : "Dismissed"
+        }
+        badgeTone="done"
+      />
+      <div className="mt-1.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+        {finished ? `${formatRelative(finished)} ago` : ""}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
+}
+
+function formatRelative(then: Date): string {
+  const ms = Date.now() - then.getTime();
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return `${h} hr`;
 }
