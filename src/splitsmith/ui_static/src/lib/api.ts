@@ -1094,11 +1094,57 @@ export interface ServerHealth {
 
 /** One entry from ``GET /api/user/recent-projects``. ``last_opened_at``
  *  is an ISO-8601 UTC timestamp the picker uses to sort. ``path`` is
- *  resolved server-side; we don't normalise it client-side. */
+ *  resolved server-side; we don't normalise it client-side. ``kind``
+ *  was added in #320 -- ``null`` covers entries written before the
+ *  field existed (the picker resolves them on open). */
 export interface RecentProject {
   path: string;
   name: string;
   last_opened_at: string;
+  kind?: "match" | "legacy" | null;
+}
+
+/** Detailed RecentProject with on-disk metadata (`?detail=true`, #322). */
+export interface RecentProjectDetail {
+  path: string;
+  name: string;
+  last_opened_at: string;
+  kind: "match" | "legacy" | "missing" | "unknown";
+  shooter_count: number;
+  stage_count: number;
+  stages_audited: number;
+  match_date: string | null;
+  club: string | null;
+  last_modified_at: string | null;
+  status: "in_progress" | "exported" | "archived" | "unknown";
+  manual: boolean;
+}
+
+export interface CreateMatchStageDraft {
+  stage_number: number;
+  stage_name: string;
+  expected_rounds?: number | null;
+  target_type?: string | null;
+}
+
+export interface CreateMatchManualBody {
+  name: string;
+  project_folder: string;
+  match_date?: string | null;
+  club?: string | null;
+  match_type?: string | null;
+  default_division?: string | null;
+  stages: CreateMatchStageDraft[];
+  primary_shooter: { name: string; division?: string | null };
+}
+
+export interface CreateMatchScoreboardBody {
+  project_folder: string;
+  name: string;
+  match_id: number;
+  content_type: number;
+  primary_shooter_name: string;
+  primary_shooter_division?: string | null;
 }
 
 class ApiError extends Error {
@@ -1562,6 +1608,30 @@ export const api = {
     request<{ projects: RecentProject[] }>("/api/user/recent-projects").then(
       (r) => r.projects,
     ),
+
+  /** Enriched recent-projects list with on-disk metadata (kind, shooters,
+   *  stages, status). Used by the redesigned match picker (#322). */
+  getRecentProjectsDetail: () =>
+    request<{ projects: RecentProjectDetail[] }>(
+      "/api/user/recent-projects?detail=true",
+    ).then((r) => r.projects),
+
+  /** Create a new match from the manual variant of the create-match form
+   *  (#322). Scaffolds match.json + first shooter and binds. */
+  createMatchManual: (body: CreateMatchManualBody) =>
+    request<ServerHealth>("/api/match/create-manual", {
+      method: "POST",
+      json: body,
+    }),
+
+  /** Create a new match from a picked scoreboard match (#322). The SPA
+   *  follows up with /api/scoreboard/fetch + /select-shooter to populate
+   *  stages and pin the primary competitor. */
+  createMatchFromScoreboard: (body: CreateMatchScoreboardBody) =>
+    request<ServerHealth>("/api/match/create-from-scoreboard", {
+      method: "POST",
+      json: body,
+    }),
 
   /** Drop one entry from the recent list (forget). Returns the updated
    *  list so the picker can re-render without a follow-up GET. */

@@ -389,8 +389,8 @@ def slugify(name: str) -> str:
     Strips accents, keeps ``[a-z0-9]``, collapses runs of separators to a
     single dash. Falls back to ``"shooter"`` for empty/garbage input.
     """
-    import unicodedata
     import re
+    import unicodedata
 
     normalized = unicodedata.normalize("NFKD", name)
     ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
@@ -433,7 +433,7 @@ class MergePlan(BaseModel):
     scoreboard_content_type: int | None
     match_date: date | None
     stages: list[MatchStageDefinition]
-    shooter_moves: list["ShooterMove"]
+    shooter_moves: list[ShooterMove]
 
 
 class ShooterMove(BaseModel):
