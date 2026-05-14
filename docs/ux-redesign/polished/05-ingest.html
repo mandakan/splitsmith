@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Add footage &middot; VADS Easter Shoot 2026</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Ingest (post-drop review)
+   Direction: Shot Timer (extends polished 02/03/04).
+   Storage choice (reference vs copy), camera inference,
+   auto-match by timestamp, per-video role toggles.
+   ============================================================ */
+
+:root {
+  --bg: #0A0B0D; --bg-glow: #0E1014;
+  --surface: #14171C; --surface-2: #1A1E24; --surface-3: #232831; --surface-4: #2A303A;
+  --rule: #262B33; --rule-strong: #3A4049;
+  --ink: #F4F4F5; --ink-2: #C9CCD2; --muted: #8E939B; --subtle: #6B7079; --whisper: #4B5058;
+  --led: #FF2D2D; --led-soft: #FF5555; --led-deep: #B91C1C; --led-glow: rgba(255,45,45,0.30); --led-tint: rgba(255,45,45,0.10);
+  --live: #FBBF24; --live-glow: rgba(251,191,36,0.30); --live-tint: rgba(251,191,36,0.10);
+  --done: #4ADE80; --done-glow: rgba(74,222,128,0.30); --done-tint: rgba(74,222,128,0.10);
+  --beep: #06B6D4; --beep-tint: rgba(6,182,212,0.10);
+  --manual: #A78BFA; --manual-tint: rgba(167,139,250,0.12);
+  --sans: 'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: var(--sans); font-weight: 400; font-size: 0.9375rem; line-height: 1.55; color: var(--ink); background: var(--bg); letter-spacing: -0.003em; -webkit-font-smoothing: antialiased; min-height: 100vh;
+  background-image: radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* Shell */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--led), var(--led-deep)); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); }
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* Page */
+main { max-width: 1240px; margin: 0 auto; padding: 32px 28px 100px; }
+.page-head { margin-bottom: 22px; }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--led); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.25rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 10px; }
+.page-sub { color: var(--muted); font-size: 0.875rem; max-width: 620px; }
+
+/* Shooter banner */
+.shooter-banner {
+  display: flex; align-items: center; gap: 14px;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  position: relative;
+  overflow: hidden;
+}
+.shooter-banner::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--led); box-shadow: 0 0 12px var(--led-glow); }
+.shooter-banner .sb-av { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); }
+.shooter-banner .info { flex: 1; }
+.shooter-banner .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--subtle); margin-bottom: 4px; }
+.shooter-banner .name { font-family: var(--display); font-weight: 700; font-size: 1rem; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); display: inline-flex; align-items: center; gap: 10px; }
+.you-tag { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.14em; background: var(--led); color: var(--bg); padding: 2px 7px; border-radius: 4px; box-shadow: 0 0 8px var(--led-glow); }
+.shooter-banner .meta { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 3px; font-feature-settings: var(--feat-num); }
+.shooter-banner .switch { font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--led); }
+.shooter-banner .switch:hover { color: var(--led-soft); }
+
+/* Card */
+.card { background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; margin-bottom: 18px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.card-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.card-head .title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+.card-head .title .count { font-family: var(--mono); font-size: 0.625rem; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0.04em; text-transform: lowercase; }
+
+/* Drop summary */
+.drop-summary {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px 22px;
+  background: linear-gradient(90deg, var(--led-tint), transparent);
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+.drop-summary::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--led); box-shadow: 0 0 12px var(--led-glow); }
+.drop-summary .ic { width: 44px; height: 44px; border-radius: 10px; background: var(--led); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 16px var(--led-glow); flex-shrink: 0; }
+.drop-summary .text { flex: 1; }
+.drop-summary .text .row { font-family: var(--display); font-weight: 700; font-size: 0.9375rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); font-feature-settings: var(--feat-num); }
+.drop-summary .text .row b { color: var(--led); }
+.drop-summary .text .path { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--muted); margin-top: 4px; font-feature-settings: var(--feat-num); }
+.drop-summary .add-more { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; background: var(--surface-2); border: 1px solid var(--rule-strong); color: var(--ink); border-radius: 7px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.drop-summary .add-more:hover { background: var(--surface-3); border-color: var(--ink-2); }
+
+/* Storage choice */
+.storage-choice { padding: 22px; border-bottom: 1px solid var(--rule); }
+.storage-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.storage-head .title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+.storage-head .help-link { font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--led); }
+.storage-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.storage-option {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 18px;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 11px;
+  background: var(--bg-glow);
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.storage-option:hover { border-color: var(--ink-2); }
+.storage-option.selected { border-color: var(--led); background: var(--led-tint); box-shadow: 0 0 0 1px var(--led-deep), 0 0 18px var(--led-glow); }
+.storage-option.selected::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--led); box-shadow: 0 0 12px var(--led-glow); }
+.storage-option .radio { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--surface); margin-top: 2px; position: relative; transition: all 180ms var(--ease); }
+.storage-option.selected .radio { border-color: var(--led); background: var(--led); box-shadow: 0 0 10px var(--led-glow); }
+.storage-option.selected .radio::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; border-radius: 50%; background: var(--bg); }
+.storage-option .opt-title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.storage-option.selected .opt-title { color: var(--led); }
+.recommended { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.14em; background: var(--led); color: var(--bg); padding: 2px 7px; border-radius: 4px; box-shadow: 0 0 8px var(--led-glow); }
+.storage-option .opt-desc { font-size: 0.8125rem; color: var(--muted); margin-bottom: 12px; line-height: 1.55; }
+.opt-implications { display: flex; flex-direction: column; gap: 6px; }
+.opt-row { display: flex; align-items: flex-start; gap: 8px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--muted); font-feature-settings: var(--feat-num); line-height: 1.55; }
+.opt-row svg.ok { color: var(--done); flex-shrink: 0; margin-top: 2px; }
+.opt-row svg.warn { color: var(--live); flex-shrink: 0; margin-top: 2px; }
+.opt-row b { color: var(--ink); }
+.opt-row .path { color: var(--ink-2); }
+.storage-foot { margin-top: 14px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.04em; color: var(--subtle); }
+.storage-foot a { color: var(--led); }
+
+/* Cameras */
+.cameras-body { padding: 18px 20px; }
+.cameras-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.camera-card { display: flex; align-items: center; gap: 14px; background: var(--bg-glow); border: 1px solid var(--rule); border-radius: 11px; padding: 14px 16px; }
+.camera-icon { width: 42px; height: 42px; border-radius: 9px; background: var(--surface-3); border: 1px solid var(--rule-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--ink-2); flex-shrink: 0; }
+.camera-card .info { flex: 1; min-width: 0; }
+.camera-card .label-row { display: flex; align-items: center; gap: 10px; }
+.camera-card .name { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); }
+.role-pill { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; padding: 3px 8px; border-radius: 4px; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid transparent; }
+.role-pill.primary { background: var(--led-tint); color: var(--led); border-color: var(--led-deep); }
+.role-pill.secondary { background: var(--surface-3); color: var(--ink-2); border-color: var(--rule-strong); }
+.camera-card .stats { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 6px; font-feature-settings: var(--feat-num); }
+.camera-card .stats .sep { color: var(--whisper); margin: 0 4px; }
+.camera-card .edit-btn { font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.camera-card .edit-btn:hover { color: var(--led); }
+
+/* Stage assignments */
+.confidence-summary { display: inline-flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.conf-badge { display: inline-flex; align-items: center; gap: 6px; }
+.conf-badge .d { width: 6px; height: 6px; border-radius: 50%; background: var(--done); box-shadow: 0 0 5px var(--done-glow); }
+.conf-badge.med .d { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.conf-badge.low .d { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+.conf-badge b { color: var(--ink); font-weight: 700; }
+
+.stage-block { border-bottom: 1px solid var(--rule); }
+.stage-block:last-child { border-bottom: 0; }
+.stage-head-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+}
+.stage-num-pill {
+  width: 32px; height: 28px;
+  border-radius: 6px;
+  background: var(--led-tint);
+  color: var(--led);
+  border: 1px solid var(--led-deep);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+}
+.stage-num-pill.mid { background: var(--surface-3); color: var(--muted); border-color: var(--rule-strong); }
+.stage-head-row .stage-name { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
+.stage-head-row .stage-name.mid { color: var(--muted); }
+.stage-head-row .stage-meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.stage-head-row .stage-tag {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  background: var(--done-tint); color: var(--done); border: 1px solid rgba(74,222,128,0.35);
+  padding: 3px 9px; border-radius: 4px;
+}
+.stage-head-row .stage-tag.warn { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.4); }
+.stage-head-row .stage-tag .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; opacity: 0.8; }
+
+.video-row {
+  display: grid;
+  grid-template-columns: 36px minmax(220px, 1.6fr) 130px 150px 250px 100px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 20px;
+  font-size: 0.8125rem;
+  border-bottom: 1px solid var(--rule);
+  transition: background 120ms var(--ease);
+}
+.video-row:last-child { border-bottom: 0; }
+.video-row:hover { background: var(--surface-2); }
+.video-row .thumb { width: 32px; height: 32px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink); flex-shrink: 0; }
+.video-row.cam-a .thumb { background: linear-gradient(135deg, #2A0B0B, var(--led-deep)); border: 1px solid rgba(255,45,45,0.4); }
+.video-row.cam-b .thumb { background: linear-gradient(135deg, #0B2026, var(--beep)); border: 1px solid rgba(6,182,212,0.4); }
+.video-row .filename { font-family: var(--mono); font-size: 0.75rem; font-weight: 600; color: var(--ink); font-feature-settings: var(--feat-num); }
+.video-row .filename .sub { font-family: var(--mono); font-size: 0.5625rem; font-weight: 500; color: var(--muted); margin-top: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+.video-row .props { font-family: var(--mono); font-size: 0.6875rem; color: var(--muted); letter-spacing: 0.04em; font-feature-settings: var(--feat-num); }
+.video-row select {
+  padding: 7px 11px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  min-height: 34px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238E939B' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  transition: all 150ms var(--ease);
+}
+.video-row select:focus { border-color: var(--led); box-shadow: 0 0 0 2px var(--led-tint); }
+.role-toggles { display: inline-flex; gap: 3px; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 7px; padding: 2px; }
+.role-toggles button {
+  padding: 5px 11px;
+  border-radius: 5px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: all 150ms var(--ease);
+}
+.role-toggles button:hover { color: var(--ink); }
+.role-toggles button.on.primary { background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); }
+.role-toggles button.on.secondary { background: var(--surface-4); color: var(--ink); }
+.role-toggles button.on.ignore { background: var(--surface-4); color: var(--muted); text-decoration: line-through; }
+
+.match-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--done);
+  font-feature-settings: var(--feat-num);
+  justify-content: flex-end;
+}
+.match-badge .d { width: 6px; height: 6px; border-radius: 50%; background: var(--done); box-shadow: 0 0 5px var(--done-glow); }
+.match-badge.med { color: var(--live); }
+.match-badge.med .d { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.match-badge.low { color: var(--led); }
+.match-badge.low .d { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+
+/* Unassigned */
+.unassigned-section { background: linear-gradient(90deg, rgba(251,191,36,0.06), transparent); border-top: 1px solid rgba(251,191,36,0.3); border-bottom: 1px solid rgba(251,191,36,0.3); }
+.unassigned-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 20px;
+}
+.unassigned-head .ic { width: 32px; height: 32px; border-radius: 8px; background: var(--live); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; box-shadow: 0 0 12px var(--live-glow); flex-shrink: 0; }
+.unassigned-head .ua-title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--live); }
+.unassigned-head .ua-sub { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+/* Footer actions */
+.footer-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+}
+.footer-actions .summary { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.footer-actions .summary b { color: var(--ink); font-weight: 700; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 8px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 42px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--led); color: var(--bg); border-color: var(--led); box-shadow: 0 0 0 1px var(--led), 0 0 18px var(--led-glow); }
+.btn.primary:hover { background: var(--led-soft); border-color: var(--led-soft); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: var(--surface-2); }
+
+/* Annotation note */
+.annot {
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: var(--live-tint);
+  border: 1px dashed rgba(251,191,36,0.4);
+  border-radius: 11px;
+  color: var(--live);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+.annot b { color: var(--live); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; }
+
+/* Jobs FAB */
+.jobs-fab {
+  position: fixed;
+  right: 28px; bottom: 28px;
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 11px 16px;
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  color: var(--ink);
+  border: 1px solid var(--led-deep);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px var(--led-deep), 0 0 28px var(--led-glow), 0 18px 36px -12px rgba(0,0,0,0.7);
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  z-index: 80;
+}
+.jobs-fab .spinner {
+  width: 16px; height: 16px;
+  border: 2px solid var(--rule-strong);
+  border-top-color: var(--led);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  box-shadow: 0 0 10px var(--led-glow);
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.jobs-fab .count { background: var(--led); color: var(--bg); padding: 3px 9px; border-radius: 999px; font-family: var(--mono); font-size: 0.625rem; font-weight: 700; font-feature-settings: var(--feat-num); letter-spacing: 0.04em; }
+
+.footnote { margin-top: 24px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--whisper); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat, .jobs-fab .spinner { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile"><span class="av">MA</span><span class="label">Mathias A.</span></div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <a href="02-match-overview.html">VADS Easter Shoot 2026</a>
+        <span class="sep">/</span>
+        <span class="current">Add footage</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-head">
+    <div class="page-kicker">Ingest &middot; auto-matched</div>
+    <h1 class="page-h1">Add footage</h1>
+    <p class="page-sub">Auto-matched to stages by recording timestamp. Review the assignments and confirm to start processing.</p>
+  </div>
+
+  <!-- Shooter banner -->
+  <div class="shooter-banner">
+    <span class="sb-av">MA</span>
+    <div class="info">
+      <div class="lbl">Adding footage for</div>
+      <div class="name">Mathias Axell <span class="you-tag">YOU</span></div>
+      <div class="meta">Production Optics &middot; Bromma PK</div>
+    </div>
+    <button class="switch">Switch shooter &darr;</button>
+  </div>
+
+  <div class="card">
+
+    <!-- Drop summary -->
+    <div class="drop-summary">
+      <span class="ic">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7l9-4 9 4M3 7v10l9 4 9-4V7M3 7l9 4 9-4"/></svg>
+      </span>
+      <div class="text">
+        <div class="row"><b>23 videos</b> detected &middot; <b>2 cameras</b> inferred &middot; <b>14.2 GB</b> total</div>
+        <div class="path">~/SD-card-04-12-2026/dcim/</div>
+      </div>
+      <button class="add-more">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        Add more
+      </button>
+    </div>
+
+    <!-- Storage choice -->
+    <div class="storage-choice">
+      <div class="storage-head">
+        <div class="title">How should these videos be stored?</div>
+        <a class="help-link">Learn about backup &rarr;</a>
+      </div>
+      <div class="storage-options">
+
+        <div class="storage-option selected">
+          <div class="radio"></div>
+          <div>
+            <div class="opt-title">Reference in place <span class="recommended">Default</span></div>
+            <div class="opt-desc">Keep originals where they are. Splitsmith only stores links.</div>
+            <div class="opt-implications">
+              <div class="opt-row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5L20 7"/></svg>
+                <span>No extra disk space &middot; <b>0 GB added</b></span>
+              </div>
+              <div class="opt-row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5L20 7"/></svg>
+                <span>Faster -- no copy step before processing</span>
+              </div>
+              <div class="opt-row">
+                <svg class="warn" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 9v4M12 17v.5"/><circle cx="12" cy="12" r="9"/></svg>
+                <span>If sources move or unmount, the project will need re-linking</span>
+              </div>
+              <div class="opt-row">
+                <span style="margin-left: 21px;">Source: <span class="path">~/SD-card-04-12-2026/dcim/</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="storage-option">
+          <div class="radio"></div>
+          <div>
+            <div class="opt-title">Copy into project folder</div>
+            <div class="opt-desc">Self-contained project. Originals can be removed afterwards.</div>
+            <div class="opt-implications">
+              <div class="opt-row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5L20 7"/></svg>
+                <span>Project is portable &middot; backup includes raw footage</span>
+              </div>
+              <div class="opt-row">
+                <svg class="ok" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5L20 7"/></svg>
+                <span>Survives unmounting source media</span>
+              </div>
+              <div class="opt-row">
+                <svg class="warn" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 9v4M12 17v.5"/><circle cx="12" cy="12" r="9"/></svg>
+                <span>Adds <b>14.2 GB</b> to disk &middot; ~3 min copy</span>
+              </div>
+              <div class="opt-row">
+                <span style="margin-left: 21px;">Target: <span class="path">~/Splitsmith/vads-easter-shoot-2026/raw/</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="storage-foot">Set a project-wide default in <a>Settings -> Storage</a>. Change per ingest if needed.</div>
+    </div>
+
+    <!-- Cameras -->
+    <div class="card-head">
+      <div class="title">Cameras <span class="count">detected from filename prefix</span></div>
+    </div>
+    <div class="cameras-body">
+      <div class="cameras-grid">
+        <div class="camera-card">
+          <span class="camera-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg>
+          </span>
+          <div class="info">
+            <div class="label-row">
+              <span class="name">Camera A</span>
+              <span class="role-pill primary">Primary</span>
+            </div>
+            <div class="stats">12 files <span class="sep">&middot;</span> GoPro Hero 11 <span class="sep">&middot;</span> Chest mount</div>
+          </div>
+          <button class="edit-btn">Edit &rarr;</button>
+        </div>
+        <div class="camera-card">
+          <span class="camera-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg>
+          </span>
+          <div class="info">
+            <div class="label-row">
+              <span class="name">Camera B</span>
+              <span class="role-pill secondary">Secondary</span>
+            </div>
+            <div class="stats">11 files <span class="sep">&middot;</span> GoPro Hero 9 <span class="sep">&middot;</span> Helmet mount</div>
+          </div>
+          <button class="edit-btn">Edit &rarr;</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Stage assignments -->
+  <div class="card">
+
+    <div class="card-head">
+      <div class="title">Stage assignments <span class="count">auto-matched by timestamp &middot; review and confirm</span></div>
+      <div class="confidence-summary">
+        <span class="conf-badge"><span class="d"></span><b>22</b> high</span>
+        <span class="conf-badge med"><span class="d"></span><b>1</b> low</span>
+      </div>
+    </div>
+
+    <!-- Stage 1 -->
+    <div class="stage-block">
+      <div class="stage-head-row">
+        <span class="stage-num-pill">01</span>
+        <span class="stage-name">Snake</span>
+        <span class="stage-meta">12 expected shots</span>
+        <span class="stage-tag"><span class="d"></span>2 cameras assigned</span>
+      </div>
+      <div class="video-row cam-a">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010032.MP4<div class="sub">Camera A &middot; chest</div></div>
+        <span class="props">0:42 &middot; 14:23:08</span>
+        <select>
+          <option>Stage 01 -- Snake</option>
+          <option>Stage 02 -- Tower</option>
+          <option>Stage 03 -- Plates</option>
+          <option>Unassigned</option>
+        </select>
+        <span class="role-toggles">
+          <button class="on primary">Primary</button>
+          <button>Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.96</span>
+      </div>
+      <div class="video-row cam-b">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010099.MP4<div class="sub">Camera B &middot; helmet</div></div>
+        <span class="props">0:44 &middot; 14:23:10</span>
+        <select><option>Stage 01 -- Snake</option></select>
+        <span class="role-toggles">
+          <button>Primary</button>
+          <button class="on secondary">Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.94</span>
+      </div>
+    </div>
+
+    <!-- Stage 2 -->
+    <div class="stage-block">
+      <div class="stage-head-row">
+        <span class="stage-num-pill">02</span>
+        <span class="stage-name">Tower</span>
+        <span class="stage-meta">16 expected shots</span>
+        <span class="stage-tag"><span class="d"></span>2 cameras assigned</span>
+      </div>
+      <div class="video-row cam-a">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010033.MP4<div class="sub">Camera A &middot; chest</div></div>
+        <span class="props">0:58 &middot; 14:31:42</span>
+        <select><option>Stage 02 -- Tower</option></select>
+        <span class="role-toggles">
+          <button class="on primary">Primary</button>
+          <button>Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.95</span>
+      </div>
+      <div class="video-row cam-b">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010100.MP4<div class="sub">Camera B &middot; helmet</div></div>
+        <span class="props">0:59 &middot; 14:31:44</span>
+        <select><option>Stage 02 -- Tower</option></select>
+        <span class="role-toggles">
+          <button>Primary</button>
+          <button class="on secondary">Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.93</span>
+      </div>
+    </div>
+
+    <!-- Stage 3 (warn) -->
+    <div class="stage-block">
+      <div class="stage-head-row">
+        <span class="stage-num-pill">03</span>
+        <span class="stage-name">Plates</span>
+        <span class="stage-meta">6 plates expected</span>
+        <span class="stage-tag warn"><span class="d"></span>Low-confidence cam-b match</span>
+      </div>
+      <div class="video-row cam-a">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010034.MP4<div class="sub">Camera A &middot; chest</div></div>
+        <span class="props">0:21 &middot; 14:42:17</span>
+        <select><option>Stage 03 -- Plates</option></select>
+        <span class="role-toggles">
+          <button class="on primary">Primary</button>
+          <button>Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.91</span>
+      </div>
+      <div class="video-row cam-b">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010101.MP4<div class="sub">Camera B &middot; helmet</div></div>
+        <span class="props">0:35 &middot; 14:43:02</span>
+        <select><option>Stage 03 -- Plates</option><option>Stage 04 -- Mover</option></select>
+        <span class="role-toggles">
+          <button>Primary</button>
+          <button class="on secondary">Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge med"><span class="d"></span>0.58</span>
+      </div>
+    </div>
+
+    <!-- Collapsed middle -->
+    <div class="stage-block">
+      <div class="stage-head-row">
+        <span class="stage-num-pill mid">...</span>
+        <span class="stage-name mid">Stages 04 - 11</span>
+        <span class="stage-meta">16 more videos auto-matched</span>
+        <span class="stage-tag"><span class="d"></span>All confirmed</span>
+      </div>
+    </div>
+
+    <!-- Stage 12 -->
+    <div class="stage-block">
+      <div class="stage-head-row">
+        <span class="stage-num-pill">12</span>
+        <span class="stage-name">Final</span>
+        <span class="stage-meta">30 expected shots</span>
+        <span class="stage-tag"><span class="d"></span>2 cameras assigned</span>
+      </div>
+      <div class="video-row cam-a">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010043.MP4<div class="sub">Camera A &middot; chest</div></div>
+        <span class="props">2:14 &middot; 16:08:55</span>
+        <select><option>Stage 12 -- Final</option></select>
+        <span class="role-toggles">
+          <button class="on primary">Primary</button>
+          <button>Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.97</span>
+      </div>
+      <div class="video-row cam-b">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010110.MP4<div class="sub">Camera B &middot; helmet</div></div>
+        <span class="props">2:16 &middot; 16:08:57</span>
+        <select><option>Stage 12 -- Final</option></select>
+        <span class="role-toggles">
+          <button>Primary</button>
+          <button class="on secondary">Secondary</button>
+          <button>Ignore</button>
+        </span>
+        <span class="match-badge"><span class="d"></span>0.96</span>
+      </div>
+    </div>
+
+    <!-- Unassigned -->
+    <div class="unassigned-section">
+      <div class="unassigned-head">
+        <span class="ic">!</span>
+        <div>
+          <div class="ua-title">Unassigned &middot; 2 videos</div>
+          <div class="ua-sub">No stage matched by timestamp -- likely pre-match or post-match footage. Assign manually or leave ignored.</div>
+        </div>
+      </div>
+      <div class="video-row cam-a">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010031.MP4<div class="sub">Camera A &middot; chest</div></div>
+        <span class="props">0:15 &middot; 13:55:21</span>
+        <select>
+          <option>-- Choose stage --</option>
+          <option>Stage 01 -- Snake</option>
+          <option>Stage 02 -- Tower</option>
+        </select>
+        <span class="role-toggles">
+          <button>Primary</button>
+          <button>Secondary</button>
+          <button class="on ignore">Ignore</button>
+        </span>
+        <span class="match-badge low"><span class="d"></span>none</span>
+      </div>
+      <div class="video-row cam-b">
+        <span class="thumb"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>
+        <div class="filename">GH010111.MP4<div class="sub">Camera B &middot; helmet</div></div>
+        <span class="props">1:32 &middot; 16:48:14</span>
+        <select>
+          <option>-- Choose stage --</option>
+          <option>Stage 12 -- Final</option>
+        </select>
+        <span class="role-toggles">
+          <button>Primary</button>
+          <button>Secondary</button>
+          <button class="on ignore">Ignore</button>
+        </span>
+        <span class="match-badge low"><span class="d"></span>none</span>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer-actions">
+      <div class="summary"><b>23 videos</b> &middot; <b>21 will process</b> &middot; <b>2 ignored</b></div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn ghost">Cancel</button>
+        <button class="btn">Save draft</button>
+        <button class="btn primary">
+          Confirm &amp; start processing
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="annot">
+    <b>What happens after confirm</b><br>
+    21 background jobs queue immediately (audio extract + beep detect per video). The jobs drawer appears in the bottom-right and shows live progress. As beeps complete, stages move to "beep awaiting review" -- continue to beep review to verify them.
+  </div>
+
+  <div class="footnote">Polished 05 &middot; ./docs/ux-redesign/polished/05-ingest.html</div>
+</main>
+
+<!-- Ambient jobs FAB -->
+<div class="jobs-fab" title="Open jobs drawer">
+  <span class="spinner"></span>
+  Processing &middot; 21 jobs
+  <span class="count">~3 min</span>
+</div>
+
+</body>
+</html>

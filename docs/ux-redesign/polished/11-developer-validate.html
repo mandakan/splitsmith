@@ -1,0 +1,2109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Developer / Validate</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Developer mode / Validate
+   Step 3 of 4: run ensemble vs labeled corpus, compare shipped.
+   Visual language locked to polished 09. Cyan accent (dev mode).
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --live-tint:    rgba(251, 191, 36, 0.10);
+  --done:         #4ADE80;
+  --done-deep:    #166534;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --done-tint:    rgba(74, 222, 128, 0.10);
+  --beep:         #06B6D4;
+  --beep-bright:  #22D3EE;
+  --beep-deep:    #0E7490;
+  --beep-glow:    rgba(6, 182, 212, 0.30);
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+  --manual:       #A78BFA;
+  --manual-tint:  rgba(167, 139, 250, 0.12);
+
+  --scope:        #07090E;
+  --scope-grid:   rgba(255, 255, 255, 0.035);
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--beep); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--beep); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell (developer variant) ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--beep) 18%, var(--beep) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--beep) 78%, var(--beep) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 24px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow);
+}
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 8px rgba(6,182,212,0.4); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+
+.model-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 14px;
+  background: linear-gradient(90deg, var(--beep-tint), transparent);
+  border: 1px solid rgba(6,182,212,0.4);
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.model-chip .label { color: var(--beep); font-weight: 700; }
+.model-chip .ver { color: var(--ink); font-weight: 700; }
+.model-chip .sep { color: var(--whisper); }
+.model-chip .stat b { color: var(--done); font-weight: 700; }
+
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+.context .crumb a { color: var(--subtle); transition: color 150ms var(--ease); }
+.context .crumb a:hover { color: var(--ink-2); }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Developer sidebar ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.dev-card {
+  padding: 12px 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 14px;
+  position: relative;
+}
+.dev-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 2px;
+  width: 2px; height: 16px;
+  background: var(--beep);
+  box-shadow: 0 0 8px rgba(6,182,212,0.4);
+  border-radius: 1px;
+}
+.dev-card .lbl {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--beep);
+  margin-bottom: 8px;
+}
+.dev-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 4px; }
+.dev-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.dev-card .meta b { color: var(--done); font-weight: 700; }
+
+.nav-label {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 8px 6px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.nav-stepper { position: relative; padding-left: 0; }
+.nav-step {
+  display: grid;
+  grid-template-columns: 28px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  min-height: 40px;
+  transition: all 150ms var(--ease);
+}
+.nav-step:hover { background: var(--surface-2); color: var(--ink); }
+.nav-step.active { background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.4); padding: 7px 9px; color: var(--beep); font-weight: 700; }
+.nav-step .num {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+  border: 1px solid var(--rule-strong);
+}
+.nav-step.active .num { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 10px rgba(6,182,212,0.4); }
+.nav-step.done .num { background: var(--done-tint); color: var(--done); border-color: var(--done); }
+.nav-step.done .num svg { width: 12px; height: 12px; }
+.nav-step .name { font-size: 0.8125rem; }
+.nav-step .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: right;
+  font-feature-settings: var(--feat-num);
+  color: var(--subtle);
+}
+.nav-step.active .count { color: var(--beep); }
+.nav-step.done .count { color: var(--done); }
+.nav-step .count.muted { color: var(--whisper); }
+.nav-step + .step-line {
+  display: block;
+  height: 12px;
+  margin-left: 22px;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--rule-strong), var(--rule));
+}
+
+.sub-section { margin-top: 20px; }
+.sub-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  min-height: 36px;
+  transition: all 150ms var(--ease);
+}
+.sub-link:hover { background: var(--surface-2); color: var(--ink); }
+.sub-link .icon { color: var(--muted); display: inline-flex; }
+.sub-link.transitional { color: var(--subtle); }
+.sub-link .pill-lab {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--live-tint);
+  color: var(--live);
+  border: 1px solid rgba(251,191,36,0.3);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+/* ============ Content ============ */
+.content { min-width: 0; }
+
+.page-head {
+  padding: 24px 32px 22px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface), transparent);
+}
+.page-head .row { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--beep); box-shadow: 0 0 4px rgba(6,182,212,0.4); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.25rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 8px; }
+.page-sub { color: var(--muted); font-size: 0.875rem; font-feature-settings: var(--feat-num); }
+.page-sub b { color: var(--ink-2); font-weight: 700; }
+
+.workspace { padding: 22px 32px 32px; }
+
+/* ============ Buttons ============ */
+.btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 7px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 40px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 0 1px var(--beep), 0 0 14px rgba(6,182,212,0.35); }
+.btn.primary:hover { background: var(--beep-bright); border-color: var(--beep-bright); box-shadow: 0 0 0 1px var(--beep-bright), 0 0 22px rgba(6,182,212,0.5); }
+.btn.soft { background: var(--beep-tint); border-color: rgba(6,182,212,0.4); color: var(--beep); }
+.btn.soft:hover { background: rgba(6,182,212,0.18); }
+.btn.danger { background: transparent; border-color: rgba(255,45,45,0.35); color: var(--led-soft); }
+.btn.danger:hover { background: var(--led-tint); border-color: var(--led); color: var(--led); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: var(--surface-2); }
+.btn.big { padding: 12px 20px; font-size: 0.75rem; min-height: 48px; }
+
+/* ============ Run-config bar ============ */
+.run-config {
+  background:
+    linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  margin-bottom: 22px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+  overflow: hidden;
+  position: relative;
+}
+.run-config::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--beep) 30%, var(--beep) 70%, transparent);
+  opacity: 0.5;
+}
+.run-config-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+.run-config-head .title {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.run-config-head .title svg { color: var(--beep); }
+.run-config-head .right { display: inline-flex; align-items: center; gap: 14px; }
+.last-run {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-feature-settings: var(--feat-num);
+}
+.last-run .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.last-run b { color: var(--ink); font-weight: 700; }
+
+.run-config-body {
+  display: grid;
+  grid-template-columns: 1.4fr 1.2fr 1fr 0.9fr;
+  gap: 0;
+  padding: 0;
+}
+.cfg-cell {
+  padding: 16px 20px;
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 9px;
+}
+.cfg-cell:last-child { border-right: 0; }
+.cfg-cell .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.cfg-cell .lbl .pin { color: var(--beep); }
+
+.seg-group {
+  display: inline-flex;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 3px;
+  width: fit-content;
+}
+.seg-group button {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 7px 12px;
+  border-radius: 5px;
+  transition: all 150ms var(--ease);
+  min-height: 30px;
+  white-space: nowrap;
+}
+.seg-group button:hover { color: var(--ink); }
+.seg-group button.active {
+  background: var(--beep);
+  color: var(--bg);
+  box-shadow: 0 0 0 1px var(--beep), 0 0 10px rgba(6,182,212,0.3);
+}
+
+.corpus-select {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 9px 14px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  min-height: 40px;
+  font-feature-settings: var(--feat-num);
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+}
+.corpus-select:hover { border-color: var(--beep); }
+.corpus-select b { color: var(--ink); font-weight: 700; }
+.corpus-select .arrow { color: var(--beep); }
+
+.slider-row {
+  display: flex; flex-direction: column; gap: 7px;
+}
+.slider-row .head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+}
+.slider-row .key {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+.slider-row .val {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--beep);
+  font-feature-settings: var(--feat-num);
+}
+.slider {
+  position: relative;
+  height: 6px;
+  background: var(--surface-4);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.slider .fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: linear-gradient(to right, var(--beep-deep), var(--beep));
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(6,182,212,0.4);
+}
+.slider .thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--ink);
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--beep);
+  box-shadow: 0 0 0 4px rgba(6,182,212,0.15), 0 0 10px rgba(6,182,212,0.5);
+}
+.slider-row .tick {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  color: var(--whisper);
+  letter-spacing: 0.08em;
+}
+
+.switch-row {
+  display: flex; align-items: center; gap: 12px;
+}
+.switch {
+  position: relative;
+  width: 38px; height: 22px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule-strong);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: all 150ms var(--ease);
+}
+.switch.on {
+  background: var(--beep-tint);
+  border-color: var(--beep);
+  box-shadow: 0 0 8px rgba(6,182,212,0.25);
+}
+.switch.on::after {
+  left: 18px;
+  background: var(--beep);
+  box-shadow: 0 0 6px rgba(6,182,212,0.5);
+}
+.switch-row .lbl-text {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+}
+.switch-row .hint {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  color: var(--subtle);
+  text-transform: uppercase;
+}
+
+.run-config-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+}
+.run-config-foot .meta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-feature-settings: var(--feat-num);
+}
+.run-config-foot .meta b { color: var(--ink-2); font-weight: 700; }
+
+/* ============ Headline metrics ============ */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.stat-card {
+  position: relative;
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  min-height: 134px;
+}
+.stat-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--rule-strong);
+}
+.stat-card.good::before { background: var(--done); box-shadow: 0 0 10px var(--done-glow); }
+.stat-card.beep::before { background: var(--beep); box-shadow: 0 0 10px var(--beep-glow); }
+.stat-card.warn::before { background: var(--live); box-shadow: 0 0 10px var(--live-glow); }
+.stat-card.bad::before  { background: var(--led);  box-shadow: 0 0 10px var(--led-glow); }
+.stat-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg, transparent, transparent 4px,
+      rgba(255,255,255,0.010) 4px, rgba(255,255,255,0.010) 5px
+    );
+  pointer-events: none;
+}
+.stat-card .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.stat-card .lbl .target {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--done);
+  background: var(--done-tint);
+  border: 1px solid var(--done-deep);
+}
+.stat-card .lbl .target::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--done);
+  box-shadow: 0 0 4px var(--done-glow);
+}
+.stat-card.warn .lbl .target { color: var(--live); background: var(--live-tint); border-color: rgba(251,191,36,0.3); }
+.stat-card.warn .lbl .target::before { background: var(--live); box-shadow: 0 0 4px var(--live-glow); }
+.stat-card.bad .lbl .target { color: var(--led); background: var(--led-tint); border-color: rgba(255,45,45,0.3); }
+.stat-card.bad .lbl .target::before { background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+
+.stat-card .v {
+  font-family: var(--mono);
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+  line-height: 1;
+  font-feature-settings: var(--feat-num);
+}
+.stat-card.good .v  { color: var(--done); text-shadow: 0 0 18px var(--done-glow); }
+.stat-card.beep .v  { color: var(--beep); text-shadow: 0 0 18px var(--beep-glow); }
+.stat-card.warn .v  { color: var(--live); text-shadow: 0 0 18px var(--live-glow); }
+.stat-card.bad .v   { color: var(--led);  text-shadow: 0 0 18px var(--led-glow); }
+
+.stat-card .sub {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 10px;
+  font-feature-settings: var(--feat-num);
+}
+.stat-card .sub b { color: var(--ink-2); font-weight: 700; }
+
+.stat-card .delta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-feature-settings: var(--feat-num);
+}
+.stat-card .delta.up   { color: var(--done); }
+.stat-card .delta.down { color: var(--led); }
+.stat-card .delta.flat { color: var(--muted); }
+.stat-card .delta .arrow {
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.stat-card .delta.up   .arrow { background: var(--done-tint); color: var(--done); box-shadow: 0 0 8px var(--done-glow); }
+.stat-card .delta.down .arrow { background: var(--led-tint);  color: var(--led);  box-shadow: 0 0 8px var(--led-glow); }
+.stat-card .delta.flat .arrow { background: var(--surface-3); color: var(--muted); }
+.stat-card .delta .caption { color: var(--subtle); font-weight: 600; }
+
+/* ============ Section heading ============ */
+.section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 32px 0 14px;
+  gap: 16px;
+}
+.section-head .title {
+  display: inline-flex; align-items: baseline; gap: 14px;
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.section-head .title::before {
+  content: "";
+  width: 18px; height: 1px;
+  background: var(--beep);
+  box-shadow: 0 0 4px rgba(6,182,212,0.4);
+  align-self: center;
+}
+.section-head .title .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--subtle);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.section-head .title .count b { color: var(--ink-2); font-weight: 700; font-feature-settings: var(--feat-num); }
+.section-head .help {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.section-head .help b { color: var(--ink-2); font-weight: 700; font-feature-settings: var(--feat-num); }
+
+/* ============ Per-shooter holdout (centerpiece) ============ */
+.holdout-card {
+  background: linear-gradient(135deg, var(--surface-2), var(--surface));
+  border: 1px solid rgba(251,191,36,0.25);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 22px 44px -28px rgba(0,0,0,0.7),
+    0 0 32px -8px rgba(251,191,36,0.10);
+  position: relative;
+  margin-bottom: 22px;
+}
+.holdout-card::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--live) 30%, var(--live) 70%, transparent);
+  box-shadow: 0 0 10px var(--live-glow);
+}
+.holdout-head {
+  padding: 18px 22px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, rgba(251,191,36,0.05), transparent);
+}
+.holdout-head .row1 { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.holdout-head .h-title {
+  font-family: var(--display);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.holdout-head .h-sub {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+}
+.holdout-head .h-flag {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  background: var(--live-tint);
+  color: var(--live);
+  border: 1px solid rgba(251,191,36,0.4);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.holdout-head .h-flag .d { width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+
+.holdout-insight {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+  padding: 12px 0 0;
+  border-top: 1px dashed var(--rule);
+  margin-top: 2px;
+}
+.holdout-insight .cell {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.holdout-insight .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.holdout-insight .v {
+  font-family: var(--mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.02em;
+}
+.holdout-insight .v.warn { color: var(--live); }
+.holdout-insight .v.bad { color: var(--led); }
+.holdout-insight .v small {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+  margin-left: 6px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.shooter-row {
+  display: grid;
+  grid-template-columns: 38px 1.4fr 90px 1fr 90px 160px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--rule);
+  transition: background 150ms var(--ease);
+}
+.shooter-row:last-child { border-bottom: 0; }
+.shooter-row:hover { background: rgba(255,255,255,0.015); }
+.shooter-row.flag-amber { background: linear-gradient(90deg, rgba(251,191,36,0.04), transparent); }
+.shooter-row.flag-red { background: linear-gradient(90deg, rgba(255,45,45,0.05), transparent); }
+
+.av {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.4);
+}
+.av.ma { background: linear-gradient(135deg, var(--led), var(--led-deep)); box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 10px var(--led-glow); }
+.av.pe { background: linear-gradient(135deg, #4ADE80, #166534); box-shadow: 0 0 0 1px rgba(74,222,128,0.4), 0 0 10px var(--done-glow); }
+.av.jl { background: linear-gradient(135deg, #FBBF24, #92400E); box-shadow: 0 0 0 1px rgba(251,191,36,0.4), 0 0 10px var(--live-glow); }
+.av.rj { background: linear-gradient(135deg, #60A5FA, #1E40AF); box-shadow: 0 0 0 1px rgba(96,165,250,0.4), 0 0 10px rgba(96,165,250,0.3); }
+.av.as { background: linear-gradient(135deg, #06B6D4, #0E7490); box-shadow: 0 0 0 1px rgba(6,182,212,0.4), 0 0 10px var(--beep-glow); }
+
+.shooter-name {
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.shooter-handle {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-top: 3px;
+  font-feature-settings: var(--feat-num);
+}
+.shooter-handle b { color: var(--muted); font-weight: 700; }
+
+.recall-hero {
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--done);
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.recall-hero.warn { color: var(--live); }
+.recall-hero.bad { color: var(--led); }
+
+.recall-meter {
+  position: relative;
+  height: 8px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.recall-meter::before {
+  content: "";
+  position: absolute;
+  left: 85%; top: -2px; bottom: -2px;
+  width: 1px;
+  background: var(--rule-strong);
+  box-shadow: 0 0 4px rgba(255,255,255,0.1);
+}
+.recall-meter > span {
+  display: block; height: 100%;
+  background: var(--done);
+  border-radius: 999px;
+  box-shadow: 0 0 8px var(--done-glow);
+}
+.recall-meter.warn > span { background: var(--live); box-shadow: 0 0 8px var(--live-glow); }
+.recall-meter.bad > span  { background: var(--led);  box-shadow: 0 0 8px var(--led-glow); }
+.recall-meter-row {
+  display: flex; flex-direction: column; gap: 5px;
+}
+.recall-meter-row .tip {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  color: var(--whisper);
+  letter-spacing: 0.06em;
+}
+.recall-meter-row .tip b { color: var(--muted); font-weight: 700; }
+
+.fx-count {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  font-weight: 600;
+  font-feature-settings: var(--feat-num);
+  text-align: right;
+}
+.fx-count small {
+  display: block;
+  font-size: 0.5625rem;
+  color: var(--whisper);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
+.status-flag {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.status-flag .d { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-flag.ok      { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.status-flag.ok .d   { background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.status-flag.amber   { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.4); }
+.status-flag.amber .d{ background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+.status-flag.red     { background: var(--led-tint); color: var(--led-soft); border-color: rgba(255,45,45,0.4); }
+.status-flag.red .d  { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+
+/* ============ Two-col layout ============ */
+.split-2 {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+/* ============ Per-venue table ============ */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface-2), transparent);
+}
+.panel-head .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.panel-head .title .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 10px;
+  font-feature-settings: var(--feat-num);
+}
+.panel-head .help {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.venue-row {
+  display: grid;
+  grid-template-columns: 1.5fr 0.6fr 1fr 0.7fr 0.7fr 0.6fr 110px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+  transition: background 150ms var(--ease);
+}
+.venue-row:last-child { border-bottom: 0; }
+.venue-row:hover:not(.head) { background: rgba(255,255,255,0.015); }
+.venue-row.head {
+  background: var(--surface-2);
+  padding: 9px 18px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 700;
+}
+.venue-row .v-name {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--ink);
+  font-weight: 500;
+  font-feature-settings: var(--feat-num);
+}
+.venue-row .v-meta {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-top: 3px;
+}
+.venue-row .v-meta .warn-tag {
+  color: var(--live);
+  font-weight: 700;
+}
+.venue-row .n-cell {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.venue-row .num-cell {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--done);
+  font-feature-settings: var(--feat-num);
+}
+.venue-row .num-cell.warn { color: var(--live); }
+.venue-row .num-cell.bad  { color: var(--led); }
+.venue-row .num-cell.muted { color: var(--ink-2); font-weight: 600; }
+
+.venue-bar-cell { display: flex; flex-direction: column; gap: 4px; }
+.venue-bar {
+  height: 5px;
+  background: var(--surface-4);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.venue-bar > span {
+  display: block; height: 100%;
+  background: var(--done);
+  box-shadow: 0 0 6px var(--done-glow);
+}
+.venue-bar.warn > span { background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+.venue-bar.bad > span  { background: var(--led);  box-shadow: 0 0 6px var(--led-glow); }
+.venue-bar-cell .pair {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+  font-weight: 600;
+}
+.venue-bar-cell .pair .lbl { color: var(--whisper); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.5625rem; }
+
+/* ============ Confusion grid (scope) ============ */
+.confusion {
+  background: var(--scope);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  position: relative;
+  box-shadow:
+    inset 0 0 60px rgba(6,182,212,0.04),
+    inset 0 1px 0 rgba(255,255,255,0.02),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.confusion::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(to right, var(--scope-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--scope-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+  pointer-events: none;
+}
+.confusion-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: rgba(6,182,212,0.04);
+  position: relative;
+  z-index: 1;
+}
+.confusion-head .title {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.confusion-head .title::before {
+  content: "";
+  width: 14px; height: 1px;
+  background: var(--beep);
+  box-shadow: 0 0 4px var(--beep-glow);
+}
+.confusion-head .meta {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-feature-settings: var(--feat-num);
+}
+.confusion-head .meta b { color: var(--ink-2); font-weight: 700; }
+
+.cm-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 30px 1fr 1fr;
+  gap: 1px;
+  background: var(--rule);
+}
+.cm-axis-x {
+  grid-column: 2 / 4;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  padding: 6px 0 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  text-align: center;
+  color: var(--subtle);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.cm-axis-y {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+.cm-cell {
+  padding: 22px 18px;
+  background: rgba(20,23,28,0.5);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  position: relative;
+  min-height: 120px;
+}
+.cm-cell .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.cm-cell .v {
+  font-family: var(--mono);
+  font-size: 2.25rem;
+  font-weight: 700;
+  font-feature-settings: var(--feat-num);
+  line-height: 1;
+  color: var(--ink);
+}
+.cm-cell .pct {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+  font-weight: 600;
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+.cm-cell.tp { background: rgba(74,222,128,0.10); }
+.cm-cell.tp .v { color: var(--done); text-shadow: 0 0 18px var(--done-glow); }
+.cm-cell.fp { background: rgba(255,45,45,0.10); }
+.cm-cell.fp .v { color: var(--led); text-shadow: 0 0 18px var(--led-glow); }
+.cm-cell.fn { background: rgba(251,191,36,0.10); }
+.cm-cell.fn .v { color: var(--live); text-shadow: 0 0 18px var(--live-glow); }
+.cm-cell.tn { background: rgba(255,255,255,0.025); }
+.cm-cell.tn .v { color: var(--ink-2); }
+
+.confusion-foot {
+  position: relative;
+  z-index: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px;
+  border-top: 1px solid var(--rule);
+  background: rgba(20,23,28,0.5);
+}
+.confusion-foot .summary {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-feature-settings: var(--feat-num);
+}
+.confusion-foot .summary b { color: var(--led); font-weight: 700; }
+.confusion-foot .summary i { color: var(--ink-2); font-style: normal; font-weight: 700; }
+.confusion-foot .link {
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--beep);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.confusion-foot .link:hover { color: var(--beep-bright); }
+
+/* ============ Voter agreement (stacked bar) ============ */
+.voter-card {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.voter-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface-2), transparent);
+}
+.voter-head .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.voter-head .help {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.voter-head .help b { color: var(--ink-2); font-weight: 700; }
+
+.voter-body { padding: 18px 18px 16px; }
+
+.voter-bar-wrap {
+  display: flex;
+  height: 36px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+  margin-bottom: 14px;
+}
+.voter-bar-seg {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--bg);
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.04em;
+}
+.voter-bar-seg.full { background: var(--done); box-shadow: 0 0 12px var(--done-glow); }
+.voter-bar-seg.two  { background: var(--beep); box-shadow: 0 0 12px var(--beep-glow); }
+.voter-bar-seg.apri { background: var(--live); box-shadow: 0 0 12px var(--live-glow); }
+
+.voter-legend {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-bottom: 18px;
+}
+.voter-legend .lg {
+  display: grid;
+  grid-template-columns: 14px 1fr 70px 50px;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.voter-legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+.voter-legend .sw.full { background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.voter-legend .sw.two  { background: var(--beep); box-shadow: 0 0 6px var(--beep-glow); }
+.voter-legend .sw.apri { background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+.voter-legend .lg .lbl-text { color: var(--ink-2); font-size: 0.75rem; font-family: var(--sans); }
+.voter-legend .lg .lbl-text small {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  color: var(--whisper);
+  margin-top: 2px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.voter-legend .lg .n { color: var(--ink); font-weight: 700; text-align: right; }
+.voter-legend .lg .p { color: var(--subtle); text-align: right; font-size: 0.6875rem; }
+
+.voter-decompose {
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--rule);
+}
+.voter-decompose .v-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 70px;
+  align-items: center;
+  gap: 12px;
+}
+.voter-tag {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 7px;
+  border-radius: 4px;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.voter-tag.a { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.3); }
+.voter-tag.b { background: var(--beep-tint); color: var(--beep); border-color: rgba(6,182,212,0.3); }
+.voter-tag.c { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.3); }
+
+.voter-decompose .v-bar {
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.voter-decompose .v-bar > span {
+  display: block; height: 100%;
+  border-radius: 999px;
+}
+.voter-decompose .v-bar.a > span { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+.voter-decompose .v-bar.b > span { background: var(--beep); box-shadow: 0 0 6px var(--beep-glow); }
+.voter-decompose .v-bar.c > span { background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+
+.voter-decompose .v-num {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink);
+  font-weight: 700;
+  text-align: right;
+  font-feature-settings: var(--feat-num);
+}
+.voter-decompose .v-num small {
+  display: block;
+  font-size: 0.5625rem;
+  color: var(--whisper);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ============ Action footer ============ */
+.action-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 32px;
+  background: linear-gradient(to top, var(--bg) 60%, transparent);
+  border-top: 1px solid var(--rule);
+  margin-top: 32px;
+  backdrop-filter: blur(10px);
+}
+.action-footer::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: -1px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--beep) 30%, var(--beep) 70%, transparent);
+  opacity: 0.4;
+}
+.action-footer .left-actions { display: flex; gap: 10px; }
+.action-footer .right-actions { display: flex; gap: 10px; align-items: center; }
+.action-footer .signoff {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-right: 14px;
+  font-feature-settings: var(--feat-num);
+}
+.action-footer .signoff b { color: var(--ink-2); font-weight: 700; }
+
+.footnote {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--whisper);
+  text-align: center;
+  padding: 18px 0 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Developer mode active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button>Match</button>
+      <button class="active">Developer</button>
+    </div>
+    <div class="model-chip">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+      <span class="label">Active</span>
+      <span class="ver">v2026.04.02</span>
+      <span class="sep">&middot;</span>
+      <span class="stat"><b>156</b> fixtures</span>
+      <span class="sep">&middot;</span>
+      <span class="stat">recall <b>0.94</b></span>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile">
+      <span class="av" style="width: 28px; height: 28px;">MA</span>
+      <span class="label">Mathias A.</span>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="09-developer-corpus.html">Developer</a>
+        <span class="sep">/</span>
+        <span class="current">Validate</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- ============ DEVELOPER SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="dev-card">
+      <div class="lbl">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+        Detector training
+      </div>
+      <div class="title">Ensemble pipeline</div>
+      <div class="meta">v2026.04.02 &middot; recall <b>0.94</b></div>
+    </div>
+
+    <div class="nav-label">Workflow</div>
+
+    <div class="nav-stepper">
+      <div class="nav-step done">
+        <span class="num"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 12 10 17 19 8"/></svg></span>
+        <span class="name">Corpus</span>
+        <span class="count">156</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step done">
+        <span class="num"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 12 10 17 19 8"/></svg></span>
+        <span class="name">Review queue</span>
+        <span class="count">14</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step active">
+        <span class="num">3</span>
+        <span class="name">Validate</span>
+        <span class="count">Now</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step">
+        <span class="num">4</span>
+        <span class="name">Retrain</span>
+        <span class="count muted">--</span>
+      </div>
+    </div>
+
+    <div class="sub-section">
+      <div class="nav-label">Tools</div>
+      <div class="sub-link">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 16,12 14,15 10,15 8,12 2,12"/><path d="M5 9l-2 3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2-3"/><path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg></span>
+        Inbox
+      </div>
+      <div class="sub-link transitional">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4v10c0 1.1.9 2 2 2h2c1.1 0 2-.9 2-2V4M5 4h14"/></svg></span>
+        Lab playground
+        <span class="pill-lab">Legacy</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+
+    <div class="page-head">
+      <div class="row">
+        <div>
+          <div class="page-kicker">Developer &middot; validate</div>
+          <h1 class="page-h1">Validate</h1>
+          <div class="page-sub">Run the ensemble against the labeled corpus. Compare to the shipped model before retraining.</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn ghost" aria-label="Export validation report">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Export report
+          </button>
+          <button class="btn" aria-label="View run log">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 3h6l4 4v14H5V3h4z"/><path d="M9 12h6M9 16h6M9 8h4"/></svg>
+            Run log
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <!-- ============ RUN-CONFIG BAR ============ -->
+      <section class="run-config" aria-label="Validation run configuration">
+        <div class="run-config-head">
+          <div class="title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            Run configuration
+          </div>
+          <div class="right">
+            <span class="last-run">
+              <span class="dot" aria-hidden="true"></span>
+              Last run <b>3d ago</b>
+              <span style="color: var(--whisper);">&middot;</span>
+              v2026.04.02 baseline
+            </span>
+            <button class="btn ghost" style="padding: 6px 10px; min-height: 32px; font-size: 0.625rem;">Edit
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="run-config-body">
+          <!-- Split type -->
+          <div class="cfg-cell">
+            <span class="lbl"><span class="pin">&#9679;</span> Split strategy</span>
+            <div class="seg-group" role="tablist" aria-label="Split strategy">
+              <button>5-fold CV</button>
+              <button class="active">Per-shooter</button>
+              <button>Per-venue</button>
+            </div>
+            <span style="font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.08em; color: var(--whisper); text-transform: uppercase;">Leave-one-shooter-out &middot; catches overfit 5-fold CV misses</span>
+          </div>
+
+          <!-- Corpus selector + threshold -->
+          <div class="cfg-cell">
+            <span class="lbl"><span class="pin">&#9679;</span> Corpus</span>
+            <button class="corpus-select" aria-label="Choose corpus filter">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16l-6 8v6l-4-2v-4z"/></svg>
+              <span><b>156</b> fixtures</span>
+              <span style="color: var(--whisper);">&middot;</span>
+              <span>all venues</span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></span>
+            </button>
+            <span style="font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.08em; color: var(--whisper); text-transform: uppercase;">5 shooters &middot; 7 venues &middot; 142 candidates after filters</span>
+          </div>
+
+          <!-- Threshold slider -->
+          <div class="cfg-cell">
+            <span class="lbl"><span class="pin">&#9679;</span> Threshold</span>
+            <div class="slider-row" role="group" aria-label="Confidence threshold">
+              <div class="head">
+                <span class="key">min_confidence</span>
+                <span class="val">0.42</span>
+              </div>
+              <div class="slider" aria-hidden="true">
+                <div class="fill" style="width: 42%;"></div>
+                <div class="thumb" style="left: 42%;"></div>
+              </div>
+              <div class="tick"><span>0.00</span><span>1.00</span></div>
+            </div>
+          </div>
+
+          <!-- Apriori toggle + CTA -->
+          <div class="cfg-cell">
+            <span class="lbl"><span class="pin">&#9679;</span> Apriori boost</span>
+            <div class="switch-row">
+              <button class="switch on" role="switch" aria-checked="true" aria-label="Apriori boost enabled"></button>
+              <div>
+                <div class="lbl-text">Enabled</div>
+                <div class="hint">stage_rounds.expected</div>
+              </div>
+            </div>
+            <button class="btn primary big" style="margin-top: 4px; align-self: stretch; justify-content: center;">
+              Run validation
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="run-config-foot">
+          <span class="meta">Run <b>2026-05-14 13:42</b> &middot; 3.2s &middot; 4 cores &middot; 142 candidates &middot; consensus 2-of-3</span>
+          <span class="meta" style="color: var(--beep);">View full diff vs v2026.04.02 &rarr;</span>
+        </div>
+      </section>
+
+      <!-- ============ HEADLINE METRICS ============ -->
+      <section class="metrics-grid" aria-label="Headline validation metrics">
+
+        <article class="stat-card good">
+          <div class="lbl">
+            Recall
+            <span class="target">&#10003; Above target</span>
+          </div>
+          <div class="v">0.94</div>
+          <div class="sub"><b>142</b> of <b>151</b> true positives</div>
+          <div class="delta up">
+            <span class="arrow" aria-label="up">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </span>
+            +0.02 <span class="caption">vs shipped</span>
+          </div>
+        </article>
+
+        <article class="stat-card bad">
+          <div class="lbl">
+            Precision
+            <span class="target">Below baseline</span>
+          </div>
+          <div class="v">0.91</div>
+          <div class="sub"><b>14</b> false positives</div>
+          <div class="delta down">
+            <span class="arrow" aria-label="down">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            </span>
+            -0.01 <span class="caption">vs shipped</span>
+          </div>
+        </article>
+
+        <article class="stat-card good">
+          <div class="lbl">
+            F1 score
+            <span class="target">&#10003; Improvement</span>
+          </div>
+          <div class="v">0.92</div>
+          <div class="sub">harmonic mean &middot; recall + precision</div>
+          <div class="delta up">
+            <span class="arrow" aria-label="up">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </span>
+            +0.01 <span class="caption">vs shipped</span>
+          </div>
+        </article>
+
+        <article class="stat-card beep">
+          <div class="lbl">
+            Avg confidence
+            <span class="target" style="color: var(--beep); background: var(--beep-tint); border-color: rgba(6,182,212,0.3);">&#9679; TP only</span>
+          </div>
+          <div class="v">0.78</div>
+          <div class="sub">range <b>0.34</b> &ndash; <b>0.96</b></div>
+          <div class="delta flat">
+            <span class="arrow" aria-label="flat">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14"/></svg>
+            </span>
+            +0.004 <span class="caption">vs shipped</span>
+          </div>
+        </article>
+
+      </section>
+
+      <!-- ============ PER-SHOOTER HOLDOUT ============ -->
+      <div class="section-head">
+        <div class="title">Per-shooter holdout <span class="count"><b>5</b> shooters tested by leave-one-out</span></div>
+        <div class="help">Catches overfit that 5-fold CV misses</div>
+      </div>
+
+      <section class="holdout-card" aria-label="Per-shooter holdout breakdown">
+        <div class="holdout-head">
+          <div class="row1">
+            <div>
+              <div class="h-title">Per-shooter holdout</div>
+              <div class="h-sub">Each shooter held out one-at-a-time &middot; ensemble retrained on the remaining four &middot; tested on the held-out</div>
+            </div>
+            <span class="h-flag">
+              <span class="d" aria-hidden="true"></span>
+              2 below target
+            </span>
+          </div>
+
+          <div class="holdout-insight" role="group" aria-label="Holdout insight summary">
+            <div class="cell">
+              <span class="k">Mean recall</span>
+              <span class="v">0.84</span>
+            </div>
+            <div class="cell">
+              <span class="k">Spread</span>
+              <span class="v warn">0.32 <small>min 0.64 / max 0.96</small></span>
+            </div>
+            <div class="cell">
+              <span class="k">Target threshold</span>
+              <span class="v">&ge;0.85 <small>2 shooters fail</small></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Shooter rows -->
+        <div class="shooter-row">
+          <span class="av ma" aria-hidden="true">MA</span>
+          <div>
+            <div class="shooter-name">Mathias Axell</div>
+            <div class="shooter-handle">Production Optics &middot; <b>Bromma PK</b> &middot; primary corpus</div>
+          </div>
+          <span class="recall-hero">0.96</span>
+          <div class="recall-meter-row">
+            <div class="recall-meter" aria-label="recall 0.96"><span style="width: 96%;"></span></div>
+            <div class="tip"><span>0.00</span><span><b>target 0.85</b></span><span>1.00</span></div>
+          </div>
+          <div class="fx-count">42 <small>fixtures</small></div>
+          <span class="status-flag ok">
+            <span class="d" aria-hidden="true"></span>
+            Within bounds
+          </span>
+        </div>
+
+        <div class="shooter-row">
+          <span class="av pe" aria-hidden="true">PE</span>
+          <div>
+            <div class="shooter-name">Pia Eriksson</div>
+            <div class="shooter-handle">Production &middot; <b>VAdS &middot; bromma</b> &middot; chest-cam</div>
+          </div>
+          <span class="recall-hero">0.93</span>
+          <div class="recall-meter-row">
+            <div class="recall-meter" aria-label="recall 0.93"><span style="width: 93%;"></span></div>
+            <div class="tip"><span>0.00</span><span><b>target 0.85</b></span><span>1.00</span></div>
+          </div>
+          <div class="fx-count">18 <small>fixtures</small></div>
+          <span class="status-flag ok">
+            <span class="d" aria-hidden="true"></span>
+            Within bounds
+          </span>
+        </div>
+
+        <div class="shooter-row">
+          <span class="av jl" aria-hidden="true">JL</span>
+          <div>
+            <div class="shooter-name">Johan Larsson</div>
+            <div class="shooter-handle">Standard &middot; <b>solvalla</b> &middot; mixed mounts</div>
+          </div>
+          <span class="recall-hero">0.87</span>
+          <div class="recall-meter-row">
+            <div class="recall-meter" aria-label="recall 0.87"><span style="width: 87%;"></span></div>
+            <div class="tip"><span>0.00</span><span><b>target 0.85</b></span><span>1.00</span></div>
+          </div>
+          <div class="fx-count">22 <small>fixtures</small></div>
+          <span class="status-flag ok">
+            <span class="d" aria-hidden="true"></span>
+            Within bounds
+          </span>
+        </div>
+
+        <div class="shooter-row flag-amber">
+          <span class="av rj" aria-hidden="true">RJ</span>
+          <div>
+            <div class="shooter-name">Robert Janson</div>
+            <div class="shooter-handle">Production Optics &middot; <b>bofors</b> &middot; outdoor</div>
+          </div>
+          <span class="recall-hero warn">0.78</span>
+          <div class="recall-meter-row">
+            <div class="recall-meter warn" aria-label="recall 0.78"><span style="width: 78%;"></span></div>
+            <div class="tip"><span>0.00</span><span><b>target 0.85</b></span><span>1.00</span></div>
+          </div>
+          <div class="fx-count">24 <small>fixtures</small></div>
+          <span class="status-flag amber">
+            <span class="d" aria-hidden="true"></span>
+            Below target
+          </span>
+        </div>
+
+        <div class="shooter-row flag-red">
+          <span class="av as" aria-hidden="true">AS</span>
+          <div>
+            <div class="shooter-name">Anna Sundberg</div>
+            <div class="shooter-handle">Open &middot; <b>helmet-cam &middot; low-light</b> &middot; only one venue</div>
+          </div>
+          <span class="recall-hero bad">0.64</span>
+          <div class="recall-meter-row">
+            <div class="recall-meter bad" aria-label="recall 0.64"><span style="width: 64%;"></span></div>
+            <div class="tip"><span>0.00</span><span><b>target 0.85</b></span><span>1.00</span></div>
+          </div>
+          <div class="fx-count">8 <small>fixtures</small></div>
+          <span class="status-flag red">
+            <span class="d" aria-hidden="true"></span>
+            Overfit risk
+          </span>
+        </div>
+      </section>
+
+      <!-- ============ TWO-COL: VENUE TABLE + CONFUSION ============ -->
+      <div class="split-2">
+
+        <!-- Per-venue breakdown -->
+        <section class="panel" aria-label="Per-venue breakdown">
+          <div class="panel-head">
+            <div class="title">Per-venue breakdown <span class="count"><b>7</b> venues</span></div>
+            <div class="help">Recall &middot; precision &middot; F1 by venue</div>
+          </div>
+
+          <div class="venue-row head">
+            <span>Venue</span>
+            <span style="text-align: right;">Fixtures</span>
+            <span>Recall</span>
+            <span>Precision</span>
+            <span>F1</span>
+            <span style="text-align: right;">FP</span>
+            <span style="text-align: right;">Status</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">vads-easter-2026</div>
+              <div class="v-meta">indoor &middot; chest-cam</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">32</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span>0.97</span><span class="lbl">R</span></div>
+              <div class="venue-bar"><span style="width: 97%;"></span></div>
+            </div>
+            <span class="num-cell">0.94</span>
+            <span class="num-cell">0.95</span>
+            <span class="n-cell" style="text-align: right;">2</span>
+            <span class="status-flag ok" style="font-size: 0.5rem;"><span class="d"></span>Reviewed</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">bofors-bombardment-2026</div>
+              <div class="v-meta">outdoor &middot; chest-cam</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">28</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span>0.91</span><span class="lbl">R</span></div>
+              <div class="venue-bar"><span style="width: 91%;"></span></div>
+            </div>
+            <span class="num-cell">0.88</span>
+            <span class="num-cell">0.89</span>
+            <span class="n-cell" style="text-align: right;">3</span>
+            <span class="status-flag amber" style="font-size: 0.5rem;"><span class="d"></span>Just promoted</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">bromma-classifier-2026</div>
+              <div class="v-meta">indoor &middot; classifier</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">24</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span>1.00</span><span class="lbl">R</span></div>
+              <div class="venue-bar"><span style="width: 100%;"></span></div>
+            </div>
+            <span class="num-cell">0.97</span>
+            <span class="num-cell">0.98</span>
+            <span class="n-cell" style="text-align: right;">1</span>
+            <span class="status-flag ok" style="font-size: 0.5rem;"><span class="d"></span>Reviewed</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">solvalla-open-2025</div>
+              <div class="v-meta">outdoor &middot; cam-b helmet</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">18</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span>0.91</span><span class="lbl">R</span></div>
+              <div class="venue-bar"><span style="width: 91%;"></span></div>
+            </div>
+            <span class="num-cell">0.92</span>
+            <span class="num-cell">0.91</span>
+            <span class="n-cell" style="text-align: right;">2</span>
+            <span class="status-flag ok" style="font-size: 0.5rem;"><span class="d"></span>Reviewed</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">helmet-low-light</div>
+              <div class="v-meta"><span class="warn-tag">weak signal</span> &middot; indoor &middot; external</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">12</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span style="color: var(--led);">0.64</span><span class="lbl">R</span></div>
+              <div class="venue-bar bad"><span style="width: 64%;"></span></div>
+            </div>
+            <span class="num-cell bad">0.71</span>
+            <span class="num-cell bad">0.67</span>
+            <span class="n-cell" style="text-align: right; color: var(--led);">5</span>
+            <span class="status-flag red" style="font-size: 0.5rem;"><span class="d"></span>Weak signal</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">classic-2024</div>
+              <div class="v-meta">indoor &middot; archival</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">8</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span>0.89</span><span class="lbl">R</span></div>
+              <div class="venue-bar"><span style="width: 89%;"></span></div>
+            </div>
+            <span class="num-cell">0.90</span>
+            <span class="num-cell">0.90</span>
+            <span class="n-cell" style="text-align: right;">1</span>
+            <span class="status-flag ok" style="font-size: 0.5rem;"><span class="d"></span>Reviewed</span>
+          </div>
+
+          <div class="venue-row">
+            <div>
+              <div class="v-name">winter-classifier-2025</div>
+              <div class="v-meta">indoor &middot; classifier</div>
+            </div>
+            <span class="n-cell" style="text-align: right;">6</span>
+            <div class="venue-bar-cell">
+              <div class="pair"><span>0.95</span><span class="lbl">R</span></div>
+              <div class="venue-bar"><span style="width: 95%;"></span></div>
+            </div>
+            <span class="num-cell">0.94</span>
+            <span class="num-cell">0.94</span>
+            <span class="n-cell" style="text-align: right;">0</span>
+            <span class="status-flag ok" style="font-size: 0.5rem;"><span class="d"></span>Reviewed</span>
+          </div>
+        </section>
+
+        <!-- Confusion grid + voter agreement stacked -->
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+
+          <!-- Confusion matrix -->
+          <section class="confusion" aria-label="Confusion summary">
+            <div class="confusion-head">
+              <div class="title">Confusion summary</div>
+              <div class="meta"><b>156</b> ground-truth shots &middot; thr 0.42</div>
+            </div>
+            <div class="cm-grid">
+              <div></div>
+              <div class="cm-axis-x">
+                <div>Predicted shot</div>
+                <div>Predicted not</div>
+              </div>
+              <div class="cm-axis-y">Actual</div>
+              <div class="cm-cell tp">
+                <span class="k">True positive</span>
+                <span class="v">142</span>
+                <span class="pct">94.0% of P</span>
+              </div>
+              <div class="cm-cell fn">
+                <span class="k">False negative</span>
+                <span class="v">9</span>
+                <span class="pct">6.0% missed</span>
+              </div>
+              <div class="cm-axis-y" style="grid-row: 3 / 4;">Actual not</div>
+              <div class="cm-cell fp">
+                <span class="k">False positive</span>
+                <span class="v">14</span>
+                <span class="pct">9.0% of preds</span>
+              </div>
+              <div class="cm-cell tn">
+                <span class="k">True negative</span>
+                <span class="v">--</span>
+                <span class="pct">background &middot; not scored</span>
+              </div>
+            </div>
+            <div class="confusion-foot">
+              <span class="summary"><b>14</b> false positives across <i>9 fixtures</i></span>
+              <a class="link" href="#">View all FPs
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+              </a>
+            </div>
+          </section>
+
+          <!-- Voter agreement -->
+          <section class="voter-card" aria-label="Voter agreement breakdown">
+            <div class="voter-head">
+              <div class="title">Voter agreement</div>
+              <div class="help">Where consensus came from &middot; <b>142</b> kept shots</div>
+            </div>
+            <div class="voter-body">
+              <!-- Stacked bar -->
+              <div class="voter-bar-wrap" aria-label="Consensus stacked bar">
+                <div class="voter-bar-seg full" style="flex: 72;">72%</div>
+                <div class="voter-bar-seg two"  style="flex: 20;">20%</div>
+                <div class="voter-bar-seg apri" style="flex: 8;">8%</div>
+              </div>
+
+              <div class="voter-legend">
+                <div class="lg">
+                  <span class="sw full" aria-hidden="true"></span>
+                  <span class="lbl-text">All 3 voters agree<small>A &times; B &times; C unanimous</small></span>
+                  <span class="n">102</span>
+                  <span class="p">72%</span>
+                </div>
+                <div class="lg">
+                  <span class="sw two" aria-hidden="true"></span>
+                  <span class="lbl-text">2 of 3 voters<small>most common pair: A + C</small></span>
+                  <span class="n">28</span>
+                  <span class="p">20%</span>
+                </div>
+                <div class="lg">
+                  <span class="sw apri" aria-hidden="true"></span>
+                  <span class="lbl-text">2 of 3 + apriori boost<small>expected-count region</small></span>
+                  <span class="n">12</span>
+                  <span class="p">8%</span>
+                </div>
+              </div>
+
+              <div class="voter-decompose">
+                <div class="v-row">
+                  <span class="voter-tag a">A</span>
+                  <div>
+                    <div style="font-family: var(--sans); font-size: 0.75rem; color: var(--ink-2); margin-bottom: 5px;">Envelope onsets <span style="color: var(--whisper); font-family: var(--mono); font-size: 0.625rem;">&middot; candidate gen</span></div>
+                    <div class="v-bar a"><span style="width: 100%;"></span></div>
+                  </div>
+                  <span class="v-num">142<small>candidates</small></span>
+                </div>
+                <div class="v-row">
+                  <span class="voter-tag b">B</span>
+                  <div>
+                    <div style="font-family: var(--sans); font-size: 0.75rem; color: var(--ink-2); margin-bottom: 5px;">CLAP prompt diff <span style="color: var(--whisper); font-family: var(--mono); font-size: 0.625rem;">&middot; semantic vote</span></div>
+                    <div class="v-bar b"><span style="width: 79%;"></span></div>
+                  </div>
+                  <span class="v-num">112<small>votes</small></span>
+                </div>
+                <div class="v-row">
+                  <span class="voter-tag c">C</span>
+                  <div>
+                    <div style="font-family: var(--sans); font-size: 0.75rem; color: var(--ink-2); margin-bottom: 5px;">GBDT classifier <span style="color: var(--whisper); font-family: var(--mono); font-size: 0.625rem;">&middot; features + CLAP + PANN</span></div>
+                    <div class="v-bar c"><span style="width: 91%;"></span></div>
+                  </div>
+                  <span class="v-num">129<small>votes</small></span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Action footer -->
+    <footer class="action-footer">
+      <div class="left-actions">
+        <button class="btn danger">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          Roll back to shipped
+        </button>
+        <button class="btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Save validation report
+        </button>
+      </div>
+      <div class="right-actions">
+        <span class="signoff">Signed off &middot; <b>MA</b> &middot; 13:42</span>
+        <button class="btn primary big">
+          Continue to retrain
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </footer>
+
+    <div class="footnote">
+      Polished 11 &middot; ./docs/ux-redesign/polished/11-developer-validate.html
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

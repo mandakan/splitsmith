@@ -59,23 +59,24 @@ this session).
 | 04| Create match         | applied       | Scoreboard variant + manual variant stacked. Form patterns, search results, stage editor table. |
 | 07| Stage compare        | skill         | F1 telemetry sync timeline         |
 | 08| Export configurator  | applied       | Numbered sections + sticky summary rail. Radio cards, stage chips, trim presets, transitions, overlays. |
+| 05| Ingest               | applied       | Storage-choice radio cards (reference vs copy), per-stage video-row groups, role toggles, unassigned section, jobs FAB. |
+| 06| Beep review          | applied       | Two-pane: left beep queue grouped by stage, right detail with mini waveform (cyan-glow beep marker), alt-beeps panel, secondary-camera offset card. |
+| 08| Export configurator  | applied       | Numbered sections + sticky summary rail. Radio cards, stage chips, trim presets, transitions, overlays. |
 | 09| Developer corpus     | applied       | Developer shell variant (cyan accent), workflow stepper, inbox, fixtures table. |
+| 10| Developer review queue | applied     | 3-column dev shell + queue list + detail. Hand-label vs ensemble waveform diff, shot-diff table with FP row, tags + notes panels, keyboard reference. |
+| 11| Developer validate   | skill         | Run-config bar, headline metrics, per-shooter holdout panel (centerpiece), per-venue table, confusion grid on scope surface, voter-agreement stacked bar, sticky action footer. |
+| 12| Developer retrain    | skill         | Run summary banner, 6-stage pipeline with motherboard trace + running pulse + CRT log tail, before/after comparison table (regressions visually unmissable), per-voter panels, history log, sticky promote/rollback action zone. |
 | 13| Coach (match-wide)   | skill         | CRT-oscilloscope split histogram (twin-trace), 4 instrument stat cards, per-stage breakdown with rank pills, interval tiles, practice recommendations with priority rails, annotations timeline. |
 | 14| Coach (per-stage)    | applied       | Shot ruler (color-coded dots), video tile + transport, current-shot panel with classification chips + annotation editor, full per-shot list with interval tags. Self-referential baselines only. |
 
 ## Polished surfaces -- still to do
 
-9 surfaces remain. Recommended ordering by primitive coverage:
+4 surfaces remain (Batch 5 only):
 
-**Batch 2 + 3 -- COMPLETE.** wf04, wf07, wf08, wf09, wf13, wf14 shipped.
+**Batch 2/3/4 -- COMPLETE.** 14 of 18 polished surfaces shipped.
 
-**Batch 4 (next):**
-- wf05 ingest, wf06 beep review, wf10 developer review queue,
-  wf11 developer validate, wf12 developer retrain
-
-**Batch 5:**
-- wf15 jobs drawer, wf16 shooters management, wf17 match overview
-  empty, wf18 ingest empty
+**Batch 5 (final):**
+- wf15 jobs drawer, wf16 shooters management, wf17 match overview empty, wf18 ingest empty
 
 ## How to resume
 

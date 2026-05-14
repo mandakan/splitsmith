@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Beep review &middot; VADS Easter Shoot 2026</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Beep review
+   Direction: Shot Timer (extends polished 03/05/14).
+   Two-pane: left beep queue grouped by stage, right detail
+   with mini waveform, confirm/adjust/skip controls.
+   ============================================================ */
+
+:root {
+  --bg: #0A0B0D; --bg-glow: #0E1014;
+  --surface: #14171C; --surface-2: #1A1E24; --surface-3: #232831; --surface-4: #2A303A;
+  --rule: #262B33; --rule-strong: #3A4049;
+  --ink: #F4F4F5; --ink-2: #C9CCD2; --muted: #8E939B; --subtle: #6B7079; --whisper: #4B5058;
+  --led: #FF2D2D; --led-soft: #FF5555; --led-deep: #B91C1C; --led-glow: rgba(255,45,45,0.30); --led-tint: rgba(255,45,45,0.10);
+  --live: #FBBF24; --live-glow: rgba(251,191,36,0.30); --live-tint: rgba(251,191,36,0.10);
+  --done: #4ADE80; --done-glow: rgba(74,222,128,0.30); --done-tint: rgba(74,222,128,0.10);
+  --beep: #06B6D4; --beep-glow: rgba(6,182,212,0.35); --beep-tint: rgba(6,182,212,0.10);
+  --manual: #A78BFA;
+  --sans: 'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: var(--sans); font-weight: 400; font-size: 0.9375rem; line-height: 1.55; color: var(--ink); background: var(--bg); letter-spacing: -0.003em; -webkit-font-smoothing: antialiased; min-height: 100vh; background-image: radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--bg-glow), var(--bg)); background-attachment: fixed; }
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select, textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* Shell */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--led), var(--led-deep)); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); }
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* Two-column layout */
+.review-layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 86px); }
+
+/* LEFT: review list */
+.review-list { background: var(--surface); border-right: 1px solid var(--rule); overflow-y: auto; max-height: calc(100vh - 86px); position: sticky; top: 86px; align-self: start; }
+.review-list-head { padding: 20px 18px 16px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.review-list-head .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 8px; display: inline-flex; align-items: center; gap: 10px; }
+.review-list-head .lbl::before { content: ""; width: 18px; height: 1px; background: var(--beep); box-shadow: 0 0 4px var(--beep-glow); }
+.review-list-head .title { font-family: var(--display); font-size: 1.375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); margin-bottom: 4px; }
+.review-list-head .sub { font-size: 0.8125rem; color: var(--muted); margin-bottom: 14px; line-height: 1.5; }
+.progress-row { display: flex; align-items: center; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; font-feature-settings: var(--feat-num); }
+.progress-row b { color: var(--ink); font-weight: 700; }
+.progress { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; display: flex; }
+.progress .done { background: var(--done); box-shadow: 0 0 8px var(--done-glow); height: 100%; }
+.progress .current { background: var(--beep); box-shadow: 0 0 8px var(--beep-glow); height: 100%; }
+.legend { display: flex; gap: 12px; margin-top: 12px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.legend .d { width: 8px; height: 8px; border-radius: 50%; }
+.legend .d.confirmed { background: var(--done); box-shadow: 0 0 5px var(--done-glow); }
+.legend .d.pending { background: var(--surface-4); border: 1px solid var(--rule-strong); }
+.legend .d.current { background: var(--beep); box-shadow: 0 0 5px var(--beep-glow); }
+
+.stage-group { padding: 12px 6px 8px; border-bottom: 1px solid var(--rule); }
+.stage-group-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px 10px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+.stage-group-head .num { background: var(--surface-3); color: var(--ink-2); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-feature-settings: var(--feat-num); }
+.stage-group-head .name { color: var(--ink); font-family: var(--display); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; }
+.stage-group-head .meta { margin-left: auto; font-weight: 500; }
+
+.beep-item { display: grid; grid-template-columns: 28px 1fr 50px 16px; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 7px; cursor: pointer; transition: background 120ms var(--ease); margin-bottom: 1px; }
+.beep-item:hover { background: var(--surface-2); }
+.beep-item.current { background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.4); padding: 7px 11px; box-shadow: inset 0 0 14px rgba(6,182,212,0.06); }
+.beep-item .av { width: 28px; height: 28px; border-radius: 50%; color: var(--ink); font-family: var(--mono); font-size: 0.625rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.beep-item .av.ma { background: linear-gradient(135deg, var(--led), var(--led-deep)); box-shadow: 0 0 0 1px rgba(255,45,45,0.35); }
+.beep-item .av.jl { background: linear-gradient(135deg, var(--live), #B45309); }
+.beep-item .av.pe { background: linear-gradient(135deg, var(--done), #166534); }
+.beep-item .av.rj { background: linear-gradient(135deg, #60A5FA, #1E3A8A); }
+.beep-item .who .name { font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); }
+.beep-item .who .sub { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.04em; color: var(--muted); font-feature-settings: var(--feat-num); margin-top: 2px; }
+.beep-item.current .who .name { color: var(--beep); }
+.beep-item .conf-mini { font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; color: var(--done); text-align: right; font-feature-settings: var(--feat-num); }
+.beep-item .conf-mini.med { color: var(--live); }
+.status-ic { width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+.status-ic.confirmed { background: var(--done); color: var(--bg); box-shadow: 0 0 6px var(--done-glow); }
+.status-ic.pending { background: transparent; border: 1.5px solid var(--rule-strong); }
+.status-ic.current { background: var(--beep); color: var(--bg); box-shadow: 0 0 6px var(--beep-glow); }
+
+.collapsed-group { display: flex; align-items: center; padding: 11px 16px; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+.collapsed-group:hover { background: var(--surface-2); color: var(--ink); }
+.collapsed-group svg { margin-left: auto; }
+
+/* RIGHT: detail */
+.review-detail { padding: 32px 36px 80px; max-width: 1100px; }
+.detail-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.detail-stage { font-family: var(--display); font-size: 0.875rem; font-weight: 700; letter-spacing: 0.06em; color: var(--ink); }
+.detail-shooter { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface-2); }
+.detail-shooter .av { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.625rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 8px var(--led-glow); }
+
+.detail-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.detail-kicker::before { content: ""; width: 26px; height: 1px; background: var(--beep); box-shadow: 0 0 4px var(--beep-glow); }
+.detail-h1 { font-family: var(--display); font-weight: 700; font-size: 2rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 8px; }
+.detail-sub { color: var(--muted); font-size: 0.875rem; margin-bottom: 20px; max-width: 620px; }
+
+/* Stage status note */
+.stage-status-note { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.35); border-radius: 10px; margin-bottom: 22px; color: var(--ink-2); font-size: 0.8125rem; line-height: 1.55; }
+.stage-status-note svg { color: var(--beep); flex-shrink: 0; margin-top: 2px; }
+.stage-status-note b { color: var(--beep); font-weight: 700; }
+
+/* Waveform card */
+.wf-card { background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; margin-bottom: 22px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.wf-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--rule); }
+.wf-head .label { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); }
+.wf-head .zoom { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.wf-head .zoom b { color: var(--ink); }
+.wf-svg-wrap { background: #050608; padding: 14px 18px; position: relative; background-image: repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(255,255,255,0.012) 3px, rgba(255,255,255,0.012) 4px); }
+.wf-svg { width: 100%; height: 120px; display: block; }
+.wf-ruler { display: flex; justify-content: space-between; padding: 8px 18px 14px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--subtle); font-feature-settings: var(--feat-num); }
+.wf-ruler .beep-tick { color: var(--beep); font-weight: 700; }
+
+/* Two-col detail */
+.detail-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+
+/* Detected card */
+.detected-card { background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.detected-top { display: flex; align-items: center; gap: 14px; padding: 18px 20px; border-bottom: 1px solid var(--rule); }
+.detected-top .ic { width: 44px; height: 44px; border-radius: 10px; background: var(--beep); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 16px var(--beep-glow); flex-shrink: 0; }
+.detected-top .label-row { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); }
+.detected-top .time { font-family: var(--mono); font-size: 1.5rem; font-weight: 700; color: var(--ink); font-feature-settings: var(--feat-num); margin-top: 4px; }
+.detected-top .conf { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 6px; font-feature-settings: var(--feat-num); }
+.detected-top .conf b { color: var(--done); }
+
+.video-preview { background: #050608; aspect-ratio: 16/9; position: relative; overflow: hidden; }
+.video-preview .placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background-image: radial-gradient(ellipse at 35% 45%, rgba(255,45,45,0.13), transparent 60%), radial-gradient(ellipse at 70% 70%, rgba(6,182,212,0.10), transparent 60%); color: var(--ink-2); font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; }
+.video-preview .placeholder svg { opacity: 0.4; margin-bottom: 10px; color: var(--ink); }
+.video-preview .tag { position: absolute; top: 14px; left: 14px; background: rgba(0,0,0,0.6); border: 1px solid rgba(6,182,212,0.4); color: var(--beep); padding: 4px 10px; border-radius: 4px; font-family: var(--display); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; backdrop-filter: blur(8px); }
+.video-preview .tc { position: absolute; bottom: 14px; right: 14px; background: rgba(0,0,0,0.7); border: 1px solid var(--rule-strong); padding: 5px 10px; border-radius: 4px; font-family: var(--mono); font-size: 0.75rem; font-weight: 700; color: var(--ink); backdrop-filter: blur(8px); font-feature-settings: var(--feat-num); }
+
+.actions-row { display: flex; gap: 10px; padding: 16px 20px; background: var(--surface-2); border-top: 1px solid var(--rule); flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 8px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-3); color: var(--ink); transition: all 180ms var(--ease); min-height: 40px; }
+.btn:hover { background: var(--surface-4); border-color: var(--ink-2); }
+.btn.primary { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 0 1px var(--beep), 0 0 18px var(--beep-glow); }
+.btn.primary:hover { background: #22D3EE; border-color: #22D3EE; }
+.btn.primary kbd { background: rgba(0,0,0,0.25); border-color: rgba(0,0,0,0.3); color: var(--bg); }
+.action-help { padding: 0 20px 18px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; color: var(--subtle); line-height: 1.55; background: var(--surface-2); }
+
+/* Side stack */
+.side { display: flex; flex-direction: column; gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 12px; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 14px 28px -20px rgba(0,0,0,0.6); }
+.panel .ph { padding: 12px 16px; border-bottom: 1px solid var(--rule); font-family: var(--display); font-weight: 700; font-size: 0.8125rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.panel .pb { padding: 14px 16px; }
+
+.alt-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+.alt-row:last-child { border-bottom: 0; }
+.alt-row .t { font-family: var(--mono); font-size: 0.875rem; font-weight: 700; color: var(--ink); font-feature-settings: var(--feat-num); }
+.alt-row .c { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 3px; font-feature-settings: var(--feat-num); }
+.alt-row .pick { padding: 7px 12px; background: var(--surface-2); border: 1px solid var(--rule-strong); border-radius: 6px; font-family: var(--display); font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); }
+.alt-row .pick:hover { background: var(--surface-3); border-color: var(--beep); color: var(--beep); }
+.alt-foot { margin-top: 10px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; color: var(--subtle); }
+
+.sec-cam .row { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--ink-2); margin-bottom: 6px; font-feature-settings: var(--feat-num); }
+.sec-cam .row b { color: var(--ink); font-weight: 700; }
+.sec-cam .offset { font-family: var(--mono); font-size: 1.125rem; font-weight: 700; color: var(--done); margin: 8px 0 4px; font-feature-settings: var(--feat-num); }
+.sec-cam .help { font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+
+.kbd-list .row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--ink-2); }
+.kbd-list .row .what { color: var(--muted); }
+.kbd-list .keys { display: inline-flex; gap: 3px; }
+
+/* Jobs FAB */
+.jobs-fab { position: fixed; right: 28px; bottom: 28px; display: inline-flex; align-items: center; gap: 12px; padding: 11px 16px; background: linear-gradient(135deg, var(--surface), var(--surface-2)); color: var(--ink); border: 1px solid var(--beep); border-radius: 999px; box-shadow: 0 0 0 1px var(--beep), 0 0 24px var(--beep-glow), 0 18px 36px -12px rgba(0,0,0,0.7); font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; z-index: 80; }
+.jobs-fab .spinner { width: 16px; height: 16px; border: 2px solid var(--rule-strong); border-top-color: var(--beep); border-radius: 50%; animation: spin 1s linear infinite; box-shadow: 0 0 10px var(--beep-glow); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.jobs-fab .count { background: var(--beep); color: var(--bg); padding: 3px 9px; border-radius: 999px; font-family: var(--mono); font-size: 0.625rem; font-weight: 700; font-feature-settings: var(--feat-num); }
+
+.footnote { margin-top: 36px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--whisper); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat, .jobs-fab .spinner { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile"><span class="av">MA</span><span class="label">Mathias A.</span></div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <a href="02-match-overview.html">VADS Easter Shoot 2026</a>
+        <span class="sep">/</span>
+        <span class="current">Beep review</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="review-layout">
+
+  <!-- LEFT: list -->
+  <aside class="review-list">
+    <div class="review-list-head">
+      <div class="lbl">Beep review</div>
+      <div class="title">Confirm</div>
+      <div class="sub">Verify each detected beep before shot detection runs.</div>
+
+      <div class="progress-row">
+        <span><b>15</b> confirmed &middot; <b>8</b> pending</span>
+        <span style="margin-left: auto;">23 total</span>
+      </div>
+      <div class="progress">
+        <span class="done" style="width: 65%;"></span>
+        <span class="current" style="width: 4%;"></span>
+      </div>
+
+      <div class="legend">
+        <span class="lg"><span class="d confirmed"></span>Done</span>
+        <span class="lg"><span class="d pending"></span>Pending</span>
+        <span class="lg"><span class="d current"></span>Current</span>
+      </div>
+    </div>
+
+    <!-- Collapsed -->
+    <div class="collapsed-group">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 6 9 12 15 18"/></svg>
+      <span style="margin-left: 6px;">Stage 01 &middot; Snake -- 4 of 4 confirmed</span>
+    </div>
+
+    <!-- Stage 2 (mixed) -->
+    <div class="stage-group">
+      <div class="stage-group-head">
+        <span class="num">02</span><span class="name">Tower</span>
+        <span class="meta">3 of 4 confirmed</span>
+      </div>
+      <div class="beep-item">
+        <span class="av ma">MA</span>
+        <div class="who"><div class="name">Mathias</div><div class="sub">04:18.221</div></div>
+        <div class="conf-mini">0.94</div>
+        <span class="status-ic confirmed"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="beep-item">
+        <span class="av jl">JL</span>
+        <div class="who"><div class="name">Johan</div><div class="sub">04:16.115</div></div>
+        <div class="conf-mini">0.88</div>
+        <span class="status-ic pending"></span>
+      </div>
+      <div class="beep-item">
+        <span class="av pe">PE</span>
+        <div class="who"><div class="name">Pia</div><div class="sub">04:14.402</div></div>
+        <div class="conf-mini">0.91</div>
+        <span class="status-ic confirmed"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="beep-item">
+        <span class="av rj">RJ</span>
+        <div class="who"><div class="name">Robert</div><div class="sub">04:12.881</div></div>
+        <div class="conf-mini">0.93</div>
+        <span class="status-ic confirmed"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+    </div>
+
+    <!-- Stage 3 (current) -->
+    <div class="stage-group">
+      <div class="stage-group-head">
+        <span class="num">03</span><span class="name">Plates</span>
+        <span class="meta">0 of 4 confirmed</span>
+      </div>
+      <div class="beep-item current">
+        <span class="av ma">MA</span>
+        <div class="who"><div class="name">Mathias</div><div class="sub">04:33.583</div></div>
+        <div class="conf-mini">0.92</div>
+        <span class="status-ic current"></span>
+      </div>
+      <div class="beep-item">
+        <span class="av jl">JL</span>
+        <div class="who"><div class="name">Johan</div><div class="sub">04:31.012</div></div>
+        <div class="conf-mini">0.89</div>
+        <span class="status-ic pending"></span>
+      </div>
+      <div class="beep-item">
+        <span class="av pe">PE</span>
+        <div class="who"><div class="name">Pia</div><div class="sub">04:29.401</div></div>
+        <div class="conf-mini med">0.51</div>
+        <span class="status-ic pending"></span>
+      </div>
+      <div class="beep-item">
+        <span class="av rj">RJ</span>
+        <div class="who"><div class="name">Robert</div><div class="sub">04:27.812</div></div>
+        <div class="conf-mini">0.86</div>
+        <span class="status-ic pending"></span>
+      </div>
+    </div>
+
+    <!-- Stage 4 (mixed) -->
+    <div class="stage-group">
+      <div class="stage-group-head">
+        <span class="num">04</span><span class="name">Mover</span>
+        <span class="meta">1 of 4 confirmed</span>
+      </div>
+      <div class="beep-item">
+        <span class="av ma">MA</span>
+        <div class="who"><div class="name">Mathias</div><div class="sub">05:12.448</div></div>
+        <div class="conf-mini">0.95</div>
+        <span class="status-ic pending"></span>
+      </div>
+      <div class="beep-item">
+        <span class="av jl">JL</span>
+        <div class="who"><div class="name">Johan</div><div class="sub">05:10.220</div></div>
+        <div class="conf-mini">0.90</div>
+        <span class="status-ic pending"></span>
+      </div>
+      <div class="beep-item">
+        <span class="av pe">PE</span>
+        <div class="who"><div class="name">Pia</div><div class="sub">05:08.011</div></div>
+        <div class="conf-mini">0.94</div>
+        <span class="status-ic confirmed"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="beep-item">
+        <span class="av rj">RJ</span>
+        <div class="who"><div class="name">Robert</div><div class="sub">05:06.331</div></div>
+        <div class="conf-mini">0.92</div>
+        <span class="status-ic pending"></span>
+      </div>
+    </div>
+
+    <div class="collapsed-group">
+      <span>Stages 05-12 &middot; 11 of 11 confirmed</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 6 15 12 9 18"/></svg>
+    </div>
+
+  </aside>
+
+  <!-- RIGHT: detail -->
+  <main class="review-detail">
+
+    <div class="detail-head">
+      <span class="detail-stage">Stage 03 &middot; Plates</span>
+      <span class="detail-shooter">
+        <span class="av">MA</span>
+        Mathias Axell
+      </span>
+      <span style="color: var(--subtle);">Camera A &middot; primary</span>
+    </div>
+
+    <div class="detail-kicker">Beep review &middot; current</div>
+    <h1 class="detail-h1">Confirm the beep</h1>
+    <p class="detail-sub">Detector found a strong candidate at 04:33.583. Verify the marker lands on the beep before shot detection runs.</p>
+
+    <div class="stage-status-note">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 17v.5"/></svg>
+      <div><b>Stage 03 is waiting for all 4 shooters' beeps to be confirmed</b> before shot detection runs. 4 pending here (including this one). Estimated review time: ~30 seconds.</div>
+    </div>
+
+    <!-- Mini waveform -->
+    <div class="wf-card">
+      <div class="wf-head">
+        <span class="label">Waveform &middot; near detected beep</span>
+        <span class="zoom">&plusmn; 1.5s window &middot; <b>click to nudge</b></span>
+      </div>
+      <div class="wf-svg-wrap">
+        <svg class="wf-svg" viewBox="0 0 1000 100" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="env" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#06B6D4" stop-opacity="0.35"/>
+              <stop offset="100%" stop-color="#06B6D4" stop-opacity="0.05"/>
+            </linearGradient>
+            <filter id="beepGlow"><feGaussianBlur stdDeviation="2"/></filter>
+          </defs>
+          <!-- baseline -->
+          <line x1="0" y1="50" x2="1000" y2="50" stroke="#3A4049" stroke-width="0.5" stroke-dasharray="2 3"/>
+          <!-- envelope -->
+          <path d="M0 50 L50 49 L100 51 L150 50 L200 48 L250 52 L300 50 L350 47 L380 53 L410 49 L440 50 L460 30 L470 70 L475 22 L480 78 L485 28 L490 72 L500 50 L530 49 L560 50 L590 51 L620 48 L650 51 L680 50 L710 47 L740 52 L770 50 L800 49 L830 50 L860 51 L890 49 L920 50 L950 50 L1000 50 Z" fill="url(#env)" stroke="#06B6D4" stroke-width="0.5"/>
+          <!-- weak alt at x=215 -->
+          <line x1="215" y1="2" x2="215" y2="98" stroke="#06B6D4" stroke-width="1" stroke-dasharray="2 3" opacity="0.35"/>
+          <circle cx="215" cy="8" r="3" fill="#06B6D4" opacity="0.45"/>
+          <!-- detected beep marker -->
+          <g filter="url(#beepGlow)" opacity="0.4">
+            <line x1="475" y1="0" x2="475" y2="100" stroke="#06B6D4" stroke-width="3"/>
+          </g>
+          <line x1="475" y1="0" x2="475" y2="100" stroke="#06B6D4" stroke-width="2.5" stroke-dasharray="6 3"/>
+          <rect x="445" y="2" width="60" height="16" rx="4" fill="#06B6D4"/>
+          <text x="475" y="14" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono, monospace" letter-spacing="0.1em">BEEP</text>
+        </svg>
+      </div>
+      <div class="wf-ruler">
+        <span>-1.5s</span>
+        <span>-1.0s</span>
+        <span>-0.5s</span>
+        <span class="beep-tick">BEEP</span>
+        <span>+0.5s</span>
+        <span>+1.0s</span>
+        <span>+1.5s</span>
+      </div>
+    </div>
+
+    <!-- Two-col detail -->
+    <div class="detail-grid">
+
+      <!-- Detected card -->
+      <div class="detected-card">
+        <div class="detected-top">
+          <span class="ic">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M19 5a8 8 0 0 1 0 14"/></svg>
+          </span>
+          <div>
+            <div class="label-row">Detected beep</div>
+            <div class="time">04:33.583</div>
+            <div class="conf"><b>0.92</b> confidence &middot; high &middot; relative to start of cam-a video</div>
+          </div>
+        </div>
+
+        <div class="video-preview">
+          <div class="placeholder">
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+            Preview &middot; 50ms before detected beep
+          </div>
+          <span class="tag">At beep</span>
+          <span class="tc">04:33.583</span>
+        </div>
+
+        <div class="actions-row">
+          <button class="btn primary">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5L20 7"/></svg>
+            Confirm beep
+            <kbd>Enter</kbd>
+          </button>
+          <button class="btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg>
+            Adjust
+            <kbd>J</kbd>
+          </button>
+          <button class="btn">
+            Skip
+            <kbd>S</kbd>
+          </button>
+        </div>
+        <div class="action-help">
+          Skipping leaves this beep pending. You can come back to it; shot detection will not start for this stage until all beeps are confirmed.
+        </div>
+      </div>
+
+      <!-- Side -->
+      <aside class="side">
+
+        <div class="panel">
+          <div class="ph">Alternative beeps</div>
+          <div class="pb">
+            <div class="alt-row">
+              <div>
+                <div class="t">04:31.044</div>
+                <div class="c">conf 0.18 &middot; weak echo</div>
+              </div>
+              <button class="pick">Use this</button>
+            </div>
+            <div class="alt-row">
+              <div>
+                <div class="t">04:35.122</div>
+                <div class="c">conf 0.05 &middot; ambient</div>
+              </div>
+              <button class="pick">Use this</button>
+            </div>
+            <div class="alt-foot">Showing top 2 alternatives.</div>
+          </div>
+        </div>
+
+        <div class="panel sec-cam">
+          <div class="ph">Secondary camera</div>
+          <div class="pb">
+            <div class="row"><b>Camera B</b> &middot; helmet mount</div>
+            <div class="offset">+0.084s</div>
+            <div class="help">Auto-computed offset from cam-a beep &middot; verified at audit time</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="ph">Keyboard</div>
+          <div class="pb kbd-list">
+            <div class="row"><span class="what">Confirm</span><span class="keys"><kbd>Enter</kbd></span></div>
+            <div class="row"><span class="what">Adjust manually</span><span class="keys"><kbd>J</kbd></span></div>
+            <div class="row"><span class="what">Pick alternative</span><span class="keys"><kbd>P</kbd></span></div>
+            <div class="row"><span class="what">Next / prev</span><span class="keys"><kbd>&darr;</kbd><kbd>&uarr;</kbd></span></div>
+            <div class="row"><span class="what">Play / pause</span><span class="keys"><kbd>Space</kbd></span></div>
+            <div class="row"><span class="what">Skip</span><span class="keys"><kbd>S</kbd></span></div>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+
+    <div class="footnote">Polished 06 &middot; ./docs/ux-redesign/polished/06-beep-review.html</div>
+  </main>
+</div>
+
+<!-- Jobs FAB -->
+<div class="jobs-fab">
+  <span class="spinner"></span>
+  Processing &middot; 6 jobs
+  <span class="count">~2 min</span>
+</div>
+
+</body>
+</html>
