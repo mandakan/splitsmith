@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith -- wireframe 15: jobs drawer</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --surface-3: #f1f1f3;
+    --border: #e5e5e8;
+    --border-strong: #d4d4d8;
+    --text: #18181b;
+    --text-muted: #71717a;
+    --text-subtle: #a1a1aa;
+    --accent: #4338ca;
+    --accent-2: #6d28d9;
+    --accent-soft: #eef2ff;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --slate: #475569;
+    --slate-soft: #f1f5f9;
+    --teal: #0891b2;
+    --teal-soft: #cffafe;
+    --shadow: 0 1px 2px rgba(15, 15, 20, 0.04), 0 1px 1px rgba(15, 15, 20, 0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; font-size: 14px; line-height: 1.45; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; }
+  kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--border); }
+
+  .wf-banner { background: #1f2937; color: #e5e7eb; font-size: 12px; padding: 6px 16px; text-align: center; letter-spacing: 0.02em; }
+  .wf-banner b { color: white; }
+
+  /* Shell -- shown faded behind drawer */
+  .stage-bg {
+    position: relative;
+    min-height: calc(100vh - 30px);
+  }
+  .stage-bg .faded {
+    filter: blur(2px) opacity(0.55);
+    pointer-events: none;
+    user-select: none;
+  }
+  .stage-bg::after {
+    content: "";
+    position: fixed;
+    top: 30px; left: 0; right: 380px; bottom: 0;
+    background: rgba(15, 15, 20, 0.06);
+    pointer-events: none;
+  }
+  .faded-shell {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .faded-shell .dot { width: 18px; height: 18px; border-radius: 4px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .faded-shell .name { font-weight: 600; font-size: 15px; }
+  .faded-shell .mode { font-size: 12px; color: var(--text-muted); margin-left: 8px; padding: 4px 10px; background: var(--surface-2); border-radius: 6px; border: 1px solid var(--border); }
+  .faded-content {
+    padding: 32px 28px;
+    color: var(--text-subtle);
+    text-align: center;
+  }
+  .faded-content .ph {
+    width: 80%; margin: 0 auto 12px;
+    height: 18px;
+    background: linear-gradient(90deg, transparent, var(--surface-3) 30%, var(--surface-3) 70%, transparent);
+    border-radius: 999px;
+  }
+  .faded-content .ph.short { width: 40%; }
+  .faded-content .ph.med { width: 60%; }
+  .faded-content .ph.tall { height: 80px; }
+  .faded-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 20px auto;
+    max-width: 1000px;
+  }
+  .faded-grid > div {
+    height: 90px;
+    background: var(--surface-3);
+    border-radius: 10px;
+  }
+
+  /* ============ Jobs drawer ============ */
+  .jobs-drawer {
+    position: fixed;
+    top: 30px; right: 0; bottom: 0;
+    width: 380px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(15,15,20,0.08);
+    overflow-y: auto;
+    display: flex; flex-direction: column;
+    z-index: 50;
+  }
+
+  .drawer-head {
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 1;
+  }
+  .drawer-head .top-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .drawer-head .title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+  .drawer-head .title .running {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.2s ease infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .drawer-head .close { background: transparent; border: 0; color: var(--text-muted); padding: 4px; cursor: pointer; }
+  .drawer-head .sub { color: var(--text-muted); font-size: 12.5px; margin-bottom: 12px; }
+
+  /* Worker chip */
+  .worker-chip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+  }
+  .worker-chip .ic {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .worker-chip .body { flex: 1; font-size: 12.5px; }
+  .worker-chip .body b { color: var(--text); font-weight: 600; }
+  .worker-chip .body .sub { color: var(--text-muted); font-size: 11.5px; margin-top: 1px; }
+  .worker-chip .add {
+    background: transparent;
+    border: 0;
+    color: var(--accent);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .group-head {
+    padding: 11px 18px 7px;
+    font-size: 11px;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .group-head .count {
+    background: var(--surface-3);
+    color: var(--text-muted);
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .group-head .count.running { background: var(--accent-soft); color: var(--accent); }
+  .group-head .count.failed { background: var(--red-soft); color: var(--red); }
+
+  /* Job item */
+  .job-item {
+    padding: 11px 18px 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .job-item:hover { background: var(--surface-2); }
+  .job-row-top {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 4px;
+  }
+  .job-ic {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .job-ic.trim { background: rgba(20,184,166,0.12); color: var(--teal); }
+  .job-ic.shot { background: var(--accent-soft); color: var(--accent); }
+  .job-ic.beep { background: rgba(8,145,178,0.12); color: var(--teal); }
+  .job-ic.train { background: rgba(109,40,217,0.12); color: var(--accent-2); }
+  .job-ic.done { background: var(--green-soft); color: var(--green); }
+  .job-ic.fail { background: var(--red-soft); color: var(--red); }
+
+  .job-text { flex: 1; min-width: 0; }
+  .job-name {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .job-target {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    font-family: ui-monospace, Menlo, monospace;
+    margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .job-status {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .job-status.running { background: var(--accent-soft); color: var(--accent); }
+  .job-status.queued { background: var(--surface-3); color: var(--text-muted); }
+  .job-status.done { background: var(--green-soft); color: var(--green); }
+  .job-status.failed { background: var(--red-soft); color: var(--red); }
+  .job-status.warn { background: var(--amber-soft); color: var(--amber); }
+
+  .job-progress {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 6px;
+  }
+  .progress-bar {
+    flex: 1;
+    height: 5px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-bar > span {
+    display: block; height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+  .progress-bar.done > span { background: var(--green); }
+  .progress-bar.queued > span { background: var(--surface-3); }
+  .job-progress .eta {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: ui-monospace, Menlo, monospace;
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .job-meta {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 5px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .job-meta .sep { color: var(--text-subtle); }
+  .job-meta .worker-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 1px 6px;
+    background: var(--surface-3);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .job-meta .worker-tag.remote { background: rgba(109,40,217,0.1); color: var(--accent-2); }
+
+  .job-actions {
+    margin-top: 8px;
+    display: inline-flex; gap: 6px;
+  }
+  .job-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .job-btn:hover { color: var(--text); background: var(--surface-2); }
+  .job-btn.danger:hover { color: var(--red); border-color: var(--red-soft); background: var(--red-soft); }
+  .job-btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+
+  .fail-note {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--red-soft);
+    border-radius: 7px;
+    font-size: 11.5px;
+    color: var(--red);
+    line-height: 1.4;
+  }
+  .fail-note b { font-weight: 600; }
+
+  /* Empty/done states */
+  .done-group {
+    background: var(--surface-2);
+  }
+  .done-group .group-head {
+    background: var(--surface-2);
+  }
+  .done-group .job-item {
+    background: var(--surface-2);
+    opacity: 0.7;
+  }
+  .done-group .job-item:hover { background: var(--surface-3); opacity: 1; }
+
+  .drawer-foot {
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .drawer-foot a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  /* Top fab (shown collapsed) */
+  .ambient-fab {
+    position: fixed;
+    right: 24px; bottom: 24px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="wf-banner">
+  <b>Wireframe 15</b> &nbsp;&middot;&nbsp; Jobs drawer (ambient, slide-out from right)
+  &nbsp;&middot;&nbsp; Workers abstracted as a pool. Future SaaS adds remote workers without UI changes.
+</div>
+
+<div class="stage-bg">
+
+  <!-- Faded match-mode shell behind the drawer -->
+  <div class="faded">
+    <div class="faded-shell">
+      <span class="dot"></span>
+      <span class="name">Splitsmith</span>
+      <span class="mode">Match mode</span>
+      <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);">VADS Easter Shoot 2026</span>
+    </div>
+    <div class="faded-content">
+      <div class="ph short" style="margin: 16px auto;"></div>
+      <div class="ph tall" style="margin: 12px auto;"></div>
+      <div class="faded-grid">
+        <div></div><div></div><div></div><div></div>
+      </div>
+      <div class="ph med" style="margin: 18px auto;"></div>
+      <div class="faded-grid">
+        <div style="height: 56px;"></div>
+        <div style="height: 56px;"></div>
+        <div style="height: 56px;"></div>
+        <div style="height: 56px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawer -->
+  <aside class="jobs-drawer">
+
+    <div class="drawer-head">
+      <div class="top-row">
+        <div class="title">
+          <span class="running"></span>
+          Jobs
+        </div>
+        <button class="close" title="Close drawer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="sub">
+        <b style="color: var(--text); font-weight: 600;">5 running</b> &middot; 7 queued &middot; ~4 min remaining
+      </div>
+
+      <div class="worker-chip">
+        <span class="ic">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+        </span>
+        <div class="body">
+          <div><b>Worker pool</b> &middot; local-1 &middot; local-2</div>
+          <div class="sub">2 of 2 active &middot; ~3.2x speed-up over single-worker</div>
+        </div>
+        <button class="add">+ Remote</button>
+      </div>
+    </div>
+
+    <!-- Running -->
+    <div class="group-head">
+      Running
+      <span class="count running">5</span>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic shot">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l5-7 4 7 4-3 5 6"/><circle cx="12" cy="18" r="2"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Detect shots</div>
+          <div class="job-target">stage 3 &middot; pia &middot; cam-a</div>
+        </div>
+        <span class="job-status running">Running</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar"><span style="width: 62%;"></span></div>
+        <span class="eta">~24s</span>
+      </div>
+      <div class="job-meta">
+        <span class="worker-tag">local-1</span>
+        <span class="sep">&middot;</span>
+        <span>started 38s ago</span>
+      </div>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic trim">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="7" cy="6" r="1.5" fill="currentColor"/><circle cx="13" cy="18" r="1.5" fill="currentColor"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Trim stage video</div>
+          <div class="job-target">stage 4 &middot; mathias &middot; cam-a + cam-b</div>
+        </div>
+        <span class="job-status running">Running</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar"><span style="width: 41%;"></span></div>
+        <span class="eta">~1m 12s</span>
+      </div>
+      <div class="job-meta">
+        <span class="worker-tag">local-2</span>
+        <span class="sep">&middot;</span>
+        <span>started 52s ago</span>
+      </div>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic beep">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M19 5a8 8 0 0 1 0 14"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Beep detection</div>
+          <div class="job-target">stage 8 &middot; mathias &middot; cam-a</div>
+        </div>
+        <span class="job-status running">Running</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar"><span style="width: 88%;"></span></div>
+        <span class="eta">~8s</span>
+      </div>
+      <div class="job-meta">
+        <span class="worker-tag">local-1</span>
+        <span class="sep">&middot;</span>
+        <span>started 21s ago</span>
+      </div>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic train">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Re-evaluate fixture batch</div>
+          <div class="job-target">14 fixtures &middot; ensemble v2026.04.02</div>
+        </div>
+        <span class="job-status running">Running</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar"><span style="width: 33%;"></span></div>
+        <span class="eta">~2m 41s</span>
+      </div>
+      <div class="job-meta">
+        <span class="worker-tag">local-2</span>
+        <span class="sep">&middot;</span>
+        <span>started 1m 18s ago</span>
+        <span class="sep">&middot;</span>
+        <span style="color: var(--accent);">Developer task</span>
+      </div>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic beep">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M19 5a8 8 0 0 1 0 14"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Beep detection</div>
+          <div class="job-target">stage 8 &middot; mathias &middot; cam-b (helmet)</div>
+        </div>
+        <span class="job-status running">Running</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar"><span style="width: 76%;"></span></div>
+        <span class="eta">~12s</span>
+      </div>
+      <div class="job-meta">
+        <span class="worker-tag">local-2</span>
+        <span class="sep">&middot;</span>
+        <span>started 36s ago</span>
+      </div>
+    </div>
+
+    <!-- Failed -->
+    <div class="group-head">
+      Needs attention
+      <span class="count failed">1</span>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic fail">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Trim stage video</div>
+          <div class="job-target">stage 7 &middot; mathias &middot; cam-a</div>
+        </div>
+        <span class="job-status failed">Failed</span>
+      </div>
+      <div class="fail-note">
+        <b>Source video unreachable.</b>
+        <span style="font-family: ui-monospace, Menlo, monospace; font-size: 11px;">~/SD-card-04-12-2026/dcim/GH010038.MP4</span>
+        was a reference link and the source is no longer mounted.
+      </div>
+      <div class="job-actions">
+        <button class="job-btn primary">Relink source</button>
+        <button class="job-btn">Skip stage</button>
+        <button class="job-btn danger">Dismiss</button>
+      </div>
+    </div>
+
+    <!-- Queued -->
+    <div class="group-head">
+      Queued
+      <span class="count">7</span>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic shot">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l5-7 4 7 4-3 5 6"/><circle cx="12" cy="18" r="2"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Detect shots</div>
+          <div class="job-target">stage 8 &middot; mathias (waiting for beep)</div>
+        </div>
+        <span class="job-status queued">Queued</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar queued"><span style="width: 0%;"></span></div>
+        <span class="eta">--</span>
+      </div>
+      <div class="job-meta">
+        <span>3 jobs ahead</span>
+        <span class="sep">&middot;</span>
+        <span>waits on beep confirm</span>
+      </div>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic shot">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l5-7 4 7 4-3 5 6"/><circle cx="12" cy="18" r="2"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Detect shots</div>
+          <div class="job-target">stage 4 &middot; pia &middot; cam-a</div>
+        </div>
+        <span class="job-status queued">Queued</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar queued"><span style="width: 0%;"></span></div>
+        <span class="eta">--</span>
+      </div>
+      <div class="job-meta">
+        <span>4 jobs ahead</span>
+      </div>
+    </div>
+
+    <div class="job-item">
+      <div class="job-row-top">
+        <span class="job-ic trim">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="7" cy="6" r="1.5" fill="currentColor"/><circle cx="13" cy="18" r="1.5" fill="currentColor"/></svg>
+        </span>
+        <div class="job-text">
+          <div class="job-name">Trim stage video</div>
+          <div class="job-target">stage 9 &middot; johan &middot; cam-a</div>
+        </div>
+        <span class="job-status queued">Queued</span>
+      </div>
+      <div class="job-progress">
+        <div class="progress-bar queued"><span style="width: 0%;"></span></div>
+        <span class="eta">--</span>
+      </div>
+      <div class="job-meta">
+        <span>5 jobs ahead</span>
+      </div>
+    </div>
+
+    <div style="padding: 9px 18px 11px; background: var(--surface-2); font-size: 11.5px; color: var(--text-muted); display: flex; justify-content: space-between;">
+      <span>+ 4 more queued</span>
+      <a style="color: var(--accent); text-decoration: none; font-weight: 500;">Show all &rarr;</a>
+    </div>
+
+    <!-- Done today -->
+    <div class="done-group">
+      <div class="group-head">
+        Completed today
+        <span class="count">23</span>
+      </div>
+
+      <div class="job-item">
+        <div class="job-row-top">
+          <span class="job-ic done">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg>
+          </span>
+          <div class="job-text">
+            <div class="job-name">Detect shots</div>
+            <div class="job-target">stage 2 &middot; pia &middot; cam-a</div>
+          </div>
+          <span class="job-status done">Done</span>
+        </div>
+        <div class="job-meta">
+          <span class="worker-tag">local-1</span>
+          <span class="sep">&middot;</span>
+          <span>2 min ago &middot; 42s</span>
+        </div>
+      </div>
+
+      <div class="job-item">
+        <div class="job-row-top">
+          <span class="job-ic done">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg>
+          </span>
+          <div class="job-text">
+            <div class="job-name">Trim stage video</div>
+            <div class="job-target">stage 1 &middot; mathias &middot; cam-a + cam-b</div>
+          </div>
+          <span class="job-status done">Done</span>
+        </div>
+        <div class="job-meta">
+          <span class="worker-tag">local-2</span>
+          <span class="sep">&middot;</span>
+          <span>4 min ago &middot; 1m 38s</span>
+        </div>
+      </div>
+
+      <div class="job-item">
+        <div class="job-row-top">
+          <span class="job-ic done">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5L20 7"/></svg>
+          </span>
+          <div class="job-text">
+            <div class="job-name">Audio extract</div>
+            <div class="job-target">stage 1 &middot; pia &middot; cam-a</div>
+          </div>
+          <span class="job-status done">Done</span>
+        </div>
+        <div class="job-meta">
+          <span class="worker-tag">local-1</span>
+          <span class="sep">&middot;</span>
+          <span>9 min ago &middot; 11s</span>
+        </div>
+      </div>
+
+      <div style="padding: 10px 18px; font-size: 11.5px; color: var(--text-muted); text-align: center;">
+        + 20 more &middot; <a style="color: var(--accent); text-decoration: none; font-weight: 500;">Show full history &rarr;</a>
+      </div>
+    </div>
+
+    <div class="drawer-foot">
+      <span><b style="color: var(--text); font-weight: 600;">Auto-retry</b> failed jobs in 1 min</span>
+      <a>Worker settings &rarr;</a>
+    </div>
+
+  </aside>
+
+</div>
+
+</body>
+</html>

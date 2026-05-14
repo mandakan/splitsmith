@@ -1,0 +1,1013 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith -- wireframe 08: match export configurator</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --surface-3: #f1f1f3;
+    --border: #e5e5e8;
+    --border-strong: #d4d4d8;
+    --text: #18181b;
+    --text-muted: #71717a;
+    --text-subtle: #a1a1aa;
+    --accent: #4338ca;
+    --accent-2: #6d28d9;
+    --accent-soft: #eef2ff;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --slate: #475569;
+    --slate-soft: #f1f5f9;
+    --shadow: 0 1px 2px rgba(15, 15, 20, 0.04), 0 1px 1px rgba(15, 15, 20, 0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; font-size: 14px; line-height: 1.45; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; }
+  kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--border); }
+  input, select { font: inherit; color: inherit; }
+
+  .wf-banner { background: #1f2937; color: #e5e7eb; font-size: 12px; padding: 6px 16px; text-align: center; letter-spacing: 0.02em; }
+  .wf-banner b { color: white; }
+
+  /* Shell */
+  .shell { background: var(--surface); border-bottom: 1px solid var(--border); }
+  .shell-top { display: flex; align-items: center; padding: 10px 24px; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .brand-dot { width: 18px; height: 18px; border-radius: 4px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .mode-switch button { background: transparent; border: 0; padding: 6px 14px; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+  .mode-switch button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .shell-spacer { flex: 1; }
+  .shell-actions { display: flex; align-items: center; gap: 6px; }
+  .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-muted); }
+  .icon-btn:hover { background: var(--surface-2); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; }
+  .context-bar { display: flex; align-items: center; padding: 8px 24px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+  .crumb { display: inline-flex; align-items: center; gap: 8px; }
+  .crumb a { color: var(--text-muted); text-decoration: none; }
+  .crumb a:hover { color: var(--text); }
+  .crumb-sep { color: var(--text-subtle); }
+
+  /* App body */
+  .app-body { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 86px); }
+
+  /* Sidebar */
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 16px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+  .match-card-head { padding: 6px 8px 12px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  .match-card-head .title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; margin-bottom: 4px; }
+  .match-card-head .meta { font-size: 11.5px; color: var(--text-muted); }
+  .nav-section { margin: 4px 0 12px; }
+  .nav-label { text-transform: uppercase; color: var(--text-subtle); font-size: 10.5px; letter-spacing: 0.06em; font-weight: 600; padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; }
+  .nav-label .pill { background: var(--surface-3); color: var(--text-muted); border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 600; letter-spacing: 0; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 7px; color: var(--text); font-size: 13px; cursor: pointer; }
+  .nav-item:hover { background: var(--surface-2); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-item .icon { color: var(--text-muted); }
+  .nav-item.active .icon { color: var(--accent); }
+  .stage-item { display: grid; grid-template-columns: 22px 1fr 16px; align-items: center; gap: 8px; padding: 4px 10px 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+  .stage-item:hover { background: var(--surface-2); }
+  .stage-num { width: 22px; height: 22px; border-radius: 5px; background: var(--surface-3); color: var(--text-muted); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .stage-status { width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .status-done { background: var(--green-soft); color: var(--green); }
+  .status-partial { background: var(--amber-soft); color: var(--amber); }
+  .status-todo { background: var(--surface-3); color: var(--text-subtle); }
+  .status-flag { background: var(--red-soft); color: var(--red); }
+
+  /* Page */
+  .page-head {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 28px;
+  }
+  .page-h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+  .page-sub { color: var(--text-muted); font-size: 13.5px; margin-top: 4px; }
+
+  /* Layout */
+  .export-layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 20px;
+    padding: 22px 28px 130px;
+    max-width: 1320px;
+    margin: 0 auto;
+  }
+
+  /* Section */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .section-head {
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .section-head .title {
+    font-size: 13.5px;
+    font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-head .title .num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .section-head .help { font-size: 12px; color: var(--text-muted); }
+  .section-body { padding: 16px 18px; }
+
+  /* Mode toggle */
+  .mode-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .mode-option {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface-2);
+    cursor: pointer;
+  }
+  .mode-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .mode-option .radio {
+    flex-shrink: 0;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-strong);
+    background: var(--surface);
+    margin-top: 2px;
+    position: relative;
+  }
+  .mode-option.selected .radio {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .mode-option.selected .radio::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: white;
+  }
+  .mode-option .opt-title { font-size: 13.5px; font-weight: 600; margin-bottom: 4px; }
+  .mode-option.selected .opt-title { color: var(--accent); }
+  .mode-option .opt-desc { font-size: 12.5px; color: var(--text-muted); }
+
+  /* Shooter selector */
+  .shooter-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .shooter-row .av { width: 32px; height: 32px; border-radius: 50%; color: white; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .shooter-row .info { flex: 1; }
+  .shooter-row .name { font-weight: 600; font-size: 13.5px; }
+  .shooter-row .meta { font-size: 12px; color: var(--text-muted); }
+
+  /* Stage chip selector */
+  .stage-chips {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 10px;
+  }
+  .stage-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px 5px 8px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1.5px solid var(--accent-soft);
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .stage-chip .num {
+    background: var(--accent);
+    color: white;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .stage-chip.off {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text-muted);
+    text-decoration: line-through;
+  }
+  .stage-chip.off .num { background: var(--surface-3); color: var(--text-muted); }
+  .stage-chip.warn {
+    background: var(--amber-soft);
+    color: var(--amber);
+    border-color: var(--amber-soft);
+  }
+  .stage-chip.warn .num { background: var(--amber); }
+
+  /* Trim presets */
+  .preset-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .preset {
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .preset .pname { font-weight: 600; }
+  .preset .pnum { font-size: 11.5px; color: var(--text-muted); font-family: ui-monospace, Menlo, monospace; }
+  .preset.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .preset.selected .pname { color: var(--accent); }
+
+  .trim-custom {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+  }
+  .trim-custom .field { display: flex; flex-direction: column; gap: 4px; }
+  .trim-custom label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .trim-custom .num-input {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px;
+    padding: 6px 10px;
+  }
+  .trim-custom .num-input input {
+    border: 0; background: transparent; outline: none; font-size: 13.5px; width: 70px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .trim-custom .num-input .unit { color: var(--text-muted); font-size: 12px; }
+
+  /* Transitions */
+  .transition-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .trans {
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .trans.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .trans .preview {
+    height: 64px;
+    background: #18181b;
+    position: relative;
+  }
+  .trans .preview .a, .trans .preview .b {
+    position: absolute; top: 0; bottom: 0;
+    width: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .trans .preview .a { left: 0; background: linear-gradient(135deg, #1e1b4b, #4338ca); }
+  .trans .preview .b { right: 0; background: linear-gradient(135deg, #134e4a, #14b8a6); }
+  .trans.dissolve .preview .a { right: 35%; left: 0; width: auto; }
+  .trans.dissolve .preview .b { left: 35%; right: 0; width: auto; }
+  .trans.dissolve .preview::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; left: 35%; right: 35%;
+    background: linear-gradient(to right, rgba(67,56,202,0.6), rgba(20,184,166,0.6));
+  }
+  .trans.title-card .preview {
+    background: linear-gradient(135deg, #1e1b4b, #4338ca);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    color: white;
+    text-align: center;
+  }
+  .trans.title-card .preview .stage-num-overlay { font-size: 10px; opacity: 0.7; }
+  .trans.title-card .preview .stage-name-overlay { font-size: 13px; font-weight: 700; }
+  .trans.cut .preview .a { right: 50%; }
+  .trans.cut .preview .b { left: 50%; }
+  .trans.fade .preview .a { background: black; right: 35%; left: 0; width: auto; }
+  .trans.fade .preview .b { left: 35%; right: 0; width: auto; }
+  .trans.fade .preview::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; left: 35%; right: 35%;
+    background: black;
+  }
+  .trans .label {
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .trans.selected .label { color: var(--accent); }
+
+  /* Overlay templates */
+  .overlay-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+  .overlay-tile {
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .overlay-tile.selected { border-color: var(--accent); background: var(--accent-soft); }
+  .overlay-tile .preview {
+    height: 110px;
+    background: #0a0a0c;
+    background-image:
+      radial-gradient(ellipse at 30% 40%, rgba(99,102,241,0.18), transparent 60%),
+      radial-gradient(ellipse at 70% 60%, rgba(244,114,182,0.12), transparent 60%);
+    position: relative;
+    color: white;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+  }
+  .overlay-tile.none .preview::after {
+    content: "(no overlay)";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255,255,255,0.4);
+    font-family: -apple-system, BlinkMacSystemFont, system-ui;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+  .overlay-tile .ov-tl {
+    position: absolute; top: 8px; left: 8px;
+    background: rgba(0,0,0,0.6);
+    padding: 2px 7px;
+    border-radius: 3px;
+    backdrop-filter: blur(8px);
+  }
+  .overlay-tile .ov-br {
+    position: absolute; bottom: 8px; right: 8px;
+    background: rgba(0,0,0,0.6);
+    padding: 4px 8px;
+    border-radius: 3px;
+    backdrop-filter: blur(8px);
+    text-align: right;
+  }
+  .overlay-tile .ov-br .big { font-size: 13px; font-weight: 700; display: block; }
+  .overlay-tile .ov-bl {
+    position: absolute; bottom: 8px; left: 8px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .overlay-tile .label {
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .overlay-tile.selected .label { color: var(--accent); }
+
+  /* Overlay settings */
+  .overlay-settings {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .overlay-settings .field { display: flex; flex-direction: column; gap: 4px; }
+  .overlay-settings label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .overlay-settings select,
+  .overlay-settings input {
+    padding: 6px 10px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px;
+    font-size: 13px; outline: none;
+  }
+
+  /* Output formats */
+  .formats { display: flex; flex-direction: column; gap: 8px; }
+  .fmt-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 13px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .fmt-row.on { background: var(--accent-soft); border-color: var(--accent-soft); }
+  .fmt-check {
+    width: 18px; height: 18px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border-strong);
+    background: var(--surface);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: white;
+    flex-shrink: 0;
+  }
+  .fmt-row.on .fmt-check {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .fmt-row.on .fmt-check svg { display: block; }
+  .fmt-row .fmt-check svg { display: none; }
+  .fmt-row .info { flex: 1; }
+  .fmt-row .fname { font-weight: 600; font-size: 13.5px; }
+  .fmt-row.on .fname { color: var(--accent); }
+  .fmt-row .fhint { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  .dest-row {
+    display: flex; gap: 8px; margin-top: 12px;
+  }
+  .dest-row input {
+    flex: 1;
+    padding: 8px 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    outline: none;
+  }
+  .dest-row button {
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+
+  /* Right rail */
+  .summary-rail {
+    position: sticky;
+    top: 100px;
+    align-self: start;
+  }
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .summary-card .ph {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: white;
+  }
+  .summary-card .ph .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.8; }
+  .summary-card .ph .title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin-top: 2px; }
+
+  .summary-stats {
+    padding: 14px 18px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .stat-line { display: flex; align-items: center; gap: 12px; }
+  .stat-line .ic {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .stat-line .info { flex: 1; }
+  .stat-line .info .v { font-size: 14px; font-weight: 600; }
+  .stat-line .info .v .unit { font-size: 11.5px; color: var(--text-muted); font-weight: 400; margin-left: 2px; }
+  .stat-line .info .k { font-size: 11.5px; color: var(--text-muted); }
+
+  .summary-files {
+    border-top: 1px solid var(--border);
+    padding: 12px 18px;
+  }
+  .file-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  .file-row svg { color: var(--accent); flex-shrink: 0; }
+  .file-row .path { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--text); }
+
+  .summary-cta {
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+  .btn-export {
+    width: 100%;
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--accent);
+    color: white;
+    border: 0;
+    border-radius: 9px;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-export:hover { filter: brightness(1.05); }
+  .summary-cta .small {
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  /* Recent exports */
+  .recent {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-top: 14px;
+    overflow: hidden;
+  }
+  .recent-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .recent-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px;
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .recent-row:last-child { border-bottom: 0; }
+  .recent-row .ic {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .recent-row .name { font-weight: 500; flex: 1; }
+  .recent-row .when { color: var(--text-subtle); font-size: 11.5px; }
+  .recent-row .reveal { background: transparent; border: 0; color: var(--accent); font-size: 11.5px; font-weight: 500; cursor: pointer; }
+
+  .footnote { color: var(--text-subtle); font-size: 12px; text-align: center; margin-top: 18px; }
+</style>
+</head>
+<body>
+
+<div class="wf-banner">
+  <b>Wireframe 08</b> &nbsp;&middot;&nbsp; Match export configurator
+  &nbsp;&middot;&nbsp; Scope, trim, transitions, overlays, output. Closes the end-to-end flow.
+</div>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand"><div class="brand-dot"></div>Splitsmith</div>
+    <div class="mode-switch"><button class="active">Match</button><button>Developer</button></div>
+    <div class="shell-spacer"></div>
+    <div class="shell-actions">
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+      <span class="avatar">MA</span>
+    </div>
+  </div>
+  <div class="context-bar">
+    <div class="crumb">
+      <a href="01-match-picker.html">Matches</a><span class="crumb-sep">/</span>
+      <a href="02-match-overview.html">VADS Easter Shoot 2026</a><span class="crumb-sep">/</span>
+      <span style="color: var(--text);">Export</span>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="match-card-head">
+      <div class="title">VADS Easter Shoot 2026</div>
+      <div class="meta">2026-04-12 &middot; Vasterort PK</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>Overview</div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>Coach</div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>Shooters</div>
+      <div class="nav-item active"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>Export</div>
+    </div>
+    <div class="nav-label">Stages<span class="pill">8 / 12</span></div>
+    <div class="stage-item"><span class="stage-num">1</span><span class="name">Snake</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">2</span><span class="name">Tower</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">3</span><span class="name">Plates</span><span class="stage-status status-partial"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">4</span><span class="name">Mover</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">5</span><span class="name">Standards</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">6</span><span class="name">Field 1</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">7</span><span class="name">Field 2</span><span class="stage-status status-flag"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 7v6M12 17v.5"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">8</span><span class="name">Window</span><span class="stage-status status-partial"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">9</span><span class="name">Long range</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">10</span><span class="name">Speed shoot</span><span class="stage-status status-todo"></span></div>
+    <div class="stage-item"><span class="stage-num">11</span><span class="name">Plate rack</span><span class="stage-status status-todo"></span></div>
+    <div class="stage-item"><span class="stage-num">12</span><span class="name">Final</span><span class="stage-status status-todo"></span></div>
+  </aside>
+
+  <!-- CONTENT -->
+  <main style="min-width: 0;">
+
+    <div class="page-head">
+      <h1 class="page-h1">Export</h1>
+      <div class="page-sub">Configure how your match gets bundled into a Final Cut Pro project.</div>
+    </div>
+
+    <div class="export-layout">
+
+      <!-- LEFT: configuration -->
+      <div style="min-width: 0;">
+
+        <!-- 1. Output mode -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">1</span>Output mode</div>
+            <div class="help">What kind of timeline?</div>
+          </div>
+          <div class="section-body">
+            <div class="mode-toggle">
+              <div class="mode-option selected">
+                <div class="radio"></div>
+                <div>
+                  <div class="opt-title">Single-shooter timeline</div>
+                  <div class="opt-desc">One FCPXML with all selected stages back-to-back. Best for editing your own match video.</div>
+                </div>
+              </div>
+              <div class="mode-option">
+                <div class="radio"></div>
+                <div>
+                  <div class="opt-title">Multi-shooter compare grid</div>
+                  <div class="opt-desc">Side-by-side grid per stage. One audio source, the rest muted. Great for technique comparison.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Shooter -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">2</span>Shooter</div>
+            <div class="help">Single-shooter timeline -- pick whose footage</div>
+          </div>
+          <div class="section-body">
+            <div class="shooter-row">
+              <span class="av" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">MA</span>
+              <div class="info">
+                <div class="name">Mathias Axell <span style="font-size: 10.5px; color: var(--accent); background: var(--accent-soft); padding: 1.5px 7px; border-radius: 999px; margin-left: 4px; font-weight: 600;">YOU</span></div>
+                <div class="meta">Production Optics &middot; 2 cameras (primary: chest, secondary: helmet)</div>
+              </div>
+              <button style="background: transparent; border: 0; color: var(--accent); font-size: 12.5px; font-weight: 500; cursor: pointer;">Change &darr;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Stages -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">3</span>Stages</div>
+            <div class="help">9 of 12 included &middot; only audited stages can be exported</div>
+          </div>
+          <div class="section-body">
+            <div class="stage-chips">
+              <span class="stage-chip"><span class="num">1</span>Snake</span>
+              <span class="stage-chip"><span class="num">2</span>Tower</span>
+              <span class="stage-chip off"><span class="num">3</span>Plates</span>
+              <span class="stage-chip"><span class="num">4</span>Mover</span>
+              <span class="stage-chip"><span class="num">5</span>Standards</span>
+              <span class="stage-chip"><span class="num">6</span>Field 1</span>
+              <span class="stage-chip warn"><span class="num">7</span>Field 2</span>
+              <span class="stage-chip off"><span class="num">8</span>Window</span>
+              <span class="stage-chip"><span class="num">9</span>Long range</span>
+              <span class="stage-chip off"><span class="num">10</span>Speed shoot</span>
+              <span class="stage-chip off"><span class="num">11</span>Plate rack</span>
+              <span class="stage-chip off"><span class="num">12</span>Final</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted);">
+              <span style="color: var(--amber);">Stage 7 has anomalies flagged</span> -- still included; review during edit if you want.
+              Stages 3, 8, 10-12 are not yet audited and cannot be exported.
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Trim -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">4</span>Trim padding</div>
+            <div class="help">How much footage around each stage</div>
+          </div>
+          <div class="section-body">
+            <div class="preset-row">
+              <div class="preset">
+                <span class="pname">Full</span>
+                <span class="pnum">5.0s / 5.0s</span>
+              </div>
+              <div class="preset selected">
+                <span class="pname">Action</span>
+                <span class="pnum">0.5s / 1.0s</span>
+              </div>
+              <div class="preset">
+                <span class="pname">Highlight</span>
+                <span class="pnum">1.5s / 2.0s</span>
+              </div>
+              <div class="preset">
+                <span class="pname">Custom</span>
+                <span class="pnum">below</span>
+              </div>
+            </div>
+            <div class="trim-custom">
+              <div class="field">
+                <label>Before beep</label>
+                <div class="num-input">
+                  <input type="text" value="0.5"/>
+                  <span class="unit">seconds</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>After last shot</label>
+                <div class="num-input">
+                  <input type="text" value="1.0"/>
+                  <span class="unit">seconds</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Transitions (NEW) -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">5</span>Transitions between stages</div>
+            <div class="help">Stitches stages together in the exported timeline</div>
+          </div>
+          <div class="section-body">
+            <div class="transition-grid">
+              <div class="trans cut">
+                <div class="preview"><div class="a">A</div><div class="b">B</div></div>
+                <div class="label">Hard cut</div>
+              </div>
+              <div class="trans dissolve selected">
+                <div class="preview"><div class="a">A</div><div class="b">B</div></div>
+                <div class="label">Cross dissolve</div>
+              </div>
+              <div class="trans title-card">
+                <div class="preview">
+                  <span class="stage-num-overlay">Stage 5</span>
+                  <span class="stage-name-overlay">Standards</span>
+                </div>
+                <div class="label">Title card</div>
+              </div>
+              <div class="trans fade">
+                <div class="preview"><div class="a">A</div><div class="b">B</div></div>
+                <div class="label">Fade through black</div>
+              </div>
+            </div>
+
+            <div class="overlay-settings">
+              <div class="field">
+                <label>Duration</label>
+                <div class="num-input" style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; display: flex; gap: 4px;">
+                  <input type="text" value="0.5" style="border: 0; background: transparent; outline: none; font-size: 13px; width: 60px; font-family: ui-monospace, Menlo, monospace;"/>
+                  <span style="color: var(--text-muted); font-size: 12px;">seconds</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Title card style (if used)</label>
+                <select>
+                  <option>Stage number + name</option>
+                  <option>Name only</option>
+                  <option>Number only</option>
+                  <option>Match name + stage</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Hold</label>
+                <div class="num-input" style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; display: flex; gap: 4px;">
+                  <input type="text" value="2.0" style="border: 0; background: transparent; outline: none; font-size: 13px; width: 60px; font-family: ui-monospace, Menlo, monospace;"/>
+                  <span style="color: var(--text-muted); font-size: 12px;">seconds (title)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Overlays (NEW) -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">6</span>Overlays</div>
+            <div class="help">Burned into the FCPXML as title clips</div>
+          </div>
+          <div class="section-body">
+            <div class="overlay-grid">
+              <div class="overlay-tile none">
+                <div class="preview"></div>
+                <div class="label">No overlay</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview">
+                  <span class="ov-tl">SHOT 7 / 16</span>
+                </div>
+                <div class="label">Shot counter</div>
+              </div>
+              <div class="overlay-tile selected">
+                <div class="preview">
+                  <span class="ov-tl">SHOT 7 / 16</span>
+                  <span class="ov-br">04.83s<span class="big">0.48s</span></span>
+                  <span class="ov-bl">Stage 5</span>
+                </div>
+                <div class="label">Splits + counter</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview">
+                  <span class="ov-br" style="text-align: center;"><span class="big">04.83s</span></span>
+                </div>
+                <div class="label">Timer only</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview">
+                  <span class="ov-bl">Stage 5 &middot; Standards</span>
+                  <span class="ov-tl">MATHIAS</span>
+                </div>
+                <div class="label">Stage banner</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview" style="display: flex; align-items: flex-end; padding: 8px;">
+                  <span style="font-size: 8.5px; color: rgba(255,255,255,0.55); font-family: inherit;">(open custom editor)</span>
+                </div>
+                <div class="label">Custom...</div>
+              </div>
+            </div>
+
+            <div class="overlay-settings">
+              <div class="field">
+                <label>Style</label>
+                <select>
+                  <option>Minimal (selected)</option>
+                  <option>Bold</option>
+                  <option>Outlined</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Font size</label>
+                <select>
+                  <option>Default</option>
+                  <option>Small</option>
+                  <option>Large</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Color accent</label>
+                <select>
+                  <option>Match brand (indigo)</option>
+                  <option>None</option>
+                  <option>Custom...</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7. Output -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">7</span>Output</div>
+            <div class="help">Files and where they land</div>
+          </div>
+          <div class="section-body">
+            <div class="formats">
+              <div class="fmt-row on">
+                <span class="fmt-check"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span>
+                <div class="info">
+                  <div class="fname">FCPXML <span style="font-weight: 400; color: var(--text-muted); margin-left: 4px;">(.fcpxml)</span></div>
+                  <div class="fhint">Final Cut Pro project with stage clips, beep-aligned markers, transitions and overlay titles.</div>
+                </div>
+                <select style="background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px;">
+                  <option>Re-encode to ProRes 422</option>
+                  <option>Re-encode to H.264</option>
+                  <option>Keep original codec</option>
+                </select>
+              </div>
+              <div class="fmt-row">
+                <span class="fmt-check"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span>
+                <div class="info">
+                  <div class="fname">Splits CSV <span style="font-weight: 400; color: var(--text-muted); margin-left: 4px;">(.csv)</span></div>
+                  <div class="fhint">Per-shot timestamps and splits per stage, ready for spreadsheets.</div>
+                </div>
+              </div>
+              <div class="fmt-row">
+                <span class="fmt-check"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span>
+                <div class="info">
+                  <div class="fname">Text report <span style="font-weight: 400; color: var(--text-muted); margin-left: 4px;">(.txt)</span></div>
+                  <div class="fhint">Human-readable summary: match meta, per-stage splits, anomalies.</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top: 14px;">
+              <label style="font-size: 12px; color: var(--text-muted); font-weight: 500; display: block; margin-bottom: 6px;">Destination</label>
+              <div class="dest-row">
+                <input type="text" value="~/Splitsmith/vads-easter-shoot-2026/exports/" />
+                <button>Choose folder</button>
+                <button>Reveal</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: summary rail -->
+      <aside class="summary-rail">
+        <div class="summary-card">
+          <div class="ph">
+            <div class="label">Ready to export</div>
+            <div class="title">VADS Easter Shoot 2026</div>
+          </div>
+
+          <div class="summary-stats">
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10l4 2-4 2v-4zM13 10h4M13 14h4"/></svg></span>
+              <div class="info"><div class="v">9 <span class="unit">stages</span></div><div class="k">Snake, Tower, Mover, Standards, Field 1, Field 2, Long range, plus 2 more</div></div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span>
+              <div class="info"><div class="v">1 <span class="unit">shooter</span></div><div class="k">Mathias Axell (you)</div></div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <div class="info"><div class="v">3:24 <span class="unit">timeline</span></div><div class="k">With transitions; ~2:48 cuts only</div></div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></span>
+              <div class="info"><div class="v">~8 min <span class="unit">processing</span></div><div class="k">Trim + ProRes re-encode + overlay render</div></div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.7c-1.2.7-2.6 1.3-4 1.7-2 .5-3.7.3-5-.5-1 1-2.5 1.6-4 1.6-3 0-5-2-5-5 0-1.5.6-3 1.6-4-.8-1.3-1-3-.5-5 .4-1.4 1-2.8 1.7-4M6 6l12 12"/></svg></span>
+              <div class="info"><div class="v">Splits CSV <span class="unit">+ Text report</span></div><div class="k">Optional sibling files alongside FCPXML</div></div>
+            </div>
+          </div>
+
+          <div class="summary-files">
+            <div style="font-size: 11px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 6px;">Will be written</div>
+            <div class="file-row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="path">vads-easter-2026.fcpxml</span>
+            </div>
+          </div>
+
+          <div class="summary-cta">
+            <button class="btn-export">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg>
+              Export match
+            </button>
+            <div class="small">Export runs in the background. You can keep working while it processes.</div>
+          </div>
+        </div>
+
+        <!-- Recent exports -->
+        <div class="recent">
+          <div class="recent-head">Recent exports</div>
+          <div class="recent-row">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+            <div class="name">vads-easter-2026-draft.fcpxml</div>
+            <span class="when">2 hr ago</span>
+            <button class="reveal">Reveal</button>
+          </div>
+          <div class="recent-row">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+            <div class="name">stage-2-tower.fcpxml</div>
+            <span class="when">yesterday</span>
+            <button class="reveal">Reveal</button>
+          </div>
+        </div>
+
+        <div class="footnote">Wireframe 08 of N</div>
+      </aside>
+
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Add footage (empty)</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* SPLITSMITH -- Ingest empty / drop state (extends polished 05) */
+
+:root {
+  --bg: #0A0B0D; --bg-glow: #0E1014;
+  --surface: #14171C; --surface-2: #1A1E24; --surface-3: #232831; --surface-4: #2A303A;
+  --rule: #262B33; --rule-strong: #3A4049;
+  --ink: #F4F4F5; --ink-2: #C9CCD2; --muted: #8E939B; --subtle: #6B7079; --whisper: #4B5058;
+  --led: #FF2D2D; --led-soft: #FF5555; --led-deep: #B91C1C; --led-glow: rgba(255,45,45,0.30); --led-tint: rgba(255,45,45,0.10);
+  --live: #FBBF24; --live-tint: rgba(251,191,36,0.10);
+  --done: #4ADE80; --done-tint: rgba(74,222,128,0.10); --done-glow: rgba(74,222,128,0.30);
+  --beep: #06B6D4; --beep-tint: rgba(6,182,212,0.10);
+  --sans: 'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: var(--sans); font-size: 0.9375rem; line-height: 1.55; color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased; min-height: 100vh; background-image: radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--bg-glow), var(--bg)); background-attachment: fixed; }
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+code { font-family: var(--mono); font-size: 0.75rem; background: var(--surface-3); border: 1px solid var(--rule); padding: 2px 6px; border-radius: 4px; color: var(--ink-2); font-feature-settings: var(--feat-num); }
+
+/* Shell */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--led), var(--led-deep)); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* Page */
+main { max-width: 1100px; margin: 0 auto; padding: 36px 28px 100px; }
+.page-head { margin-bottom: 22px; }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--led); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.25rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 10px; }
+.page-sub { color: var(--muted); font-size: 0.875rem; max-width: 620px; }
+
+/* Shooter banner */
+.shooter-banner { display: flex; align-items: center; gap: 14px; background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; padding: 14px 18px; margin-bottom: 22px; position: relative; overflow: hidden; }
+.shooter-banner::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--led); box-shadow: 0 0 12px var(--led-glow); }
+.sb-av { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); flex-shrink: 0; }
+.shooter-banner .info { flex: 1; }
+.shooter-banner .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--subtle); margin-bottom: 4px; }
+.shooter-banner .name { font-family: var(--display); font-weight: 700; font-size: 1rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); display: inline-flex; align-items: center; gap: 10px; }
+.you-tag { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.14em; background: var(--led); color: var(--bg); padding: 2px 7px; border-radius: 4px; box-shadow: 0 0 8px var(--led-glow); }
+.shooter-banner .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 4px; font-feature-settings: var(--feat-num); }
+.switch { font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--led); }
+
+/* Drop zone */
+.drop-zone {
+  padding: 56px 42px;
+  background:
+    radial-gradient(800px 320px at 50% 30%, rgba(255,45,45,0.10), transparent 65%),
+    linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 2px dashed var(--led-deep);
+  border-radius: 16px;
+  text-align: center;
+  margin-bottom: 22px;
+  position: relative;
+  overflow: hidden;
+  transition: all 220ms var(--ease);
+}
+.drop-zone:hover { border-color: var(--led); box-shadow: 0 0 0 1px var(--led), 0 0 28px var(--led-glow); }
+.drop-zone::before, .drop-zone::after {
+  content: "";
+  position: absolute;
+  width: 80px; height: 80px;
+  border: 2px solid var(--led);
+  opacity: 0.6;
+}
+.drop-zone::before { top: 18px; left: 18px; border-right: 0; border-bottom: 0; border-radius: 14px 0 0 0; }
+.drop-zone::after { bottom: 18px; right: 18px; border-left: 0; border-top: 0; border-radius: 0 0 14px 0; }
+
+.drop-zone .ic { width: 72px; height: 72px; border-radius: 18px; background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 18px; box-shadow: 0 0 24px var(--led-glow); }
+.drop-zone h2 { font-family: var(--display); font-weight: 700; font-size: 1.875rem; letter-spacing: 0.01em; text-transform: uppercase; color: var(--ink); margin: 0 0 12px; }
+.drop-zone p { font-size: 0.9375rem; color: var(--muted); max-width: 580px; margin: 0 auto 24px; line-height: 1.65; }
+
+.ctas { display: inline-flex; gap: 10px; margin-bottom: 22px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 8px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); min-height: 42px; transition: all 180ms var(--ease); }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--led); color: var(--bg); border-color: var(--led); box-shadow: 0 0 0 1px var(--led), 0 0 18px var(--led-glow); }
+.btn.primary:hover { background: var(--led-soft); border-color: var(--led-soft); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: var(--surface-2); }
+
+.supported { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.04em; color: var(--subtle); font-feature-settings: var(--feat-num); }
+
+/* Storage choice */
+.storage-pre { background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; margin-bottom: 22px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.storage-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.storage-head .title { display: inline-flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
+.storage-head .title svg { color: var(--led); }
+.storage-head .help { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.storage-body { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 18px 20px; }
+.opt { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border: 1.5px solid var(--rule-strong); border-radius: 11px; background: var(--bg-glow); cursor: pointer; transition: all 180ms var(--ease); position: relative; overflow: hidden; }
+.opt:hover { border-color: var(--ink-2); }
+.opt.selected { border-color: var(--led); background: var(--led-tint); box-shadow: 0 0 0 1px var(--led-deep), 0 0 16px var(--led-glow); }
+.opt.selected::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--led); box-shadow: 0 0 10px var(--led-glow); }
+.opt .radio { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--rule-strong); background: var(--surface); margin-top: 2px; position: relative; }
+.opt.selected .radio { border-color: var(--led); background: var(--led); box-shadow: 0 0 10px var(--led-glow); }
+.opt.selected .radio::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; border-radius: 50%; background: var(--bg); }
+.opt-title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.opt.selected .opt-title { color: var(--led); }
+.recommended { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.14em; background: var(--led); color: var(--bg); padding: 2px 7px; border-radius: 4px; box-shadow: 0 0 8px var(--led-glow); }
+.opt-desc { font-size: 0.8125rem; color: var(--muted); line-height: 1.55; }
+.opt-desc b { color: var(--ink); font-weight: 700; }
+.opt-desc .path { font-family: var(--mono); font-size: 0.6875rem; color: var(--ink-2); background: var(--surface-3); padding: 2px 6px; border-radius: 4px; margin-left: 4px; font-feature-settings: var(--feat-num); }
+
+/* Recent */
+.recent { background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; margin-bottom: 22px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.recent-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.recent-head .title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
+.recent-head .help { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.recent-row { display: grid; grid-template-columns: 32px 1fr 130px 90px 100px; align-items: center; gap: 14px; padding: 12px 20px; border-top: 1px solid var(--rule); transition: background 120ms var(--ease); }
+.recent-row:hover { background: var(--surface-2); }
+.recent-row .ic { width: 32px; height: 32px; border-radius: 7px; background: var(--surface-3); border: 1px solid var(--rule-strong); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.path-block .path { font-family: var(--mono); font-size: 0.8125rem; font-weight: 600; color: var(--ink); font-feature-settings: var(--feat-num); }
+.path-block .sub { font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 3px; font-feature-settings: var(--feat-num); }
+.recent-row .when { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); font-feature-settings: var(--feat-num); }
+.recent-row .videos { font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; color: var(--ink); font-feature-settings: var(--feat-num); text-align: right; }
+.recent-row .use { padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--rule-strong); color: var(--ink); border-radius: 7px; font-family: var(--display); font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.recent-row .use:hover { border-color: var(--led); color: var(--led); background: var(--led-tint); }
+
+/* Tips */
+.tips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tip { display: flex; gap: 12px; padding: 16px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 11px; }
+.tip .ic { width: 28px; height: 28px; border-radius: 7px; background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.tip .body { font-size: 0.8125rem; color: var(--ink-2); line-height: 1.55; }
+.tip .body b { color: var(--ink); font-weight: 700; font-family: var(--display); letter-spacing: 0.04em; text-transform: uppercase; }
+
+.footnote { margin-top: 28px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--whisper); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) { .brand .heartbeat { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg></span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat"></span>
+    </div>
+    <div class="mode-switch"><button class="active">Match</button><button>Developer</button></div>
+    <div class="spacer"></div>
+    <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+    <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    <div class="profile"><span class="av">MA</span><span class="label">Mathias A.</span></div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <a href="17-match-overview-empty.html">Bromma Spring Cup 2026</a>
+        <span class="sep">/</span>
+        <span class="current">Add footage</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-head">
+    <div class="page-kicker">Ingest &middot; drop state</div>
+    <h1 class="page-h1">Add footage</h1>
+    <p class="page-sub">Drop a folder for the selected shooter. Videos are auto-matched to stages by recording time.</p>
+  </div>
+
+  <!-- Shooter banner -->
+  <div class="shooter-banner">
+    <span class="sb-av">MA</span>
+    <div class="info">
+      <div class="lbl">Adding footage for</div>
+      <div class="name">Mathias Axell <span class="you-tag">YOU</span></div>
+      <div class="meta">Production Optics &middot; Bromma PK</div>
+    </div>
+    <button class="switch">Switch shooter &darr;</button>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="drop-zone">
+    <div class="ic">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l9-4 9 4M3 7v10l9 4 9-4V7M3 7l9 4 9-4"/></svg>
+    </div>
+    <h2>Drop a folder of videos</h2>
+    <p>Drag and drop your SD-card folder, or pick videos manually. Splitsmith will scan for camera-prefixed files (e.g. <code>GH010032.MP4</code>) and group them by camera.</p>
+    <div class="ctas">
+      <button class="btn primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 3h7v7M21 3l-9 9M5 15v4a2 2 0 0 0 2 2h12"/></svg>
+        Pick a folder
+      </button>
+      <button class="btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20"/></svg>
+        Select videos manually
+      </button>
+    </div>
+    <div class="supported">Supported: <code>.mp4</code> &middot; <code>.mov</code> &middot; <code>.mkv</code> &middot; <code>.lrv</code> &middot; <code>.360</code> &middot; 14.2 GB scan ~20s</div>
+  </div>
+
+  <!-- Storage choice -->
+  <div class="storage-pre">
+    <div class="storage-head">
+      <div class="title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M2 7l10-5 10 5v10l-10 5L2 17z"/></svg>
+        Storage for this ingest
+      </div>
+      <span class="help">Choose before dropping &middot; can override per video later</span>
+    </div>
+    <div class="storage-body">
+      <div class="opt selected">
+        <span class="radio"></span>
+        <div>
+          <div class="opt-title">Reference in place <span class="recommended">Default</span></div>
+          <div class="opt-desc">Keep originals where they are. <b>No extra disk space.</b> Project breaks if the source moves.</div>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="radio"></span>
+        <div>
+          <div class="opt-title">Copy into project folder</div>
+          <div class="opt-desc">Self-contained, portable, survives unmounting.<br><span class="path">~/Splitsmith/bromma-spring-cup-2026/raw/</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent sources -->
+  <div class="recent">
+    <div class="recent-head">
+      <div class="title">Recent sources</div>
+      <span class="help">Drop the same folder again or scan a fresh card</span>
+    </div>
+
+    <div class="recent-row">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M9 6V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"/></svg></span>
+      <div class="path-block">
+        <div class="path">~/SD-card-2026-05-14/</div>
+        <div class="sub">GoPro Hero 11 &middot; chest mount &middot; scanned 2h ago</div>
+      </div>
+      <span class="when">last used 2h ago</span>
+      <span class="videos">12 videos</span>
+      <button class="use">Use this &rarr;</button>
+    </div>
+
+    <div class="recent-row">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M9 6V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"/></svg></span>
+      <div class="path-block">
+        <div class="path">/Volumes/GOPRO_B/DCIM/</div>
+        <div class="sub">GoPro Hero 9 &middot; helmet mount</div>
+      </div>
+      <span class="when">last used yesterday</span>
+      <span class="videos">11 videos</span>
+      <button class="use">Use this &rarr;</button>
+    </div>
+
+    <div class="recent-row">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+      <div class="path-block">
+        <div class="path">~/Footage/2026-04-12-vads-easter/</div>
+        <div class="sub">Mixed source &middot; previously imported into VADS Easter 2026</div>
+      </div>
+      <span class="when">1 month ago</span>
+      <span class="videos">23 videos</span>
+      <button class="use">Use this &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Tips -->
+  <div class="tips">
+    <div class="tip">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+      <div class="body"><b>Use recording timestamps.</b> Splitsmith reads each video's mtime to suggest the right stage. Don't rename files before import.</div>
+    </div>
+    <div class="tip">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3"/></svg></span>
+      <div class="body"><b>Filename prefix = camera.</b> Files starting with <code>GH01</code>, <code>GX01</code>, etc. group into per-camera lanes automatically.</div>
+    </div>
+    <div class="tip">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>
+      <div class="body"><b>Detection runs in the background.</b> The jobs drawer shows beep detection per video as soon as you confirm -- keep working while it processes.</div>
+    </div>
+  </div>
+
+  <div class="footnote">Polished 18 &middot; ./docs/ux-redesign/polished/18-ingest-empty.html</div>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith -- wireframe 16: shooters management</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --surface-3: #f1f1f3;
+    --border: #e5e5e8;
+    --border-strong: #d4d4d8;
+    --text: #18181b;
+    --text-muted: #71717a;
+    --text-subtle: #a1a1aa;
+    --accent: #4338ca;
+    --accent-2: #6d28d9;
+    --accent-soft: #eef2ff;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --slate: #475569;
+    --slate-soft: #f1f5f9;
+    --teal: #0891b2;
+    --teal-soft: #cffafe;
+    --shadow: 0 1px 2px rgba(15, 15, 20, 0.04), 0 1px 1px rgba(15, 15, 20, 0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; font-size: 14px; line-height: 1.45; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; }
+  kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--border); }
+
+  .wf-banner { background: #1f2937; color: #e5e7eb; font-size: 12px; padding: 6px 16px; text-align: center; letter-spacing: 0.02em; }
+  .wf-banner b { color: white; }
+
+  /* Shell */
+  .shell { background: var(--surface); border-bottom: 1px solid var(--border); }
+  .shell-top { display: flex; align-items: center; padding: 10px 24px; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .brand-dot { width: 18px; height: 18px; border-radius: 4px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .mode-switch button { background: transparent; border: 0; padding: 6px 14px; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+  .mode-switch button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .shell-spacer { flex: 1; }
+  .shell-actions { display: flex; align-items: center; gap: 6px; }
+  .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-muted); }
+  .icon-btn:hover { background: var(--surface-2); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; }
+  .context-bar { display: flex; align-items: center; padding: 8px 24px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+  .context-bar a { color: var(--text-muted); text-decoration: none; }
+  .breadcrumb-sep { color: var(--text-subtle); margin: 0 6px; }
+
+  .app-body { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 86px); }
+
+  /* Sidebar (match mode) */
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 16px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+  .match-card-head { padding: 6px 8px 12px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  .match-card-head .title { font-size: 13.5px; font-weight: 600; margin-bottom: 4px; }
+  .match-card-head .meta { font-size: 11.5px; color: var(--text-muted); }
+  .nav-section { margin: 4px 0 12px; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 7px; color: var(--text); font-size: 13px; cursor: pointer; }
+  .nav-item:hover { background: var(--surface-2); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-item .icon { color: var(--text-muted); }
+  .nav-item.active .icon { color: var(--accent); }
+  .nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-subtle); }
+  .nav-label { text-transform: uppercase; color: var(--text-subtle); font-size: 10.5px; letter-spacing: 0.06em; font-weight: 600; padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; }
+  .nav-label .pill { background: var(--surface-3); color: var(--text-muted); border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 600; }
+  .stage-item { display: grid; grid-template-columns: 22px 1fr 16px; align-items: center; gap: 8px; padding: 4px 10px 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+  .stage-num { width: 22px; height: 22px; border-radius: 5px; background: var(--surface-3); color: var(--text-muted); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .stage-status { width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .status-done { background: var(--green-soft); color: var(--green); }
+  .status-partial { background: var(--amber-soft); color: var(--amber); }
+  .status-todo { background: var(--surface-3); color: var(--text-subtle); }
+  .status-flag { background: var(--red-soft); color: var(--red); }
+
+  /* Page */
+  .page-head { background: var(--surface); border-bottom: 1px solid var(--border); padding: 18px 28px; }
+  .page-h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+  .page-sub { color: var(--text-muted); font-size: 13.5px; margin-top: 4px; }
+  .page-head .row { display: flex; align-items: flex-end; justify-content: space-between; }
+
+  .content { padding: 22px 28px 80px; max-width: 1280px; margin: 0 auto; }
+
+  /* Section heading */
+  .section-h {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 0 0 12px;
+  }
+  .section-h .title { font-size: 14px; font-weight: 600; }
+  .section-h .help { font-size: 12px; color: var(--text-muted); }
+  .section-h .ctas { display: inline-flex; gap: 8px; }
+
+  /* Shooter card */
+  .shooter-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .shooter-head {
+    display: grid;
+    grid-template-columns: 48px 1fr 130px 110px 90px;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .shooter-head .av-lg {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    color: white;
+    font-size: 14px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .shooter-head .name-block .name {
+    font-size: 15px; font-weight: 600; letter-spacing: -0.005em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .shooter-head .name-block .you-pill {
+    font-size: 10px; background: var(--accent-soft); color: var(--accent);
+    padding: 1.5px 7px; border-radius: 999px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .shooter-head .name-block .ref-pill {
+    font-size: 10px; background: rgba(8,145,178,0.12); color: var(--teal);
+    padding: 1.5px 7px; border-radius: 999px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .shooter-head .name-block .meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .shooter-head .name-block .meta .sep { color: var(--text-subtle); }
+  .shooter-head .progress-block { display: flex; flex-direction: column; gap: 4px; }
+  .shooter-head .progress-block .text { font-size: 12px; color: var(--text-muted); }
+  .shooter-head .progress-block .text b { color: var(--text); font-weight: 600; }
+  .progress-bar {
+    height: 5px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-bar > span {
+    display: block; height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+  }
+  .progress-bar.done > span { background: var(--green); }
+
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    justify-self: flex-start;
+  }
+  .status-pill .d { width: 6px; height: 6px; border-radius: 50%; }
+  .status-pill.complete { background: var(--green-soft); color: var(--green); }
+  .status-pill.complete .d { background: var(--green); }
+  .status-pill.in-progress { background: var(--amber-soft); color: var(--amber); }
+  .status-pill.in-progress .d { background: var(--amber); }
+  .status-pill.new { background: var(--accent-soft); color: var(--accent); }
+  .status-pill.new .d { background: var(--accent); }
+
+  .row-actions { display: inline-flex; gap: 4px; justify-content: flex-end; }
+  .row-actions .micro-btn {
+    width: 30px; height: 30px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .row-actions .micro-btn:hover { background: var(--surface-2); color: var(--text); }
+
+  /* Camera rows */
+  .cameras { background: var(--surface-2); }
+  .camera-row {
+    display: grid;
+    grid-template-columns: 38px 1fr 150px 130px 1fr 90px 60px;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .camera-row .ic {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .camera-row .cam-name { font-weight: 600; font-size: 13px; }
+  .camera-row .cam-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+  .camera-row select {
+    padding: 6px 9px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 12.5px;
+    outline: none;
+    font: inherit;
+    color: inherit;
+  }
+  .role-pill-row { display: inline-flex; gap: 4px; }
+  .role-pill {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .role-pill.on.primary { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); font-weight: 600; }
+  .role-pill.on.secondary { background: var(--slate-soft); color: var(--slate); border-color: var(--slate-soft); font-weight: 600; }
+  .camera-row .stages-line {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .camera-row .stages-line .chip {
+    padding: 1.5px 7px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .camera-row .stages-line .chip.dim { background: var(--surface-3); color: var(--text-muted); }
+  .camera-row .health {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .camera-row .health.warn { color: var(--amber); }
+
+  .add-camera {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px dashed var(--border);
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--surface-2);
+  }
+
+  /* Reference shooter card */
+  .ref-card {
+    background: linear-gradient(135deg, rgba(8,145,178,0.04), transparent);
+    border: 1px solid rgba(8,145,178,0.18);
+  }
+  .ref-card .av-lg { background: linear-gradient(135deg, var(--teal), var(--accent-2)) !important; }
+  .ref-body {
+    padding: 12px 18px;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+    border-top: 1px dashed rgba(8,145,178,0.25);
+    background: rgba(8,145,178,0.04);
+  }
+  .ref-body b { color: var(--text); }
+  .ref-actions { display: inline-flex; gap: 6px; margin-top: 8px; }
+
+  /* Add shooter card */
+  .add-shooter-card {
+    background: var(--surface);
+    border: 1.5px dashed var(--border-strong);
+    border-radius: 13px;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .add-shooter-card .ic {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-bottom: 10px;
+  }
+  .add-shooter-card .title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .add-shooter-card .help { font-size: 12.5px; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 500; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .btn-soft { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+
+  .footnote { color: var(--text-subtle); font-size: 12px; text-align: center; margin-top: 28px; }
+</style>
+</head>
+<body>
+
+<div class="wf-banner">
+  <b>Wireframe 16</b> &nbsp;&middot;&nbsp; Shooters management (per-match)
+  &nbsp;&middot;&nbsp; List shooters, edit cameras and roles, reserve reference-shooter slots for the future.
+</div>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand"><div class="brand-dot"></div>Splitsmith</div>
+    <div class="mode-switch"><button class="active">Match</button><button>Developer</button></div>
+    <div class="shell-spacer"></div>
+    <div class="shell-actions">
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+      <span class="avatar">MA</span>
+    </div>
+  </div>
+  <div class="context-bar">
+    <a href="01-match-picker.html">Matches</a><span class="breadcrumb-sep">/</span>
+    <a href="02-match-overview.html">VADS Easter Shoot 2026</a><span class="breadcrumb-sep">/</span>
+    <span style="color: var(--text);">Shooters</span>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <aside class="sidebar">
+    <div class="match-card-head">
+      <div class="title">VADS Easter Shoot 2026</div>
+      <div class="meta">2026-04-12 &middot; Vasterort PK</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>Overview</div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>Coach</div>
+      <div class="nav-item active"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>Shooters<span class="count">4</span></div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>Export</div>
+    </div>
+    <div class="nav-label">Stages<span class="pill">8 / 12</span></div>
+    <div class="stage-item"><span class="stage-num">1</span><span style="font-size: 12.5px;">Snake</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">2</span><span style="font-size: 12.5px;">Tower</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">3</span><span style="font-size: 12.5px;">Plates</span><span class="stage-status status-partial"></span></div>
+    <div class="stage-item"><span class="stage-num">4</span><span style="font-size: 12.5px;">Mover</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">5</span><span style="font-size: 12.5px;">Standards</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">6</span><span style="font-size: 12.5px;">Field 1</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">7</span><span style="font-size: 12.5px;">Field 2</span><span class="stage-status status-flag"></span></div>
+    <div class="stage-item"><span class="stage-num">8</span><span style="font-size: 12.5px;">Window</span><span class="stage-status status-partial"></span></div>
+    <div class="stage-item"><span class="stage-num">9</span><span style="font-size: 12.5px;">Long range</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">10</span><span style="font-size: 12.5px;">Speed shoot</span><span class="stage-status status-todo"></span></div>
+    <div class="stage-item"><span class="stage-num">11</span><span style="font-size: 12.5px;">Plate rack</span><span class="stage-status status-todo"></span></div>
+    <div class="stage-item"><span class="stage-num">12</span><span style="font-size: 12.5px;">Final</span><span class="stage-status status-todo"></span></div>
+  </aside>
+
+  <main style="min-width: 0;">
+
+    <div class="page-head">
+      <div class="row">
+        <div>
+          <h1 class="page-h1">Shooters</h1>
+          <div class="page-sub">4 shooters in this match. Each shooter can carry multiple cameras; roles apply per stage.</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 16,12 14,15 10,15 8,12 2,12"/><path d="M5 9l-2 3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2-3"/><path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg>
+            Import shooter package
+          </button>
+          <button class="btn btn-primary">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+            Add shooter
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="section-h">
+        <div class="title">Active shooters</div>
+        <div class="help">Footage attached &middot; participating in this match</div>
+      </div>
+
+      <!-- Mathias -->
+      <div class="shooter-card">
+        <div class="shooter-head">
+          <span class="av-lg" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">MA</span>
+          <div class="name-block">
+            <div class="name">Mathias Axell <span class="you-pill">You</span></div>
+            <div class="meta">
+              <span>Production Optics</span><span class="sep">&middot;</span>
+              <span>Bromma PK</span><span class="sep">&middot;</span>
+              <span>2 cameras</span>
+            </div>
+          </div>
+          <div class="progress-block">
+            <div class="text"><b>12 / 12</b> stages audited</div>
+            <div class="progress-bar done"><span style="width: 100%"></span></div>
+          </div>
+          <span class="status-pill complete"><span class="d"></span>Complete</span>
+          <div class="row-actions">
+            <button class="micro-btn" title="Open Coach"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="cameras">
+          <div class="camera-row">
+            <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+            <div>
+              <div class="cam-name">Camera A</div>
+              <div class="cam-sub">cam-a &middot; chest mount</div>
+            </div>
+            <select>
+              <option>GoPro Hero 11</option>
+              <option>GoPro Hero 9</option>
+              <option>Insta360</option>
+              <option>Other</option>
+            </select>
+            <div class="role-pill-row">
+              <span class="role-pill on primary">Primary</span>
+              <span class="role-pill">Secondary</span>
+            </div>
+            <div class="stages-line">
+              Stages: <span class="chip">1</span><span class="chip">2</span><span class="chip">3</span><span class="chip">4</span><span class="chip">5</span><span class="chip">6</span><span class="chip">7</span><span class="chip">8</span><span class="chip">9</span>
+              <span style="color: var(--text-muted); margin-left: 2px;">+3 more</span>
+            </div>
+            <span class="health">12 videos</span>
+            <div class="row-actions">
+              <button class="micro-btn" title="Edit"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg></button>
+            </div>
+          </div>
+
+          <div class="camera-row">
+            <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+            <div>
+              <div class="cam-name">Camera B</div>
+              <div class="cam-sub">cam-b &middot; helmet mount</div>
+            </div>
+            <select>
+              <option>GoPro Hero 9</option>
+              <option>GoPro Hero 11</option>
+              <option>Insta360</option>
+            </select>
+            <div class="role-pill-row">
+              <span class="role-pill">Primary</span>
+              <span class="role-pill on secondary">Secondary</span>
+            </div>
+            <div class="stages-line">
+              Stages: <span class="chip">1</span><span class="chip">2</span><span class="chip">4</span><span class="chip">5</span><span class="chip">6</span><span class="chip">7</span><span class="chip">8</span><span class="chip">9</span>
+              <span style="color: var(--text-muted); margin-left: 2px;">+3 more</span>
+            </div>
+            <span class="health">11 videos</span>
+            <div class="row-actions">
+              <button class="micro-btn" title="Edit"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg></button>
+            </div>
+          </div>
+
+          <div class="add-camera">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add another camera for Mathias
+          </div>
+        </div>
+      </div>
+
+      <!-- Johan -->
+      <div class="shooter-card">
+        <div class="shooter-head">
+          <span class="av-lg" style="background: linear-gradient(135deg, #14b8a6, #0ea5e9);">JL</span>
+          <div class="name-block">
+            <div class="name">Johan Larsson</div>
+            <div class="meta">
+              <span>Standard</span><span class="sep">&middot;</span>
+              <span>Vasterort PK</span><span class="sep">&middot;</span>
+              <span>1 camera</span>
+            </div>
+          </div>
+          <div class="progress-block">
+            <div class="text"><b>4 / 12</b> stages audited</div>
+            <div class="progress-bar"><span style="width: 33%"></span></div>
+          </div>
+          <span class="status-pill in-progress"><span class="d"></span>In progress</span>
+          <div class="row-actions">
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></button>
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="cameras">
+          <div class="camera-row">
+            <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+            <div>
+              <div class="cam-name">Camera A</div>
+              <div class="cam-sub">cam-a &middot; chest mount</div>
+            </div>
+            <select>
+              <option>GoPro Hero 9</option>
+            </select>
+            <div class="role-pill-row">
+              <span class="role-pill on primary">Primary</span>
+              <span class="role-pill">Secondary</span>
+            </div>
+            <div class="stages-line">
+              Stages: <span class="chip">1</span><span class="chip">2</span><span class="chip">3</span><span class="chip">4</span>
+              <span class="chip dim">5-12 missing</span>
+            </div>
+            <span class="health warn">4 videos</span>
+            <div class="row-actions">
+              <button class="micro-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg></button>
+            </div>
+          </div>
+          <div class="add-camera">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add another camera for Johan
+          </div>
+        </div>
+      </div>
+
+      <!-- Pia (just imported) -->
+      <div class="shooter-card">
+        <div class="shooter-head">
+          <span class="av-lg" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">PE</span>
+          <div class="name-block">
+            <div class="name">Pia Eriksson</div>
+            <div class="meta">
+              <span>Production Optics</span><span class="sep">&middot;</span>
+              <span>Bromma PK</span><span class="sep">&middot;</span>
+              <span>1 camera</span>
+            </div>
+          </div>
+          <div class="progress-block">
+            <div class="text"><b>0 / 12</b> stages audited</div>
+            <div class="progress-bar"><span style="width: 0%"></span></div>
+          </div>
+          <span class="status-pill new"><span class="d"></span>Just imported</span>
+          <div class="row-actions">
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></button>
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="cameras">
+          <div class="camera-row">
+            <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+            <div>
+              <div class="cam-name">Camera A</div>
+              <div class="cam-sub">cam-a &middot; chest mount</div>
+            </div>
+            <select>
+              <option>GoPro Hero 11</option>
+            </select>
+            <div class="role-pill-row">
+              <span class="role-pill on primary">Primary</span>
+              <span class="role-pill">Secondary</span>
+            </div>
+            <div class="stages-line">
+              Stages: <span class="chip">1</span><span class="chip">2</span><span class="chip">3</span><span class="chip">4</span><span class="chip">5</span><span class="chip">6</span><span class="chip">7</span><span class="chip">8</span><span class="chip">9</span><span class="chip">10</span><span class="chip">11</span><span class="chip">12</span>
+            </div>
+            <span class="health">12 videos</span>
+            <div class="row-actions">
+              <button class="micro-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg></button>
+            </div>
+          </div>
+          <div class="add-camera">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add another camera for Pia
+          </div>
+        </div>
+      </div>
+
+      <!-- Robert -->
+      <div class="shooter-card">
+        <div class="shooter-head">
+          <span class="av-lg" style="background: linear-gradient(135deg, #ef4444, #b91c1c);">RJ</span>
+          <div class="name-block">
+            <div class="name">Robert Janson</div>
+            <div class="meta">
+              <span>Production</span><span class="sep">&middot;</span>
+              <span>Bromma PK</span><span class="sep">&middot;</span>
+              <span>1 camera</span>
+            </div>
+          </div>
+          <div class="progress-block">
+            <div class="text"><b>7 / 12</b> stages audited</div>
+            <div class="progress-bar"><span style="width: 58%"></span></div>
+          </div>
+          <span class="status-pill in-progress"><span class="d"></span>In progress</span>
+          <div class="row-actions">
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></button>
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="cameras">
+          <div class="camera-row">
+            <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+            <div>
+              <div class="cam-name">Camera A</div>
+              <div class="cam-sub">cam-a &middot; chest mount</div>
+            </div>
+            <select>
+              <option>GoPro Hero 11</option>
+            </select>
+            <div class="role-pill-row">
+              <span class="role-pill on primary">Primary</span>
+              <span class="role-pill">Secondary</span>
+            </div>
+            <div class="stages-line">
+              Stages: <span class="chip">1</span><span class="chip">2</span><span class="chip">3</span><span class="chip">4</span><span class="chip">5</span><span class="chip">6</span><span class="chip">7</span>
+              <span class="chip dim">8-12 missing</span>
+            </div>
+            <span class="health">7 videos</span>
+            <div class="row-actions">
+              <button class="micro-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg></button>
+            </div>
+          </div>
+          <div class="add-camera">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add another camera for Robert
+          </div>
+        </div>
+      </div>
+
+      <!-- Reference shooters (future) -->
+      <div class="section-h" style="margin-top: 28px;">
+        <div class="title">Reference shooters</div>
+        <div class="help">Imported runs from match winners or coach-approved shooters &middot; no audit controls, appear in Compare and Coach</div>
+      </div>
+
+      <div class="shooter-card ref-card">
+        <div class="shooter-head">
+          <span class="av-lg">JN</span>
+          <div class="name-block">
+            <div class="name">Jens Nilsson <span class="ref-pill">Reference</span></div>
+            <div class="meta">
+              <span>2026-04-12 winner</span><span class="sep">&middot;</span>
+              <span>Production Optics</span><span class="sep">&middot;</span>
+              <span>imported from scoreboard</span>
+            </div>
+          </div>
+          <div class="progress-block">
+            <div class="text"><b>12 / 12</b> stages</div>
+            <div class="progress-bar done"><span style="width: 100%"></span></div>
+          </div>
+          <span class="status-pill complete"><span class="d"></span>Complete</span>
+          <div class="row-actions">
+            <button class="micro-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
+          </div>
+        </div>
+        <div class="ref-body">
+          <b>Future feature.</b> Reference shooters provide hand-vetted shot timings (no local footage required) that show up in Compare timelines and Coach summaries so you can benchmark against the winner or a coach-approved baseline. Sources can be scoreboard data, a hosted reference corpus, or a club-coach signed file.
+          <div class="ref-actions">
+            <button class="btn btn-ghost" style="font-size: 12px;">Add reference from scoreboard</button>
+            <button class="btn btn-ghost" style="font-size: 12px;">Import .ref file</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add new shooter -->
+      <div class="add-shooter-card" style="margin-top: 18px;">
+        <div class="ic">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M17 11v6M14 14h6"/></svg>
+        </div>
+        <div class="title">Add another shooter</div>
+        <div class="help">Drop a folder of videos or pick from your scoreboard squad. Each shooter can carry multiple cameras.</div>
+      </div>
+
+      <div class="footnote">
+        Wireframe 16 of N &nbsp;&middot;&nbsp; ./docs/ux-redesign/wireframes/16-shooters-management.html
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

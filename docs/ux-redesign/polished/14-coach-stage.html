@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Stage 8 Window &middot; Coach</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Coach (per-stage)
+   Direction: Shot Timer (extends polished 02/03/07).
+   Stage-level deep dive on a single shooter. Shot ruler + video
+   + per-shot list + classification + self-referential baselines.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --live-tint:    rgba(251, 191, 36, 0.10);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --done-tint:    rgba(74, 222, 128, 0.10);
+  --beep:         #06B6D4;
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+  --manual:       #A78BFA;
+  --manual-tint:  rgba(167, 139, 250, 0.12);
+
+  /* split classification */
+  --fast: var(--done);
+  --fast-tint: var(--done-tint);
+  --ok: #8E939B;
+  --ok-tint: rgba(142,147,155,0.14);
+  --slow: var(--live);
+  --slow-tint: var(--live-tint);
+  --vslow: var(--led);
+  --vslow-tint: var(--led-tint);
+
+  /* interval types */
+  --i-draw: var(--manual);
+  --i-fire: var(--done);
+  --i-transition: var(--beep);
+  --i-reload: var(--live);
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select, textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--led), var(--led-deep)); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); }
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Sidebar ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.match-card { padding: 4px 8px 14px; border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+.match-card .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); margin-bottom: 6px; }
+.match-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 6px; }
+.match-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+
+.nav-section { margin: 4px 0 14px; }
+.nav-item { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 7px; color: var(--ink-2); font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: all 150ms var(--ease); min-height: 36px; }
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item .icon { color: var(--muted); display: inline-flex; }
+.nav-item:hover .icon { color: var(--ink); }
+.nav-item.active { background: var(--led-tint); border: 1px solid var(--led-deep); padding: 7px 9px; color: var(--led); font-weight: 700; }
+.nav-item.active .icon { color: var(--led); }
+.nav-label { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+.nav-label .pill { background: var(--surface-2); border: 1px solid var(--rule); color: var(--ink-2); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-feature-settings: var(--feat-num); }
+
+.stage-list { display: flex; flex-direction: column; gap: 1px; }
+.stage-item { display: grid; grid-template-columns: 26px 1fr 14px; gap: 9px; align-items: center; padding: 6px 10px 6px 6px; border-radius: 6px; cursor: pointer; font-size: 0.8125rem; min-height: 34px; }
+.stage-item:hover { background: var(--surface-2); }
+.stage-num { width: 26px; height: 26px; border-radius: 5px; background: var(--surface-3); color: var(--ink-2); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-feature-settings: var(--feat-num); }
+.stage-name { color: var(--ink-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-status { width: 12px; height: 12px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.stage-status.done { background: var(--done); box-shadow: 0 0 5px var(--done-glow); color: var(--bg); }
+.stage-status.partial { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.stage-status.flagged { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+.stage-status.todo { background: transparent; border: 1px solid var(--rule-strong); }
+.stage-item.current { background: var(--led-tint); }
+.stage-item.current .stage-num { background: var(--led); color: var(--bg); box-shadow: 0 0 0 1px var(--led), 0 0 8px var(--led-glow); }
+.stage-item.current .stage-name { color: var(--led); font-weight: 700; }
+
+/* ============ Content ============ */
+.content { min-width: 0; }
+
+/* ============ Stage header ============ */
+.stage-head { background: linear-gradient(to bottom, var(--surface), transparent); border-bottom: 1px solid var(--rule); padding: 20px 28px 0; }
+.stage-head .top-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.stage-h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.75rem;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--ink);
+  display: inline-flex; align-items: center; gap: 14px;
+}
+.stage-h1 .stagenum {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--led);
+  padding: 4px 10px;
+  background: var(--led-tint);
+  border: 1px solid var(--led-deep);
+  border-radius: 5px;
+  font-feature-settings: var(--feat-num);
+}
+.stage-nav { display: inline-flex; gap: 4px; }
+.stage-nav .nav-arrow {
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  color: var(--ink-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 150ms var(--ease);
+}
+.stage-nav .nav-arrow:hover { background: var(--surface-3); border-color: var(--ink-2); color: var(--ink); }
+
+.shooter-bar { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
+.shooter-bar .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.shooter-pills { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 999px; padding: 3px; gap: 2px; }
+.sp { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px 4px 5px; border-radius: 999px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); cursor: pointer; transition: all 150ms var(--ease); }
+.sp:hover { color: var(--ink); }
+.sp .av-sm { width: 22px; height: 22px; border-radius: 50%; color: var(--ink); font-family: var(--mono); font-size: 0.625rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.sp.active { background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); padding: 3px 11px 3px 4px; font-weight: 700; }
+.sp.active .av-sm { box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 10px var(--led-glow); }
+.sp .av-sm.ma { background: linear-gradient(135deg, var(--led), var(--led-deep)); }
+.sp .av-sm.jl { background: linear-gradient(135deg, var(--live), #B45309); }
+.sp .av-sm.pe { background: linear-gradient(135deg, var(--done), #166534); }
+.sp .av-sm.rj { background: linear-gradient(135deg, #60A5FA, #1E3A8A); }
+
+.stage-tabs { display: flex; gap: 28px; margin-top: 18px; }
+.tab {
+  padding: 12px 0 14px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--led); border-bottom-color: var(--led); box-shadow: 0 1px 0 var(--led), 0 0 12px var(--led-glow); }
+.tab .count { color: var(--subtle); font-family: var(--mono); font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.04em; }
+
+/* ============ Top action bar ============ */
+.action-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+.btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 7px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 36px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--led); color: var(--bg); border-color: var(--led); box-shadow: 0 0 0 1px var(--led), 0 0 14px var(--led-glow); }
+.btn.primary:hover { background: var(--led-soft); border-color: var(--led-soft); }
+.btn.primary kbd { background: rgba(0,0,0,0.25); border: 1px solid rgba(0,0,0,0.3); color: var(--bg); }
+
+.kbd-strip {
+  margin-left: auto;
+  display: inline-flex; gap: 16px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.kbd-strip .item { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ============ Shot ruler ============ */
+.ruler-wrap { padding: 14px 28px 18px; background: var(--bg); border-bottom: 1px solid var(--rule); }
+.ruler-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ruler-head .title {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-feature-settings: var(--feat-num);
+}
+.ruler-head .title b { color: var(--ink); font-weight: 700; }
+.ruler-head .legend {
+  display: inline-flex; gap: 16px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.ruler-head .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.ruler-head .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+.ruler-head .legend .dot.fast { background: var(--fast); box-shadow: 0 0 5px var(--done-glow); }
+.ruler-head .legend .dot.ok { background: var(--ok); }
+.ruler-head .legend .dot.slow { background: var(--slow); box-shadow: 0 0 5px var(--live-glow); }
+.ruler-head .legend .dot.vslow { background: var(--vslow); box-shadow: 0 0 5px var(--led-glow); }
+
+.shot-ruler {
+  position: relative;
+  height: 64px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.ruler-bar {
+  position: relative;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  margin-top: 8px;
+}
+.ruler-bar::before {
+  /* tick marks */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(10% - 1px), var(--rule-strong) calc(10% - 1px), var(--rule-strong) 10%);
+  opacity: 0.5;
+  border-radius: inherit;
+}
+.ruler-bar .filled {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  background: linear-gradient(to right, var(--led), var(--led-soft));
+  border-radius: 999px;
+  box-shadow: 0 0 12px var(--led-glow);
+}
+.shot-dot {
+  position: absolute;
+  top: -7px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--ok);
+  transform: translateX(-50%);
+  border: 2px solid var(--surface);
+  cursor: pointer;
+  transition: transform 150ms var(--ease);
+  z-index: 2;
+}
+.shot-dot:hover { transform: translateX(-50%) scale(1.2); }
+.shot-dot.fast { background: var(--fast); box-shadow: 0 0 8px var(--done-glow); }
+.shot-dot.ok { background: var(--ok); }
+.shot-dot.slow { background: var(--slow); box-shadow: 0 0 8px var(--live-glow); }
+.shot-dot.vslow { background: var(--vslow); box-shadow: 0 0 8px var(--led-glow); }
+.shot-dot.current {
+  width: 26px; height: 26px;
+  top: -12px;
+  border-width: 3px;
+  z-index: 5;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 4px rgba(255,45,45,0.18), 0 0 16px var(--led-glow);
+}
+.shot-dot-label {
+  position: absolute;
+  top: 28px;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: var(--subtle);
+  white-space: nowrap;
+  font-feature-settings: var(--feat-num);
+}
+.shot-dot-label.current {
+  color: var(--led);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* ============ Workspace ============ */
+.workspace { padding: 20px 28px 80px; }
+.work-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 18px;
+}
+
+/* ============ Video card ============ */
+.video-card {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+  margin-bottom: 16px;
+}
+.video-tile {
+  background: #050608;
+  aspect-ratio: 16 / 9;
+  position: relative;
+  overflow: hidden;
+}
+.video-tile .placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background-image:
+    radial-gradient(ellipse at 35% 45%, rgba(255,45,45,0.15), transparent 60%),
+    radial-gradient(ellipse at 70% 70%, rgba(6,182,212,0.10), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(255,255,255,0.015) 3px, rgba(255,255,255,0.015) 4px);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.video-tile .placeholder svg { opacity: 0.4; margin-bottom: 12px; color: var(--ink); }
+.video-tile .top-bar {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 12px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.65), transparent);
+  z-index: 2;
+}
+.video-tile .shooter-tag {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(0,0,0,0.6);
+  padding: 5px 14px 5px 5px;
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,45,45,0.3);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.video-tile .shooter-tag .av {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 8px var(--led-glow);
+}
+.video-tile .shooter-tag .sub { color: var(--muted); font-size: 0.625rem; }
+.video-tile .top-actions { display: inline-flex; gap: 6px; }
+.video-tile .top-actions button,
+.video-tile .top-actions .cam-select {
+  background: rgba(0,0,0,0.6);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+}
+.video-tile .top-actions button {
+  width: 30px; height: 30px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.video-tile .top-actions .cam-select { padding: 6px 10px; }
+.video-tile .pinned-shot {
+  position: absolute;
+  left: 18px; top: 50%;
+  transform: translateY(-50%);
+  background: var(--live);
+  color: var(--bg);
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 0 14px var(--live-glow);
+  z-index: 3;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.video-tile .pinned-shot::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--bg);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.video-tile .bottom-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 12px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+  z-index: 2;
+}
+.video-tile .stage-time {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  font-feature-settings: var(--feat-num);
+}
+.video-tile .stage-time .muted { color: var(--muted); font-weight: 500; }
+.video-tile .loop-ind {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--live);
+}
+
+/* Transport */
+.transport {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--rule);
+}
+.transport .controls { display: inline-flex; gap: 6px; align-items: center; }
+.transport-btn {
+  width: 36px; height: 36px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: 7px;
+  color: var(--ink-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 150ms var(--ease);
+}
+.transport-btn:hover { background: var(--surface-4); border-color: var(--ink-2); color: var(--ink); }
+.transport-btn.play {
+  width: 44px; height: 44px;
+  background: var(--led);
+  border-color: var(--led);
+  color: var(--bg);
+  box-shadow: 0 0 0 1px var(--led), 0 0 14px var(--led-glow);
+}
+.transport-btn.play:hover { background: var(--led-soft); border-color: var(--led-soft); }
+.transport .time {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  font-feature-settings: var(--feat-num);
+}
+.transport .time .muted { color: var(--subtle); font-weight: 500; }
+.transport .loop-toggle {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--live);
+  padding: 7px 11px;
+  background: var(--live-tint);
+  border: 1px solid rgba(251,191,36,0.35);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* ============ Current shot panel ============ */
+.shot-panel {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  padding: 22px 24px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.shot-panel-head {
+  display: flex; align-items: center; gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 18px;
+}
+.shot-panel-head .num-hero {
+  width: 56px; height: 56px;
+  border-radius: 11px;
+  background: var(--vslow-tint);
+  color: var(--vslow);
+  border: 1px solid var(--led-deep);
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+  box-shadow: inset 0 0 16px var(--led-tint);
+}
+.shot-panel-head .title-block .eyebrow {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin-bottom: 4px;
+}
+.shot-panel-head .title-block .title {
+  font-family: var(--display);
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.shot-panel-head .title-block .sub {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.shot-panel-head .verdict-pill {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--vslow-tint);
+  color: var(--vslow);
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: 1px solid var(--led-deep);
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 0 0 16px var(--led-glow);
+}
+
+/* Shot stats */
+.shot-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.shot-stat {
+  background: var(--bg-glow);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 14px;
+}
+.shot-stat .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 8px;
+}
+.shot-stat .v {
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+  line-height: 1;
+  font-feature-settings: var(--feat-num);
+}
+.shot-stat .v.fast { color: var(--fast); text-shadow: 0 0 12px var(--done-glow); }
+.shot-stat .v.slow { color: var(--slow); text-shadow: 0 0 12px var(--live-glow); }
+.shot-stat .v.vslow { color: var(--vslow); text-shadow: 0 0 14px var(--led-glow); }
+.shot-stat .delta {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 8px;
+  font-feature-settings: var(--feat-num);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.shot-stat .delta.up { color: var(--led); }
+.shot-stat .delta.down { color: var(--done); }
+
+/* Classification row */
+.classify-row {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.classify-row .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-right: 6px;
+}
+.interval-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px 6px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+}
+.interval-chip:hover { color: var(--ink); border-color: var(--ink-2); }
+.interval-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+.interval-chip.draw .dot { background: var(--i-draw); }
+.interval-chip.fire .dot { background: var(--i-fire); }
+.interval-chip.transition .dot { background: var(--i-transition); }
+.interval-chip.reload .dot { background: var(--i-reload); }
+.interval-chip.other .dot { background: var(--muted); }
+.interval-chip.active.transition {
+  background: var(--beep-tint);
+  border-color: var(--beep);
+  color: var(--beep);
+  box-shadow: 0 0 12px rgba(6,182,212,0.25);
+}
+.interval-chip.active.transition .dot { box-shadow: 0 0 6px rgba(6,182,212,0.5); }
+.classify-help {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+/* Annotations on this shot */
+.annot-section { }
+.annot-section .lbl-row {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 10px;
+}
+.annot-section .lbl-row .count {
+  background: var(--surface-3);
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.1em;
+  font-feature-settings: var(--feat-num);
+}
+
+.existing-annot {
+  background: var(--bg-glow);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  position: relative;
+}
+.existing-annot::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--beep);
+  border-radius: 2px;
+}
+.existing-annot .row {
+  display: grid;
+  grid-template-columns: 1fr 90px;
+  align-items: flex-start;
+  gap: 12px;
+}
+.existing-annot .note {
+  font-size: 0.875rem;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.tag-inline {
+  background: var(--beep-tint);
+  color: var(--beep);
+  border: 1px solid rgba(6,182,212,0.35);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-right: 8px;
+  vertical-align: 2px;
+}
+.tag-inline.transition { background: var(--beep-tint); color: var(--beep); border-color: rgba(6,182,212,0.35); }
+.tag-inline.reload { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.35); }
+.tag-inline.draw { background: var(--manual-tint); color: var(--manual); border-color: rgba(167,139,250,0.35); }
+.tag-inline.positive { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.35); }
+.existing-annot .when {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  text-align: right;
+}
+
+.annot-area {
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 14px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: 9px;
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  color: var(--ink);
+  resize: vertical;
+  transition: all 150ms var(--ease);
+}
+.annot-area::placeholder { color: var(--subtle); }
+.annot-area:focus {
+  border-color: var(--led);
+  background: var(--bg-glow);
+  box-shadow: 0 0 0 3px var(--led-tint);
+}
+
+.annot-tag-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 12px;
+}
+.annot-tag {
+  padding: 5px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+}
+.annot-tag:hover { color: var(--ink); border-color: var(--ink-2); }
+.annot-tag.on {
+  background: var(--beep-tint);
+  border-color: var(--beep);
+  color: var(--beep);
+}
+.annot-tag.custom { border-style: dashed; color: var(--led); border-color: var(--rule-strong); }
+.annot-tag.custom:hover { border-color: var(--led); background: var(--led-tint); }
+
+.annot-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 14px;
+  gap: 12px;
+}
+.annot-foot .note-help {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  max-width: 360px;
+}
+.annot-foot .save-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  background: var(--led);
+  color: var(--bg);
+  border: 1px solid var(--led);
+  border-radius: 7px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: 0 0 0 1px var(--led), 0 0 14px var(--led-glow);
+}
+.annot-foot .save-btn kbd {
+  background: rgba(0,0,0,0.25);
+  border-color: rgba(0,0,0,0.3);
+  color: var(--bg);
+}
+
+/* ============ Right: shot list ============ */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.panel .ph {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface-2), transparent);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel .ph .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.panel .ph .title .help {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 8px;
+  text-transform: lowercase;
+}
+.panel .ph .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+
+.shot-li {
+  display: grid;
+  grid-template-columns: 28px 62px 70px 110px 1fr 14px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  transition: background 120ms var(--ease);
+}
+.shot-li:last-child { border-bottom: 0; }
+.shot-li:hover { background: var(--surface-2); }
+.shot-li.current {
+  background: var(--led-tint);
+  border-left: 3px solid var(--led);
+  padding-left: 11px;
+  box-shadow: inset 0 0 18px rgba(255,45,45,0.05);
+}
+.shot-li .num {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+}
+.shot-li.current .num { background: var(--led); color: var(--bg); box-shadow: 0 0 10px var(--led-glow); }
+.shot-li .t {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.shot-li.current .t { color: var(--ink); font-weight: 600; }
+.shot-li .split {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-feature-settings: var(--feat-num);
+  border: 1px solid transparent;
+}
+.split.fast { background: var(--fast-tint); color: var(--fast); border-color: rgba(74,222,128,0.3); }
+.split.ok { background: var(--ok-tint); color: var(--ink-2); border-color: var(--rule); }
+.split.slow { background: var(--slow-tint); color: var(--slow); border-color: rgba(251,191,36,0.3); }
+.split.vslow { background: var(--vslow-tint); color: var(--vslow); border-color: rgba(255,45,45,0.35); }
+.split.dash { background: var(--surface-3); color: var(--subtle); border: 1px dashed var(--rule-strong); }
+.shot-li .int {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.shot-li .int .d { width: 6px; height: 6px; border-radius: 50%; }
+.shot-li .int.draw .d { background: var(--i-draw); }
+.shot-li .int.fire .d { background: var(--i-fire); }
+.shot-li .int.transition .d { background: var(--i-transition); }
+.shot-li .int.reload .d { background: var(--i-reload); }
+.shot-li .annot-ind {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--beep);
+}
+.shot-li .arrow { color: var(--subtle); display: inline-flex; }
+.shot-li.current .arrow { color: var(--led); }
+
+.footnote { margin-top: 32px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--whisper); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat,
+  .video-tile .pinned-shot::before { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile">
+      <span class="av">MA</span>
+      <span class="label">Mathias A.</span>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <a href="02-match-overview.html">VADS Easter Shoot 2026</a>
+        <span class="sep">/</span>
+        <span class="current">Stage 8 &middot; Window &middot; Coach</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="match-card">
+      <div class="lbl">Active match</div>
+      <div class="title">VADS Easter Shoot 2026</div>
+      <div class="meta">2026-04-12 &middot; Vasterort PK</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+        Overview
+      </div>
+      <div class="nav-item active">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>
+        Coach
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>
+        Shooters
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>
+        Export
+      </div>
+    </div>
+
+    <div class="nav-label">Stages <span class="pill">8 / 12</span></div>
+
+    <div class="stage-list">
+      <div class="stage-item"><span class="stage-num">01</span><span class="stage-name">Snake</span><span class="stage-status done" title="Done"></span></div>
+      <div class="stage-item"><span class="stage-num">02</span><span class="stage-name">Tower</span><span class="stage-status done" title="Done"></span></div>
+      <div class="stage-item"><span class="stage-num">03</span><span class="stage-name">Plates</span><span class="stage-status partial" title="Partial"></span></div>
+      <div class="stage-item"><span class="stage-num">04</span><span class="stage-name">Mover</span><span class="stage-status done" title="Done"></span></div>
+      <div class="stage-item"><span class="stage-num">05</span><span class="stage-name">Standards</span><span class="stage-status done" title="Done"></span></div>
+      <div class="stage-item"><span class="stage-num">06</span><span class="stage-name">Field 1</span><span class="stage-status done" title="Done"></span></div>
+      <div class="stage-item"><span class="stage-num">07</span><span class="stage-name">Field 2</span><span class="stage-status flagged" title="Flagged"></span></div>
+      <div class="stage-item current"><span class="stage-num">08</span><span class="stage-name">Window</span><span class="stage-status partial" title="Partial"></span></div>
+      <div class="stage-item"><span class="stage-num">09</span><span class="stage-name">Long range</span><span class="stage-status done" title="Done"></span></div>
+      <div class="stage-item"><span class="stage-num">10</span><span class="stage-name">Speed shoot</span><span class="stage-status todo" title="Todo"></span></div>
+      <div class="stage-item"><span class="stage-num">11</span><span class="stage-name">Plate rack</span><span class="stage-status todo" title="Todo"></span></div>
+      <div class="stage-item"><span class="stage-num">12</span><span class="stage-name">Final</span><span class="stage-status todo" title="Todo"></span></div>
+    </div>
+  </aside>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+
+    <!-- Stage header -->
+    <div class="stage-head">
+      <div class="top-row">
+        <h1 class="stage-h1">
+          <span class="stagenum">Stage 08</span>
+          Window
+        </h1>
+        <div class="stage-nav">
+          <button class="nav-arrow" title="Previous stage"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <button class="nav-arrow" title="Next stage"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+
+        <div class="shooter-bar">
+          <span class="lbl">Shooter</span>
+          <div class="shooter-pills">
+            <span class="sp active"><span class="av-sm ma">MA</span>Mathias</span>
+            <span class="sp"><span class="av-sm jl">JL</span>Johan</span>
+            <span class="sp"><span class="av-sm pe">PE</span>Pia</span>
+            <span class="sp"><span class="av-sm rj">RJ</span>Robert</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage-tabs">
+        <span class="tab">Audit</span>
+        <span class="tab">Compare <span class="count">3 shooters</span></span>
+        <span class="tab active">Coach</span>
+      </div>
+    </div>
+
+    <!-- Action bar -->
+    <div class="action-bar">
+      <button class="btn primary">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        Add annotation
+        <kbd>N</kbd>
+      </button>
+      <button class="btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Loop shot
+      </button>
+      <button class="btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+        Multi-cam
+      </button>
+      <div class="kbd-strip">
+        <span class="item"><kbd>&larr;</kbd><kbd>&rarr;</kbd> step</span>
+        <span class="item"><kbd>L</kbd> loop</span>
+        <span class="item"><kbd>N</kbd> note</span>
+        <span class="item"><kbd>C</kbd> classify</span>
+      </div>
+    </div>
+
+    <!-- Shot ruler -->
+    <div class="ruler-wrap" aria-label="Shot timeline">
+      <div class="ruler-head">
+        <div class="title">Shot timeline &middot; <b>14 shots</b> &middot; <b>12.50s</b> total</div>
+        <div class="legend">
+          <span class="lg"><span class="dot fast"></span>Fast &le; 0.25s</span>
+          <span class="lg"><span class="dot ok"></span>OK 0.25-0.45s</span>
+          <span class="lg"><span class="dot slow"></span>Slow 0.45-0.85s</span>
+          <span class="lg"><span class="dot vslow"></span>V-slow &gt; 0.85s</span>
+        </div>
+      </div>
+      <div class="shot-ruler">
+        <div class="ruler-bar">
+          <div class="filled" style="width: 55%;"></div>
+        </div>
+
+        <span class="shot-dot fast" style="left: 7%"></span>
+        <span class="shot-dot-label" style="left: 7%">01</span>
+
+        <span class="shot-dot fast" style="left: 11%"></span>
+        <span class="shot-dot-label" style="left: 11%">02</span>
+
+        <span class="shot-dot fast" style="left: 17%"></span>
+        <span class="shot-dot-label" style="left: 17%">03</span>
+
+        <span class="shot-dot slow" style="left: 24%"></span>
+        <span class="shot-dot-label" style="left: 24%">04</span>
+
+        <span class="shot-dot slow" style="left: 30%"></span>
+        <span class="shot-dot-label" style="left: 30%">05</span>
+
+        <span class="shot-dot fast" style="left: 34%"></span>
+        <span class="shot-dot-label" style="left: 34%">06</span>
+
+        <span class="shot-dot fast" style="left: 38%"></span>
+        <span class="shot-dot-label" style="left: 38%">07</span>
+
+        <span class="shot-dot vslow" style="left: 45%"></span>
+        <span class="shot-dot-label" style="left: 45%">08</span>
+
+        <span class="shot-dot vslow current" style="left: 55%">09</span>
+        <span class="shot-dot-label current" style="left: 55%">09 &middot; SELECTED</span>
+
+        <span class="shot-dot fast" style="left: 59%"></span>
+        <span class="shot-dot-label" style="left: 59%">10</span>
+
+        <span class="shot-dot fast" style="left: 62%"></span>
+        <span class="shot-dot-label" style="left: 62%">11</span>
+
+        <span class="shot-dot slow" style="left: 70%"></span>
+        <span class="shot-dot-label" style="left: 70%">12</span>
+
+        <span class="shot-dot ok" style="left: 78%"></span>
+        <span class="shot-dot-label" style="left: 78%">13</span>
+
+        <span class="shot-dot ok" style="left: 86%"></span>
+        <span class="shot-dot-label" style="left: 86%">14</span>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <div class="work-grid">
+
+        <!-- LEFT column -->
+        <div>
+
+          <!-- Video card -->
+          <div class="video-card">
+            <div class="video-tile">
+              <div class="placeholder">
+                <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="6 4 20 12 6 20" fill="currentColor" fill-opacity="0.4"/></svg>
+                Watching at shot 09 &middot; 0.5s before, 1.0s after
+              </div>
+              <div class="top-bar">
+                <span class="shooter-tag">
+                  <span class="av">MA</span>
+                  Mathias <span class="sub">&middot; cam-a chest</span>
+                </span>
+                <div class="top-actions">
+                  <select class="cam-select">
+                    <option>Camera A &middot; chest</option>
+                    <option>Camera B &middot; helmet</option>
+                    <option>Split (both)</option>
+                  </select>
+                  <button title="Multi-cam"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg></button>
+                </div>
+              </div>
+              <span class="pinned-shot">Shot 09 &middot; pinned</span>
+              <div class="bottom-bar">
+                <span class="stage-time">06.834s <span class="muted">/ 12.50s</span></span>
+                <span class="loop-ind">Looping &plusmn;1s</span>
+              </div>
+            </div>
+
+            <div class="transport">
+              <div class="controls">
+                <button class="transport-btn" title="Previous shot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19,4 9,12 19,20" fill="currentColor"/><line x1="5" y1="4" x2="5" y2="20" stroke-width="2.5"/></svg></button>
+                <button class="transport-btn play" title="Play"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="7,4 20,12 7,20"/></svg></button>
+                <button class="transport-btn" title="Next shot"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,4 15,12 5,20" fill="currentColor"/><line x1="19" y1="4" x2="19" y2="20" stroke-width="2.5"/></svg></button>
+              </div>
+              <span class="time">Shot 09 &middot; 06.834s <span class="muted">(split 1.133s)</span></span>
+              <button class="loop-toggle">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                Loop on
+              </button>
+            </div>
+          </div>
+
+          <!-- Current shot panel -->
+          <div class="shot-panel">
+            <div class="shot-panel-head">
+              <span class="num-hero">09</span>
+              <div class="title-block">
+                <div class="eyebrow">Selected shot</div>
+                <div class="title">Shot 09 of 14</div>
+                <div class="sub">06.834s &middot; T3 -> T4 transition &middot; cam-a primary</div>
+              </div>
+              <span class="verdict-pill">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 17v.5"/></svg>
+                Slowest split
+              </span>
+            </div>
+
+            <div class="shot-stats">
+              <div class="shot-stat">
+                <div class="k">Time</div>
+                <div class="v">06.834s</div>
+                <div class="delta">from beep at 0.000s</div>
+              </div>
+              <div class="shot-stat">
+                <div class="k">Split (from 08)</div>
+                <div class="v vslow">1.133s</div>
+                <div class="delta up">
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l7-7 7 7M12 19V5"/></svg>
+                  + 0.55s vs career
+                </div>
+              </div>
+              <div class="shot-stat">
+                <div class="k">Best transition</div>
+                <div class="v fast">0.32s</div>
+                <div class="delta">career best &middot; standards 2025</div>
+              </div>
+              <div class="shot-stat">
+                <div class="k">Career avg / transitions</div>
+                <div class="v">0.58s</div>
+                <div class="delta">across 28 this match</div>
+              </div>
+            </div>
+
+            <div class="classify-row">
+              <span class="lbl">Interval</span>
+              <span class="interval-chip draw"><span class="dot"></span>Draw</span>
+              <span class="interval-chip fire"><span class="dot"></span>Fire</span>
+              <span class="interval-chip transition active"><span class="dot"></span>Transition</span>
+              <span class="interval-chip reload"><span class="dot"></span>Reload</span>
+              <span class="interval-chip other"><span class="dot"></span>Other</span>
+              <span class="classify-help">Auto-classified &middot; click to override</span>
+            </div>
+
+            <div class="annot-section">
+              <div class="lbl-row">
+                Annotations on shot 09
+                <span class="count">1 note</span>
+              </div>
+
+              <div class="existing-annot">
+                <div class="row">
+                  <span class="note">
+                    <span class="tag-inline transition">Transition</span>
+                    Over-swung from T3 to T4 -- decelerate earlier next time.
+                  </span>
+                  <span class="when">28 min ago</span>
+                </div>
+              </div>
+
+              <textarea class="annot-area" placeholder="Add another note on this shot..."></textarea>
+
+              <div class="annot-tag-row">
+                <span class="annot-tag on">transition</span>
+                <span class="annot-tag">draw</span>
+                <span class="annot-tag">reload</span>
+                <span class="annot-tag">positive</span>
+                <span class="annot-tag">sight-tracking</span>
+                <span class="annot-tag">grip</span>
+                <span class="annot-tag">stance</span>
+                <span class="annot-tag custom">+ custom</span>
+              </div>
+
+              <div class="annot-foot">
+                <span class="note-help">Notes are attached to this shot and visible in the match-wide annotation timeline.</span>
+                <button class="save-btn">
+                  Save note
+                  <kbd>&#8984;+Enter</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT column: shot list -->
+        <div>
+          <div class="panel">
+            <div class="ph">
+              <span class="title">All shots <span class="help">click to pin</span></span>
+              <span class="count">14 total</span>
+            </div>
+
+            <div class="shot-li">
+              <span class="num">01</span>
+              <span class="t">0.821</span>
+              <span class="split dash">--</span>
+              <span class="int draw"><span class="d"></span>Draw</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">02</span>
+              <span class="t">1.342</span>
+              <span class="split fast">0.521</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">03</span>
+              <span class="t">2.118</span>
+              <span class="split fast">0.776</span>
+              <span class="int transition"><span class="d"></span>Trans.</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">04</span>
+              <span class="t">3.064</span>
+              <span class="split slow">0.946</span>
+              <span class="int transition"><span class="d"></span>Trans.</span>
+              <span class="annot-ind">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5l-6 2 2-6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+                1 note
+              </span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">05</span>
+              <span class="t">3.812</span>
+              <span class="split slow">0.748</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">06</span>
+              <span class="t">4.298</span>
+              <span class="split fast">0.486</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">07</span>
+              <span class="t">4.811</span>
+              <span class="split fast">0.513</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">08</span>
+              <span class="t">5.701</span>
+              <span class="split vslow">0.890</span>
+              <span class="int reload"><span class="d"></span>Reload</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li current">
+              <span class="num">09</span>
+              <span class="t">6.834</span>
+              <span class="split vslow">1.133</span>
+              <span class="int transition"><span class="d"></span>Trans.</span>
+              <span class="annot-ind">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5l-6 2 2-6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+                1 note
+              </span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">10</span>
+              <span class="t">7.348</span>
+              <span class="split fast">0.514</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">11</span>
+              <span class="t">7.722</span>
+              <span class="split fast">0.374</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">12</span>
+              <span class="t">8.572</span>
+              <span class="split slow">0.850</span>
+              <span class="int transition"><span class="d"></span>Trans.</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">13</span>
+              <span class="t">9.371</span>
+              <span class="split ok">0.799</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">14</span>
+              <span class="t">10.122</span>
+              <span class="split ok">0.751</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="footnote">
+        Polished 14 &middot; ./docs/ux-redesign/polished/14-coach-stage.html
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

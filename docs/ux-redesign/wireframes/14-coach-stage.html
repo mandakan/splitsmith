@@ -1,0 +1,1072 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith -- wireframe 14: coach (per-stage)</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --surface-3: #f1f1f3;
+    --border: #e5e5e8;
+    --border-strong: #d4d4d8;
+    --text: #18181b;
+    --text-muted: #71717a;
+    --text-subtle: #a1a1aa;
+    --accent: #4338ca;
+    --accent-2: #6d28d9;
+    --accent-soft: #eef2ff;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --red: #b91c1c;
+    --red-soft: #fee2e2;
+    --slate: #475569;
+    --slate-soft: #f1f5f9;
+
+    --fast: #15803d;
+    --fast-soft: #dcfce7;
+    --ok: #475569;
+    --ok-soft: #f1f5f9;
+    --slow: #b45309;
+    --slow-soft: #fef3c7;
+    --vslow: #b91c1c;
+    --vslow-soft: #fee2e2;
+
+    --draw: #8b5cf6;
+    --transition: #14b8a6;
+    --reload: #b45309;
+    --fire: #15803d;
+
+    --shadow: 0 1px 2px rgba(15, 15, 20, 0.04), 0 1px 1px rgba(15, 15, 20, 0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; font-size: 14px; line-height: 1.45; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; }
+  kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--border); }
+
+  .wf-banner { background: #1f2937; color: #e5e7eb; font-size: 12px; padding: 6px 16px; text-align: center; letter-spacing: 0.02em; }
+  .wf-banner b { color: white; }
+
+  /* Shell */
+  .shell { background: var(--surface); border-bottom: 1px solid var(--border); }
+  .shell-top { display: flex; align-items: center; padding: 10px 24px; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .brand-dot { width: 18px; height: 18px; border-radius: 4px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .mode-switch button { background: transparent; border: 0; padding: 6px 14px; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+  .mode-switch button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .shell-spacer { flex: 1; }
+  .shell-actions { display: flex; align-items: center; gap: 6px; }
+  .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-muted); }
+  .icon-btn:hover { background: var(--surface-2); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; }
+  .context-bar { display: flex; align-items: center; padding: 8px 24px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+  .crumb { display: inline-flex; align-items: center; gap: 8px; }
+  .crumb a { color: var(--text-muted); text-decoration: none; }
+  .crumb a:hover { color: var(--text); }
+  .crumb-sep { color: var(--text-subtle); }
+
+  .app-body { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 86px); }
+
+  /* Sidebar */
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 16px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+  .match-card-head { padding: 6px 8px 12px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  .match-card-head .title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; margin-bottom: 4px; }
+  .match-card-head .meta { font-size: 11.5px; color: var(--text-muted); }
+  .nav-section { margin: 4px 0 12px; }
+  .nav-item { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 7px; color: var(--text); font-size: 13px; cursor: pointer; }
+  .nav-item:hover { background: var(--surface-2); }
+  .nav-item .icon { color: var(--text-muted); }
+  .nav-label { text-transform: uppercase; color: var(--text-subtle); font-size: 10.5px; letter-spacing: 0.06em; font-weight: 600; padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; }
+  .nav-label .pill { background: var(--surface-3); color: var(--text-muted); border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 600; }
+  .stage-item { display: grid; grid-template-columns: 22px 1fr 16px; align-items: center; gap: 8px; padding: 4px 10px 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+  .stage-item:hover { background: var(--surface-2); }
+  .stage-item.current { background: var(--accent-soft); }
+  .stage-item.current .name { color: var(--accent); font-weight: 600; }
+  .stage-num { width: 22px; height: 22px; border-radius: 5px; background: var(--surface-3); color: var(--text-muted); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .stage-item.current .stage-num { background: var(--accent); color: white; }
+  .stage-status { width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .status-done { background: var(--green-soft); color: var(--green); }
+  .status-partial { background: var(--amber-soft); color: var(--amber); }
+  .status-todo { background: var(--surface-3); color: var(--text-subtle); }
+  .status-flag { background: var(--red-soft); color: var(--red); }
+
+  /* Stage header */
+  .stage-head { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 28px 0; }
+  .stage-head .title-row { display: flex; align-items: center; gap: 14px; }
+  .stage-h1 { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  .stage-h1 .stagenum { color: var(--text-subtle); font-weight: 600; margin-right: 4px; }
+  .stage-nav { display: inline-flex; gap: 2px; margin-left: 10px; }
+  .stage-nav .icon-btn { width: 28px; height: 28px; }
+  .stage-tabs { display: flex; gap: 24px; margin-top: 12px; }
+  .tab { padding: 10px 0; font-size: 13.5px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid transparent; cursor: pointer; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab .count { color: var(--text-subtle); margin-left: 4px; font-weight: 500; }
+  .shooter-bar { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .shooter-bar .label { font-size: 12px; color: var(--text-muted); }
+  .shooter-pills { display: inline-flex; gap: 4px; }
+  .sp { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 12.5px; color: var(--text-muted); cursor: pointer; }
+  .sp .av-sm { width: 20px; height: 20px; border-radius: 50%; color: white; font-size: 9.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .sp.active { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  /* Shot ruler (top strip showing all shots in this stage) */
+  .shot-ruler-wrap {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 28px 14px;
+  }
+  .shot-ruler-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 9px;
+  }
+  .shot-ruler-head .title {
+    font-size: 11.5px; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: 600;
+  }
+  .shot-ruler-head .legend { display: flex; gap: 12px; font-size: 11.5px; color: var(--text-muted); }
+  .shot-ruler-head .legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+  .shot-ruler-head .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .lg .dot.fast { background: var(--fast); }
+  .lg .dot.ok { background: var(--ok); opacity: 0.6; }
+  .lg .dot.slow { background: var(--slow); }
+  .lg .dot.vslow { background: var(--vslow); }
+  .shot-ruler {
+    position: relative;
+    height: 56px;
+    background: linear-gradient(to bottom, var(--surface-2), var(--surface));
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .ruler-bar {
+    position: relative;
+    height: 5px;
+    background: var(--surface-3);
+    border-radius: 999px;
+  }
+  .ruler-bar .filled {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 49%;
+    background: var(--accent);
+    border-radius: 999px;
+  }
+  .shot-dot {
+    position: absolute;
+    top: -7px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--ok);
+    transform: translateX(-50%);
+    border: 2px solid var(--surface);
+    cursor: pointer;
+  }
+  .shot-dot.fast { background: var(--fast); }
+  .shot-dot.slow { background: var(--slow); }
+  .shot-dot.vslow { background: var(--vslow); }
+  .shot-dot.current {
+    width: 24px; height: 24px;
+    top: -11px;
+    box-shadow: 0 0 0 4px rgba(67,56,202,0.18);
+    z-index: 3;
+  }
+  .shot-dot.current::after {
+    content: attr(data-num);
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .shot-dot-label {
+    position: absolute;
+    top: 26px;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: var(--text-subtle);
+    font-family: ui-monospace, Menlo, monospace;
+    white-space: nowrap;
+  }
+  .shot-dot-label.current { color: var(--accent); font-weight: 700; }
+
+  /* Workspace grid */
+  .workspace { padding: 18px 28px 80px; }
+  .work-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  /* Video card */
+  .video-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .video-tile {
+    background: #0a0a0c;
+    aspect-ratio: 16 / 9;
+    position: relative;
+    color: #eaeaea;
+    overflow: hidden;
+  }
+  .video-tile .placeholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background-image:
+      radial-gradient(ellipse at 35% 45%, rgba(245,158,11,0.18), transparent 60%),
+      radial-gradient(ellipse at 70% 70%, rgba(239,68,68,0.13), transparent 60%);
+    color: #f4f4f5;
+    font-size: 12.5px;
+    letter-spacing: 0.03em;
+  }
+  .video-tile .placeholder svg { opacity: 0.55; margin-bottom: 6px; }
+  .video-tile .top-bar {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+  }
+  .video-tile .shooter-tag {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: rgba(0,0,0,0.55);
+    padding: 4px 12px 4px 4px;
+    border-radius: 999px;
+    backdrop-filter: blur(8px);
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .video-tile .shooter-tag .av { width: 22px; height: 22px; border-radius: 50%; color: white; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .video-tile .top-actions { display: inline-flex; gap: 6px; }
+  .video-tile .top-actions button {
+    width: 26px; height: 26px;
+    background: rgba(0,0,0,0.55);
+    border: 0; color: white;
+    border-radius: 6px;
+    backdrop-filter: blur(8px);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .video-tile .cam-select {
+    background: rgba(0,0,0,0.55);
+    color: white;
+    border: 0;
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-size: 11px;
+    backdrop-filter: blur(8px);
+  }
+  .video-tile .bottom-bar {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 10px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(to top, rgba(0,0,0,0.55), transparent);
+    color: white;
+  }
+  .video-tile .stage-time { font-family: ui-monospace, Menlo, monospace; font-size: 13px; font-weight: 500; }
+  .video-tile .stage-time .muted { color: rgba(255,255,255,0.5); }
+  .video-tile .pinned-shot {
+    position: absolute;
+    left: 16px; top: 50%;
+    transform: translateY(-50%);
+    background: rgba(180,83,9,0.85);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    backdrop-filter: blur(8px);
+  }
+
+  /* Transport */
+  .transport {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 14px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+  }
+  .transport .controls { display: inline-flex; gap: 4px; align-items: center; }
+  .transport .controls .icon-btn { width: 30px; height: 30px; background: var(--surface); border-radius: 7px; border: 1px solid var(--border); }
+  .transport .time { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 500; }
+  .transport .time .muted { color: var(--text-subtle); }
+  .transport .toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--accent);
+    margin-left: auto;
+  }
+
+  /* Current-shot panel */
+  .shot-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-top: 14px;
+  }
+  .shot-panel-head {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .shot-panel-head .num {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: var(--slow-soft);
+    color: var(--slow);
+    font-weight: 700;
+    font-size: 15px;
+    font-family: ui-monospace, Menlo, monospace;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .shot-panel-head .title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .shot-panel-head .sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+  .shot-panel-head .verdict-pill {
+    margin-left: auto;
+    background: var(--vslow-soft);
+    color: var(--vslow);
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 700;
+    display: inline-flex; align-items: center; gap: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .shot-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .shot-stat {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 10px 12px;
+  }
+  .shot-stat .k { font-size: 10.5px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 4px; }
+  .shot-stat .v { font-family: ui-monospace, Menlo, monospace; font-size: 17px; font-weight: 700; letter-spacing: -0.015em; }
+  .shot-stat .v.slow { color: var(--slow); }
+  .shot-stat .v.vslow { color: var(--vslow); }
+  .shot-stat .delta { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, Menlo, monospace; margin-top: 3px; }
+  .shot-stat .delta.up { color: var(--red); }
+  .shot-stat .delta.down { color: var(--green); }
+
+  /* Classification row */
+  .classify-row {
+    display: flex; align-items: center; gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .classify-row .lbl {
+    font-size: 11.5px; text-transform: uppercase; color: var(--text-subtle);
+    letter-spacing: 0.05em; font-weight: 600;
+  }
+  .interval-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px 5px 5px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .interval-chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .interval-chip.active { font-weight: 600; }
+  .interval-chip.transition.active {
+    background: rgba(20,184,166,0.08);
+    border-color: var(--transition);
+    color: var(--transition);
+  }
+  .interval-chip.transition.active .dot { background: var(--transition); }
+  .interval-chip.fire .dot { background: var(--fire); }
+  .interval-chip.draw .dot { background: var(--draw); }
+  .interval-chip.reload .dot { background: var(--reload); }
+  .interval-chip.transition .dot { background: var(--transition); }
+  .interval-chip.other .dot { background: var(--text-muted); }
+  .classify-help {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--text-subtle);
+  }
+
+  /* Annotation */
+  .annot-section { margin-bottom: 14px; }
+  .annot-section .lbl {
+    font-size: 11.5px; text-transform: uppercase; color: var(--text-subtle);
+    letter-spacing: 0.05em; font-weight: 600; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .annot-section .lbl .count {
+    background: var(--surface-3); color: var(--text-muted);
+    padding: 1px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0;
+  }
+  .annot-area {
+    width: 100%;
+    min-height: 60px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui;
+    font-size: 13px;
+    color: var(--text);
+    outline: none;
+    resize: vertical;
+  }
+  .annot-area:focus {
+    background: var(--surface);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .annot-tag-row {
+    display: flex; flex-wrap: wrap; gap: 5px;
+    margin-top: 8px;
+  }
+  .annot-tag {
+    padding: 3px 9px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .annot-tag.on { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .annot-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .annot-foot .save {
+    background: var(--accent); color: white;
+    border: 0; padding: 5px 12px; border-radius: 7px;
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* Existing annotation list (this shot) */
+  .existing-annot {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 10px 12px;
+    margin-top: 8px;
+  }
+  .existing-annot .row {
+    display: grid;
+    grid-template-columns: 1fr 80px;
+    align-items: center; gap: 10px;
+    font-size: 12.5px;
+  }
+  .existing-annot .row .note { color: var(--text); }
+  .existing-annot .row .note .tag-inline {
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 10px; font-weight: 600;
+    padding: 1.5px 6px; border-radius: 999px;
+    margin-right: 5px;
+  }
+  .existing-annot .row .when { color: var(--text-subtle); font-size: 11.5px; text-align: right; }
+
+  /* RIGHT col: shot list + comparison */
+  .right-stack { display: flex; flex-direction: column; gap: 14px; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .panel .ph {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel .ph .help { font-size: 11.5px; color: var(--text-muted); font-weight: 500; }
+
+  .shot-li {
+    display: grid;
+    grid-template-columns: 28px 60px 60px 90px 1fr 16px;
+    align-items: center; gap: 8px;
+    padding: 7px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .shot-li:last-child { border-bottom: 0; }
+  .shot-li:hover { background: var(--surface-2); }
+  .shot-li.current {
+    background: var(--accent-soft);
+    border-left: 2px solid var(--accent);
+    padding-left: 12px;
+  }
+  .shot-li .num {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    font-weight: 700;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .shot-li.current .num { background: var(--accent); color: white; }
+  .shot-li .t { font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+  .shot-li .split {
+    font-family: ui-monospace, Menlo, monospace;
+    font-weight: 600;
+    text-align: center;
+    padding: 2px 6px;
+    border-radius: 5px;
+  }
+  .split.fast { background: var(--fast-soft); color: var(--fast); }
+  .split.ok { background: var(--ok-soft); color: var(--ok); }
+  .split.slow { background: var(--slow-soft); color: var(--slow); }
+  .split.vslow { background: var(--vslow-soft); color: var(--vslow); }
+  .shot-li .int {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+    color: var(--text-muted);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .shot-li .int .d { width: 6px; height: 6px; border-radius: 50%; }
+  .shot-li .int.transition .d { background: var(--transition); }
+  .shot-li .int.fire .d { background: var(--fire); }
+  .shot-li .int.reload .d { background: var(--reload); }
+  .shot-li .int.draw .d { background: var(--draw); }
+  .shot-li .rank-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  .shot-li .annot-ind {
+    font-size: 11px;
+    color: var(--accent);
+  }
+  .shot-li .arrow { color: var(--text-subtle); }
+
+  /* Comparison panel */
+  .compare-row {
+    display: grid;
+    grid-template-columns: 28px 1fr 70px 70px;
+    align-items: center; gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .compare-row:last-child { border-bottom: 0; }
+  .compare-row.you { background: var(--accent-soft); }
+  .compare-row.you .name { color: var(--accent); font-weight: 600; }
+  .compare-row .av {
+    width: 22px; height: 22px; border-radius: 50%;
+    color: white; font-size: 9.5px; font-weight: 600;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .compare-row .name { font-size: 12.5px; font-weight: 500; }
+  .compare-row .sub { font-size: 11px; color: var(--text-muted); }
+  .compare-row .val {
+    font-family: ui-monospace, Menlo, monospace;
+    font-weight: 600;
+    text-align: right;
+  }
+  .compare-row .delta {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    text-align: right;
+    color: var(--text-muted);
+  }
+  .compare-row .delta.fast { color: var(--green); }
+  .compare-row .delta.slow { color: var(--red); }
+
+  /* Career baseline mini */
+  .baseline-card {
+    background: linear-gradient(135deg, rgba(67,56,202,0.04), transparent);
+    border: 1px solid var(--accent-soft);
+  }
+  .baseline-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .baseline-row .ic {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: white;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .baseline-row b { font-weight: 600; }
+  .baseline-row .val { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--accent); }
+
+  /* Action bar */
+  .top-actions-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 28px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 500; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+  .top-actions-bar .spacer { flex: 1; }
+  .kbd-strip {
+    display: flex; gap: 14px; font-size: 11.5px; color: var(--text-subtle);
+  }
+  .kbd-strip .item { display: inline-flex; align-items: center; gap: 5px; }
+
+  .footnote { color: var(--text-subtle); font-size: 12px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<div class="wf-banner">
+  <b>Wireframe 14</b> &nbsp;&middot;&nbsp; Coach (per-stage, single shooter)
+  &nbsp;&middot;&nbsp; Stage-level deep dive. Video + per-shot list + classification + annotations + self-referential baselines.
+</div>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand"><div class="brand-dot"></div>Splitsmith</div>
+    <div class="mode-switch"><button class="active">Match</button><button>Developer</button></div>
+    <div class="shell-spacer"></div>
+    <div class="shell-actions">
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+      <span class="avatar">MA</span>
+    </div>
+  </div>
+  <div class="context-bar">
+    <div class="crumb">
+      <a href="01-match-picker.html">Matches</a><span class="crumb-sep">/</span>
+      <a href="02-match-overview.html">VADS Easter Shoot 2026</a><span class="crumb-sep">/</span>
+      <span style="color: var(--text);">Stage 8 &middot; Window &middot; Coach</span>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <aside class="sidebar">
+    <div class="match-card-head">
+      <div class="title">VADS Easter Shoot 2026</div>
+      <div class="meta">2026-04-12 &middot; Vasterort PK</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>Overview</div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>Coach</div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>Shooters</div>
+      <div class="nav-item"><span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>Export</div>
+    </div>
+    <div class="nav-label">Stages<span class="pill">8 / 12</span></div>
+    <div class="stage-item"><span class="stage-num">1</span><span class="name">Snake</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">2</span><span class="name">Tower</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">3</span><span class="name">Plates</span><span class="stage-status status-partial"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">4</span><span class="name">Mover</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">5</span><span class="name">Standards</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">6</span><span class="name">Field 1</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">7</span><span class="name">Field 2</span><span class="stage-status status-flag"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 7v6M12 17v.5"/></svg></span></div>
+    <div class="stage-item current"><span class="stage-num">8</span><span class="name">Window</span><span class="stage-status status-partial"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">9</span><span class="name">Long range</span><span class="stage-status status-done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span></div>
+    <div class="stage-item"><span class="stage-num">10</span><span class="name">Speed shoot</span><span class="stage-status status-todo"></span></div>
+    <div class="stage-item"><span class="stage-num">11</span><span class="name">Plate rack</span><span class="stage-status status-todo"></span></div>
+    <div class="stage-item"><span class="stage-num">12</span><span class="name">Final</span><span class="stage-status status-todo"></span></div>
+  </aside>
+
+  <main style="min-width: 0;">
+
+    <!-- Stage header -->
+    <div class="stage-head">
+      <div class="title-row">
+        <h1 class="stage-h1"><span class="stagenum">Stage 8</span>Window</h1>
+        <div class="stage-nav">
+          <button class="icon-btn" title="Previous stage"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <button class="icon-btn" title="Next stage"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+
+        <div class="shooter-bar">
+          <span class="label">Shooter</span>
+          <div class="shooter-pills">
+            <span class="sp active"><span class="av-sm" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">MA</span>Mathias</span>
+            <span class="sp"><span class="av-sm" style="background: linear-gradient(135deg, #14b8a6, #0ea5e9);">JL</span>Johan</span>
+            <span class="sp"><span class="av-sm" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">PE</span>Pia</span>
+            <span class="sp"><span class="av-sm" style="background: linear-gradient(135deg, #ef4444, #b91c1c);">RJ</span>Robert</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage-tabs">
+        <div class="tab">Audit</div>
+        <div class="tab">Compare <span class="count">3 shooters</span></div>
+        <div class="tab active">Coach</div>
+      </div>
+    </div>
+
+    <!-- Action bar -->
+    <div class="top-actions-bar">
+      <button class="btn-primary btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Add annotation <kbd style="background: rgba(255,255,255,0.18); color: white; border-color: rgba(255,255,255,0.25); margin-left: 4px;">N</kbd>
+      </button>
+      <button class="btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Loop this shot
+      </button>
+      <button class="btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+        Multi-cam
+      </button>
+      <span class="spacer"></span>
+      <div class="kbd-strip">
+        <span class="item"><kbd>&larr;</kbd><kbd>&rarr;</kbd> step shots</span>
+        <span class="item"><kbd>L</kbd> loop</span>
+        <span class="item"><kbd>N</kbd> note</span>
+        <span class="item"><kbd>C</kbd> re-classify</span>
+      </div>
+    </div>
+
+    <!-- Shot ruler -->
+    <div class="shot-ruler-wrap">
+      <div class="shot-ruler-head">
+        <div class="title">Shot timeline &middot; 14 shots &middot; 12.50s total</div>
+        <div class="legend">
+          <span class="lg"><span class="dot fast"></span>Fast &le; 0.25s</span>
+          <span class="lg"><span class="dot ok"></span>OK 0.25-0.45s</span>
+          <span class="lg"><span class="dot slow"></span>Slow 0.45-0.85s</span>
+          <span class="lg"><span class="dot vslow"></span>V-slow &gt; 0.85s</span>
+        </div>
+      </div>
+      <div class="shot-ruler">
+        <div class="ruler-bar">
+          <div class="filled" style="width: 48%;"></div>
+        </div>
+
+        <!-- shots placed along the bar -->
+        <div class="shot-dot fast" style="left: 7%"></div>
+        <div class="shot-dot-label" style="left: 7%">1</div>
+
+        <div class="shot-dot fast" style="left: 11%"></div>
+        <div class="shot-dot-label" style="left: 11%">2</div>
+
+        <div class="shot-dot fast" style="left: 17%"></div>
+        <div class="shot-dot-label" style="left: 17%">3</div>
+
+        <div class="shot-dot slow" style="left: 24%"></div>
+        <div class="shot-dot-label" style="left: 24%">4</div>
+
+        <div class="shot-dot slow" style="left: 30%"></div>
+        <div class="shot-dot-label" style="left: 30%">5</div>
+
+        <div class="shot-dot fast" style="left: 34%"></div>
+        <div class="shot-dot-label" style="left: 34%">6</div>
+
+        <div class="shot-dot fast" style="left: 38%"></div>
+        <div class="shot-dot-label" style="left: 38%">7</div>
+
+        <div class="shot-dot vslow" style="left: 45%"></div>
+        <div class="shot-dot-label" style="left: 45%">8</div>
+
+        <div class="shot-dot current vslow" style="left: 55%" data-num="9"></div>
+        <div class="shot-dot-label current" style="left: 55%">9 &middot; selected</div>
+
+        <div class="shot-dot fast" style="left: 59%"></div>
+        <div class="shot-dot-label" style="left: 59%">10</div>
+
+        <div class="shot-dot fast" style="left: 62%"></div>
+        <div class="shot-dot-label" style="left: 62%">11</div>
+
+        <div class="shot-dot slow" style="left: 70%"></div>
+        <div class="shot-dot-label" style="left: 70%">12</div>
+
+        <div class="shot-dot ok" style="left: 78%"></div>
+        <div class="shot-dot-label" style="left: 78%">13</div>
+
+        <div class="shot-dot ok" style="left: 86%"></div>
+        <div class="shot-dot-label" style="left: 86%">14</div>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <div class="work-grid">
+
+        <!-- LEFT: video + current shot panel -->
+        <div>
+          <div class="video-card">
+            <div class="video-tile">
+              <div class="placeholder">
+                <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><polygon points="6,4 20,12 6,20"/></svg>
+                Watching at shot 9 &middot; 0.5s before, 1.0s after
+              </div>
+              <div class="top-bar">
+                <span class="shooter-tag">
+                  <span class="av" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">MA</span>
+                  Mathias &middot; cam-a chest
+                </span>
+                <div class="top-actions">
+                  <select class="cam-select">
+                    <option>Camera A &middot; chest</option>
+                    <option>Camera B &middot; helmet</option>
+                    <option>Split (both)</option>
+                  </select>
+                  <button title="Multi-cam"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg></button>
+                </div>
+              </div>
+              <span class="pinned-shot">Shot 9 &middot; pinned</span>
+              <div class="bottom-bar">
+                <span class="stage-time">06.834s <span class="muted">/ 12.50s</span></span>
+                <span style="font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; opacity: 0.7;">looping &plusmn;1s</span>
+              </div>
+            </div>
+
+            <div class="transport">
+              <div class="controls">
+                <button class="icon-btn" title="Previous shot"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19,4 9,12 19,20"/><line x1="5" y1="4" x2="5" y2="20" stroke-width="2"/></svg></button>
+                <button class="icon-btn" style="background: var(--accent); color: white; border-color: var(--accent); width: 34px; height: 34px;" title="Play"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="7,4 20,12 7,20"/></svg></button>
+                <button class="icon-btn" title="Next shot"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="4" x2="19" y2="20" stroke-width="2"/></svg></button>
+              </div>
+              <span class="time">Shot 9 &middot; 06.834s <span class="muted">(split 1.133s)</span></span>
+              <span class="toggle">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                Loop this shot
+              </span>
+            </div>
+          </div>
+
+          <!-- Current shot panel -->
+          <div class="shot-panel">
+            <div class="shot-panel-head">
+              <span class="num">9</span>
+              <div>
+                <div class="title">Shot 9 of 14</div>
+                <div class="sub">06.834s &middot; transition from T3 to T4 &middot; cam-a primary</div>
+              </div>
+              <span class="verdict-pill">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17v.5"/><circle cx="12" cy="12" r="9"/></svg>
+                Slowest split
+              </span>
+            </div>
+
+            <div class="shot-stats">
+              <div class="shot-stat">
+                <div class="k">Time</div>
+                <div class="v">06.834s</div>
+                <div class="delta">from beep at 0.000s</div>
+              </div>
+              <div class="shot-stat">
+                <div class="k">Split (from #8)</div>
+                <div class="v vslow">1.133s</div>
+                <div class="delta up">+ 0.55s vs your career</div>
+              </div>
+              <div class="shot-stat">
+                <div class="k">Your best transition</div>
+                <div class="v" style="color: var(--fast);">0.32s</div>
+                <div class="delta">career best &middot; Standards 2025</div>
+              </div>
+              <div class="shot-stat">
+                <div class="k">Career avg on transitions</div>
+                <div class="v">0.58s</div>
+                <div class="delta">across 28 transitions this match</div>
+              </div>
+            </div>
+
+            <div class="classify-row">
+              <span class="lbl">Interval</span>
+              <span class="interval-chip draw"><span class="dot"></span>Draw</span>
+              <span class="interval-chip fire"><span class="dot"></span>Fire</span>
+              <span class="interval-chip transition active"><span class="dot"></span>Transition</span>
+              <span class="interval-chip reload"><span class="dot"></span>Reload</span>
+              <span class="interval-chip other"><span class="dot"></span>Other</span>
+              <span class="classify-help">Auto-classified &middot; click to override</span>
+            </div>
+
+            <!-- Existing annotation on this shot -->
+            <div class="annot-section">
+              <div class="lbl">
+                Annotations on shot 9
+                <span class="count">1 note</span>
+              </div>
+
+              <div class="existing-annot">
+                <div class="row">
+                  <span class="note"><span class="tag-inline">transition</span>Over-swung from T3 to T4 -- decelerate earlier next time.</span>
+                  <span class="when">28 min ago</span>
+                </div>
+              </div>
+
+              <textarea class="annot-area" style="margin-top: 8px;" placeholder="Add another note on this shot..."></textarea>
+              <div class="annot-tag-row">
+                <span class="annot-tag on">transition</span>
+                <span class="annot-tag">draw</span>
+                <span class="annot-tag">reload</span>
+                <span class="annot-tag">positive</span>
+                <span class="annot-tag">sight-tracking</span>
+                <span class="annot-tag">grip</span>
+                <span class="annot-tag">stance</span>
+                <span class="annot-tag">+ custom</span>
+              </div>
+              <div class="annot-foot">
+                <span>Notes are attached to this shot and visible in the match-wide annotation timeline.</span>
+                <button class="save">Save note <kbd style="background: rgba(255,255,255,0.18); color: white; border-color: rgba(255,255,255,0.25); margin-left: 4px;">&#8984;+Enter</kbd></button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- RIGHT: shot list -->
+        <div class="right-stack">
+
+          <!-- Per-shot list -->
+          <div class="panel">
+            <div class="ph">
+              <span>All shots &middot; <span style="color: var(--text-muted); font-weight: 500;">click to pin</span></span>
+              <span class="help">14 total</span>
+            </div>
+
+            <div class="shot-li">
+              <span class="num">1</span>
+              <span class="t">0.821</span>
+              <span class="split fast">&mdash;</span>
+              <span class="int draw"><span class="d"></span>Draw</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">2</span>
+              <span class="t">1.342</span>
+              <span class="split fast">0.521</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">3</span>
+              <span class="t">2.118</span>
+              <span class="split fast">0.776</span>
+              <span class="int transition"><span class="d"></span>Transition</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">4</span>
+              <span class="t">3.064</span>
+              <span class="split slow">0.946</span>
+              <span class="int transition"><span class="d"></span>Transition</span>
+              <span class="rank-line"><span class="annot-ind">1 note</span></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">5</span>
+              <span class="t">3.812</span>
+              <span class="split slow">0.748</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">6</span>
+              <span class="t">4.298</span>
+              <span class="split fast">0.486</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">7</span>
+              <span class="t">4.811</span>
+              <span class="split fast">0.513</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">8</span>
+              <span class="t">5.701</span>
+              <span class="split vslow">0.890</span>
+              <span class="int reload"><span class="d"></span>Reload</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li current">
+              <span class="num">9</span>
+              <span class="t">6.834</span>
+              <span class="split vslow">1.133</span>
+              <span class="int transition"><span class="d"></span>Transition</span>
+              <span class="rank-line"><span class="annot-ind">1 note</span></span>
+              <span class="arrow" style="color: var(--accent);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">10</span>
+              <span class="t">7.348</span>
+              <span class="split fast">0.514</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">11</span>
+              <span class="t">7.722</span>
+              <span class="split fast">0.374</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">12</span>
+              <span class="t">8.572</span>
+              <span class="split slow">0.850</span>
+              <span class="int transition"><span class="d"></span>Transition</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">13</span>
+              <span class="t">9.371</span>
+              <span class="split ok">0.799</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+            <div class="shot-li">
+              <span class="num">14</span>
+              <span class="t">10.122</span>
+              <span class="split ok">0.751</span>
+              <span class="int fire"><span class="d"></span>Fire</span>
+              <span class="rank-line"></span>
+              <span class="arrow"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <div class="footnote">
+        Wireframe 14 of N &nbsp;&middot;&nbsp; ./docs/ux-redesign/wireframes/14-coach-stage.html
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

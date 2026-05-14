@@ -1,0 +1,1320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Developer / Corpus</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Developer mode / Corpus
+   Direction: Shot Timer (extends polished 01/02/03/07).
+   Developer shell variant: dev banner in shell, dev stepper
+   sidebar, workflow status banner, inbox, fixtures table.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --live-tint:    rgba(251, 191, 36, 0.10);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --done-tint:    rgba(74, 222, 128, 0.10);
+  --beep:         #06B6D4;
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+  --manual:       #A78BFA;
+  --manual-tint:  rgba(167, 139, 250, 0.12);
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell (developer variant) ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+/* Developer mode: cyan accent in shell rule */
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--beep) 18%, var(--beep) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--beep) 78%, var(--beep) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 24px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow);
+}
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 8px rgba(6,182,212,0.4); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+
+/* Active model indicator */
+.model-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 14px;
+  background: linear-gradient(90deg, var(--beep-tint), transparent);
+  border: 1px solid rgba(6,182,212,0.4);
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.model-chip .label { color: var(--beep); font-weight: 700; }
+.model-chip .ver { color: var(--ink); font-weight: 700; }
+.model-chip .sep { color: var(--whisper); }
+.model-chip .stat b { color: var(--done); font-weight: 700; }
+
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Developer sidebar ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.dev-card {
+  padding: 12px 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 14px;
+  position: relative;
+}
+.dev-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 2px;
+  width: 2px; height: 16px;
+  background: var(--beep);
+  box-shadow: 0 0 8px rgba(6,182,212,0.4);
+  border-radius: 1px;
+}
+.dev-card .lbl {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--beep);
+  margin-bottom: 8px;
+}
+.dev-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 4px; }
+.dev-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.dev-card .meta b { color: var(--done); font-weight: 700; }
+
+.nav-label {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 8px 6px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.nav-stepper { position: relative; padding-left: 0; }
+.nav-step {
+  display: grid;
+  grid-template-columns: 28px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  min-height: 40px;
+  transition: all 150ms var(--ease);
+}
+.nav-step:hover { background: var(--surface-2); color: var(--ink); }
+.nav-step.active { background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.4); padding: 7px 9px; color: var(--beep); font-weight: 700; }
+.nav-step .num {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+  border: 1px solid var(--rule-strong);
+}
+.nav-step.active .num { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 10px rgba(6,182,212,0.4); }
+.nav-step.done .num { background: var(--done-tint); color: var(--done); border-color: var(--done); }
+.nav-step .name { font-size: 0.8125rem; }
+.nav-step .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: right;
+  font-feature-settings: var(--feat-num);
+  color: var(--subtle);
+}
+.nav-step.active .count { color: var(--beep); }
+.nav-step .count.alert {
+  background: var(--live);
+  color: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 8px var(--live-glow);
+}
+.nav-step .count.muted { color: var(--whisper); }
+
+.step-connector {
+  position: absolute;
+  left: 23px;
+  width: 1px;
+  height: 14px;
+  background: var(--rule-strong);
+  display: block;
+  margin: 0 auto;
+}
+.nav-step + .step-line {
+  display: block;
+  height: 12px;
+  margin-left: 22px;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--rule-strong), var(--rule));
+}
+
+.sub-section { margin-top: 20px; }
+.sub-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  min-height: 36px;
+  transition: all 150ms var(--ease);
+}
+.sub-link:hover { background: var(--surface-2); color: var(--ink); }
+.sub-link .icon { color: var(--muted); display: inline-flex; }
+.sub-link.transitional { color: var(--subtle); }
+.sub-link .pill-lab {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--live-tint);
+  color: var(--live);
+  border: 1px solid rgba(251,191,36,0.3);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+/* ============ Content ============ */
+.content { min-width: 0; }
+
+.page-head {
+  padding: 24px 32px 22px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface), transparent);
+}
+.page-head .row { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--beep); box-shadow: 0 0 4px rgba(6,182,212,0.4); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.25rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 8px; }
+.page-sub { color: var(--muted); font-size: 0.875rem; font-feature-settings: var(--feat-num); }
+.page-sub b { color: var(--ink-2); font-weight: 700; }
+
+.workspace { padding: 22px 32px 64px; }
+
+/* ============ Buttons ============ */
+.btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 7px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 36px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 0 1px var(--beep), 0 0 14px rgba(6,182,212,0.35); }
+.btn.primary:hover { background: #22D3EE; border-color: #22D3EE; }
+.btn.soft { background: var(--beep-tint); border-color: rgba(6,182,212,0.4); color: var(--beep); }
+.btn.soft:hover { background: rgba(6,182,212,0.15); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+
+/* ============ Workflow banner ============ */
+.workflow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  margin-bottom: 22px;
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.wf-step {
+  padding: 16px 20px;
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 4px;
+  cursor: pointer;
+  position: relative;
+  transition: background 150ms var(--ease);
+}
+.wf-step:last-child { border-right: 0; }
+.wf-step:hover { background: var(--surface-2); }
+.wf-step .ic-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.wf-step .ic {
+  width: 30px; height: 30px;
+  border-radius: 7px;
+  background: var(--beep-tint);
+  color: var(--beep);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(6,182,212,0.3);
+}
+.wf-step .label {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.wf-step .value {
+  font-family: var(--display);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1;
+  margin: 8px 0 2px;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.wf-step .value.mono { font-family: var(--mono); font-size: 1.625rem; }
+.wf-step .value .unit { font-family: var(--mono); font-size: 0.6875rem; font-weight: 500; color: var(--muted); margin-left: 6px; letter-spacing: 0.08em; text-transform: uppercase; }
+.wf-step .hint {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 6px;
+  font-feature-settings: var(--feat-num);
+}
+.wf-step .cta {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--beep);
+  margin-top: 8px;
+}
+.wf-step.alert {
+  background:
+    linear-gradient(135deg, var(--live-tint), transparent);
+}
+.wf-step.alert .ic { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.4); }
+.wf-step.alert .value { color: var(--live); }
+.wf-step.alert .cta { color: var(--live); }
+.wf-step .arrow {
+  position: absolute;
+  right: -11px; top: 50%;
+  transform: translateY(-50%);
+  width: 22px; height: 22px;
+  background: var(--bg);
+  border: 1px solid var(--rule-strong);
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  z-index: 2;
+}
+.wf-step:last-child .arrow { display: none; }
+
+/* ============ Inbox ============ */
+.inbox {
+  background:
+    linear-gradient(135deg, rgba(6,182,212,0.06), rgba(6,182,212,0.02));
+  border: 1px solid rgba(6,182,212,0.35);
+  border-radius: 13px;
+  overflow: hidden;
+  margin-bottom: 22px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+}
+.inbox-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(6,182,212,0.25);
+  background: rgba(6,182,212,0.05);
+}
+.inbox-head .title {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--beep);
+}
+.inbox-head .title svg { color: var(--beep); }
+.inbox-head .count {
+  background: var(--beep);
+  color: var(--bg);
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.04em;
+}
+.inbox-head .more {
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--beep);
+}
+.inbox-head .more:hover { color: #22D3EE; }
+
+.inbox-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 130px 110px 110px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  background: var(--surface);
+  border-top: 1px solid rgba(6,182,212,0.18);
+}
+.inbox-row:first-of-type { border-top: 0; }
+.inbox-row .ic-circle {
+  width: 30px; height: 30px;
+  border-radius: 7px;
+  background: var(--beep-tint);
+  color: var(--beep);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(6,182,212,0.3);
+}
+.inbox-row .name {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.inbox-row .src {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+}
+.inbox-row .src b { color: var(--ink-2); font-weight: 700; }
+.inbox-row .when {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.source-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 4px;
+}
+.source-tag.match { background: var(--led-tint); color: var(--led); border: 1px solid rgba(255,45,45,0.3); }
+.source-tag.match .dot { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+.source-tag.github { background: var(--surface-3); color: var(--ink-2); border: 1px solid var(--rule-strong); }
+.source-tag.github .dot { background: var(--ink-2); }
+.source-tag .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ============ Toolbar ============ */
+.toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.search {
+  display: flex; align-items: center; gap: 10px;
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  padding: 10px 14px;
+  min-height: 42px;
+  transition: all 150ms var(--ease);
+}
+.search:focus-within {
+  border-color: var(--beep);
+  box-shadow: 0 0 0 3px var(--beep-tint);
+}
+.search svg { color: var(--subtle); }
+.search input { flex: 1; font-size: 0.875rem; color: var(--ink); }
+.search input::placeholder { color: var(--subtle); }
+.search input::placeholder code,
+.search .ph-mono { font-family: var(--mono); color: var(--muted); }
+
+/* Filter chips */
+.filter-row {
+  display: flex; flex-wrap: wrap; gap: 7px;
+  margin-bottom: 16px;
+}
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+  font-feature-settings: var(--feat-num);
+}
+.filter-chip:hover { color: var(--ink); border-color: var(--ink-2); }
+.filter-chip.active {
+  background: var(--beep-tint);
+  border-color: var(--beep);
+  color: var(--beep);
+}
+.filter-chip .key { color: var(--subtle); font-weight: 400; }
+.filter-chip.active .key { color: rgba(6,182,212,0.7); }
+.filter-chip svg { color: currentColor; opacity: 0.7; }
+.filter-chip.add { border-style: dashed; color: var(--beep); border-color: var(--rule-strong); }
+.filter-chip.add:hover { border-color: var(--beep); background: var(--beep-tint); }
+
+/* ============ Fixtures table ============ */
+.fx-card {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.fx-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface-2), transparent);
+}
+.fx-card-head .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.fx-card-head .title .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 10px;
+  font-feature-settings: var(--feat-num);
+}
+.fx-card-head .sort {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fx-card-head .sort-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  padding: 6px 11px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.fx-row {
+  display: grid;
+  grid-template-columns: 36px 1.6fr 120px 70px 100px 1fr 110px 80px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+  transition: background 150ms var(--ease);
+}
+.fx-row:last-child { border-bottom: 0; }
+.fx-row:hover:not(.head) { background: var(--surface-2); }
+.fx-row.head {
+  background: var(--surface-2);
+  padding: 10px 18px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 700;
+}
+.checkbox {
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid var(--rule-strong);
+  background: var(--surface-3);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms var(--ease);
+}
+.checkbox:hover { border-color: var(--beep); }
+.checkbox.checked {
+  background: var(--beep);
+  border-color: var(--beep);
+  position: relative;
+  box-shadow: 0 0 8px rgba(6,182,212,0.3);
+}
+.checkbox.checked::after {
+  content: "";
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 5px; height: 9px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.fx-row .name {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.fx-row .src {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+}
+.fx-row .src .sp { color: var(--whisper); margin: 0 4px; }
+
+.camera-cell {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.cam-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.cam-dot.chest { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+.cam-dot.helmet { background: var(--beep); box-shadow: 0 0 6px rgba(6,182,212,0.4); }
+
+.shots-cell {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  text-align: right;
+  padding-right: 10px;
+}
+
+.recall {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--done);
+  font-feature-settings: var(--feat-num);
+}
+.recall.med { color: var(--live); }
+.recall.low { color: var(--led); }
+.recall-bar {
+  width: 48px;
+  height: 4px;
+  background: var(--surface-4);
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.recall-bar > span { display: block; height: 100%; background: var(--done); border-radius: 999px; box-shadow: 0 0 6px var(--done-glow); }
+.recall.med .recall-bar > span { background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+.recall.low .recall-bar > span { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--rule-strong);
+}
+.tag.venue { background: var(--beep-tint); color: var(--beep); border-color: rgba(6,182,212,0.3); }
+.tag.cam-helmet { background: var(--manual-tint); color: var(--manual); border-color: rgba(167,139,250,0.3); }
+.tag.warn { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.3); }
+.tag.flag { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.3); }
+.tag.classifier { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.status-pill .d { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-pill.reviewed { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.status-pill.reviewed .d { background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.status-pill.pending { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.3); }
+.status-pill.pending .d { background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+.status-pill.flagged { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.3); }
+.status-pill.flagged .d { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+
+.fx-actions { display: inline-flex; gap: 4px; justify-content: flex-end; }
+.micro-btn {
+  width: 30px; height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+}
+.micro-btn:hover { color: var(--ink); background: var(--surface-3); border-color: var(--ink-2); }
+
+/* Pagination */
+.pagination {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.pagination b { color: var(--ink); font-weight: 700; }
+.nav-btns { display: inline-flex; gap: 4px; }
+.pnav {
+  min-width: 30px; height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-feature-settings: var(--feat-num);
+  transition: all 150ms var(--ease);
+}
+.pnav:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.pnav.active { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 10px rgba(6,182,212,0.3); }
+
+.footnote {
+  margin-top: 32px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--whisper);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Developer mode active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button>Match</button>
+      <button class="active">Developer</button>
+    </div>
+    <div class="model-chip">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+      <span class="label">Active</span>
+      <span class="ver">v2026.04.02</span>
+      <span class="sep">&middot;</span>
+      <span class="stat"><b>156</b> fixtures</span>
+      <span class="sep">&middot;</span>
+      <span class="stat">recall <b>0.94</b></span>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile">
+      <span class="av">MA</span>
+      <span class="label">Mathias A.</span>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <span>Developer</span>
+        <span class="sep">/</span>
+        <span class="current">Corpus</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- ============ DEVELOPER SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="dev-card">
+      <div class="lbl">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+        Detector training
+      </div>
+      <div class="title">Ensemble pipeline</div>
+      <div class="meta">v2026.04.02 &middot; recall <b>0.94</b></div>
+    </div>
+
+    <div class="nav-label">Workflow</div>
+
+    <div class="nav-stepper">
+      <div class="nav-step active">
+        <span class="num">1</span>
+        <span class="name">Corpus</span>
+        <span class="count">156</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step">
+        <span class="num">2</span>
+        <span class="name">Review queue</span>
+        <span class="count alert">14</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step">
+        <span class="num">3</span>
+        <span class="name">Validate</span>
+        <span class="count muted">--</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step">
+        <span class="num">4</span>
+        <span class="name">Retrain</span>
+        <span class="count muted">--</span>
+      </div>
+    </div>
+
+    <div class="sub-section">
+      <div class="nav-label">Tools</div>
+      <div class="sub-link">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 16,12 14,15 10,15 8,12 2,12"/><path d="M5 9l-2 3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2-3"/><path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg></span>
+        Inbox
+      </div>
+      <div class="sub-link transitional">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4v10c0 1.1.9 2 2 2h2c1.1 0 2-.9 2-2V4M5 4h14"/></svg></span>
+        Lab playground
+        <span class="pill-lab">Legacy</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+
+    <div class="page-head">
+      <div class="row">
+        <div>
+          <div class="page-kicker">Developer &middot; corpus</div>
+          <h1 class="page-h1">Corpus</h1>
+          <div class="page-sub"><b>156</b> fixtures across <b>8</b> venues. Curate, tag, and prepare them for validation and retraining.</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" transform="rotate(180 12 12)"/></svg>
+            Import package
+          </button>
+          <button class="btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            Export corpus
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <!-- Workflow banner -->
+      <section class="workflow" aria-label="Detector workflow status">
+        <div class="wf-step">
+          <div class="ic-row">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="6" width="16" height="12"/><path d="M4 10h16M9 14h6"/></svg></span>
+            <span class="label">Step 1 &middot; Corpus</span>
+          </div>
+          <div class="value mono">156<span class="unit">fixtures</span></div>
+          <div class="hint">8 venues &middot; 4 cameras</div>
+          <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+        </div>
+        <div class="wf-step alert">
+          <div class="ic-row">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 17v.5"/></svg></span>
+            <span class="label">Step 2 &middot; Review queue</span>
+          </div>
+          <div class="value mono">14<span class="unit">pending</span></div>
+          <div class="hint">Bofors 2026 + 3 GitHub submissions</div>
+          <span class="cta">Open queue
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+          </span>
+          <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+        </div>
+        <div class="wf-step">
+          <div class="ic-row">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12l5 5L20 7"/></svg></span>
+            <span class="label">Step 3 &middot; Validate</span>
+          </div>
+          <div class="value mono">0.94<span class="unit">recall</span></div>
+          <div class="hint">3d ago &middot; per-shooter holdout</div>
+          <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>
+        </div>
+        <div class="wf-step">
+          <div class="ic-row">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg></span>
+            <span class="label">Step 4 &middot; Retrain</span>
+          </div>
+          <div class="value mono">5d<span class="unit">ago</span></div>
+          <div class="hint">v2026.04.02 &middot; 142 fixtures</div>
+        </div>
+      </section>
+
+      <!-- Inbox -->
+      <section class="inbox" aria-label="Recently promoted fixtures">
+        <div class="inbox-head">
+          <div class="title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 16,12 14,15 10,15 8,12 2,12"/><path d="M5 9l-2 3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2-3"/><path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg>
+            Inbox &middot; recently promoted
+            <span class="count">7</span>
+          </div>
+          <a class="more">See all in queue
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left: 4px;"><path d="M9 6l6 6-6 6"/></svg>
+          </a>
+        </div>
+
+        <div class="inbox-row">
+          <span class="ic-circle"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+          <div>
+            <div class="name">bofors-bombardment-2026 / stage-2 / mathias-axell</div>
+            <div class="src">cam-a <span class="sp">&middot;</span> <b>16 shots</b> <span class="sp">&middot;</span> 8.4s <span class="sp">&middot;</span> conf <b>0.92</b></div>
+          </div>
+          <span class="source-tag match">
+            <span class="dot"></span>Match mode
+          </span>
+          <span class="when">12 min ago</span>
+          <button class="btn soft" style="padding: 6px 11px;">
+            Review
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <div class="inbox-row">
+          <span class="ic-circle"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+          <div>
+            <div class="name">bofors-bombardment-2026 / stage-3 / pia-eriksson</div>
+            <div class="src">cam-a <span class="sp">&middot;</span> <b>12 shots</b> <span class="sp">&middot;</span> 6.8s <span class="sp">&middot;</span> conf <b>0.89</b></div>
+          </div>
+          <span class="source-tag match">
+            <span class="dot"></span>Match mode
+          </span>
+          <span class="when">14 min ago</span>
+          <button class="btn soft" style="padding: 6px 11px;">
+            Review
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <div class="inbox-row">
+          <span class="ic-circle"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg></span>
+          <div>
+            <div class="name">indoor-helmet-low-light-fixture.spx</div>
+            <div class="src">submitted by <b>@jsundberg</b> via github <span class="sp">&middot;</span> helmet-cam <span class="sp">&middot;</span> <b>8 shots</b></div>
+          </div>
+          <span class="source-tag github">
+            <span class="dot"></span>GitHub
+          </span>
+          <span class="when">3 hr ago</span>
+          <button class="btn soft" style="padding: 6px 11px;">
+            Review
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+          <input type="text" placeholder="Search by name, source, or tag    (try venue:bofors or cam:helmet)" />
+          <kbd>/</kbd>
+        </div>
+        <button class="btn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+          5 filters
+        </button>
+        <button class="btn primary">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+          Add tag
+        </button>
+      </div>
+
+      <!-- Active filters -->
+      <div class="filter-row">
+        <span class="filter-chip active">
+          <span class="key">status:</span> reviewed
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </span>
+        <span class="filter-chip active">
+          <span class="key">status:</span> pending
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </span>
+        <span class="filter-chip">
+          <span class="key">status:</span> flagged
+        </span>
+        <span class="filter-chip">
+          <span class="key">venue:</span> bofors
+        </span>
+        <span class="filter-chip">
+          <span class="key">cam:</span> helmet
+        </span>
+        <span class="filter-chip active">
+          <span class="key">division:</span> production-optics
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </span>
+        <span class="filter-chip add">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          Add filter
+        </span>
+      </div>
+
+      <!-- Fixtures table -->
+      <div class="fx-card">
+        <div class="fx-card-head">
+          <div class="title">Fixtures <span class="count">87 of 156 match filters</span></div>
+          <div class="sort">
+            Sort
+            <button class="sort-btn">
+              Recently added
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="fx-row head">
+          <span class="checkbox" style="background: transparent;"></span>
+          <span>Fixture</span>
+          <span>Camera</span>
+          <span style="text-align: right; padding-right: 10px;">Shots</span>
+          <span>Recall</span>
+          <span>Tags</span>
+          <span>Status</span>
+          <span></span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox checked"></span>
+          <div>
+            <div class="name">vads-easter-shoot-2026-stage5-mathias</div>
+            <div class="src">vads-easter-shoot-2026 <span class="sp">&middot;</span> stage 5 <span class="sp">&middot;</span> mathias-axell <span class="sp">&middot;</span> cam-a</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot chest"></span>Chest</span>
+          <span class="shots-cell">24</span>
+          <span class="recall">
+            <span class="recall-bar"><span style="width: 96%;"></span></span>0.96
+          </span>
+          <span class="tags">
+            <span class="tag venue">vads</span>
+            <span class="tag">chest</span>
+            <span class="tag">indoor</span>
+          </span>
+          <span class="status-pill reviewed"><span class="d"></span>Reviewed</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Open"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox checked"></span>
+          <div>
+            <div class="name">bofors-bombardment-2026-stage2-mathias</div>
+            <div class="src">bofors-bombardment-2026 <span class="sp">&middot;</span> stage 2 <span class="sp">&middot;</span> mathias-axell <span class="sp">&middot;</span> cam-a</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot chest"></span>Chest</span>
+          <span class="shots-cell">16</span>
+          <span class="recall">
+            <span class="recall-bar"><span style="width: 92%;"></span></span>0.92
+          </span>
+          <span class="tags">
+            <span class="tag venue">bofors</span>
+            <span class="tag">chest</span>
+            <span class="tag">outdoor</span>
+            <span class="tag warn">just-promoted</span>
+          </span>
+          <span class="status-pill pending"><span class="d"></span>Pending</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Review"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox"></span>
+          <div>
+            <div class="name">indoor-helmet-low-light-fixture</div>
+            <div class="src">github-submission <span class="sp">&middot;</span> @jsundberg <span class="sp">&middot;</span> helmet-cam</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot helmet"></span>Helmet</span>
+          <span class="shots-cell">8</span>
+          <span class="recall low">
+            <span class="recall-bar"><span style="width: 64%;"></span></span>0.64
+          </span>
+          <span class="tags">
+            <span class="tag cam-helmet">helmet</span>
+            <span class="tag">indoor</span>
+            <span class="tag warn">low-light</span>
+            <span class="tag warn">external</span>
+          </span>
+          <span class="status-pill pending"><span class="d"></span>Pending</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Review"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox"></span>
+          <div>
+            <div class="name">vads-easter-shoot-2026-stage7-mathias</div>
+            <div class="src">vads-easter-shoot-2026 <span class="sp">&middot;</span> stage 7 <span class="sp">&middot;</span> mathias-axell <span class="sp">&middot;</span> cam-a</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot chest"></span>Chest</span>
+          <span class="shots-cell">22</span>
+          <span class="recall med">
+            <span class="recall-bar"><span style="width: 78%;"></span></span>0.78
+          </span>
+          <span class="tags">
+            <span class="tag venue">vads</span>
+            <span class="tag">chest</span>
+            <span class="tag flag">anomaly</span>
+          </span>
+          <span class="status-pill flagged"><span class="d"></span>Flagged</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Open"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox"></span>
+          <div>
+            <div class="name">bromma-classifier-2026-stage3-mathias</div>
+            <div class="src">bromma-classifier-2026 <span class="sp">&middot;</span> stage 3 <span class="sp">&middot;</span> mathias-axell <span class="sp">&middot;</span> cam-a</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot chest"></span>Chest</span>
+          <span class="shots-cell">12</span>
+          <span class="recall">
+            <span class="recall-bar"><span style="width: 100%;"></span></span>1.00
+          </span>
+          <span class="tags">
+            <span class="tag venue">bromma</span>
+            <span class="tag">chest</span>
+            <span class="tag">indoor</span>
+            <span class="tag classifier">classifier</span>
+          </span>
+          <span class="status-pill reviewed"><span class="d"></span>Reviewed</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Open"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox"></span>
+          <div>
+            <div class="name">solvalla-open-2025-stage6-mathias</div>
+            <div class="src">solvalla-open-2025 <span class="sp">&middot;</span> stage 6 <span class="sp">&middot;</span> mathias-axell <span class="sp">&middot;</span> cam-b</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot helmet"></span>Helmet</span>
+          <span class="shots-cell">18</span>
+          <span class="recall">
+            <span class="recall-bar"><span style="width: 91%;"></span></span>0.91
+          </span>
+          <span class="tags">
+            <span class="tag venue">solvalla</span>
+            <span class="tag cam-helmet">helmet</span>
+            <span class="tag">outdoor</span>
+          </span>
+          <span class="status-pill reviewed"><span class="d"></span>Reviewed</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Open"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="fx-row">
+          <span class="checkbox"></span>
+          <div>
+            <div class="name">bromma-classifier-2026-stage1-pia</div>
+            <div class="src">bromma-classifier-2026 <span class="sp">&middot;</span> stage 1 <span class="sp">&middot;</span> pia-eriksson <span class="sp">&middot;</span> cam-a</div>
+          </div>
+          <span class="camera-cell"><span class="cam-dot chest"></span>Chest</span>
+          <span class="shots-cell">12</span>
+          <span class="recall">
+            <span class="recall-bar"><span style="width: 95%;"></span></span>0.95
+          </span>
+          <span class="tags">
+            <span class="tag venue">bromma</span>
+            <span class="tag">chest</span>
+            <span class="tag">indoor</span>
+          </span>
+          <span class="status-pill reviewed"><span class="d"></span>Reviewed</span>
+          <span class="fx-actions">
+            <button class="micro-btn" title="Open"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button class="micro-btn" title="More"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+          </span>
+        </div>
+
+        <div class="pagination">
+          <span>Showing <b>1-7</b> of <b>87</b></span>
+          <div class="nav-btns">
+            <button class="pnav" title="Previous"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <button class="pnav active">1</button>
+            <button class="pnav">2</button>
+            <button class="pnav">3</button>
+            <button class="pnav">...</button>
+            <button class="pnav">13</button>
+            <button class="pnav" title="Next"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></button>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="footnote">
+        Polished 09 &middot; ./docs/ux-redesign/polished/09-developer-corpus.html
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

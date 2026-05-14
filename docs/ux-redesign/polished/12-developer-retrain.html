@@ -1,0 +1,2259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Developer / Retrain</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Developer mode / Retrain
+   Direction: Shot Timer (extends polished 09 / 13).
+   Step 4 of the developer workflow. Build the new shipped model
+   from validated fixtures. The page is a model-build operator's
+   console: a live pipeline, a before/after comparison that makes
+   trade-offs visible, and a deploy/rollback decision zone.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --live-tint:    rgba(251, 191, 36, 0.10);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --done-tint:    rgba(74, 222, 128, 0.10);
+  --beep:         #06B6D4;
+  --beep-soft:    #22D3EE;
+  --beep-glow:    rgba(6, 182, 212, 0.32);
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+  --manual:       #A78BFA;
+  --manual-tint:  rgba(167, 139, 250, 0.12);
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--beep); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell (developer variant) ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--beep) 18%, var(--beep) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--beep) 78%, var(--beep) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 24px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow);
+}
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 8px rgba(6,182,212,0.4); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+
+.model-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 14px;
+  background: linear-gradient(90deg, var(--beep-tint), transparent);
+  border: 1px solid rgba(6,182,212,0.4);
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.model-chip .label { color: var(--beep); font-weight: 700; }
+.model-chip .ver { color: var(--ink); font-weight: 700; }
+.model-chip .sep { color: var(--whisper); }
+.model-chip .stat b { color: var(--done); font-weight: 700; }
+
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); transition: color 150ms var(--ease); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Developer sidebar ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.dev-card {
+  padding: 12px 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 14px;
+  position: relative;
+}
+.dev-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 2px;
+  width: 2px; height: 16px;
+  background: var(--beep);
+  box-shadow: 0 0 8px rgba(6,182,212,0.4);
+  border-radius: 1px;
+}
+.dev-card .lbl {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--beep);
+  margin-bottom: 8px;
+}
+.dev-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 4px; }
+.dev-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.dev-card .meta b { color: var(--done); font-weight: 700; }
+
+.nav-label {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 8px 6px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.nav-stepper { position: relative; padding-left: 0; }
+.nav-step {
+  display: grid;
+  grid-template-columns: 28px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  min-height: 40px;
+  transition: all 150ms var(--ease);
+}
+.nav-step:hover { background: var(--surface-2); color: var(--ink); }
+.nav-step.active { background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.4); padding: 7px 9px; color: var(--beep); font-weight: 700; }
+.nav-step .num {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+  border: 1px solid var(--rule-strong);
+}
+.nav-step.active .num { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 10px rgba(6,182,212,0.4); }
+.nav-step.done .num { background: var(--done-tint); color: var(--done); border-color: var(--done); }
+.nav-step .name { font-size: 0.8125rem; }
+.nav-step .count {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: right;
+  font-feature-settings: var(--feat-num);
+  color: var(--subtle);
+}
+.nav-step.done .count { color: var(--done); }
+.nav-step.active .count { color: var(--beep); }
+.nav-step .count.alert {
+  background: var(--live);
+  color: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 8px var(--live-glow);
+}
+.nav-step .count.muted { color: var(--whisper); }
+.nav-step .count.live {
+  background: var(--beep);
+  color: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 8px var(--beep-glow);
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+}
+
+.nav-step + .step-line {
+  display: block;
+  height: 12px;
+  margin-left: 22px;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--rule-strong), var(--rule));
+}
+.nav-step.done + .step-line { background: linear-gradient(to bottom, var(--done), var(--rule-strong)); opacity: 0.5; }
+
+.sub-section { margin-top: 20px; }
+.sub-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  min-height: 36px;
+  transition: all 150ms var(--ease);
+}
+.sub-link:hover { background: var(--surface-2); color: var(--ink); }
+.sub-link .icon { color: var(--muted); display: inline-flex; }
+.sub-link.transitional { color: var(--subtle); }
+.sub-link .pill-lab {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--live-tint);
+  color: var(--live);
+  border: 1px solid rgba(251,191,36,0.3);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+/* ============ Content ============ */
+.content { min-width: 0; }
+
+.page-head {
+  padding: 24px 32px 22px;
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(to bottom, var(--surface), transparent);
+}
+.page-head .row { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--beep); box-shadow: 0 0 4px rgba(6,182,212,0.4); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.25rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 8px; }
+.page-sub { color: var(--muted); font-size: 0.875rem; font-feature-settings: var(--feat-num); max-width: 64ch; }
+.page-sub b { color: var(--ink-2); font-weight: 700; }
+
+.workspace { padding: 22px 32px 120px; }
+
+/* ============ Buttons ============ */
+.btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 7px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 40px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 0 1px var(--beep), 0 0 14px rgba(6,182,212,0.35); }
+.btn.primary:hover { background: var(--beep-soft); border-color: var(--beep-soft); }
+.btn.soft { background: var(--beep-tint); border-color: rgba(6,182,212,0.4); color: var(--beep); }
+.btn.soft:hover { background: rgba(6,182,212,0.15); }
+.btn.danger-ghost { background: transparent; border-color: rgba(255,45,45,0.45); color: var(--led-soft); }
+.btn.danger-ghost:hover { background: var(--led-tint); border-color: var(--led); color: var(--led); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ============ Run summary banner ============ */
+.run-summary {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(6,182,212,0.04), transparent 50%),
+    var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  padding: 20px 22px 22px;
+  margin-bottom: 22px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 22px 44px -28px rgba(0,0,0,0.7);
+}
+.run-summary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 4px);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.run-summary-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  margin-bottom: 18px;
+}
+.run-summary-top .left { display: flex; align-items: center; gap: 14px; }
+.status-led {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 6px 12px 6px 10px;
+  border-radius: 999px;
+  background: rgba(6,182,212,0.10);
+  border: 1px solid rgba(6,182,212,0.4);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--beep);
+}
+.status-led .pulse {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--beep);
+  box-shadow: 0 0 10px var(--beep-glow);
+  animation: pulseLED 1.6s var(--ease) infinite;
+}
+@keyframes pulseLED { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+.run-summary-top .right { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.run-summary-top .right .key { color: var(--whisper); }
+.run-summary-top .right b { color: var(--ink); font-weight: 700; }
+
+.compare-strip {
+  display: grid;
+  grid-template-columns: 1fr 64px 1fr;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+}
+.cs-side {
+  padding: 18px 22px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--rule);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cs-side.shipped { border-color: var(--rule-strong); }
+.cs-side.candidate {
+  border-color: rgba(6,182,212,0.45);
+  background:
+    linear-gradient(180deg, rgba(6,182,212,0.07), var(--surface));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 0 1px rgba(6,182,212,0.08);
+}
+.cs-side .role {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.cs-side.candidate .role { color: var(--beep); }
+.cs-side .role .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.cs-side .ver {
+  font-family: var(--display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1.05;
+  color: var(--ink);
+  margin: 8px 0 2px;
+  font-feature-settings: var(--feat-num);
+}
+.cs-side .ver .vtag { font-family: var(--mono); font-size: 1.0625rem; color: var(--ink); letter-spacing: 0.02em; }
+.cs-side.candidate .ver .vtag { color: var(--beep); }
+.cs-side .ver-meta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.cs-side .ver-meta b { color: var(--ink-2); font-weight: 700; }
+.cs-side .ver-stats {
+  display: flex; gap: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+}
+.cs-side .ver-stat { display: flex; flex-direction: column; gap: 2px; }
+.cs-side .ver-stat .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.cs-side .ver-stat .v {
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.cs-side.candidate .ver-stat.hero .v { color: var(--done); }
+.cs-side .ver-stat .v.dim { color: var(--muted); font-weight: 500; }
+
+.cs-conn {
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.cs-conn::before {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; top: 50%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--beep), transparent);
+  box-shadow: 0 0 6px var(--beep-glow);
+  transform: translateY(-50%);
+}
+.cs-conn .chev {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--beep);
+  color: var(--beep);
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative; z-index: 2;
+  box-shadow: 0 0 14px var(--beep-glow);
+}
+
+/* ============ Pipeline ============ */
+.pipeline-card {
+  background:
+    linear-gradient(180deg, var(--surface), var(--surface-2)),
+    radial-gradient(900px 240px at 50% -40px, rgba(6,182,212,0.08), transparent 70%);
+  background-blend-mode: normal, normal;
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  padding: 18px 22px 22px;
+  margin-bottom: 22px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 22px 44px -30px rgba(0,0,0,0.7);
+}
+.pipeline-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 12% 10%, rgba(6,182,212,0.06), transparent 30%),
+    radial-gradient(circle at 88% 90%, rgba(6,182,212,0.05), transparent 35%);
+  pointer-events: none;
+}
+
+.pl-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  position: relative;
+}
+.pl-head .h-left { display: flex; flex-direction: column; gap: 5px; }
+.pl-head .h-title {
+  font-family: var(--display);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  display: inline-flex; align-items: center; gap: 11px;
+}
+.pl-head .h-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 8px var(--beep-glow); animation: pulseLED 1.6s var(--ease) infinite; }
+.pl-head .h-sub {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.pl-head .h-sub b { color: var(--ink-2); font-weight: 700; }
+
+.pl-head .h-right { display: flex; gap: 22px; align-items: flex-end; }
+.pl-stat { display: flex; flex-direction: column; gap: 3px; text-align: right; }
+.pl-stat .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.pl-stat .v {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.pl-stat .v.eta { color: var(--beep); }
+.pl-stat .v.done { color: var(--done); }
+
+.pl-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  position: relative;
+}
+
+.pstage {
+  position: relative;
+  background:
+    linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  padding: 14px 14px 13px;
+  display: flex; flex-direction: column; gap: 8px;
+  min-height: 156px;
+  transition: all 150ms var(--ease);
+}
+.pstage::before {
+  content: "";
+  position: absolute; left: 0; top: 14px;
+  width: 2px; height: 18px;
+  background: var(--rule-strong);
+  border-radius: 1px;
+}
+.pstage.done::before { background: var(--done); box-shadow: 0 0 8px var(--done-glow); }
+.pstage.running::before { background: var(--beep); box-shadow: 0 0 10px var(--beep-glow); }
+.pstage.failed::before { background: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+
+.pstage .pst-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+}
+.pstage .pst-num {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--subtle);
+}
+.pstage .pst-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.pstage .pst-status .d { width: 6px; height: 6px; border-radius: 50%; }
+.pstage.done .pst-status { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.pstage.done .pst-status .d { background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.pstage.running .pst-status { background: var(--beep-tint); color: var(--beep); border-color: rgba(6,182,212,0.4); }
+.pstage.running .pst-status .d { background: var(--beep); box-shadow: 0 0 6px var(--beep-glow); animation: pulseLED 1.2s var(--ease) infinite; }
+.pstage.idle .pst-status { background: var(--surface-3); color: var(--subtle); border-color: var(--rule-strong); }
+.pstage.idle .pst-status .d { background: var(--whisper); }
+.pstage.failed .pst-status { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.4); }
+.pstage.failed .pst-status .d { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+
+.pstage .pst-name {
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1.15;
+}
+.pstage.idle .pst-name { color: var(--muted); }
+.pstage .pst-desc {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.pstage .pst-foot {
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rule);
+}
+.pstage .pst-time {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.pstage.idle .pst-time { color: var(--whisper); }
+.pstage .pst-metric {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  color: var(--done);
+  font-feature-settings: var(--feat-num);
+  text-align: right;
+}
+.pstage.idle .pst-metric { color: var(--whisper); }
+.pstage.running .pst-metric { color: var(--beep); }
+
+/* Pipeline rail */
+.pl-rail {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 22px;
+  margin: -7px 0 -7px;
+  pointer-events: none;
+}
+.pl-rail-svg { width: 100%; height: 100%; display: block; }
+
+/* Progress bar for running stage */
+.pst-progress {
+  position: relative;
+  height: 4px;
+  background: var(--surface-4);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.pst-progress > span {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 62%;
+  background: linear-gradient(90deg, var(--beep), var(--beep-soft));
+  border-radius: 999px;
+  box-shadow: 0 0 10px var(--beep-glow);
+}
+.pst-progress > span::after {
+  content: "";
+  position: absolute; inset: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255,255,255,0.18) 0 6px,
+    transparent 6px 12px
+  );
+  animation: stripe 1.2s linear infinite;
+}
+@keyframes stripe { from { background-position: 0 0; } to { background-position: 24px 0; } }
+
+/* Log tail */
+.log-tail {
+  margin-top: 16px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(6,182,212,0.05), transparent 60%),
+    #06080B;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 13px 16px 14px;
+  position: relative;
+  overflow: hidden;
+}
+.log-tail::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 3px);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.log-tail::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 50%, transparent 50%, rgba(0,0,0,0.35) 100%);
+  pointer-events: none;
+}
+.log-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 9px;
+  position: relative; z-index: 2;
+}
+.log-head .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--beep);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.log-head .lbl .d { width: 6px; height: 6px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 6px var(--beep-glow); animation: pulseLED 1.2s var(--ease) infinite; }
+.log-head .ctrls { display: inline-flex; gap: 6px; }
+.log-head .ctrls .b {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  padding: 3px 7px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+}
+.log-head .ctrls .b.active { color: var(--beep); border-color: rgba(6,182,212,0.4); background: rgba(6,182,212,0.05); }
+
+.log-lines {
+  position: relative; z-index: 2;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.01em;
+  line-height: 1.7;
+  font-feature-settings: var(--feat-num);
+  text-shadow: 0 0 6px rgba(6,182,212,0.15);
+}
+.log-lines .row { display: grid; grid-template-columns: 70px 60px 1fr; gap: 12px; }
+.log-lines .row + .row { opacity: 0.95; }
+.log-lines .ts { color: var(--whisper); }
+.log-lines .lv { font-weight: 700; }
+.log-lines .lv.info { color: var(--beep); }
+.log-lines .lv.ok { color: var(--done); }
+.log-lines .lv.warn { color: var(--live); }
+.log-lines .msg { color: var(--ink-2); }
+.log-lines .msg b { color: var(--ink); font-weight: 700; }
+.log-lines .row.cursor .msg::after {
+  content: "";
+  display: inline-block;
+  width: 7px; height: 12px;
+  background: var(--beep);
+  margin-left: 4px;
+  vertical-align: -2px;
+  box-shadow: 0 0 8px var(--beep-glow);
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ============ Section heading ============ */
+.section-h {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  margin: 6px 0 14px;
+  gap: 14px;
+}
+.section-h .titlewrap { display: flex; flex-direction: column; gap: 4px; }
+.section-h .kicker {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--beep);
+}
+.section-h .title {
+  font-family: var(--display);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.section-h .help {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.section-h .help b { color: var(--ink-2); font-weight: 700; }
+
+/* ============ Before/after metrics ============ */
+.metrics-card {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -28px rgba(0,0,0,0.6);
+}
+.metrics-head {
+  display: grid;
+  grid-template-columns: 1fr 130px 36px 130px 110px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 700;
+}
+.metrics-head .col-mid { text-align: center; color: var(--whisper); }
+.metrics-head .col-old { text-align: right; }
+.metrics-head .col-new { text-align: right; color: var(--beep); }
+.metrics-head .col-old, .metrics-head .col-new {
+  font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.2em;
+}
+.metrics-head .ver { display: block; color: var(--muted); font-weight: 500; margin-top: 3px; }
+.metrics-head .col-new .ver { color: var(--beep); }
+
+.metric-row {
+  display: grid;
+  grid-template-columns: 1fr 130px 36px 130px 110px;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px 13px 22px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+  transition: background 150ms var(--ease);
+}
+.metric-row:last-child { border-bottom: 0; }
+.metric-row:hover { background: var(--surface-2); }
+.metric-row::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 12px; bottom: 12px;
+  width: 2px;
+  background: var(--rule-strong);
+  border-radius: 1px;
+}
+.metric-row.up::before { background: var(--done); box-shadow: 0 0 8px var(--done-glow); }
+.metric-row.down::before { background: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+.metric-row.flat::before { background: var(--rule-strong); }
+
+.metric-row .name {
+  display: flex; align-items: center; gap: 11px;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+.metric-row .name .ic {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule-strong);
+  color: var(--ink-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.metric-row.up .name .ic { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.metric-row.down .name .ic { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.4); }
+
+.metric-row .name .nm-text { display: flex; flex-direction: column; gap: 1px; }
+.metric-row .name .lbl { font-family: var(--display); font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink); }
+.metric-row .name .hint {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.metric-row.down .name .hint b { color: var(--led); font-weight: 700; }
+
+.metric-val {
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: right;
+  font-feature-settings: var(--feat-num);
+}
+.metric-val.old { color: var(--muted); font-weight: 500; }
+.metric-val.new { color: var(--ink); }
+.metric-row.up .metric-val.new { color: var(--done); }
+.metric-row.down .metric-val.new { color: var(--led); }
+
+.metric-arrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--whisper);
+}
+.metric-row.up .metric-arrow { color: var(--done); }
+.metric-row.down .metric-arrow { color: var(--led); }
+
+.delta-chip {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.02em;
+  justify-self: end;
+  min-width: 86px;
+  justify-content: center;
+}
+.delta-chip.up { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.delta-chip.down { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.4); }
+.delta-chip.flat { background: var(--surface-3); color: var(--muted); border-color: var(--rule-strong); }
+
+/* Insight callout */
+.insight {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 14px 18px;
+  background:
+    linear-gradient(90deg, var(--live-tint), transparent 70%);
+  border: 1px solid rgba(251,191,36,0.3);
+  border-left: 3px solid var(--live);
+  border-radius: 10px;
+  margin-bottom: 22px;
+}
+.insight .ic {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--live-tint);
+  color: var(--live);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(251,191,36,0.4);
+  flex-shrink: 0;
+}
+.insight .body { font-size: 0.8125rem; color: var(--ink-2); line-height: 1.55; }
+.insight .body b { color: var(--ink); font-weight: 700; }
+.insight .body code { font-family: var(--mono); font-size: 0.75rem; color: var(--live); }
+.insight .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--live);
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* ============ Voter detail panel ============ */
+.voter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.voter-card {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  padding: 16px 16px 14px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+}
+.voter-card::before {
+  content: "";
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+}
+.voter-card.va::before { background: var(--led); box-shadow: 0 0 12px var(--led-glow); }
+.voter-card.vb::before { background: var(--beep); box-shadow: 0 0 12px var(--beep-glow); }
+.voter-card.vc::before { background: var(--live); box-shadow: 0 0 12px var(--live-glow); }
+
+.voter-card .vc-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.voter-card .v-name { display: flex; align-items: center; gap: 10px; }
+.voter-card .v-name .badge {
+  width: 28px; height: 28px;
+  border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-size: 0.875rem; font-weight: 700; letter-spacing: 0.04em;
+}
+.voter-card.va .v-name .badge { background: var(--led-tint); color: var(--led); border: 1px solid rgba(255,45,45,0.4); }
+.voter-card.vb .v-name .badge { background: var(--beep-tint); color: var(--beep); border: 1px solid rgba(6,182,212,0.4); }
+.voter-card.vc .v-name .badge { background: var(--live-tint); color: var(--live); border: 1px solid rgba(251,191,36,0.4); }
+.voter-card .v-name .lbl {
+  font-family: var(--display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1;
+}
+.voter-card .v-name .sub {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+}
+.voter-card .v-recall {
+  font-family: var(--mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-feature-settings: var(--feat-num);
+  text-align: right;
+}
+.voter-card.va .v-recall { color: var(--led-soft); }
+.voter-card.vb .v-recall { color: var(--beep); }
+.voter-card.vc .v-recall { color: var(--live); }
+.voter-card .v-recall .k {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 500;
+  margin-bottom: 3px;
+}
+
+.voter-card .v-tune {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 11px 0 0;
+  border-top: 1px dashed var(--rule);
+  margin-top: 4px;
+}
+.voter-card .v-tune .field { display: flex; flex-direction: column; gap: 3px; }
+.voter-card .v-tune .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 700;
+}
+.voter-card .v-tune .v {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.voter-card .v-tune .v .from { color: var(--whisper); font-weight: 500; font-size: 0.6875rem; }
+.voter-card .v-tune .v .arrow { color: var(--subtle); }
+
+.voter-card .v-feat {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px dashed var(--rule);
+}
+.voter-card .ft {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  border: 1px solid var(--rule-strong);
+  font-feature-settings: var(--feat-num);
+}
+.voter-card .ft b { color: var(--ink); font-weight: 800; }
+
+/* Mini scope chart for voter cards */
+.voter-trace {
+  height: 36px;
+  margin-top: 12px;
+  position: relative;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, transparent, rgba(0,0,0,0.25));
+}
+.voter-trace svg { width: 100%; height: 100%; display: block; }
+
+/* ============ History log ============ */
+.history-card {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  overflow: hidden;
+  margin-bottom: 64px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -28px rgba(0,0,0,0.6);
+}
+.history-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 18px;
+  background: linear-gradient(to bottom, var(--surface-2), transparent);
+  border-bottom: 1px solid var(--rule);
+}
+.history-head .l {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.history-head .l .count {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 6px;
+  font-feature-settings: var(--feat-num);
+}
+.history-head .toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 7px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  color: var(--ink-2);
+}
+.history-head .toggle:hover { color: var(--ink); border-color: var(--ink-2); }
+
+.h-row {
+  display: grid;
+  grid-template-columns: 150px 110px 90px 1fr 140px 110px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+  transition: background 150ms var(--ease);
+}
+.h-row:last-child { border-bottom: 0; }
+.h-row:hover { background: var(--surface-2); }
+.h-row.head {
+  background: var(--surface-2);
+  padding: 10px 18px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-weight: 700;
+}
+.h-ver {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.h-ver .live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--beep); box-shadow: 0 0 8px var(--beep-glow);
+  flex-shrink: 0;
+  animation: pulseLED 1.6s var(--ease) infinite;
+}
+.h-when {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.h-recall {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.h-recall .delta-mini {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  margin-left: 6px;
+}
+.h-recall .delta-mini.up { color: var(--done); }
+.h-recall .delta-mini.down { color: var(--led); }
+.h-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.h-note b { color: var(--ink-2); font-weight: 700; }
+.h-who {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 0.75rem;
+  color: var(--ink-2);
+}
+.h-who .av {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4);
+}
+
+.h-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  justify-self: end;
+}
+.h-status .d { width: 6px; height: 6px; border-radius: 50%; }
+.h-status.active { background: var(--beep-tint); color: var(--beep); border-color: rgba(6,182,212,0.4); }
+.h-status.active .d { background: var(--beep); box-shadow: 0 0 6px var(--beep-glow); }
+.h-status.promoted { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.h-status.promoted .d { background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.h-status.rolled { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.4); }
+.h-status.rolled .d { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+.h-status.superseded { background: var(--surface-3); color: var(--muted); border-color: var(--rule-strong); }
+.h-status.superseded .d { background: var(--whisper); }
+
+/* ============ Action zone (sticky bottom) ============ */
+.action-zone {
+  position: sticky;
+  bottom: 0;
+  left: 0; right: 0;
+  z-index: 30;
+  margin-top: 26px;
+  background:
+    linear-gradient(180deg, transparent, var(--bg) 22%, var(--bg));
+  padding-top: 22px;
+}
+.action-shell {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 22px;
+  background:
+    linear-gradient(180deg, rgba(6,182,212,0.03), transparent),
+    var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 -8px 28px -20px rgba(6,182,212,0.18);
+}
+.action-shell::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+.action-shell .left { display: flex; flex-direction: column; gap: 6px; }
+.action-shell .left .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--beep);
+  display: inline-flex; align-items: center; gap: 9px;
+}
+.action-shell .left .lbl .d { width: 6px; height: 6px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 6px var(--beep-glow); }
+.action-shell .left .help {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+.action-shell .left .help code {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--beep);
+}
+.action-shell .right { display: flex; gap: 10px; align-items: center; }
+
+.btn-promote {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 12px 22px;
+  border-radius: 9px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, var(--beep), var(--beep-soft));
+  color: var(--bg);
+  border: 1px solid var(--beep);
+  box-shadow:
+    0 0 0 1px var(--beep),
+    0 0 18px var(--beep-glow),
+    inset 0 1px 0 rgba(255,255,255,0.25);
+  min-height: 44px;
+  position: relative;
+  transition: all 180ms var(--ease);
+}
+.btn-promote:hover {
+  box-shadow:
+    0 0 0 1px var(--beep-soft),
+    0 0 28px var(--beep-glow),
+    inset 0 1px 0 rgba(255,255,255,0.3);
+  transform: translateY(-1px);
+}
+.btn-rollback {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 18px;
+  border-radius: 9px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--led-soft);
+  border: 1px solid rgba(255,45,45,0.45);
+  min-height: 44px;
+  transition: all 180ms var(--ease);
+}
+.btn-rollback:hover { background: var(--led-tint); border-color: var(--led); color: var(--led); }
+.btn-stash {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 18px;
+  border-radius: 9px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--rule-strong);
+  min-height: 44px;
+  transition: all 180ms var(--ease);
+}
+.btn-stash:hover { background: var(--surface-3); border-color: var(--ink-2); color: var(--ink); }
+
+.footnote {
+  margin-top: 22px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--whisper);
+  text-align: center;
+}
+
+/* Responsive guard */
+@media (max-width: 1100px) {
+  .pl-grid { grid-template-columns: repeat(3, 1fr); }
+  .voter-grid { grid-template-columns: 1fr; }
+  .compare-strip { grid-template-columns: 1fr; }
+  .compare-strip .cs-conn { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat,
+  .status-led .pulse,
+  .pl-head .h-title .dot,
+  .pstage.running .pst-status .d,
+  .log-head .lbl .d,
+  .log-lines .row.cursor .msg::after,
+  .h-ver .live-dot { animation: none; }
+  .pst-progress > span::after { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Developer mode active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button>Match</button>
+      <button class="active">Developer</button>
+    </div>
+    <div class="model-chip">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+      <span class="label">Active</span>
+      <span class="ver">v2026.04.02</span>
+      <span class="sep">&middot;</span>
+      <span class="stat"><b>142</b> fixtures</span>
+      <span class="sep">&middot;</span>
+      <span class="stat">recall <b>0.94</b></span>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile">
+      <span class="av">MA</span>
+      <span class="label">Mathias A.</span>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="09-developer-corpus.html">Developer</a>
+        <span class="sep">/</span>
+        <span class="current">Retrain</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- ============ DEVELOPER SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="dev-card">
+      <div class="lbl">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+        Detector training
+      </div>
+      <div class="title">Ensemble pipeline</div>
+      <div class="meta">v2026.04.02 &middot; recall <b>0.94</b></div>
+    </div>
+
+    <div class="nav-label">Workflow</div>
+
+    <div class="nav-stepper">
+      <div class="nav-step done">
+        <span class="num">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+        </span>
+        <span class="name">Corpus</span>
+        <span class="count">156</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step done">
+        <span class="num">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+        </span>
+        <span class="name">Review queue</span>
+        <span class="count">14</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step done">
+        <span class="num">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+        </span>
+        <span class="name">Validate</span>
+        <span class="count">0.96</span>
+      </div>
+      <div class="step-line"></div>
+
+      <div class="nav-step active">
+        <span class="num">4</span>
+        <span class="name">Retrain</span>
+        <span class="count live">live</span>
+      </div>
+    </div>
+
+    <div class="sub-section">
+      <div class="nav-label">Tools</div>
+      <div class="sub-link">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 16,12 14,15 10,15 8,12 2,12"/><path d="M5 9l-2 3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2-3"/><path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg></span>
+        Inbox
+      </div>
+      <div class="sub-link">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+        Build history
+      </div>
+      <div class="sub-link transitional">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4v10c0 1.1.9 2 2 2h2c1.1 0 2-.9 2-2V4M5 4h14"/></svg></span>
+        Lab playground
+        <span class="pill-lab">Legacy</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+
+    <div class="page-head">
+      <div class="row">
+        <div>
+          <div class="page-kicker">Developer &middot; retrain</div>
+          <h1 class="page-h1">Retrain</h1>
+          <div class="page-sub">Build a new shipped model from validated fixtures. Promote or roll back based on the side-by-side comparison.</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn ghost">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            History
+          </button>
+          <button class="btn">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9"/></svg>
+            Configure build
+          </button>
+          <button class="btn soft">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 3v18l4-3 4 3V3z"/><path d="M13 6l8 0M13 12h6"/></svg>
+            Open report
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <!-- ============ RUN SUMMARY ============ -->
+      <section class="run-summary" aria-label="Build summary">
+        <div class="run-summary-top">
+          <div class="left">
+            <span class="status-led">
+              <span class="pulse"></span>
+              Build in progress &middot; stage 5 of 6
+            </span>
+            <span class="status-led" style="background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.35); color: var(--done);">
+              <span class="pulse" style="background: var(--done); box-shadow: 0 0 10px var(--done-glow); animation: none;"></span>
+              Validation passed
+            </span>
+          </div>
+          <div class="right">
+            <span><span class="key">corpus</span> <b>156</b> fixtures</span>
+            <span><span class="key">seed</span> <b>0xCAFE</b></span>
+            <span><span class="key">runner</span> <b>local-worker</b></span>
+            <span><span class="key">started</span> <b>14:47:09</b></span>
+          </div>
+        </div>
+
+        <div class="compare-strip">
+          <div class="cs-side shipped">
+            <span class="role"><span class="dot"></span>Currently shipped</span>
+            <div class="ver">ensemble <span class="vtag">v2026.04.02</span></div>
+            <div class="ver-meta">Promoted <b>5 days ago</b> &middot; by Mathias A.</div>
+            <div class="ver-stats">
+              <div class="ver-stat">
+                <span class="k">Fixtures</span>
+                <span class="v">142</span>
+              </div>
+              <div class="ver-stat">
+                <span class="k">Recall</span>
+                <span class="v">0.94</span>
+              </div>
+              <div class="ver-stat">
+                <span class="k">F1</span>
+                <span class="v">0.93</span>
+              </div>
+              <div class="ver-stat">
+                <span class="k">Worst slice</span>
+                <span class="v dim">0.71</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cs-conn" aria-hidden="true">
+            <div class="chev">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+
+          <div class="cs-side candidate">
+            <span class="role"><span class="dot"></span>Prospective build</span>
+            <div class="ver">ensemble <span class="vtag">v2026.05.14-rc</span></div>
+            <div class="ver-meta">Built <b>just now</b> &middot; validated on 5-fold per-shooter holdout</div>
+            <div class="ver-stats">
+              <div class="ver-stat hero">
+                <span class="k">Fixtures</span>
+                <span class="v">156</span>
+              </div>
+              <div class="ver-stat hero">
+                <span class="k">Recall</span>
+                <span class="v">0.96</span>
+              </div>
+              <div class="ver-stat hero">
+                <span class="k">F1</span>
+                <span class="v">0.95</span>
+              </div>
+              <div class="ver-stat">
+                <span class="k">Worst slice</span>
+                <span class="v" style="color: var(--led);">0.64</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PIPELINE ============ -->
+      <section class="pipeline-card" aria-label="Build pipeline">
+
+        <div class="pl-head">
+          <div class="h-left">
+            <div class="h-title"><span class="dot"></span>Artifact build pipeline</div>
+            <div class="h-sub">scripts/build_ensemble_artifacts.py &middot; runner <b>local-worker / m3-max</b></div>
+          </div>
+          <div class="h-right">
+            <div class="pl-stat">
+              <span class="k">Elapsed</span>
+              <span class="v">04:46</span>
+            </div>
+            <div class="pl-stat">
+              <span class="k">ETA</span>
+              <span class="v eta">+02:34</span>
+            </div>
+            <div class="pl-stat">
+              <span class="k">Stages</span>
+              <span class="v done">4 / 6</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pl-grid">
+
+          <!-- STAGE 1 -->
+          <div class="pstage done">
+            <div class="pst-top">
+              <span class="pst-num">01</span>
+              <span class="pst-status">
+                <span class="d"></span>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg>
+                Done
+              </span>
+            </div>
+            <div class="pst-name">Gather corpus</div>
+            <div class="pst-desc">Extract features from 156 fixtures &middot; CLAP &middot; PANN &middot; envelope.</div>
+            <div class="pst-foot">
+              <span class="pst-time">01:12</span>
+              <span class="pst-metric">156 rows<br/>2.8 GB cached</span>
+            </div>
+          </div>
+
+          <!-- STAGE 2 -->
+          <div class="pstage done">
+            <div class="pst-top">
+              <span class="pst-num">02</span>
+              <span class="pst-status">
+                <span class="d"></span>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg>
+                Done
+              </span>
+            </div>
+            <div class="pst-name">Train voter A</div>
+            <div class="pst-desc">Envelope onset &middot; auto-calibrate min_confidence floor.</div>
+            <div class="pst-foot">
+              <span class="pst-time">00:34</span>
+              <span class="pst-metric">min_conf 0.42<br/>recall 0.97</span>
+            </div>
+          </div>
+
+          <!-- STAGE 3 -->
+          <div class="pstage done">
+            <div class="pst-top">
+              <span class="pst-num">03</span>
+              <span class="pst-status">
+                <span class="d"></span>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg>
+                Done
+              </span>
+            </div>
+            <div class="pst-name">Calibrate voter B</div>
+            <div class="pst-desc">CLAP shot-vs-not-shot differential threshold from labels.</div>
+            <div class="pst-foot">
+              <span class="pst-time">00:51</span>
+              <span class="pst-metric">thr 0.18<br/>recall 0.89</span>
+            </div>
+          </div>
+
+          <!-- STAGE 4 -->
+          <div class="pstage done">
+            <div class="pst-top">
+              <span class="pst-num">04</span>
+              <span class="pst-status">
+                <span class="d"></span>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M5 12l5 5L20 7"/></svg>
+                Done
+              </span>
+            </div>
+            <div class="pst-name">Train voter C</div>
+            <div class="pst-desc">GradientBoostingClassifier &middot; 14 + 6 + 1 features &middot; CV.</div>
+            <div class="pst-foot">
+              <span class="pst-time">01:42</span>
+              <span class="pst-metric">CV mean 0.91<br/>std 0.04</span>
+            </div>
+          </div>
+
+          <!-- STAGE 5 - RUNNING -->
+          <div class="pstage running">
+            <div class="pst-top">
+              <span class="pst-num">05</span>
+              <span class="pst-status">
+                <span class="d"></span>
+                Running
+              </span>
+            </div>
+            <div class="pst-name">Cross-validate ensemble</div>
+            <div class="pst-desc">5-fold over the full corpus &middot; fold 3 / 5 in progress.</div>
+            <div class="pst-progress" aria-label="62 percent complete"><span></span></div>
+            <div class="pst-foot">
+              <span class="pst-time">00:27 / ~01:42</span>
+              <span class="pst-metric">fold 3 &middot; partial 0.95</span>
+            </div>
+          </div>
+
+          <!-- STAGE 6 - IDLE -->
+          <div class="pstage idle">
+            <div class="pst-top">
+              <span class="pst-num">06</span>
+              <span class="pst-status">
+                <span class="d"></span>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="8"/></svg>
+                Pending
+              </span>
+            </div>
+            <div class="pst-name">Package artifacts</div>
+            <div class="pst-desc">Write /data/ bundle &middot; calibration.json &middot; gbdt.pkl &middot; manifest.</div>
+            <div class="pst-foot">
+              <span class="pst-time">--:--</span>
+              <span class="pst-metric">awaiting CV</span>
+            </div>
+          </div>
+
+          <!-- Rail SVG: motherboard-style trace under all 6 stages -->
+          <div class="pl-rail" aria-hidden="true">
+            <svg class="pl-rail-svg" viewBox="0 0 1200 22" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="railOn" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#4ADE80"/>
+                  <stop offset="100%" stop-color="#06B6D4"/>
+                </linearGradient>
+                <linearGradient id="railOff" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#3A4049"/>
+                  <stop offset="100%" stop-color="#262B33"/>
+                </linearGradient>
+              </defs>
+              <!-- Done rail (stages 1-5) -->
+              <path d="M 100 11 H 900" stroke="url(#railOn)" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.85"/>
+              <!-- Idle rail (stage 5-6) -->
+              <path d="M 900 11 H 1100" stroke="url(#railOff)" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="4 4"/>
+              <!-- Stage nodes -->
+              <circle cx="100" cy="11" r="3.5" fill="#4ADE80"/>
+              <circle cx="300" cy="11" r="3.5" fill="#4ADE80"/>
+              <circle cx="500" cy="11" r="3.5" fill="#4ADE80"/>
+              <circle cx="700" cy="11" r="3.5" fill="#4ADE80"/>
+              <circle cx="900" cy="11" r="4.5" fill="#06B6D4">
+                <animate attributeName="r" values="4.5;6;4.5" dur="1.4s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="1;0.5;1" dur="1.4s" repeatCount="indefinite"/>
+              </circle>
+              <circle cx="1100" cy="11" r="3.5" fill="none" stroke="#4B5058" stroke-width="1.5"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- LOG TAIL -->
+        <div class="log-tail" role="log" aria-live="polite">
+          <div class="log-head">
+            <span class="lbl"><span class="d"></span>Live training output &middot; tail -f build.log</span>
+            <span class="ctrls">
+              <span class="b">INFO</span>
+              <span class="b active">DEBUG</span>
+              <span class="b">PAUSE</span>
+            </span>
+          </div>
+          <div class="log-lines">
+            <div class="row">
+              <span class="ts">14:51:02</span>
+              <span class="lv info">INFO</span>
+              <span class="msg">voter_a calibrated &middot; min_confidence floor = <b>0.42</b> (was 0.46)</span>
+            </div>
+            <div class="row">
+              <span class="ts">14:51:34</span>
+              <span class="lv info">INFO</span>
+              <span class="msg">voter_b CLAP differential threshold = <b>0.18</b> &middot; recall 0.89</span>
+            </div>
+            <div class="row">
+              <span class="ts">14:52:48</span>
+              <span class="lv ok">OK</span>
+              <span class="msg">gbdt 5-fold complete &middot; mean recall <b>0.91</b> &middot; std <b>0.04</b></span>
+            </div>
+            <div class="row">
+              <span class="ts">14:54:12</span>
+              <span class="lv info">INFO</span>
+              <span class="msg">ensemble CV starting &middot; per-shooter holdout enabled</span>
+            </div>
+            <div class="row">
+              <span class="ts">14:55:01</span>
+              <span class="lv ok">OK</span>
+              <span class="msg">fold 1/5 complete &middot; recall <b>0.96</b> &middot; precision <b>0.94</b></span>
+            </div>
+            <div class="row">
+              <span class="ts">14:55:42</span>
+              <span class="lv ok">OK</span>
+              <span class="msg">fold 2/5 complete &middot; recall <b>0.95</b> &middot; precision <b>0.93</b></span>
+            </div>
+            <div class="row cursor">
+              <span class="ts">14:56:11</span>
+              <span class="lv info">INFO</span>
+              <span class="msg">fold 3/5 running &middot; holdout = shooter.<b>robert-janson</b> &middot; partial recall 0.95</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ BEFORE/AFTER METRICS ============ -->
+      <div class="section-h">
+        <div class="titlewrap">
+          <span class="kicker">Side-by-side &middot; shipped vs candidate</span>
+          <span class="title">Ensemble metrics</span>
+        </div>
+        <span class="help"><b>v2026.04.02</b> &rarr; <b style="color: var(--beep);">v2026.05.14-rc</b> &middot; 5-fold per-shooter holdout</span>
+      </div>
+
+      <section class="metrics-card" aria-label="Before and after comparison">
+        <div class="metrics-head">
+          <span>Metric</span>
+          <span class="col-old">Current<span class="ver">v2026.04.02</span></span>
+          <span class="col-mid"></span>
+          <span class="col-new">New<span class="ver">v2026.05.14-rc</span></span>
+          <span style="text-align: right;">&Delta;</span>
+        </div>
+
+        <div class="metric-row up">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">Recall</span>
+              <span class="hint">true positives / labeled shots</span>
+            </div>
+          </div>
+          <span class="metric-val old">0.94</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new">0.96</span>
+          <span class="delta-chip up">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            +0.02
+          </span>
+        </div>
+
+        <div class="metric-row up">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">Precision</span>
+              <span class="hint">true positives / detections</span>
+            </div>
+          </div>
+          <span class="metric-val old">0.92</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new">0.93</span>
+          <span class="delta-chip up">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            +0.01
+          </span>
+        </div>
+
+        <div class="metric-row up">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4l5 16 3-10 3 10 5-16"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">F1</span>
+              <span class="hint">harmonic mean of recall + precision</span>
+            </div>
+          </div>
+          <span class="metric-val old">0.93</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new">0.95</span>
+          <span class="delta-chip up">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            +0.02
+          </span>
+        </div>
+
+        <div class="metric-row flat">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M9 5v14"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">Fixtures (corpus)</span>
+              <span class="hint">+14 newly validated &middot; +1 venue covered</span>
+            </div>
+          </div>
+          <span class="metric-val old">142</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new" style="color: var(--ink);">156</span>
+          <span class="delta-chip flat">+14</span>
+        </div>
+
+        <div class="metric-row down">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 9v4M12 17v.5"/><path d="M10.3 4.3 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">Per-shooter worst</span>
+              <span class="hint">regression on <b>shooter.robert-janson</b> (18 fixtures)</span>
+            </div>
+          </div>
+          <span class="metric-val old">0.79</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new">0.78</span>
+          <span class="delta-chip down">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            -0.01
+          </span>
+        </div>
+
+        <div class="metric-row down">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 9v4M12 17v.5"/><path d="M10.3 4.3 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">Worst venue / camera</span>
+              <span class="hint">regression on <b>helmet-cam &middot; low-light indoor</b></span>
+            </div>
+          </div>
+          <span class="metric-val old">0.71</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new">0.64</span>
+          <span class="delta-chip down">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            -0.07
+          </span>
+        </div>
+
+        <div class="metric-row flat">
+          <div class="name">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></span>
+            <div class="nm-text">
+              <span class="lbl">Build size</span>
+              <span class="hint">gbdt.pkl + calibration + manifest</span>
+            </div>
+          </div>
+          <span class="metric-val old">42 MB</span>
+          <span class="metric-arrow">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+          <span class="metric-val new" style="color: var(--ink);">48 MB</span>
+          <span class="delta-chip flat">+6 MB</span>
+        </div>
+      </section>
+
+      <!-- INSIGHT -->
+      <div class="insight">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span>
+        <div>
+          <span class="lbl">Mixed signal &middot; review recommended</span>
+          <div class="body">
+            Net positive on the headline metrics (recall <b>+0.02</b>, F1 <b>+0.02</b>) but the build <b>regresses</b> on <code>shooter.robert-janson</code> (-0.01) and <code>helmet-cam / low-light indoor</code> (-0.07). The low-light venue has only 4 fixtures in the new corpus -- it's likely under-represented. Consider <b>collecting more helmet-cam low-light footage</b> before promoting, or stage this as a rollback candidate and ship next week.
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ VOTER DETAIL ============ -->
+      <div class="section-h">
+        <div class="titlewrap">
+          <span class="kicker">3-voter ensemble &middot; per-voter contribution</span>
+          <span class="title">Voter calibration</span>
+        </div>
+        <span class="help">Each voter recalibrated against the 156-fixture corpus</span>
+      </div>
+
+      <section class="voter-grid" aria-label="Per voter detail">
+
+        <!-- Voter A -->
+        <div class="voter-card va">
+          <div class="vc-top">
+            <div class="v-name">
+              <span class="badge">A</span>
+              <div>
+                <div class="lbl">Envelope onset</div>
+                <div class="sub">Candidate generator</div>
+              </div>
+            </div>
+            <div class="v-recall">
+              <span class="k">Recall</span>
+              0.97
+            </div>
+          </div>
+          <div class="v-tune">
+            <div class="field">
+              <span class="k">min_confidence</span>
+              <span class="v">0.42 <span class="arrow"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg></span> <span class="from">from 0.46</span></span>
+            </div>
+            <div class="field">
+              <span class="k">Calibrate</span>
+              <span class="v">auto &middot; positive floor</span>
+            </div>
+          </div>
+          <div class="voter-trace" aria-hidden="true">
+            <svg viewBox="0 0 200 36" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="trA" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#FF2D2D" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="#FF2D2D" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,28 L8,28 L10,8 L12,28 L26,28 L28,11 L30,28 L48,28 L50,14 L52,28 L72,28 L74,6 L76,28 L98,28 L100,16 L102,28 L122,28 L124,9 L126,28 L150,28 L152,12 L154,28 L178,28 L180,7 L182,28 L200,28"
+                fill="none" stroke="#FF2D2D" stroke-width="1.2" stroke-linejoin="round"/>
+              <path d="M0,28 L8,28 L10,8 L12,28 L26,28 L28,11 L30,28 L48,28 L50,14 L52,28 L72,28 L74,6 L76,28 L98,28 L100,16 L102,28 L122,28 L124,9 L126,28 L150,28 L152,12 L154,28 L178,28 L180,7 L182,28 L200,28 L200,36 L0,36 Z"
+                fill="url(#trA)"/>
+              <line x1="0" y1="20" x2="200" y2="20" stroke="#FF2D2D" stroke-width="0.5" stroke-dasharray="2 3" opacity="0.4"/>
+            </svg>
+          </div>
+          <div class="v-feat">
+            <span class="ft">spectral flux</span>
+            <span class="ft">RMS envelope</span>
+            <span class="ft">peak prominence</span>
+          </div>
+        </div>
+
+        <!-- Voter B -->
+        <div class="voter-card vb">
+          <div class="vc-top">
+            <div class="v-name">
+              <span class="badge">B</span>
+              <div>
+                <div class="lbl">CLAP differential</div>
+                <div class="sub">Semantic discriminator</div>
+              </div>
+            </div>
+            <div class="v-recall">
+              <span class="k">Recall</span>
+              0.89
+            </div>
+          </div>
+          <div class="v-tune">
+            <div class="field">
+              <span class="k">threshold</span>
+              <span class="v">0.18 <span class="arrow"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6l6 6-6 6"/></svg></span> <span class="from">from 0.22</span></span>
+            </div>
+            <div class="field">
+              <span class="k">Prompts</span>
+              <span class="v">"gunshot" &middot; "speech"</span>
+            </div>
+          </div>
+          <div class="voter-trace" aria-hidden="true">
+            <svg viewBox="0 0 200 36" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="trB" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#06B6D4" stop-opacity="0.45"/>
+                  <stop offset="100%" stop-color="#06B6D4" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,26 C12,18 20,22 30,16 C40,10 50,15 60,12 C70,9 80,18 92,14 C104,10 116,20 126,15 C136,11 148,8 160,12 C172,16 184,10 200,14"
+                fill="none" stroke="#06B6D4" stroke-width="1.4" stroke-linejoin="round"/>
+              <path d="M0,26 C12,18 20,22 30,16 C40,10 50,15 60,12 C70,9 80,18 92,14 C104,10 116,20 126,15 C136,11 148,8 160,12 C172,16 184,10 200,14 L200,36 L0,36 Z"
+                fill="url(#trB)"/>
+              <line x1="0" y1="22" x2="200" y2="22" stroke="#06B6D4" stroke-width="0.5" stroke-dasharray="2 3" opacity="0.5"/>
+            </svg>
+          </div>
+          <div class="v-feat">
+            <span class="ft">CLAP embed</span>
+            <span class="ft">cosine sim</span>
+            <span class="ft">delta gate</span>
+          </div>
+        </div>
+
+        <!-- Voter C -->
+        <div class="voter-card vc">
+          <div class="vc-top">
+            <div class="v-name">
+              <span class="badge">C</span>
+              <div>
+                <div class="lbl">GBDT classifier</div>
+                <div class="sub">Hand-crafted + learned</div>
+              </div>
+            </div>
+            <div class="v-recall">
+              <span class="k">5-fold mean</span>
+              0.91
+            </div>
+          </div>
+          <div class="v-tune">
+            <div class="field">
+              <span class="k">CV std</span>
+              <span class="v">&plusmn; 0.04</span>
+            </div>
+            <div class="field">
+              <span class="k">trees</span>
+              <span class="v">240 &middot; depth 5</span>
+            </div>
+          </div>
+          <div class="voter-trace" aria-hidden="true">
+            <svg viewBox="0 0 200 36" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="trC" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#FBBF24" stop-opacity="0.45"/>
+                  <stop offset="100%" stop-color="#FBBF24" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <!-- Bar-style importance chart -->
+              <rect x="4" y="14" width="10" height="20" fill="#FBBF24" opacity="0.85"/>
+              <rect x="20" y="10" width="10" height="24" fill="#FBBF24" opacity="0.85"/>
+              <rect x="36" y="6" width="10" height="28" fill="#FBBF24"/>
+              <rect x="52" y="12" width="10" height="22" fill="#FBBF24" opacity="0.85"/>
+              <rect x="68" y="18" width="10" height="16" fill="#FBBF24" opacity="0.6"/>
+              <rect x="84" y="22" width="10" height="12" fill="#FBBF24" opacity="0.5"/>
+              <rect x="100" y="20" width="10" height="14" fill="#FBBF24" opacity="0.55"/>
+              <rect x="116" y="24" width="10" height="10" fill="#FBBF24" opacity="0.4"/>
+              <rect x="132" y="26" width="10" height="8" fill="#FBBF24" opacity="0.4"/>
+              <rect x="148" y="27" width="10" height="7" fill="#FBBF24" opacity="0.35"/>
+              <rect x="164" y="28" width="10" height="6" fill="#FBBF24" opacity="0.3"/>
+              <rect x="180" y="30" width="10" height="4" fill="#FBBF24" opacity="0.25"/>
+              <line x1="0" y1="34" x2="200" y2="34" stroke="#FBBF24" stroke-width="0.5" opacity="0.35"/>
+            </svg>
+          </div>
+          <div class="v-feat">
+            <span class="ft">14<b>x</b> hand-crafted</span>
+            <span class="ft">6<b>x</b> CLAP sim</span>
+            <span class="ft">1<b>x</b> PANN gunshot</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ HISTORY ============ -->
+      <div class="section-h">
+        <div class="titlewrap">
+          <span class="kicker">Audit log</span>
+          <span class="title">Retrain history</span>
+        </div>
+        <span class="help">Last <b>5</b> shipped or attempted builds</span>
+      </div>
+
+      <section class="history-card" aria-label="Retrain history">
+        <div class="history-head">
+          <div class="l">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            History
+            <span class="count">5 builds</span>
+          </div>
+          <button class="toggle">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
+            Expand &middot; show all 23
+          </button>
+        </div>
+
+        <div class="h-row head">
+          <span>Version</span>
+          <span>When</span>
+          <span>Recall</span>
+          <span>Note</span>
+          <span>By</span>
+          <span style="text-align: right;">Status</span>
+        </div>
+
+        <div class="h-row">
+          <span class="h-ver"><span class="live-dot"></span>v2026.04.02</span>
+          <span class="h-when">5d ago</span>
+          <span class="h-recall">0.94 <span class="delta-mini up">+0.03</span></span>
+          <span class="h-note">Promoted after Pia helmet-cam fixtures landed &middot; <b>142 fixtures</b></span>
+          <span class="h-who"><span class="av">MA</span>Mathias A.</span>
+          <span class="h-status active"><span class="d"></span>Active</span>
+        </div>
+
+        <div class="h-row">
+          <span class="h-ver"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--rule-strong); display: inline-block;"></span>v2026.03.18</span>
+          <span class="h-when">3w ago</span>
+          <span class="h-recall">0.91 <span class="delta-mini down">-0.01</span></span>
+          <span class="h-note">Rolled back &middot; <b>regression on shooter.pia-eriksson</b> (-0.05)</span>
+          <span class="h-who"><span class="av">MA</span>Mathias A.</span>
+          <span class="h-status rolled"><span class="d"></span>Rolled back</span>
+        </div>
+
+        <div class="h-row">
+          <span class="h-ver"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--rule-strong); display: inline-block;"></span>v2026.03.15</span>
+          <span class="h-when">3w ago</span>
+          <span class="h-recall">0.92 <span class="delta-mini up">+0.02</span></span>
+          <span class="h-note">Superseded by v2026.03.18 &middot; same week</span>
+          <span class="h-who"><span class="av">MA</span>Mathias A.</span>
+          <span class="h-status superseded"><span class="d"></span>Superseded</span>
+        </div>
+
+        <div class="h-row">
+          <span class="h-ver"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--rule-strong); display: inline-block;"></span>v2026.02.21</span>
+          <span class="h-when">12w ago</span>
+          <span class="h-recall">0.90 <span class="delta-mini up">+0.04</span></span>
+          <span class="h-note">First build with PANN gunshot feature on voter C</span>
+          <span class="h-who"><span class="av">MA</span>Mathias A.</span>
+          <span class="h-status superseded"><span class="d"></span>Superseded</span>
+        </div>
+
+        <div class="h-row">
+          <span class="h-ver"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--rule-strong); display: inline-block;"></span>v2026.01.04</span>
+          <span class="h-when">19w ago</span>
+          <span class="h-recall">0.86 <span class="delta-mini up">+0.02</span></span>
+          <span class="h-note">Bofors fixtures added &middot; recall floor on outdoor 9mm</span>
+          <span class="h-who"><span class="av">MA</span>Mathias A.</span>
+          <span class="h-status superseded"><span class="d"></span>Superseded</span>
+        </div>
+      </section>
+
+      <!-- ============ STICKY ACTION ZONE ============ -->
+      <section class="action-zone" aria-label="Deployment actions">
+        <div class="action-shell">
+          <div class="left">
+            <span class="lbl"><span class="d"></span>Decision &middot; promote, stage, or roll back</span>
+            <div class="help">
+              <b>Promote</b> writes <code>v2026.05.14-rc</code> artifacts to <code>src/splitsmith/data/</code>, bumps <code>__version__.py</code>, and updates the model-chip in the shell. <b>Roll back</b> restores <code>v2026.04.02</code> from <code>~/Splitsmith/builds/</code>. <b>Save as candidate</b> keeps the build but leaves the active model unchanged.
+            </div>
+          </div>
+          <div class="right">
+            <button class="btn-stash" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="6" rx="1"/><path d="M5 10v10h14V10M10 14h4"/></svg>
+              Save as candidate
+            </button>
+            <button class="btn-rollback" type="button">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+              Roll back &middot; v2026.04.02
+            </button>
+            <button class="btn-promote" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+              Promote to shipped
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="footnote">
+          Polished 12 &middot; ./docs/ux-redesign/polished/12-developer-retrain.html
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

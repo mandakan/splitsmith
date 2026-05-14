@@ -1,0 +1,1550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Export &middot; VADS Easter Shoot 2026</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Export configurator
+   Direction: Shot Timer (extends polished 02/03).
+   Closes the end-to-end flow: scope, trim, transitions,
+   overlays, output. Numbered sections + sticky summary rail.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --live-tint:    rgba(251, 191, 36, 0.10);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --done-tint:    rgba(74, 222, 128, 0.10);
+  --beep:         #06B6D4;
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+  --manual:       #A78BFA;
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select, textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--led), var(--led-deep)); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); }
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Sidebar (carries from polished 02) ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.match-card { padding: 4px 8px 14px; border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+.match-card .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); margin-bottom: 6px; }
+.match-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 6px; }
+.match-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.nav-section { margin: 4px 0 14px; }
+.nav-item { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 7px; color: var(--ink-2); font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: all 150ms var(--ease); min-height: 36px; }
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item .icon { color: var(--muted); display: inline-flex; }
+.nav-item:hover .icon { color: var(--ink); }
+.nav-item.active { background: var(--led-tint); border: 1px solid var(--led-deep); padding: 7px 9px; color: var(--led); font-weight: 700; }
+.nav-item.active .icon { color: var(--led); }
+.nav-label { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+.nav-label .pill { background: var(--surface-2); border: 1px solid var(--rule); color: var(--ink-2); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-feature-settings: var(--feat-num); }
+.stage-list { display: flex; flex-direction: column; gap: 1px; }
+.stage-item { display: grid; grid-template-columns: 26px 1fr 14px; gap: 9px; align-items: center; padding: 6px 10px 6px 6px; border-radius: 6px; cursor: pointer; font-size: 0.8125rem; min-height: 34px; }
+.stage-item:hover { background: var(--surface-2); }
+.stage-num { width: 26px; height: 26px; border-radius: 5px; background: var(--surface-3); color: var(--ink-2); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-feature-settings: var(--feat-num); }
+.stage-name { color: var(--ink-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-status { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.stage-status.done { background: var(--done); box-shadow: 0 0 5px var(--done-glow); }
+.stage-status.partial { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.stage-status.flagged { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+.stage-status.todo { background: transparent; border: 1px solid var(--rule-strong); }
+
+/* ============ Content ============ */
+.content { min-width: 0; }
+
+.page-head { padding: 24px 32px 22px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface), transparent); }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--led); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.25rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 8px; }
+.page-sub { color: var(--muted); font-size: 0.875rem; }
+
+/* ============ Export layout ============ */
+.export-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 22px;
+  padding: 24px 32px 80px;
+  max-width: 1480px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+/* ============ Section card ============ */
+.section {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 13px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 18px 36px -24px rgba(0,0,0,0.6);
+}
+.section-head {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(to bottom, var(--surface-2), transparent);
+}
+.section-head .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  display: inline-flex; align-items: center; gap: 12px;
+}
+.section-head .title .num {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--led-tint);
+  color: var(--led);
+  border: 1px solid var(--led-deep);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+  box-shadow: 0 0 10px var(--led-glow);
+}
+.section-head .help {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.section-body { padding: 20px 22px; }
+
+/* ============ Mode toggle (radio cards) ============ */
+.mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.mode-option {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 18px;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 11px;
+  background: var(--bg-glow);
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.mode-option:hover { border-color: var(--ink-2); }
+.mode-option.selected {
+  border-color: var(--led);
+  background: var(--led-tint);
+  box-shadow: 0 0 0 1px var(--led-deep), 0 0 18px var(--led-glow);
+}
+.mode-option.selected::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--led);
+  box-shadow: 0 0 12px var(--led-glow);
+}
+.mode-option .radio {
+  flex-shrink: 0;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rule-strong);
+  background: var(--surface);
+  margin-top: 2px;
+  position: relative;
+  transition: all 180ms var(--ease);
+}
+.mode-option.selected .radio {
+  border-color: var(--led);
+  background: var(--led);
+  box-shadow: 0 0 10px var(--led-glow);
+}
+.mode-option.selected .radio::after {
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--bg);
+}
+.mode-option .opt-title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.mode-option.selected .opt-title { color: var(--led); }
+.mode-option .opt-desc { font-size: 0.8125rem; color: var(--muted); line-height: 1.5; }
+
+/* ============ Shooter row ============ */
+.shooter-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px;
+  background: var(--bg-glow);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+.shooter-row .av {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow);
+  flex-shrink: 0;
+}
+.shooter-row .info { flex: 1; min-width: 0; }
+.shooter-row .name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.you-tag {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  background: var(--led);
+  color: var(--bg);
+  padding: 2px 7px;
+  border-radius: 4px;
+  box-shadow: 0 0 8px var(--led-glow);
+}
+.shooter-row .meta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+}
+.shooter-row .change-btn {
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--led);
+}
+.shooter-row .change-btn:hover { color: var(--led-soft); }
+
+/* ============ Stage chips ============ */
+.stage-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 12px;
+}
+.stage-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 12px 5px 5px;
+  background: var(--led-tint);
+  color: var(--led);
+  border: 1px solid var(--led-deep);
+  border-radius: 999px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+}
+.stage-chip .num {
+  background: var(--led);
+  color: var(--bg);
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-feature-settings: var(--feat-num);
+}
+.stage-chip.off {
+  background: var(--surface-3);
+  border-color: var(--rule);
+  color: var(--whisper);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.stage-chip.off .num { background: var(--rule-strong); color: var(--subtle); }
+.stage-chip.warn {
+  background: var(--live-tint);
+  color: var(--live);
+  border-color: rgba(251,191,36,0.4);
+}
+.stage-chip.warn .num { background: var(--live); color: var(--bg); }
+
+.stage-chip-help {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  line-height: 1.5;
+  font-feature-settings: var(--feat-num);
+}
+.stage-chip-help .warn-text { color: var(--live); }
+
+/* ============ Trim presets ============ */
+.preset-row {
+  display: flex; gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.preset {
+  padding: 12px 16px;
+  background: var(--bg-glow);
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 120px;
+  transition: all 180ms var(--ease);
+}
+.preset:hover { border-color: var(--ink-2); }
+.preset.selected {
+  border-color: var(--led);
+  background: var(--led-tint);
+  box-shadow: 0 0 0 1px var(--led-deep), 0 0 14px var(--led-glow);
+}
+.preset .pname {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.preset.selected .pname { color: var(--led); }
+.preset .pnum {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  font-feature-settings: var(--feat-num);
+}
+
+.trim-custom {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--rule);
+}
+.field-col { display: flex; flex-direction: column; gap: 7px; }
+.field-col label {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.num-input {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 9px 12px;
+  transition: all 150ms var(--ease);
+  min-height: 42px;
+}
+.num-input:focus-within {
+  border-color: var(--led);
+  background: var(--bg-glow);
+  box-shadow: 0 0 0 3px var(--led-tint);
+}
+.num-input input {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.num-input .unit {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+/* ============ Transitions ============ */
+.transition-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.trans {
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 11px;
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+}
+.trans:hover { border-color: var(--ink-2); }
+.trans.selected {
+  border-color: var(--led);
+  box-shadow: 0 0 0 1px var(--led-deep), 0 0 14px var(--led-glow);
+}
+.trans .preview {
+  height: 72px;
+  background: #050608;
+  position: relative;
+  overflow: hidden;
+}
+.trans .preview .a, .trans .preview .b {
+  position: absolute; top: 0; bottom: 0;
+  width: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--ink);
+  letter-spacing: 0.1em;
+}
+.trans .preview .a { left: 0; background: linear-gradient(135deg, #2A0B0B, #B91C1C); }
+.trans .preview .b { right: 0; background: linear-gradient(135deg, #0B2026, var(--beep)); }
+.trans.cut .preview .a { right: 50%; left: 0; width: auto; }
+.trans.cut .preview .b { left: 50%; right: 0; width: auto; }
+.trans.dissolve .preview .a { right: 35%; left: 0; width: auto; }
+.trans.dissolve .preview .b { left: 35%; right: 0; width: auto; }
+.trans.dissolve .preview::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 35%; right: 35%;
+  background: linear-gradient(to right, rgba(185,28,28,0.7), rgba(6,182,212,0.7));
+}
+.trans.title-card .preview {
+  background: linear-gradient(135deg, #1A0303, #B91C1C 50%, #FF2D2D);
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column;
+  color: var(--ink);
+  text-align: center;
+  text-transform: uppercase;
+}
+.trans.title-card .preview .stage-num-overlay {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--ink);
+  opacity: 0.85;
+}
+.trans.title-card .preview .stage-name-overlay {
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin-top: 2px;
+}
+.trans.fade .preview .a { right: 35%; left: 0; width: auto; }
+.trans.fade .preview .b { left: 35%; right: 0; width: auto; }
+.trans.fade .preview::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 35%; right: 35%;
+  background: var(--bg);
+}
+.trans .label {
+  padding: 11px 12px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--ink-2);
+}
+.trans.selected .label { color: var(--led); }
+
+/* ============ Overlay grid ============ */
+.overlay-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.overlay-tile {
+  border: 1.5px solid var(--rule-strong);
+  border-radius: 11px;
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+}
+.overlay-tile:hover { border-color: var(--ink-2); }
+.overlay-tile.selected {
+  border-color: var(--led);
+  box-shadow: 0 0 0 1px var(--led-deep), 0 0 14px var(--led-glow);
+}
+.overlay-tile .preview {
+  height: 124px;
+  background: #050608;
+  background-image:
+    radial-gradient(ellipse at 30% 40%, rgba(255,45,45,0.13), transparent 60%),
+    radial-gradient(ellipse at 70% 60%, rgba(6,182,212,0.09), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(255,255,255,0.012) 3px, rgba(255,255,255,0.012) 4px);
+  position: relative;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+}
+.overlay-tile.none .preview::after {
+  content: "(no overlay)";
+  position: absolute;
+  inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--subtle);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.overlay-tile .ov-tl {
+  position: absolute; top: 10px; left: 10px;
+  background: rgba(0,0,0,0.7);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 3px 8px;
+  border-radius: 4px;
+  backdrop-filter: blur(8px);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.overlay-tile .ov-br {
+  position: absolute; bottom: 10px; right: 10px;
+  background: rgba(0,0,0,0.7);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 5px 9px;
+  border-radius: 4px;
+  backdrop-filter: blur(8px);
+  text-align: right;
+  font-family: var(--mono);
+  font-feature-settings: var(--feat-num);
+}
+.overlay-tile .ov-br .big {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  display: block;
+  color: var(--led);
+}
+.overlay-tile .ov-br .sm { font-size: 0.5625rem; color: var(--muted); }
+.overlay-tile .ov-bl {
+  position: absolute; bottom: 10px; left: 10px;
+  background: var(--led);
+  color: var(--bg);
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.5625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 0 10px var(--led-glow);
+}
+.overlay-tile .label {
+  padding: 11px 12px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--ink-2);
+}
+.overlay-tile.selected .label { color: var(--led); }
+.overlay-tile.custom .preview {
+  display: flex; align-items: flex-end;
+  padding: 14px;
+}
+.overlay-tile.custom .preview-text {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  color: var(--subtle);
+}
+
+/* Overlay settings */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.settings-grid .field-col select,
+.settings-grid .field-col input {
+  padding: 10px 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  min-height: 42px;
+  transition: all 150ms var(--ease);
+}
+.settings-grid .field-col select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238E939B' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.settings-grid .field-col select:focus,
+.settings-grid .field-col input:focus {
+  border-color: var(--led);
+  background-color: var(--bg-glow);
+  box-shadow: 0 0 0 3px var(--led-tint);
+}
+
+/* ============ Output formats ============ */
+.formats { display: flex; flex-direction: column; gap: 10px; }
+.fmt-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px;
+  background: var(--bg-glow);
+  border: 1.5px solid var(--rule);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+}
+.fmt-row:hover { border-color: var(--ink-2); }
+.fmt-row.on {
+  background: var(--led-tint);
+  border-color: var(--led-deep);
+}
+.fmt-check {
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  border: 1.5px solid var(--rule-strong);
+  background: var(--surface-3);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--bg);
+  flex-shrink: 0;
+  transition: all 180ms var(--ease);
+}
+.fmt-row.on .fmt-check {
+  background: var(--led);
+  border-color: var(--led);
+  box-shadow: 0 0 10px var(--led-glow);
+}
+.fmt-check svg { display: none; }
+.fmt-row.on .fmt-check svg { display: block; }
+.fmt-row .info { flex: 1; min-width: 0; }
+.fmt-row .fname {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  display: inline-flex; align-items: center; gap: 10px;
+}
+.fmt-row.on .fname { color: var(--led); }
+.fmt-row .ext {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--muted);
+}
+.fmt-row.on .ext { color: var(--led-soft); }
+.fmt-row .fhint {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.fmt-row .codec-select {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+/* Destination */
+.dest-block { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--rule); }
+.dest-label {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.dest-row { display: flex; gap: 8px; }
+.dest-row input {
+  flex: 1;
+  padding: 10px 14px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  min-height: 42px;
+  font-feature-settings: var(--feat-num);
+  transition: all 150ms var(--ease);
+}
+.dest-row input:focus { border-color: var(--led); background: var(--bg-glow); box-shadow: 0 0 0 3px var(--led-tint); }
+.dest-row button {
+  padding: 0 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  min-height: 42px;
+}
+.dest-row button:hover { background: var(--surface-3); border-color: var(--ink-2); }
+
+/* ============ Summary rail ============ */
+.summary-rail {
+  position: sticky;
+  top: 120px;
+  align-self: start;
+}
+.summary-card {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 24px 48px -24px rgba(0,0,0,0.7);
+}
+.summary-card .ph {
+  padding: 18px 22px;
+  background:
+    radial-gradient(600px 200px at 30% 30%, rgba(255,45,45,0.18), transparent 65%),
+    linear-gradient(135deg, var(--led-deep), var(--led));
+  color: var(--ink);
+  position: relative;
+}
+.summary-card .ph::after {
+  content: "";
+  position: absolute;
+  bottom: -1px; left: 0; right: 0;
+  height: 1px;
+  background: var(--led);
+  box-shadow: 0 0 12px var(--led-glow);
+}
+.summary-card .ph .lbl {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.8;
+  margin-bottom: 6px;
+}
+.summary-card .ph .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.125rem;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.summary-stats {
+  padding: 18px 22px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.stat-line { display: flex; align-items: flex-start; gap: 14px; }
+.stat-line .ic {
+  width: 38px; height: 38px;
+  border-radius: 9px;
+  background: var(--led-tint);
+  color: var(--led);
+  border: 1px solid var(--led-deep);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 12px var(--led-glow);
+}
+.stat-line .info { flex: 1; min-width: 0; }
+.stat-line .v {
+  font-family: var(--mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.005em;
+  line-height: 1.1;
+}
+.stat-line .v .unit {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.stat-line .k {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+  line-height: 1.55;
+}
+
+.summary-files {
+  border-top: 1px solid var(--rule);
+  padding: 16px 22px;
+}
+.summary-files .files-label {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 10px;
+}
+.file-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.file-row svg { color: var(--led); flex-shrink: 0; }
+.file-row .path { color: var(--ink); }
+
+.summary-cta {
+  padding: 18px 22px;
+  border-top: 1px solid var(--rule);
+  background: var(--bg-glow);
+}
+.btn-export {
+  width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 14px 18px;
+  background: var(--led);
+  color: var(--bg);
+  border: 1px solid var(--led);
+  border-radius: 9px;
+  font-family: var(--display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 0 0 1px var(--led), 0 0 22px var(--led-glow);
+  transition: all 180ms var(--ease);
+}
+.btn-export:hover {
+  background: var(--led-soft);
+  border-color: var(--led-soft);
+  box-shadow: 0 0 0 1px var(--led-soft), 0 0 28px var(--led-glow);
+}
+.summary-cta .small {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ============ Recent exports ============ */
+.recent {
+  margin-top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.recent-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  background: var(--surface-2);
+}
+.recent-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+.recent-row:last-child { border-bottom: 0; }
+.recent-row .ic {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--rule);
+}
+.recent-row .name {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-feature-settings: var(--feat-num);
+}
+.recent-row .when {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.recent-row .reveal {
+  font-family: var(--display);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--led);
+}
+.recent-row .reveal:hover { color: var(--led-soft); }
+
+.footnote {
+  margin-top: 18px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--whisper);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile">
+      <span class="av">MA</span>
+      <span class="label">Mathias A.</span>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <a href="02-match-overview.html">VADS Easter Shoot 2026</a>
+        <span class="sep">/</span>
+        <span class="current">Export</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="match-card">
+      <div class="lbl">Active match</div>
+      <div class="title">VADS Easter Shoot 2026</div>
+      <div class="meta">2026-04-12 &middot; Vasterort PK</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+        Overview
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>
+        Coach
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>
+        Shooters
+      </div>
+      <div class="nav-item active">
+        <span class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>
+        Export
+      </div>
+    </div>
+
+    <div class="nav-label">Stages <span class="pill">8 / 12</span></div>
+    <div class="stage-list">
+      <div class="stage-item"><span class="stage-num">01</span><span class="stage-name">Snake</span><span class="stage-status done"></span></div>
+      <div class="stage-item"><span class="stage-num">02</span><span class="stage-name">Tower</span><span class="stage-status done"></span></div>
+      <div class="stage-item"><span class="stage-num">03</span><span class="stage-name">Plates</span><span class="stage-status partial"></span></div>
+      <div class="stage-item"><span class="stage-num">04</span><span class="stage-name">Mover</span><span class="stage-status done"></span></div>
+      <div class="stage-item"><span class="stage-num">05</span><span class="stage-name">Standards</span><span class="stage-status done"></span></div>
+      <div class="stage-item"><span class="stage-num">06</span><span class="stage-name">Field 1</span><span class="stage-status done"></span></div>
+      <div class="stage-item"><span class="stage-num">07</span><span class="stage-name">Field 2</span><span class="stage-status flagged"></span></div>
+      <div class="stage-item"><span class="stage-num">08</span><span class="stage-name">Window</span><span class="stage-status partial"></span></div>
+      <div class="stage-item"><span class="stage-num">09</span><span class="stage-name">Long range</span><span class="stage-status done"></span></div>
+      <div class="stage-item"><span class="stage-num">10</span><span class="stage-name">Speed shoot</span><span class="stage-status todo"></span></div>
+      <div class="stage-item"><span class="stage-num">11</span><span class="stage-name">Plate rack</span><span class="stage-status todo"></span></div>
+      <div class="stage-item"><span class="stage-num">12</span><span class="stage-name">Final</span><span class="stage-status todo"></span></div>
+    </div>
+  </aside>
+
+  <!-- CONTENT -->
+  <main class="content">
+
+    <div class="page-head">
+      <div class="page-kicker">Final cut bundle</div>
+      <h1 class="page-h1">Export</h1>
+      <p class="page-sub">Configure how the match gets bundled into a Final Cut Pro project.</p>
+    </div>
+
+    <div class="export-layout">
+
+      <!-- LEFT: configuration sections -->
+      <div style="min-width: 0;">
+
+        <!-- 1. Output mode -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">1</span>Output mode</div>
+            <div class="help">What kind of timeline?</div>
+          </div>
+          <div class="section-body">
+            <div class="mode-toggle">
+              <div class="mode-option selected">
+                <div class="radio"></div>
+                <div>
+                  <div class="opt-title">Single-shooter timeline</div>
+                  <div class="opt-desc">One FCPXML with all selected stages back-to-back. Best for editing your own match video.</div>
+                </div>
+              </div>
+              <div class="mode-option">
+                <div class="radio"></div>
+                <div>
+                  <div class="opt-title">Multi-shooter compare grid</div>
+                  <div class="opt-desc">Side-by-side grid per stage. One audio source, the rest muted. Great for technique comparison.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Shooter -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">2</span>Shooter</div>
+            <div class="help">Single-shooter timeline &middot; pick whose footage</div>
+          </div>
+          <div class="section-body">
+            <div class="shooter-row">
+              <span class="av">MA</span>
+              <div class="info">
+                <div class="name">
+                  Mathias Axell
+                  <span class="you-tag">YOU</span>
+                </div>
+                <div class="meta">Production Optics &middot; 2 cameras (primary: chest, secondary: helmet)</div>
+              </div>
+              <button class="change-btn">Change &darr;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Stages -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">3</span>Stages</div>
+            <div class="help">9 of 12 included &middot; only audited stages exportable</div>
+          </div>
+          <div class="section-body">
+            <div class="stage-chips">
+              <span class="stage-chip"><span class="num">01</span>Snake</span>
+              <span class="stage-chip"><span class="num">02</span>Tower</span>
+              <span class="stage-chip off"><span class="num">03</span>Plates</span>
+              <span class="stage-chip"><span class="num">04</span>Mover</span>
+              <span class="stage-chip"><span class="num">05</span>Standards</span>
+              <span class="stage-chip"><span class="num">06</span>Field 1</span>
+              <span class="stage-chip warn"><span class="num">07</span>Field 2</span>
+              <span class="stage-chip off"><span class="num">08</span>Window</span>
+              <span class="stage-chip"><span class="num">09</span>Long range</span>
+              <span class="stage-chip off"><span class="num">10</span>Speed shoot</span>
+              <span class="stage-chip off"><span class="num">11</span>Plate rack</span>
+              <span class="stage-chip off"><span class="num">12</span>Final</span>
+            </div>
+            <div class="stage-chip-help">
+              <span class="warn-text">Stage 07 has anomalies flagged</span> -- still included; review during edit if you want.
+              Stages 03, 08, 10-12 are not yet audited and cannot be exported.
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Trim -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">4</span>Trim padding</div>
+            <div class="help">How much footage around each stage</div>
+          </div>
+          <div class="section-body">
+            <div class="preset-row">
+              <div class="preset">
+                <span class="pname">Full</span>
+                <span class="pnum">5.0s / 5.0s</span>
+              </div>
+              <div class="preset selected">
+                <span class="pname">Action</span>
+                <span class="pnum">0.5s / 1.0s</span>
+              </div>
+              <div class="preset">
+                <span class="pname">Highlight</span>
+                <span class="pnum">1.5s / 2.0s</span>
+              </div>
+              <div class="preset">
+                <span class="pname">Custom</span>
+                <span class="pnum">below</span>
+              </div>
+            </div>
+            <div class="trim-custom">
+              <div class="field-col">
+                <label>Before beep</label>
+                <div class="num-input">
+                  <input type="text" value="0.5" />
+                  <span class="unit">seconds</span>
+                </div>
+              </div>
+              <div class="field-col">
+                <label>After last shot</label>
+                <div class="num-input">
+                  <input type="text" value="1.0" />
+                  <span class="unit">seconds</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Transitions -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">5</span>Transitions</div>
+            <div class="help">Stitches stages together in the timeline</div>
+          </div>
+          <div class="section-body">
+            <div class="transition-grid">
+              <div class="trans cut">
+                <div class="preview"><span class="a">A</span><span class="b">B</span></div>
+                <div class="label">Hard cut</div>
+              </div>
+              <div class="trans dissolve selected">
+                <div class="preview"><span class="a">A</span><span class="b">B</span></div>
+                <div class="label">Cross dissolve</div>
+              </div>
+              <div class="trans title-card">
+                <div class="preview">
+                  <span class="stage-num-overlay">Stage 05</span>
+                  <span class="stage-name-overlay">Standards</span>
+                </div>
+                <div class="label">Title card</div>
+              </div>
+              <div class="trans fade">
+                <div class="preview"><span class="a">A</span><span class="b">B</span></div>
+                <div class="label">Fade through black</div>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <div class="field-col">
+                <label>Duration</label>
+                <div class="num-input">
+                  <input type="text" value="0.5" />
+                  <span class="unit">sec</span>
+                </div>
+              </div>
+              <div class="field-col">
+                <label>Title card style</label>
+                <select>
+                  <option>Stage number + name</option>
+                  <option>Name only</option>
+                  <option>Number only</option>
+                  <option>Match name + stage</option>
+                </select>
+              </div>
+              <div class="field-col">
+                <label>Title hold</label>
+                <div class="num-input">
+                  <input type="text" value="2.0" />
+                  <span class="unit">sec</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Overlays -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">6</span>Overlays</div>
+            <div class="help">Burned in as title clips</div>
+          </div>
+          <div class="section-body">
+            <div class="overlay-grid">
+              <div class="overlay-tile none">
+                <div class="preview"></div>
+                <div class="label">No overlay</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview">
+                  <span class="ov-tl">Shot 07 / 16</span>
+                </div>
+                <div class="label">Shot counter</div>
+              </div>
+              <div class="overlay-tile selected">
+                <div class="preview">
+                  <span class="ov-tl">Shot 07 / 16</span>
+                  <span class="ov-br">
+                    <span class="sm">04.83s</span>
+                    <span class="big">0.48s</span>
+                  </span>
+                  <span class="ov-bl">Stage 05</span>
+                </div>
+                <div class="label">Splits + counter</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview">
+                  <span class="ov-br" style="text-align: center;"><span class="big" style="color: var(--led);">04.83s</span></span>
+                </div>
+                <div class="label">Timer only</div>
+              </div>
+              <div class="overlay-tile">
+                <div class="preview">
+                  <span class="ov-tl">Mathias</span>
+                  <span class="ov-bl">Stage 05 &middot; Standards</span>
+                </div>
+                <div class="label">Stage banner</div>
+              </div>
+              <div class="overlay-tile custom">
+                <div class="preview">
+                  <span class="preview-text">(open custom editor)</span>
+                </div>
+                <div class="label">Custom...</div>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <div class="field-col">
+                <label>Style</label>
+                <select>
+                  <option>Minimal (selected)</option>
+                  <option>Bold</option>
+                  <option>Outlined</option>
+                </select>
+              </div>
+              <div class="field-col">
+                <label>Font size</label>
+                <select>
+                  <option>Default</option>
+                  <option>Small</option>
+                  <option>Large</option>
+                </select>
+              </div>
+              <div class="field-col">
+                <label>Color accent</label>
+                <select>
+                  <option>Splitsmith LED red</option>
+                  <option>None</option>
+                  <option>Custom...</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 7. Output -->
+        <div class="section">
+          <div class="section-head">
+            <div class="title"><span class="num">7</span>Output</div>
+            <div class="help">Files and where they land</div>
+          </div>
+          <div class="section-body">
+            <div class="formats">
+              <div class="fmt-row on">
+                <span class="fmt-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M5 12l5 5L20 7"/></svg></span>
+                <div class="info">
+                  <div class="fname">FCPXML <span class="ext">.fcpxml</span></div>
+                  <div class="fhint">Final Cut Pro project with stage clips, beep-aligned markers, transitions and overlays.</div>
+                </div>
+                <select class="codec-select">
+                  <option>ProRes 422</option>
+                  <option>H.264</option>
+                  <option>Keep original</option>
+                </select>
+              </div>
+              <div class="fmt-row">
+                <span class="fmt-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M5 12l5 5L20 7"/></svg></span>
+                <div class="info">
+                  <div class="fname">Splits CSV <span class="ext">.csv</span></div>
+                  <div class="fhint">Per-shot timestamps and splits per stage, ready for spreadsheets.</div>
+                </div>
+              </div>
+              <div class="fmt-row">
+                <span class="fmt-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path d="M5 12l5 5L20 7"/></svg></span>
+                <div class="info">
+                  <div class="fname">Text report <span class="ext">.txt</span></div>
+                  <div class="fhint">Human-readable summary: match meta, per-stage splits, anomalies.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="dest-block">
+              <div class="dest-label">Destination</div>
+              <div class="dest-row">
+                <input type="text" value="~/Splitsmith/vads-easter-shoot-2026/exports/" />
+                <button>Choose</button>
+                <button>Reveal</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: summary rail -->
+      <aside class="summary-rail">
+        <div class="summary-card">
+          <div class="ph">
+            <div class="lbl">Ready to export</div>
+            <div class="title">VADS Easter Shoot 2026</div>
+          </div>
+
+          <div class="summary-stats">
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10l4 2-4 2v-4zM13 10h4M13 14h4"/></svg></span>
+              <div class="info">
+                <div class="v">9<span class="unit">stages</span></div>
+                <div class="k">Snake, Tower, Mover, Standards, Field 1, Field 2, Long range + 2</div>
+              </div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="8" r="3"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span>
+              <div class="info">
+                <div class="v">1<span class="unit">shooter</span></div>
+                <div class="k">Mathias Axell (you)</div>
+              </div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <div class="info">
+                <div class="v">3:24<span class="unit">timeline</span></div>
+                <div class="k">With transitions; ~2:48 cuts only</div>
+              </div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></span>
+              <div class="info">
+                <div class="v">~8 min<span class="unit">processing</span></div>
+                <div class="k">Trim + ProRes re-encode + overlay render</div>
+              </div>
+            </div>
+            <div class="stat-line">
+              <span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+              <div class="info">
+                <div class="v">+CSV<span class="unit">+ text</span></div>
+                <div class="k">Optional sibling files alongside FCPXML</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary-files">
+            <div class="files-label">Will be written</div>
+            <div class="file-row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="path">vads-easter-2026.fcpxml</span>
+            </div>
+            <div class="file-row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="path">vads-easter-2026-splits.csv</span>
+            </div>
+            <div class="file-row">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="path">vads-easter-2026-report.txt</span>
+            </div>
+          </div>
+
+          <div class="summary-cta">
+            <button class="btn-export">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg>
+              Export match
+            </button>
+            <div class="small">Runs in the background &middot; you can keep working</div>
+          </div>
+        </div>
+
+        <!-- Recent exports -->
+        <div class="recent">
+          <div class="recent-head">Recent exports</div>
+          <div class="recent-row">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+            <span class="name">vads-easter-2026-draft.fcpxml</span>
+            <span class="when">2 hr ago</span>
+            <button class="reveal">Reveal</button>
+          </div>
+          <div class="recent-row">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+            <span class="name">stage-02-tower.fcpxml</span>
+            <span class="when">Yesterday</span>
+            <button class="reveal">Reveal</button>
+          </div>
+        </div>
+
+        <div class="footnote">Polished 08</div>
+      </aside>
+
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

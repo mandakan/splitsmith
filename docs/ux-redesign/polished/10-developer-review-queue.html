@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Developer / Review queue</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Developer / Review queue
+   Direction: Shot Timer (extends polished 09).
+   Deep-work surface: hand labels vs ensemble predictions side-
+   by-side, approve into corpus or send back with notes.
+   ============================================================ */
+
+:root {
+  --bg: #0A0B0D; --bg-glow: #0E1014;
+  --surface: #14171C; --surface-2: #1A1E24; --surface-3: #232831; --surface-4: #2A303A;
+  --rule: #262B33; --rule-strong: #3A4049;
+  --ink: #F4F4F5; --ink-2: #C9CCD2; --muted: #8E939B; --subtle: #6B7079; --whisper: #4B5058;
+  --led: #FF2D2D; --led-soft: #FF5555; --led-deep: #B91C1C; --led-glow: rgba(255,45,45,0.30); --led-tint: rgba(255,45,45,0.10);
+  --live: #FBBF24; --live-glow: rgba(251,191,36,0.30); --live-tint: rgba(251,191,36,0.10);
+  --done: #4ADE80; --done-glow: rgba(74,222,128,0.30); --done-tint: rgba(74,222,128,0.10);
+  --beep: #06B6D4; --beep-glow: rgba(6,182,212,0.35); --beep-tint: rgba(6,182,212,0.10);
+  --manual: #A78BFA; --manual-tint: rgba(167,139,250,0.12);
+  --sans: 'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: var(--sans); font-weight: 400; font-size: 0.9375rem; line-height: 1.55; color: var(--ink); background: var(--bg); letter-spacing: -0.003em; -webkit-font-smoothing: antialiased; min-height: 100vh; background-image: radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%), linear-gradient(to bottom, var(--bg-glow), var(--bg)); background-attachment: fixed; }
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select, textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--beep); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--beep); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* Shell (dev variant) */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--beep) 18%, var(--beep) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--beep) 78%, var(--beep) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 24px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--led), var(--led-deep)); border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow); }
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--beep); box-shadow: 0 0 8px var(--beep-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.model-chip { display: inline-flex; align-items: center; gap: 10px; padding: 7px 14px; background: linear-gradient(90deg, var(--beep-tint), transparent); border: 1px solid rgba(6,182,212,0.4); border-radius: 7px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); font-feature-settings: var(--feat-num); }
+.model-chip .label { color: var(--beep); font-weight: 700; }
+.model-chip .ver { color: var(--ink); font-weight: 700; }
+.model-chip .sep { color: var(--whisper); }
+.model-chip .stat b { color: var(--done); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* Three-column layout: sidebar | queue | detail */
+.app-body { display: grid; grid-template-columns: 248px 320px 1fr; min-height: calc(100vh - 86px); }
+
+/* Sidebar - reused from polished 09 */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 86px; align-self: start; max-height: calc(100vh - 86px); }
+.dev-card { padding: 12px 12px 16px; border-bottom: 1px solid var(--rule); margin-bottom: 14px; position: relative; }
+.dev-card::before { content: ""; position: absolute; left: 0; top: 2px; width: 2px; height: 16px; background: var(--beep); box-shadow: 0 0 8px var(--beep-glow); border-radius: 1px; }
+.dev-card .lbl { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 8px; }
+.dev-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 4px; }
+.dev-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.dev-card .meta b { color: var(--done); font-weight: 700; }
+
+.nav-label { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+
+.nav-step { display: grid; grid-template-columns: 28px 1fr 36px; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; color: var(--ink-2); font-size: 0.8125rem; font-weight: 500; cursor: pointer; min-height: 40px; transition: all 150ms var(--ease); }
+.nav-step:hover { background: var(--surface-2); color: var(--ink); }
+.nav-step.active { background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.4); padding: 7px 9px; color: var(--beep); font-weight: 700; }
+.nav-step.done .name { color: var(--ink-2); }
+.nav-step .num { width: 26px; height: 26px; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-feature-settings: var(--feat-num); border: 1px solid var(--rule-strong); }
+.nav-step.active .num { background: var(--beep); color: var(--bg); border-color: var(--beep); box-shadow: 0 0 10px var(--beep-glow); }
+.nav-step.done .num { background: var(--done-tint); color: var(--done); border-color: var(--done); }
+.nav-step .count { font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; text-align: right; font-feature-settings: var(--feat-num); color: var(--subtle); }
+.nav-step.active .count { color: var(--beep); }
+.nav-step .count.alert { background: var(--live); color: var(--bg); padding: 2px 8px; border-radius: 4px; box-shadow: 0 0 8px var(--live-glow); }
+.nav-step .count.muted { color: var(--whisper); }
+.step-line { display: block; height: 12px; margin-left: 22px; width: 1px; background: linear-gradient(to bottom, var(--rule-strong), var(--rule)); }
+.sub-section { margin-top: 20px; }
+.sub-link { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; color: var(--ink-2); font-size: 0.8125rem; min-height: 36px; }
+.sub-link:hover { background: var(--surface-2); color: var(--ink); }
+.sub-link.transitional { color: var(--subtle); }
+.sub-link .pill-lab { margin-left: auto; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; background: var(--live-tint); color: var(--live); border: 1px solid rgba(251,191,36,0.3); padding: 2px 7px; border-radius: 4px; }
+
+/* QUEUE LIST */
+.queue-list { background: var(--surface-2); border-right: 1px solid var(--rule); overflow-y: auto; max-height: calc(100vh - 86px); position: sticky; top: 86px; align-self: start; }
+.queue-head { padding: 18px 16px 14px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.queue-head .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--beep); margin-bottom: 6px; }
+.queue-head .title { font-family: var(--display); font-size: 1.25rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); margin-bottom: 4px; }
+.queue-head .sub { font-size: 0.75rem; color: var(--muted); margin-bottom: 14px; line-height: 1.55; }
+.queue-progress { display: flex; align-items: center; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; font-feature-settings: var(--feat-num); }
+.queue-progress b { color: var(--ink); font-weight: 700; }
+.progress { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; display: flex; }
+.progress .done { background: var(--done); box-shadow: 0 0 8px var(--done-glow); height: 100%; }
+.progress .current { background: var(--beep); box-shadow: 0 0 8px var(--beep-glow); height: 100%; }
+
+.queue-section { padding: 12px 8px; border-bottom: 1px solid var(--rule); }
+.queue-section-head { display: flex; align-items: center; padding: 6px 10px 10px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+.queue-section-head .pill { margin-left: auto; background: var(--surface-3); color: var(--ink-2); border: 1px solid var(--rule-strong); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-feature-settings: var(--feat-num); }
+
+.qitem { display: grid; grid-template-columns: 28px 1fr 22px; align-items: center; gap: 10px; padding: 10px 10px; border-radius: 8px; cursor: pointer; transition: background 120ms var(--ease); margin-bottom: 1px; }
+.qitem:hover { background: var(--surface-3); }
+.qitem.current { background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.45); padding: 9px 9px; box-shadow: inset 0 0 14px rgba(6,182,212,0.06); }
+.qitem .ic { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--muted); border: 1px solid var(--rule); flex-shrink: 0; }
+.qitem.match .ic { background: var(--led-tint); color: var(--led); border-color: rgba(255,45,45,0.3); }
+.qitem.github .ic { background: var(--manual-tint); color: var(--manual); border-color: rgba(167,139,250,0.3); }
+.qitem.github.flagged .ic { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.4); }
+.qitem .info .name { font-family: var(--mono); font-size: 0.6875rem; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-feature-settings: var(--feat-num); }
+.qitem.current .info .name { color: var(--beep); }
+.qitem.done .info .name { color: var(--muted); }
+.qitem .meta-row { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); flex-wrap: wrap; }
+.qitem .meta-row .sep { color: var(--whisper); }
+.source-pill { font-family: var(--mono); font-size: 0.5rem; font-weight: 700; letter-spacing: 0.12em; padding: 2px 5px; border-radius: 3px; }
+.source-pill { background: var(--led-tint); color: var(--led); border: 1px solid rgba(255,45,45,0.3); }
+.source-pill.gh { background: var(--manual-tint); color: var(--manual); border-color: rgba(167,139,250,0.3); }
+
+.disagree-badge { width: 22px; height: 22px; border-radius: 50%; background: var(--live); color: var(--bg); font-family: var(--mono); font-size: 0.625rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 8px var(--live-glow); }
+.check-badge { width: 22px; height: 22px; border-radius: 50%; background: var(--done); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 8px var(--done-glow); }
+
+/* DETAIL */
+.review-detail { padding: 24px 32px 80px; min-width: 0; }
+.fx-head { margin-bottom: 18px; }
+.fx-head .top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.source-tag-big { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); border-radius: 5px; font-family: var(--display); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.pending-tag { padding: 5px 12px; background: var(--live-tint); color: var(--live); border: 1px solid rgba(251,191,36,0.4); border-radius: 5px; font-family: var(--display); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 6px; }
+.pending-tag .d { width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.fx-head .when { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); margin-left: auto; font-feature-settings: var(--feat-num); }
+.fx-name { font-family: var(--mono); font-size: 1.125rem; font-weight: 700; color: var(--ink); margin-bottom: 10px; font-feature-settings: var(--feat-num); }
+.fx-meta-row { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); display: flex; gap: 8px; flex-wrap: wrap; }
+.fx-meta-row .item { display: inline-flex; gap: 5px; align-items: baseline; }
+.fx-meta-row .item span { color: var(--subtle); }
+.fx-meta-row .item b { color: var(--ink); font-weight: 700; }
+.fx-meta-row .sep { color: var(--whisper); }
+
+/* Actions toolbar */
+.actions-toolbar { display: flex; align-items: center; gap: 10px; padding: 14px 18px; margin-bottom: 20px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 11px; flex-wrap: wrap; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 7px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 38px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.success { background: var(--done); color: var(--bg); border-color: var(--done); box-shadow: 0 0 0 1px var(--done), 0 0 14px var(--done-glow); font-weight: 700; }
+.btn.success:hover { background: #6EE7A0; border-color: #6EE7A0; }
+.btn.danger { background: var(--led-tint); color: var(--led); border-color: var(--led-deep); }
+.btn.danger:hover { background: var(--led); color: var(--bg); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: var(--surface-2); }
+.btn .kbd-inline { background: rgba(0,0,0,0.25); border: 1px solid rgba(0,0,0,0.3); color: currentColor; padding: 2px 6px; border-radius: 4px; font-family: var(--mono); font-size: 0.625rem; }
+
+/* Disagreement banner */
+.disagree { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 16px; padding: 16px 20px; margin-bottom: 18px; background: linear-gradient(90deg, var(--live-tint), transparent); border: 1px solid rgba(251,191,36,0.45); border-radius: 12px; position: relative; overflow: hidden; }
+.disagree::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--live); box-shadow: 0 0 12px var(--live-glow); }
+.disagree .ic { width: 38px; height: 38px; border-radius: 9px; background: var(--live); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 12px var(--live-glow); }
+.disagree .title { font-family: var(--display); font-weight: 700; font-size: 0.9375rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--live); margin-bottom: 6px; }
+.disagree .hint { font-size: 0.8125rem; color: var(--ink-2); line-height: 1.55; }
+.disagree .hint b { color: var(--ink); font-weight: 700; }
+.stat-grid { display: flex; gap: 14px; }
+.stat-grid .stat { background: var(--surface-2); border: 1px solid var(--rule-strong); border-radius: 8px; padding: 8px 14px; text-align: center; min-width: 64px; }
+.stat-grid .stat .v { font-family: var(--mono); font-size: 1.25rem; font-weight: 700; color: var(--ink); font-feature-settings: var(--feat-num); }
+.stat-grid .stat .k { font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+
+/* Waveform card */
+.wf-card { background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; margin-bottom: 18px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.wf-card-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; gap: 12px; }
+.wf-card-head .title { font-family: var(--display); font-weight: 700; font-size: 0.8125rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+.wf-card-head .legend { display: inline-flex; gap: 14px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); flex-wrap: wrap; }
+.wf-card-head .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+.wf-card-head .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+.wf-card-head .legend .dot.gt { background: var(--done); box-shadow: 0 0 5px var(--done-glow); }
+.wf-card-head .legend .dot.pred { background: var(--beep); box-shadow: 0 0 5px var(--beep-glow); }
+.wf-card-head .legend .dot.fp { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.wf-card-head .legend .dot.fn { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+.wf-svg-wrap { background: #050608; padding: 12px 18px; background-image: repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(255,255,255,0.012) 3px, rgba(255,255,255,0.012) 4px); }
+.wf-svg { width: 100%; height: 160px; display: block; }
+.wf-ruler { display: flex; justify-content: space-between; padding: 8px 18px 14px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--subtle); font-feature-settings: var(--feat-num); }
+
+/* Transport */
+.transport { display: flex; align-items: center; gap: 14px; padding: 12px 18px; margin-bottom: 18px; background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 11px; flex-wrap: wrap; }
+.transport .controls { display: inline-flex; gap: 6px; align-items: center; }
+.transport-btn { width: 34px; height: 34px; background: var(--surface-2); border: 1px solid var(--rule-strong); border-radius: 7px; color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; transition: all 150ms var(--ease); }
+.transport-btn:hover { background: var(--surface-3); border-color: var(--ink-2); color: var(--ink); }
+.transport-btn.play { width: 42px; height: 42px; background: var(--beep); border-color: var(--beep); color: var(--bg); box-shadow: 0 0 0 1px var(--beep), 0 0 14px var(--beep-glow); }
+.transport .time { font-family: var(--mono); font-size: 0.8125rem; font-weight: 700; color: var(--ink); letter-spacing: 0.04em; font-feature-settings: var(--feat-num); }
+.transport .time .muted { color: var(--muted); font-weight: 500; }
+.transport .next-disagree { margin-left: auto; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--live); display: inline-flex; align-items: center; gap: 6px; }
+
+/* Work grid */
+.work-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; }
+
+/* Shot diff table */
+.diff-card { background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 13px; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 18px 36px -24px rgba(0,0,0,0.6); }
+.diff-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.diff-head .title { font-family: var(--display); font-weight: 700; font-size: 0.875rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+.diff-head .title .count { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; color: var(--muted); margin-left: 10px; font-weight: 500; text-transform: lowercase; font-feature-settings: var(--feat-num); }
+.diff-head .filter-hint { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.04em; color: var(--subtle); }
+
+.shot-diff-row { display: grid; grid-template-columns: 30px 1fr 1fr 80px 56px 28px; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 0.8125rem; font-feature-settings: var(--feat-num); transition: background 120ms var(--ease); }
+.shot-diff-row.head { background: var(--surface-2); padding: 9px 18px; font-size: 0.5625rem; color: var(--subtle); text-transform: uppercase; letter-spacing: 0.16em; font-weight: 700; }
+.shot-diff-row:hover:not(.head) { background: var(--surface-2); }
+.shot-diff-row .num { width: 26px; height: 26px; border-radius: 5px; background: var(--surface-3); color: var(--ink-2); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rule); }
+.shot-diff-row .gt-t { color: var(--done); font-weight: 700; }
+.shot-diff-row .pred-t { color: var(--beep); font-weight: 700; }
+.shot-diff-row .delta { font-size: 0.6875rem; color: var(--muted); }
+.shot-diff-row .delta.big { color: var(--live); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.625rem; }
+.shot-diff-row .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 4px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; border: 1px solid transparent; }
+.shot-diff-row .pill.ok { background: var(--done-tint); color: var(--done); border-color: rgba(74,222,128,0.3); }
+.shot-diff-row .pill.fp { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.4); }
+.shot-diff-row.fp { background: linear-gradient(90deg, var(--live-tint), transparent); border-left: 3px solid var(--live); padding-left: 15px; }
+.shot-diff-row.fp .num { background: var(--live); color: var(--bg); border-color: var(--live); box-shadow: 0 0 8px var(--live-glow); }
+.diff-collapsed { padding: 11px 18px; background: var(--surface-2); border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: center; }
+.diff-foot { padding: 14px 18px; background: var(--bg-glow); font-size: 0.8125rem; color: var(--ink-2); line-height: 1.55; }
+.diff-foot b { color: var(--live); font-weight: 700; }
+.micro-btn { width: 26px; height: 26px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--rule); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.micro-btn:hover { color: var(--ink); border-color: var(--ink-2); background: var(--surface-3); }
+
+/* Side stack */
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 12px; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 14px 28px -20px rgba(0,0,0,0.6); }
+.panel .ph { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface-2), transparent); }
+.panel .ph .title { font-family: var(--display); font-weight: 700; font-size: 0.8125rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+.panel .ph .help { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em; color: var(--muted); font-feature-settings: var(--feat-num); }
+.panel .pb { padding: 14px 16px; }
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tag-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; font-family: var(--mono); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; background: var(--surface-3); color: var(--ink-2); border: 1px solid var(--rule-strong); border-radius: 999px; }
+.tag-pill.venue { background: var(--beep-tint); color: var(--beep); border-color: rgba(6,182,212,0.4); }
+.tag-pill.cam { background: var(--surface-3); color: var(--ink); }
+.tag-pill.warn { background: var(--live-tint); color: var(--live); border-color: rgba(251,191,36,0.4); }
+.tag-pill .x { width: 18px; height: 18px; border-radius: 50%; background: transparent; color: currentColor; display: inline-flex; align-items: center; justify-content: center; opacity: 0.6; cursor: pointer; }
+.tag-pill .x:hover { background: rgba(255,255,255,0.08); opacity: 1; }
+.tag-add { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border: 1px dashed var(--rule-strong); color: var(--beep); border-radius: 999px; font-family: var(--display); font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; }
+.tag-add:hover { border-color: var(--beep); background: var(--beep-tint); }
+.tag-section { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--rule); }
+.tag-section .label { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--subtle); margin-bottom: 8px; }
+.tag-suggest { display: inline-flex; align-items: center; padding: 4px 10px; font-family: var(--mono); font-size: 0.625rem; font-weight: 600; letter-spacing: 0.04em; background: transparent; color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; margin-right: 5px; margin-bottom: 5px; cursor: pointer; }
+.tag-suggest:hover { color: var(--beep); border-color: var(--beep); background: var(--beep-tint); }
+
+.notes-area { width: 100%; min-height: 100px; padding: 12px 14px; background: var(--surface-3); border: 1px solid var(--rule); border-radius: 9px; color: var(--ink); font-family: var(--sans); font-size: 0.8125rem; resize: vertical; line-height: 1.55; transition: all 150ms var(--ease); }
+.notes-area::placeholder { color: var(--subtle); }
+.notes-area:focus { border-color: var(--beep); background: var(--bg-glow); box-shadow: 0 0 0 3px var(--beep-tint); }
+.notes-foot { margin-top: 10px; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+
+.kbd-card-body { padding: 12px 16px; }
+.kbd-card-body .title-row { font-family: var(--display); font-weight: 700; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); margin-bottom: 10px; }
+.kbd-card-body .row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--ink-2); font-feature-settings: var(--feat-num); }
+.kbd-card-body .row span:first-child { color: var(--muted); }
+.kbd-card-body .keys { display: inline-flex; gap: 3px; }
+
+.footnote { margin-top: 36px; font-family: var(--mono); font-size: 0.5625rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--whisper); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Developer mode active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button>Match</button>
+      <button class="active">Developer</button>
+    </div>
+    <div class="model-chip">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+      <span class="label">Active</span>
+      <span class="ver">v2026.04.02</span>
+      <span class="sep">&middot;</span>
+      <span class="stat"><b>156</b> fixtures</span>
+      <span class="sep">&middot;</span>
+      <span class="stat">recall <b>0.94</b></span>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile"><span class="av">MA</span><span class="label">Mathias A.</span></div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="09-developer-corpus.html">Developer</a>
+        <span class="sep">/</span>
+        <span class="current">Review queue</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="dev-card">
+      <div class="lbl">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M8 3l-6 9h12L8 21l6-9H2"/></svg>
+        Detector training
+      </div>
+      <div class="title">Ensemble pipeline</div>
+      <div class="meta">v2026.04.02 &middot; recall <b>0.94</b></div>
+    </div>
+
+    <div class="nav-label">Workflow</div>
+
+    <div class="nav-step done">
+      <span class="num"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span>
+      <span class="name">Corpus</span>
+      <span class="count">156</span>
+    </div>
+    <div class="step-line"></div>
+
+    <div class="nav-step active">
+      <span class="num">2</span>
+      <span class="name">Review queue</span>
+      <span class="count alert">14</span>
+    </div>
+    <div class="step-line"></div>
+
+    <div class="nav-step">
+      <span class="num">3</span>
+      <span class="name">Validate</span>
+      <span class="count muted">--</span>
+    </div>
+    <div class="step-line"></div>
+
+    <div class="nav-step">
+      <span class="num">4</span>
+      <span class="name">Retrain</span>
+      <span class="count muted">--</span>
+    </div>
+
+    <div class="sub-section">
+      <div class="nav-label">Tools</div>
+      <div class="sub-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 16,12 14,15 10,15 8,12 2,12"/><path d="M5 9l-2 3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2-3"/><path d="M5 9V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg>
+        Inbox
+      </div>
+      <div class="sub-link transitional">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4v10c0 1.1.9 2 2 2h2c1.1 0 2-.9 2-2V4M5 4h14"/></svg>
+        Lab playground
+        <span class="pill-lab">Legacy</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- QUEUE LIST -->
+  <aside class="queue-list">
+    <div class="queue-head">
+      <div class="lbl">Step 2 &middot; review</div>
+      <div class="title">Review queue</div>
+      <div class="sub">Approve fixtures into the corpus or send them back with notes.</div>
+      <div class="queue-progress">
+        <span><b>3</b> reviewed today</span>
+        <span style="margin-left: auto;"><b>14</b> pending</span>
+      </div>
+      <div class="progress">
+        <span class="done" style="width: 18%;"></span>
+        <span class="current" style="width: 6%;"></span>
+      </div>
+    </div>
+
+    <div class="queue-section">
+      <div class="queue-section-head">New from match mode <span class="pill">2</span></div>
+
+      <div class="qitem current match">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">bofors-2026 / stage-2 / mathias</div>
+          <div class="meta-row"><span class="source-pill">Match</span><span>16 shots</span><span class="sep">&middot;</span><span>12 min ago</span></div>
+        </div>
+        <span class="disagree-badge">1</span>
+      </div>
+
+      <div class="qitem match">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">bofors-2026 / stage-3 / pia</div>
+          <div class="meta-row"><span class="source-pill">Match</span><span>12 shots</span><span class="sep">&middot;</span><span>14 min ago</span></div>
+        </div>
+        <span></span>
+      </div>
+    </div>
+
+    <div class="queue-section">
+      <div class="queue-section-head">GitHub submissions <span class="pill">3</span></div>
+
+      <div class="qitem github flagged">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 17v.5"/></svg></span>
+        <div class="info">
+          <div class="name">indoor-helmet-low-light.spx</div>
+          <div class="meta-row"><span class="source-pill gh">GitHub</span><span>@jsundberg</span><span class="sep">&middot;</span><span>3 hr ago</span></div>
+        </div>
+        <span class="disagree-badge">3</span>
+      </div>
+
+      <div class="qitem github">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">outdoor-rifle-suppressed.spx</div>
+          <div class="meta-row"><span class="source-pill gh">GitHub</span><span>@kontinental</span><span class="sep">&middot;</span><span>yesterday</span></div>
+        </div>
+        <span></span>
+      </div>
+
+      <div class="qitem github">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">stage-window-glare.spx</div>
+          <div class="meta-row"><span class="source-pill gh">GitHub</span><span>@malmsteen</span><span class="sep">&middot;</span><span>2 days ago</span></div>
+        </div>
+        <span></span>
+      </div>
+    </div>
+
+    <div class="queue-section">
+      <div class="queue-section-head">Older pending <span class="pill">9</span></div>
+
+      <div class="qitem match">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">bofors-2026 / stage-5 / mathias</div>
+          <div class="meta-row"><span class="source-pill">Match</span><span>24 shots</span><span class="sep">&middot;</span><span>3d ago</span></div>
+        </div>
+        <span></span>
+      </div>
+
+      <div class="qitem match">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">vads-easter-2026 / stage-7 / mathias</div>
+          <div class="meta-row"><span class="source-pill">Match</span><span>22 shots</span><span class="sep">&middot;</span><span>5d ago</span></div>
+        </div>
+        <span class="disagree-badge">2</span>
+      </div>
+    </div>
+
+    <div class="queue-section">
+      <div class="queue-section-head">Approved today <span class="pill">3</span></div>
+
+      <div class="qitem match done">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">bromma-2026 / stage-1 / pia</div>
+          <div class="meta-row"><span class="source-pill">Match</span><span>12 shots</span><span class="sep">&middot;</span><span>09:42</span></div>
+        </div>
+        <span class="check-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+
+      <div class="qitem match done">
+        <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+        <div class="info">
+          <div class="name">bromma-2026 / stage-2 / pia</div>
+          <div class="meta-row"><span class="source-pill">Match</span><span>16 shots</span><span class="sep">&middot;</span><span>09:55</span></div>
+        </div>
+        <span class="check-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- DETAIL -->
+  <main class="review-detail">
+
+    <div class="fx-head">
+      <div class="top">
+        <span class="source-tag-big">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg>
+          Match mode promotion
+        </span>
+        <span class="pending-tag"><span class="d"></span>Pending review</span>
+        <span class="when">Promoted 12 min ago by Mathias Axell</span>
+      </div>
+      <div class="fx-name">bofors-bombardment-2026 / stage-2 / mathias-axell</div>
+      <div class="fx-meta-row">
+        <span class="item"><span>Camera</span><b>cam-a chest</b></span>
+        <span class="sep">&middot;</span>
+        <span class="item"><span>Duration</span><b>8.412s</b></span>
+        <span class="sep">&middot;</span>
+        <span class="item"><span>Hand labels</span><b>16</b></span>
+        <span class="sep">&middot;</span>
+        <span class="item"><span>Division</span><b>Production Optics</b></span>
+        <span class="sep">&middot;</span>
+        <span class="item"><span>Audit conf</span><b>0.92</b></span>
+      </div>
+    </div>
+
+    <!-- Actions toolbar -->
+    <div class="actions-toolbar">
+      <button class="btn success">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5L20 7"/></svg>
+        Approve to corpus
+        <span class="kbd-inline">A</span>
+      </button>
+      <button class="btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18 2l4 4-10 10H8v-4z"/></svg>
+        Open in audit
+      </button>
+      <button class="btn danger">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        Reject &middot; send back
+        <span class="kbd-inline">X</span>
+      </button>
+      <span style="flex: 1;"></span>
+      <button class="btn ghost">Skip <span class="kbd-inline">S</span></button>
+      <button class="btn ghost"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button class="btn ghost"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+    </div>
+
+    <!-- Disagreement banner -->
+    <div class="disagree">
+      <span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 17v.5"/></svg></span>
+      <div>
+        <div class="title">Ensemble v2026.04.02 disagrees on 1 shot</div>
+        <div class="hint">The shipped detector finds <b>1 candidate not in the hand labels</b> -- likely a false positive at <b>4.823s</b>. Verify against the waveform, then approve or open in audit to fix.</div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat"><div class="v" style="color: var(--done);">15</div><div class="k">Agree</div></div>
+        <div class="stat"><div class="v" style="color: var(--live);">1</div><div class="k">Extra</div></div>
+        <div class="stat"><div class="v">0</div><div class="k">Missed</div></div>
+      </div>
+    </div>
+
+    <!-- Waveform card -->
+    <div class="wf-card">
+      <div class="wf-card-head">
+        <div class="title">Waveform &middot; hand labels vs ensemble</div>
+        <div class="legend">
+          <span class="lg"><span class="dot gt"></span>Hand-labeled (16)</span>
+          <span class="lg"><span class="dot pred"></span>Ensemble (17)</span>
+          <span class="lg"><span class="dot fp"></span>False positive (1)</span>
+          <span class="lg"><span class="dot fn"></span>False negative (0)</span>
+        </div>
+      </div>
+      <div class="wf-svg-wrap">
+        <svg class="wf-svg" viewBox="0 0 1100 160" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="env10" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#06B6D4" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#06B6D4" stop-opacity="0.03"/>
+            </linearGradient>
+          </defs>
+          <!-- gt zone label -->
+          <text x="10" y="14" fill="#4ADE80" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" letter-spacing="0.18em">HAND</text>
+          <text x="10" y="155" fill="#06B6D4" font-family="JetBrains Mono, monospace" font-size="9" font-weight="700" letter-spacing="0.18em">PRED</text>
+          <!-- mid divider -->
+          <line x1="0" y1="80" x2="1100" y2="80" stroke="#3A4049" stroke-width="0.6" stroke-dasharray="3 4"/>
+          <!-- envelope -->
+          <path d="M0 80 L60 78 L80 70 L100 88 L120 65 L130 92 L150 80 L170 75 L190 82
+            L210 35 L213 125 L216 30 L220 128 L224 40 L228 120
+            L240 80 L260 77 L280 82
+            L295 37 L298 123 L301 33 L305 127 L309 43 L313 117
+            L325 80 L355 77 L380 82
+            L395 40 L398 120 L401 35 L405 125 L409 45 L413 115
+            L425 80 L455 77 L485 80
+            L495 43 L498 117 L501 38 L505 122 L509 48 L513 112
+            L525 80 L555 77 L580 80
+            L596 38 L599 122 L602 33 L606 127 L610 43 L614 117
+            L626 80 L650 80 L680 77
+            L695 41 L698 119 L701 36 L705 124 L709 46 L713 114
+            L725 80 L750 77 L775 80
+            L796 37 L799 123 L802 32 L806 128 L810 42 L814 118
+            L826 80 L855 80 L880 77
+            L897 40 L900 120 L903 35 L907 125 L911 45 L915 115
+            L927 80 L955 80 L985 77
+            L997 41 L1000 119 L1003 36 L1007 124 L1011 46 L1015 114
+            L1027 80 L1060 80 L1100 80 Z" fill="url(#env10)" stroke="#06B6D4" stroke-width="0.4"/>
+
+          <!-- markers: agreement (GT above, PRED below) -->
+          <!-- shot 1 -->
+          <line x1="215" y1="8" x2="215" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="207" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="215" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">1</text>
+          <line x1="215" y1="82" x2="215" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 2 -->
+          <line x1="300" y1="8" x2="300" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="292" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="300" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">2</text>
+          <line x1="300" y1="82" x2="300" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 3 -->
+          <line x1="400" y1="8" x2="400" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="392" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="400" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">3</text>
+          <line x1="400" y1="82" x2="400" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 4 -->
+          <line x1="500" y1="8" x2="500" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="492" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="500" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">4</text>
+          <line x1="500" y1="82" x2="500" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- FALSE POSITIVE x=560 (PRED only) -->
+          <line x1="560" y1="82" x2="560" y2="156" stroke="#FBBF24" stroke-width="2.5" stroke-dasharray="3 2"/>
+          <rect x="552" y="142" width="16" height="14" rx="3" fill="#FBBF24"/>
+          <text x="560" y="153" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">!</text>
+          <!-- shot 5 -->
+          <line x1="600" y1="8" x2="600" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="592" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="600" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">5</text>
+          <line x1="600" y1="82" x2="600" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 6 -->
+          <line x1="700" y1="8" x2="700" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="692" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="700" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">6</text>
+          <line x1="700" y1="82" x2="700" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 7 -->
+          <line x1="800" y1="8" x2="800" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="792" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="800" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">7</text>
+          <line x1="800" y1="82" x2="800" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 8 -->
+          <line x1="900" y1="8" x2="900" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="892" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="900" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">8</text>
+          <line x1="900" y1="82" x2="900" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <!-- shot 9 -->
+          <line x1="1000" y1="8" x2="1000" y2="78" stroke="#4ADE80" stroke-width="2"/>
+          <rect x="992" y="2" width="16" height="14" rx="3" fill="#4ADE80"/>
+          <text x="1000" y="13" text-anchor="middle" fill="#0A0B0D" font-size="9" font-weight="700" font-family="JetBrains Mono">9</text>
+          <line x1="1000" y1="82" x2="1000" y2="156" stroke="#06B6D4" stroke-width="1.5" stroke-dasharray="3 2"/>
+        </svg>
+      </div>
+      <div class="wf-ruler">
+        <span>0s</span><span>1s</span><span>2s</span><span>3s</span><span>4s</span><span>5s</span><span>6s</span><span>7s</span><span>8.4s</span>
+      </div>
+    </div>
+
+    <!-- Transport -->
+    <div class="transport">
+      <div class="controls">
+        <button class="transport-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19,4 9,12 19,20" fill="currentColor"/><line x1="5" y1="4" x2="5" y2="20" stroke-width="2.5"/></svg></button>
+        <button class="transport-btn play"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="7,4 20,12 7,20"/></svg></button>
+        <button class="transport-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,4 15,12 5,20" fill="currentColor"/><line x1="19" y1="4" x2="19" y2="20" stroke-width="2.5"/></svg></button>
+        <button class="transport-btn" title="Jump to disagreement"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 17v.5"/></svg></button>
+      </div>
+      <span class="time">04.823s <span class="muted">/ 8.412s &middot; near FP @ 4.82s</span></span>
+      <span class="next-disagree"><kbd>D</kbd> Next disagreement</span>
+    </div>
+
+    <!-- Work grid -->
+    <div class="work-grid">
+
+      <!-- Shot diff table -->
+      <div class="diff-card">
+        <div class="diff-head">
+          <div class="title">Shot diff <span class="count">15 agree &middot; 1 disagreement</span></div>
+          <div class="filter-hint"><kbd>F</kbd> filter disagreements</div>
+        </div>
+
+        <div class="shot-diff-row head">
+          <span></span>
+          <span>Hand label</span>
+          <span>Ensemble</span>
+          <span>Delta</span>
+          <span>Status</span>
+          <span></span>
+        </div>
+
+        <div class="shot-diff-row">
+          <span class="num">01</span>
+          <span class="gt-t">0.821</span>
+          <span class="pred-t">0.819</span>
+          <span class="delta">&Delta; 2ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="shot-diff-row">
+          <span class="num">02</span>
+          <span class="gt-t">1.342</span>
+          <span class="pred-t">1.340</span>
+          <span class="delta">&Delta; 2ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="shot-diff-row">
+          <span class="num">03</span>
+          <span class="gt-t">2.118</span>
+          <span class="pred-t">2.114</span>
+          <span class="delta">&Delta; 4ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="shot-diff-row">
+          <span class="num">04</span>
+          <span class="gt-t">3.064</span>
+          <span class="pred-t">3.061</span>
+          <span class="delta">&Delta; 3ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+
+        <div class="shot-diff-row fp">
+          <span class="num">!</span>
+          <span class="gt-t" style="color: var(--subtle);">--</span>
+          <span class="pred-t" style="color: var(--live);">4.823</span>
+          <span class="delta big">Extra pred</span>
+          <span class="pill fp">FP</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+
+        <div class="shot-diff-row">
+          <span class="num">05</span>
+          <span class="gt-t">5.701</span>
+          <span class="pred-t">5.704</span>
+          <span class="delta">&Delta; 3ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="shot-diff-row">
+          <span class="num">06</span>
+          <span class="gt-t">6.298</span>
+          <span class="pred-t">6.301</span>
+          <span class="delta">&Delta; 3ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="shot-diff-row">
+          <span class="num">07</span>
+          <span class="gt-t">6.811</span>
+          <span class="pred-t">6.815</span>
+          <span class="delta">&Delta; 4ms</span>
+          <span class="pill ok">OK</span>
+          <button class="micro-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+
+        <div class="diff-collapsed">... 9 more rows match exactly</div>
+
+        <div class="diff-foot">
+          <b>Verdict:</b> the extra prediction at 4.82s falls between shots 4 and 5. Listen to verify whether it's an echo or a missed hand label.
+        </div>
+      </div>
+
+      <!-- Side stack -->
+      <div class="stack">
+
+        <div class="panel">
+          <div class="ph">
+            <span class="title">Tags</span>
+            <span class="help">5 attached</span>
+          </div>
+          <div class="pb">
+            <div class="tag-list">
+              <span class="tag-pill venue">venue:bofors <span class="x"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+              <span class="tag-pill cam">cam:chest <span class="x"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+              <span class="tag-pill">outdoor <span class="x"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+              <span class="tag-pill">production-optics <span class="x"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+              <span class="tag-pill warn">just-promoted <span class="x"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+            </div>
+            <span class="tag-add">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              Add tag <kbd style="background: transparent; border: 0; padding: 0; color: inherit;">T</kbd>
+            </span>
+            <div class="tag-section">
+              <div class="label">Suggested</div>
+              <span class="tag-suggest">+ ipsc</span>
+              <span class="tag-suggest">+ shoot-and-move</span>
+              <span class="tag-suggest">+ reload</span>
+              <span class="tag-suggest">+ multi-target</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="ph"><span class="title">Reviewer notes</span></div>
+          <div class="pb">
+            <textarea class="notes-area" placeholder="Note anything notable -- echoes, mic clipping, lighting, unusual conditions -- so future you knows why this fixture is interesting."></textarea>
+            <div class="notes-foot">
+              <span>Saved alongside the fixture</span>
+              <span><kbd>&#8984;</kbd>+<kbd>S</kbd> save without approve</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="kbd-card-body">
+            <div class="title-row">Keyboard</div>
+            <div class="row"><span>Approve to corpus</span><span class="keys"><kbd>A</kbd></span></div>
+            <div class="row"><span>Reject &middot; send back</span><span class="keys"><kbd>X</kbd></span></div>
+            <div class="row"><span>Skip</span><span class="keys"><kbd>S</kbd></span></div>
+            <div class="row"><span>Add tag</span><span class="keys"><kbd>T</kbd></span></div>
+            <div class="row"><span>Next disagreement</span><span class="keys"><kbd>D</kbd></span></div>
+            <div class="row"><span>Open in audit</span><span class="keys"><kbd>O</kbd></span></div>
+            <div class="row"><span>Filter disagreements</span><span class="keys"><kbd>F</kbd></span></div>
+            <div class="row"><span>Next / prev fixture</span><span class="keys"><kbd>J</kbd><kbd>K</kbd></span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="footnote">Polished 10 &middot; ./docs/ux-redesign/polished/10-developer-review-queue.html</div>
+
+  </main>
+</div>
+
+</body>
+</html>

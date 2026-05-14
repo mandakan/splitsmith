@@ -1,0 +1,1233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith — VADS Easter Shoot 2026 · Overview</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH — Match Overview
+   Direction: Shot Timer (extends polished 01 and 03).
+   Mission-briefing dashboard for a match in progress.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --cold:         #6B7079;
+  --beep:         #06B6D4;
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell (carries from polished 01/03) ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); position: relative; }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.icon-btn .badge { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--led); box-shadow: 0 0 0 2px var(--bg), 0 0 8px var(--led-glow); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; font-feature-settings: var(--feat-num); }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+.context .right { margin-left: auto; display: inline-flex; gap: 18px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--subtle); }
+.context .right b { color: var(--ink-2); font-weight: 700; }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Sidebar (carries from 03) ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.match-card { padding: 4px 8px 14px; border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+.match-card .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); margin-bottom: 6px; }
+.match-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 6px; }
+.match-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.nav-section { margin: 4px 0 14px; }
+.nav-item { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 7px; color: var(--ink-2); font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: all 150ms var(--ease); min-height: 36px; }
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item .icon { color: var(--muted); display: inline-flex; }
+.nav-item:hover .icon { color: var(--ink); }
+.nav-item.active { background: var(--led-tint); border: 1px solid var(--led-deep); padding: 7px 9px; color: var(--led); font-weight: 700; }
+.nav-item.active .icon { color: var(--led); }
+.nav-item .count { margin-left: auto; font-family: var(--mono); font-size: 0.625rem; font-weight: 700; color: var(--subtle); }
+.nav-item.active .count { color: var(--led); }
+.nav-label { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+.nav-label .pill { background: var(--surface-2); border: 1px solid var(--rule); color: var(--ink-2); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-feature-settings: var(--feat-num); }
+.stage-list { display: flex; flex-direction: column; gap: 1px; }
+.stage-item { display: grid; grid-template-columns: 26px 1fr 14px; gap: 9px; align-items: center; padding: 6px 10px 6px 6px; border-radius: 6px; cursor: pointer; font-size: 0.8125rem; min-height: 34px; }
+.stage-item:hover { background: var(--surface-2); }
+.stage-num { width: 26px; height: 26px; border-radius: 5px; background: var(--surface-3); color: var(--ink-2); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-feature-settings: var(--feat-num); }
+.stage-name { color: var(--ink-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-status { width: 12px; height: 12px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.stage-status.done { background: var(--done); box-shadow: 0 0 5px var(--done-glow); color: var(--bg); }
+.stage-status.partial { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.stage-status.flagged { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+.stage-status.todo { background: transparent; border: 1px solid var(--rule-strong); }
+.stage-item.next-up .stage-num { background: var(--led); color: var(--bg); box-shadow: 0 0 0 1px var(--led), 0 0 8px var(--led-glow); }
+.stage-item.next-up .stage-name { color: var(--led); font-weight: 700; }
+
+/* ============ Page head ============ */
+.content { min-width: 0; }
+
+.page-head { padding: 28px 32px 24px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface), transparent); }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--led); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.page-title-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.75rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0; }
+.level-pill { display: inline-flex; align-items: center; padding: 5px 11px; background: var(--surface-2); border: 1px solid var(--rule-strong); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; border-radius: 5px; }
+.match-meta-row { display: flex; align-items: center; gap: 0; font-family: var(--mono); font-size: 0.75rem; font-weight: 500; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.match-meta-row time { color: var(--ink-2); font-weight: 700; padding-right: 12px; margin-right: 12px; border-right: 1px solid var(--rule); }
+.match-meta-row .item { padding: 0 8px; }
+.match-meta-row .item:first-of-type { padding-left: 0; }
+.match-meta-row .item + .item::before { content: "·"; margin-right: 8px; margin-left: -4px; color: var(--whisper); }
+.match-meta-row .scoreboard-link { margin-left: auto; color: var(--led); display: inline-flex; align-items: center; gap: 6px; font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; }
+.match-meta-row .scoreboard-link:hover { color: var(--led-soft); }
+.page-actions { margin-top: 16px; display: inline-flex; gap: 10px; }
+
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 7px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 40px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--led); color: var(--bg); border-color: var(--led); box-shadow: 0 0 0 1px var(--led), 0 0 16px var(--led-glow); }
+.btn.primary:hover { background: var(--led-soft); border-color: var(--led-soft); box-shadow: 0 0 0 1px var(--led-soft), 0 0 24px var(--led-glow); }
+.btn.ghost { background: transparent; border-color: var(--rule); color: var(--ink-2); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ============ Workspace ============ */
+.workspace { padding: 24px 32px 64px; }
+
+/* ============ Hero: resume card ============ */
+.resume-hero {
+  position: relative;
+  background:
+    radial-gradient(900px 220px at 20% 30%, rgba(255,45,45,0.10), transparent 65%),
+    linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 16px;
+  padding: 26px 28px;
+  margin-bottom: 22px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: center;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 24px 48px -24px rgba(0,0,0,0.6);
+}
+.resume-hero::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--led);
+  box-shadow: 0 0 16px var(--led-glow);
+}
+.resume-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 4px,
+      rgba(255,255,255,0.012) 4px,
+      rgba(255,255,255,0.012) 5px
+    );
+  pointer-events: none;
+}
+
+.hero-left { position: relative; z-index: 1; }
+.hero-kicker {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin-bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.hero-kicker::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow);
+  animation: heartbeat 2s ease-in-out infinite;
+}
+.hero-h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 2.5rem;
+  line-height: 1;
+  letter-spacing: 0.003em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+.hero-h1 .num { color: var(--led); }
+.hero-sub {
+  font-size: 0.875rem;
+  color: var(--ink-2);
+  margin: 0 0 22px;
+  max-width: 540px;
+}
+.hero-sub b { color: var(--ink); font-weight: 700; }
+.hero-stats {
+  display: inline-flex;
+  gap: 0;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0;
+  overflow: hidden;
+}
+.hero-stat {
+  padding: 10px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-right: 1px solid var(--rule);
+}
+.hero-stat:last-child { border-right: 0; }
+.hero-stat .k {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.hero-stat .v {
+  font-family: var(--mono);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  line-height: 1;
+}
+.hero-stat .v.led { color: var(--led); text-shadow: 0 0 12px var(--led-glow); }
+.hero-stat .v small { font-size: 0.8125rem; color: var(--muted); margin-left: 4px; font-weight: 500; }
+
+.hero-right { position: relative; z-index: 1; }
+.btn-resume {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 24px 18px 26px;
+  background: var(--led);
+  border: 1px solid var(--led);
+  border-radius: 11px;
+  color: var(--bg);
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 0 0 0 1px var(--led), 0 0 32px var(--led-glow), inset 0 1px 0 rgba(255,255,255,0.2);
+  transition: all 200ms var(--ease);
+  min-height: 60px;
+}
+.btn-resume:hover {
+  background: var(--led-soft);
+  border-color: var(--led-soft);
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px var(--led-soft), 0 0 40px var(--led-glow);
+}
+.btn-resume .label-stack { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.btn-resume .small {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  opacity: 0.7;
+}
+.btn-resume .big { font-size: 1.0625rem; font-weight: 700; }
+.btn-resume svg { transition: transform 200ms var(--ease); }
+.btn-resume:hover svg { transform: translateX(4px); }
+
+/* ============ Section heading ============ */
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 26px 0 14px; }
+.section-head .title { display: inline-flex; align-items: baseline; gap: 14px; font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); }
+.section-head .title .count { font-family: var(--mono); font-size: 0.6875rem; color: var(--subtle); font-weight: 600; letter-spacing: 0.06em; }
+.section-head .title .count b { color: var(--ink-2); font-weight: 700; font-feature-settings: var(--feat-num); }
+.section-head .link { font-family: var(--display); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--led); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.section-head .link:hover { color: var(--led-soft); }
+
+/* ============ Shooters strip ============ */
+.shooters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.shooter-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  padding: 14px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 180ms var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.shooter-card:hover {
+  background: var(--surface-2);
+  border-color: var(--rule-strong);
+  transform: translateY(-1px);
+}
+.shooter-card.you {
+  border-color: var(--led-deep);
+  box-shadow: inset 0 0 0 1px var(--led-deep);
+}
+.shooter-card.you::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 0% 0%, rgba(255,45,45,0.05), transparent 60%);
+  pointer-events: none;
+}
+.shooter-av {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.shooter-av.you { background: linear-gradient(135deg, var(--led), var(--led-deep)); box-shadow: 0 0 0 1px var(--led-deep), 0 0 16px var(--led-glow); }
+.shooter-av.av-1 { background: linear-gradient(135deg, #FBBF24, #B45309); }
+.shooter-av.av-2 { background: linear-gradient(135deg, #4ADE80, #166534); }
+.shooter-av.av-3 { background: linear-gradient(135deg, #60A5FA, #1E3A8A); }
+.shooter-info { flex: 1; min-width: 0; }
+.shooter-name {
+  font-family: var(--display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1.1;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.shooter-name .you-pill {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--led);
+  background: var(--led-tint);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--led-deep);
+}
+.shooter-stats {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  margin-bottom: 7px;
+}
+.shooter-stats .sep { color: var(--whisper); }
+.shooter-stats .recent {
+  color: var(--live);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.shooter-stats .recent::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 5px var(--live-glow);
+}
+.shooter-progress {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.shooter-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--led);
+  box-shadow: 0 0 6px var(--led-glow);
+  border-radius: 999px;
+  transition: width 400ms var(--ease);
+}
+.shooter-progress.done > span { background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.shooter-progress.warn > span { background: var(--live); box-shadow: 0 0 6px var(--live-glow); }
+
+/* Add shooter card */
+.add-shooter {
+  border: 1px dashed var(--rule-strong);
+  background: transparent;
+  cursor: pointer;
+  justify-content: center;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 180ms var(--ease);
+}
+.add-shooter:hover {
+  border-color: var(--led-deep);
+  color: var(--led);
+  background: var(--led-tint);
+}
+.add-shooter .plus {
+  width: 24px; height: 24px;
+  border: 1.5px dashed currentColor;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+}
+
+/* ============ Stages grid ============ */
+.stages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.stage-tile {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+  transition: all 180ms var(--ease);
+  cursor: pointer;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.stage-tile:hover {
+  background: var(--surface-2);
+  border-color: var(--rule-strong);
+  transform: translateY(-1px);
+}
+.stage-tile::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: all 180ms var(--ease);
+}
+.stage-tile:hover::after { background: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+
+.stage-tile.next-up {
+  border-color: var(--led);
+  background:
+    radial-gradient(circle at 0% 0%, var(--led-tint), transparent 65%),
+    var(--surface);
+  box-shadow: 0 0 0 1px var(--led), 0 0 28px var(--led-glow);
+}
+.stage-tile.next-up::after { background: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+.stage-tile.flagged {
+  border-color: rgba(255,45,45,0.3);
+}
+
+.stage-tile .top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.stage-tile .num-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.stage-tile .num {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-feature-settings: var(--feat-num);
+}
+.stage-tile.next-up .num {
+  background: var(--led);
+  color: var(--bg);
+  box-shadow: 0 0 0 1px var(--led), 0 0 8px var(--led-glow);
+}
+.stage-tile .name {
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.stage-tile .next-tag {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--led);
+  background: var(--led-tint);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--led-deep);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.stage-tile .next-tag::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 5px var(--led-glow);
+  animation: heartbeat 1.8s ease-in-out infinite;
+}
+
+.stage-pill {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.stage-pill::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+}
+.stage-pill.done { background: rgba(74,222,128,0.10); color: var(--done); }
+.stage-pill.done::before { background: var(--done); box-shadow: 0 0 4px var(--done-glow); }
+.stage-pill.partial { background: rgba(251,191,36,0.10); color: var(--live); }
+.stage-pill.partial::before { background: var(--live); box-shadow: 0 0 4px var(--live-glow); }
+.stage-pill.flagged { background: rgba(255,45,45,0.10); color: var(--led); }
+.stage-pill.flagged::before { background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.stage-pill.flagged::after { content: ""; width: 0; height: 0; border-left: 2.5px solid transparent; border-right: 2.5px solid transparent; border-bottom: 3px solid var(--led); margin-left: -2px; }
+.stage-pill.todo { background: var(--surface-2); color: var(--subtle); border: 1px solid var(--rule); }
+.stage-pill.todo::before { background: transparent; border: 1px solid var(--subtle); }
+
+.stage-tile .bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.stage-tile .bottom b {
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+}
+.stage-tile .bottom .anomaly {
+  color: var(--led);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.stage-tile .bottom .anomaly::before {
+  content: ""; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--led);
+  box-shadow: 0 0 4px var(--led-glow);
+}
+
+/* ============ Activity log ============ */
+.activity-log {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.activity-log .log-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.activity-log .log-head .title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.activity-log .log-head .title::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--done);
+  box-shadow: 0 0 6px var(--done-glow);
+  animation: heartbeat 3s ease-in-out infinite;
+}
+.activity-log .log-head .live {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--done);
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.log-row:last-child { border-bottom: 0; }
+.log-dot-wrap {
+  width: 36px;
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+  position: relative;
+}
+.log-dot-wrap::after {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -12px;
+  width: 1px;
+  background: var(--rule);
+}
+.log-row:last-child .log-dot-wrap::after { display: none; }
+.log-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  position: relative;
+  z-index: 1;
+}
+.log-dot.accent { background: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+.log-dot.warn { background: var(--live); box-shadow: 0 0 8px var(--live-glow); }
+.log-dot.ok { background: var(--done); box-shadow: 0 0 8px var(--done-glow); }
+.log-dot.info { background: var(--beep); box-shadow: 0 0 6px rgba(6,182,212,0.3); }
+
+.log-content { font-size: 0.8125rem; color: var(--ink-2); line-height: 1.55; }
+.log-content b { color: var(--ink); font-weight: 700; }
+.log-content .kind {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin-right: 8px;
+}
+.log-content .kind.warn { color: var(--live); }
+.log-content .kind.ok { color: var(--done); }
+.log-content .kind.info { color: var(--beep); }
+
+.log-when {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  white-space: nowrap;
+  padding-top: 4px;
+}
+
+/* ============ Page reveal ============ */
+.resume-hero, .shooters-grid, .stages-grid, .activity-log {
+  animation: rise 600ms var(--ease) backwards;
+}
+.resume-hero  { animation-delay: 80ms; }
+.shooters-grid{ animation-delay: 160ms; }
+.stages-grid  { animation-delay: 240ms; }
+.activity-log { animation-delay: 320ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Responsive */
+@media (max-width: 1280px) {
+  .resume-hero { grid-template-columns: 1fr; }
+  .page-h1 { font-size: 2.25rem; }
+}
+
+</style>
+</head>
+<body>
+
+<!-- Shell -->
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 36 36" fill="none" aria-label="Splitsmith">
+        <rect x="1.5" y="1.5" width="33" height="33" rx="7" fill="#14171C" stroke="#3A4049"/>
+        <rect x="10" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <rect x="23" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <circle cx="18" cy="18" r="2.4" fill="#FF2D2D"/>
+        <circle cx="18" cy="18" r="3.8" fill="none" stroke="#FF2D2D" stroke-width="0.8" opacity="0.4"/>
+        <line x1="3" y1="32" x2="33" y2="32" stroke="#FF2D2D" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
+      </svg>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat"></span>
+    </div>
+    <div class="mode-switch">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <span class="spacer"></span>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 19V11a6 6 0 0 1 12 0v8H6Zm3 0a3 3 0 0 0 6 0"/></svg><span class="badge"></span></button>
+      <button class="profile">
+        <span class="av">MA</span>
+        <span class="label">Mathias Axell</span>
+      </button>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <span class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">·</span>
+        <span class="current">VADS Easter Shoot 2026</span>
+      </span>
+      <div class="right">
+        <span>Session <b>047</b></span>
+        <span>Worker <b style="color: var(--done);">●</b> Local 02</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="match-card">
+      <div class="lbl">Active Match</div>
+      <div class="title">VADS Easter<br>Shoot 2026</div>
+      <div class="meta">12 APR · Västerort PK</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item active">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+        Overview
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>
+        Coach
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>
+        Shooters
+        <span class="count">04</span>
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>
+        Export
+      </div>
+    </div>
+
+    <div class="nav-label">Stages <span class="pill">08 / 12</span></div>
+    <div class="stage-list">
+      <div class="stage-item"><span class="stage-num">01</span><span class="stage-name">Snake</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">02</span><span class="stage-name">Tower</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">03</span><span class="stage-name">Plates</span><span class="stage-status partial"></span></div>
+      <div class="stage-item"><span class="stage-num">04</span><span class="stage-name">Mover</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">05</span><span class="stage-name">Standards</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">06</span><span class="stage-name">Field 1</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">07</span><span class="stage-name">Field 2</span><span class="stage-status flagged"></span></div>
+      <div class="stage-item next-up"><span class="stage-num">08</span><span class="stage-name">Window</span><span class="stage-status partial"></span></div>
+      <div class="stage-item"><span class="stage-num">09</span><span class="stage-name">Long range</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">10</span><span class="stage-name">Speed shoot</span><span class="stage-status todo"></span></div>
+      <div class="stage-item"><span class="stage-num">11</span><span class="stage-name">Plate rack</span><span class="stage-status todo"></span></div>
+      <div class="stage-item"><span class="stage-num">12</span><span class="stage-name">Final</span><span class="stage-status todo"></span></div>
+    </div>
+  </aside>
+
+  <!-- Content -->
+  <main class="content">
+
+    <!-- Page head -->
+    <div class="page-head">
+      <span class="page-kicker">Match Overview</span>
+      <div class="page-title-row">
+        <h1 class="page-h1">VADS Easter Shoot 2026</h1>
+        <span class="level-pill">Level II</span>
+      </div>
+      <div class="match-meta-row">
+        <time datetime="2026-04-12">12 APR 2026</time>
+        <span class="item">Västerort PK</span>
+        <span class="item">Indoor</span>
+        <span class="item">42 competitors</span>
+        <a href="#" class="scoreboard-link">
+          View on scoreboard
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M7 7h10v10"/></svg>
+        </a>
+      </div>
+      <div class="page-actions">
+        <button class="btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg>
+          Export Match
+        </button>
+        <button class="btn ghost">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3"/></svg>
+          Match Settings
+        </button>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <!-- Resume hero -->
+      <section class="resume-hero">
+        <div class="hero-left">
+          <div class="hero-kicker">Pick up where you left off</div>
+          <h2 class="hero-h1">Stage <span class="num">08</span> · Window</h2>
+          <p class="hero-sub">Your audit on this stage is <b>unsaved</b> — <b>9 of 14 shots</b> reviewed. Last touched <b>14 minutes ago</b>.</p>
+          <div class="hero-stats">
+            <div class="hero-stat">
+              <span class="k">Match audited</span>
+              <span class="v led">66<small>%</small></span>
+            </div>
+            <div class="hero-stat">
+              <span class="k">Shots in stage</span>
+              <span class="v">09<small> / 14</small></span>
+            </div>
+            <div class="hero-stat">
+              <span class="k">Stages flagged</span>
+              <span class="v" style="color: var(--led);">01</span>
+            </div>
+          </div>
+        </div>
+        <div class="hero-right">
+          <a href="03-stage-audit.html" class="btn-resume">
+            <div class="label-stack">
+              <span class="small">Continue auditing</span>
+              <span class="big">Resume Stage 08</span>
+            </div>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+      </section>
+
+      <!-- Shooters -->
+      <div class="section-head">
+        <div class="title">
+          Shooters
+          <span class="count"><b>04</b> in this match</span>
+        </div>
+        <span class="link">
+          Manage shooters
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </span>
+      </div>
+
+      <div class="shooters-grid">
+        <div class="shooter-card you">
+          <span class="shooter-av you">MA</span>
+          <div class="shooter-info">
+            <div class="shooter-name">Mathias Axell <span class="you-pill">You</span></div>
+            <div class="shooter-stats">
+              <span>02 cams</span><span class="sep">·</span><span>12 / 12 stages</span>
+            </div>
+            <div class="shooter-progress done"><span style="width: 100%;"></span></div>
+          </div>
+        </div>
+
+        <div class="shooter-card">
+          <span class="shooter-av av-1">JL</span>
+          <div class="shooter-info">
+            <div class="shooter-name">Johan Larsson</div>
+            <div class="shooter-stats">
+              <span>01 cam</span><span class="sep">·</span><span>04 / 12 stages</span>
+            </div>
+            <div class="shooter-progress warn"><span style="width: 33%;"></span></div>
+          </div>
+        </div>
+
+        <div class="shooter-card">
+          <span class="shooter-av av-2">PE</span>
+          <div class="shooter-info">
+            <div class="shooter-name">Pia Eriksson</div>
+            <div class="shooter-stats">
+              <span>01 cam</span><span class="sep">·</span><span>00 / 12 stages</span><span class="sep">·</span>
+              <span class="recent">Just imported</span>
+            </div>
+            <div class="shooter-progress"><span style="width: 0%;"></span></div>
+          </div>
+        </div>
+
+        <div class="shooter-card add-shooter">
+          <span class="plus">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+          Add Shooter
+        </div>
+      </div>
+
+      <!-- Stages -->
+      <div class="section-head">
+        <div class="title">
+          Stages
+          <span class="count"><b>08</b> audited · <b>01</b> flagged · <b>03</b> pending</span>
+        </div>
+      </div>
+
+      <div class="stages-grid">
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">01</span>
+              <span class="name">Snake</span>
+            </div>
+            <span class="stage-pill done">Audited</span>
+          </div>
+          <div class="bottom">
+            <span><b>12</b> shots</span>
+            <span>04 shooters</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">02</span>
+              <span class="name">Tower</span>
+            </div>
+            <span class="stage-pill done">Audited</span>
+          </div>
+          <div class="bottom">
+            <span><b>16</b> shots</span>
+            <span>04 shooters</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">03</span>
+              <span class="name">Plates</span>
+            </div>
+            <span class="stage-pill partial">In progress</span>
+          </div>
+          <div class="bottom">
+            <span><b>06</b> plates</span>
+            <span>03 / 04 done</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">04</span>
+              <span class="name">Mover</span>
+            </div>
+            <span class="stage-pill done">Audited</span>
+          </div>
+          <div class="bottom">
+            <span><b>10</b> shots</span>
+            <span>04 shooters</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">05</span>
+              <span class="name">Standards</span>
+            </div>
+            <span class="stage-pill done">Audited</span>
+          </div>
+          <div class="bottom">
+            <span><b>24</b> shots</span>
+            <span>04 shooters</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">06</span>
+              <span class="name">Field 1</span>
+            </div>
+            <span class="stage-pill done">Audited</span>
+          </div>
+          <div class="bottom">
+            <span><b>22</b> shots</span>
+            <span>04 shooters</span>
+          </div>
+        </div>
+
+        <div class="stage-tile flagged">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">07</span>
+              <span class="name">Field 2</span>
+            </div>
+            <span class="stage-pill flagged">Flagged</span>
+          </div>
+          <div class="bottom">
+            <span><b>22</b> shots</span>
+            <span class="anomaly">02 anomalies</span>
+          </div>
+        </div>
+
+        <div class="stage-tile next-up">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">08</span>
+              <span class="name">Window</span>
+            </div>
+            <span class="next-tag">Next up</span>
+          </div>
+          <div class="bottom">
+            <span><b>09 / 14</b> shots reviewed</span>
+            <span style="color: var(--led);">In session</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">09</span>
+              <span class="name">Long Range</span>
+            </div>
+            <span class="stage-pill done">Audited</span>
+          </div>
+          <div class="bottom">
+            <span><b>08</b> shots</span>
+            <span>04 shooters</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">10</span>
+              <span class="name">Speed Shoot</span>
+            </div>
+            <span class="stage-pill todo">Not started</span>
+          </div>
+          <div class="bottom">
+            <span><b>14</b> expected</span>
+            <span>awaiting</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">11</span>
+              <span class="name">Plate Rack</span>
+            </div>
+            <span class="stage-pill todo">Not started</span>
+          </div>
+          <div class="bottom">
+            <span><b>08</b> plates</span>
+            <span>awaiting</span>
+          </div>
+        </div>
+
+        <div class="stage-tile">
+          <div class="top">
+            <div class="num-name">
+              <span class="num">12</span>
+              <span class="name">Final</span>
+            </div>
+            <span class="stage-pill todo">Not started</span>
+          </div>
+          <div class="bottom">
+            <span><b>30</b> expected</span>
+            <span>awaiting</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Activity log -->
+      <div class="section-head">
+        <div class="title">
+          Session Log
+          <span class="count">last <b>04</b> events</span>
+        </div>
+      </div>
+
+      <div class="activity-log">
+        <div class="log-head">
+          <div class="title">Live activity</div>
+          <span class="live">Recording</span>
+        </div>
+
+        <div class="log-row">
+          <div class="log-dot-wrap"><div class="log-dot accent"></div></div>
+          <div class="log-content">
+            <span class="kind">Audit</span>
+            Started auditing <b>Stage 08 · Window</b> for Mathias Axell
+          </div>
+          <span class="log-when">14 min ago</span>
+        </div>
+
+        <div class="log-row">
+          <div class="log-dot-wrap"><div class="log-dot warn"></div></div>
+          <div class="log-content">
+            <span class="kind warn">Anomaly</span>
+            <b>Stage 07 · Field 2</b> flagged: 2 splits outside expected distribution
+          </div>
+          <span class="log-when">38 min ago</span>
+        </div>
+
+        <div class="log-row">
+          <div class="log-dot-wrap"><div class="log-dot ok"></div></div>
+          <div class="log-content">
+            <span class="kind ok">Ingest</span>
+            Imported footage for <b>Pia Eriksson</b> (01 camera · 11 videos · 8.4 GB)
+          </div>
+          <span class="log-when">01 hr ago</span>
+        </div>
+
+        <div class="log-row">
+          <div class="log-dot-wrap"><div class="log-dot info"></div></div>
+          <div class="log-content">
+            <span class="kind info">Detect</span>
+            Re-ran shot detection on <b>Stage 03 · Plates</b> with sensitivity 0.82
+          </div>
+          <span class="log-when">02 hr ago</span>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

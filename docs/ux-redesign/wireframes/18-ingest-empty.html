@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith -- wireframe 18: ingest (empty / drop state)</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --surface-3: #f1f1f3;
+    --border: #e5e5e8;
+    --border-strong: #d4d4d8;
+    --text: #18181b;
+    --text-muted: #71717a;
+    --text-subtle: #a1a1aa;
+    --accent: #4338ca;
+    --accent-2: #6d28d9;
+    --accent-soft: #eef2ff;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --slate: #475569;
+    --slate-soft: #f1f5f9;
+    --shadow: 0 1px 2px rgba(15, 15, 20, 0.04), 0 1px 1px rgba(15, 15, 20, 0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; font-size: 14px; line-height: 1.45; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; cursor: pointer; }
+
+  .wf-banner { background: #1f2937; color: #e5e7eb; font-size: 12px; padding: 6px 16px; text-align: center; letter-spacing: 0.02em; }
+  .wf-banner b { color: white; }
+
+  .shell { background: var(--surface); border-bottom: 1px solid var(--border); }
+  .shell-top { display: flex; align-items: center; padding: 10px 24px; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+  .brand-dot { width: 18px; height: 18px; border-radius: 4px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  .mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .mode-switch button { background: transparent; border: 0; padding: 6px 14px; border-radius: 6px; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+  .mode-switch button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .shell-spacer { flex: 1; }
+  .shell-actions { display: flex; align-items: center; gap: 6px; }
+  .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-muted); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; }
+  .context-bar { display: flex; align-items: center; padding: 8px 24px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+  .context-bar a { color: var(--text-muted); text-decoration: none; }
+  .breadcrumb-sep { color: var(--text-subtle); margin: 0 6px; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  .page-head { margin-bottom: 18px; }
+  .page-h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+  .page-sub { color: var(--text-muted); font-size: 13.5px; margin-top: 6px; }
+
+  /* Shooter banner */
+  .shooter-banner {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+  }
+  .sb-av { width: 36px; height: 36px; border-radius: 50%; color: white; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .shooter-banner .info { flex: 1; }
+  .shooter-banner .name { font-weight: 600; font-size: 14px; }
+  .shooter-banner .name .pill { font-size: 10.5px; color: var(--accent); background: var(--accent-soft); padding: 1.5px 7px; border-radius: 999px; margin-left: 4px; font-weight: 600; }
+  .shooter-banner .meta { color: var(--text-muted); font-size: 12px; }
+  .shooter-banner .switch { font-size: 12px; color: var(--accent); cursor: pointer; }
+
+  /* Drop zone */
+  .drop-zone {
+    background: linear-gradient(135deg, rgba(67,56,202,0.06), rgba(109,40,217,0.02));
+    border: 2px dashed rgba(67,56,202,0.35);
+    border-radius: 18px;
+    padding: 56px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease;
+    margin-bottom: 18px;
+  }
+  .drop-zone:hover {
+    background: linear-gradient(135deg, rgba(67,56,202,0.10), rgba(109,40,217,0.04));
+    border-color: var(--accent);
+  }
+  .drop-zone .ic {
+    width: 64px; height: 64px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: white;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+    box-shadow: 0 8px 24px rgba(67,56,202,0.18);
+  }
+  .drop-zone h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 6px; }
+  .drop-zone .help { font-size: 13.5px; color: var(--text-muted); margin: 0 0 14px; max-width: 460px; margin-left: auto; margin-right: auto; }
+  .drop-zone .ctas { display: inline-flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+  .drop-zone .supported {
+    margin-top: 16px;
+    font-size: 11.5px;
+    color: var(--text-subtle);
+  }
+  .drop-zone .supported code {
+    background: var(--surface-3);
+    padding: 1.5px 7px;
+    border-radius: 4px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text);
+  }
+
+  /* Storage choice (compact pre-drop variant) */
+  .storage-pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  .storage-pre .head {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .storage-pre .head .title {
+    font-size: 13.5px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .storage-pre .head .help { font-size: 12px; color: var(--text-muted); }
+  .storage-pre .body {
+    padding: 12px 18px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .opt {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border: 1.5px solid var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .opt.selected {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .opt .radio {
+    flex-shrink: 0;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-strong);
+    background: var(--surface);
+    margin-top: 2px;
+    position: relative;
+  }
+  .opt.selected .radio { border-color: var(--accent); background: var(--accent); }
+  .opt.selected .radio::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: white;
+  }
+  .opt .opt-title {
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; gap: 7px;
+    margin-bottom: 2px;
+  }
+  .opt.selected .opt-title { color: var(--accent); }
+  .opt .recommended {
+    background: var(--accent); color: white;
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 1px 6px; border-radius: 999px;
+  }
+  .opt .opt-desc { font-size: 12px; color: var(--text-muted); }
+  .opt .opt-desc .path {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text);
+    margin-top: 3px;
+    display: block;
+  }
+
+  /* Recent ingests */
+  .recent {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    overflow: hidden;
+  }
+  .recent .head {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .recent .head .title { font-size: 13.5px; font-weight: 600; }
+  .recent .head .help { font-size: 12px; color: var(--text-muted); }
+  .recent-row {
+    display: grid;
+    grid-template-columns: 32px 1fr 130px 110px 70px;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .recent-row:last-child { border-bottom: 0; }
+  .recent-row:hover { background: var(--surface-2); }
+  .recent-row .ic {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--surface-3);
+    color: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .recent-row .path-block .path {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .recent-row .path-block .sub {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .recent-row .when { font-size: 12px; color: var(--text-muted); }
+  .recent-row .videos {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .recent-row .use {
+    background: transparent;
+    border: 0;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  /* Help row */
+  .tips {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .tip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .tip .ic {
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .tip b { color: var(--text); font-weight: 600; }
+
+  .footnote { color: var(--text-subtle); font-size: 12px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<div class="wf-banner">
+  <b>Wireframe 18</b> &nbsp;&middot;&nbsp; Ingest (empty / drop state)
+  &nbsp;&middot;&nbsp; Pre-drop variant of wf05. Storage choice up front; recent imports as shortcuts.
+</div>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand"><div class="brand-dot"></div>Splitsmith</div>
+    <div class="mode-switch"><button class="active">Match</button><button>Developer</button></div>
+    <div class="shell-spacer"></div>
+    <div class="shell-actions">
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9"/></svg></button>
+      <span class="avatar">MA</span>
+    </div>
+  </div>
+  <div class="context-bar">
+    <a href="01-match-picker.html">Matches</a><span class="breadcrumb-sep">/</span>
+    <a href="17-match-overview-empty.html">Bromma Spring Cup 2026</a><span class="breadcrumb-sep">/</span>
+    <span style="color: var(--text);">Add footage</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="page-head">
+    <h1 class="page-h1">Add footage</h1>
+    <div class="page-sub">Drop a folder for the selected shooter. Videos are auto-matched to stages by recording time.</div>
+  </div>
+
+  <!-- Shooter banner -->
+  <div class="shooter-banner">
+    <span class="sb-av" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">MA</span>
+    <div class="info">
+      <div class="name">Adding footage for: Mathias Axell <span class="pill">YOU</span></div>
+      <div class="meta">Production Optics &middot; Bromma PK</div>
+    </div>
+    <span class="switch">Switch shooter &darr;</span>
+  </div>
+
+  <!-- Drop zone -->
+  <div class="drop-zone">
+    <div class="ic">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l9-4 9 4M3 7v10l9 4 9-4V7M3 7l9 4 9-4"/></svg>
+    </div>
+    <h2>Drop a folder of videos</h2>
+    <p class="help">
+      Drag and drop your SD-card folder, or pick videos manually. Splitsmith will scan for
+      camera-prefixed files (e.g. <code style="font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: var(--surface-3); padding: 1.5px 6px; border-radius: 4px;">GH010032.MP4</code>) and group them by camera.
+    </p>
+    <div class="ctas">
+      <button class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7M21 3l-9 9M5 15v4a2 2 0 0 0 2 2h12"/></svg>
+        Pick a folder
+      </button>
+      <button class="btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20"/></svg>
+        Select videos manually
+      </button>
+    </div>
+    <div class="supported">
+      Supported: <code>.mp4</code> &middot; <code>.mov</code> &middot; <code>.mkv</code> &middot;
+      <code>.lrv</code> &middot; <code>.360</code> (Insta360) -- 14.2 GB SD card scan takes ~20s
+    </div>
+  </div>
+
+  <!-- Storage choice (set up front so it's done before files land) -->
+  <div class="storage-pre">
+    <div class="head">
+      <div class="title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 7l10-5 10 5v10l-10 5L2 17z"/></svg>
+        Storage for this ingest
+      </div>
+      <span class="help">Choose before dropping &middot; can override per video later</span>
+    </div>
+    <div class="body">
+      <div class="opt selected">
+        <span class="radio"></span>
+        <div>
+          <div class="opt-title">Reference in place <span class="recommended">Default</span></div>
+          <div class="opt-desc">
+            Keep originals where they are. <b style="color: var(--text);">No extra disk space.</b>
+            Project breaks if the source moves.
+          </div>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="radio"></span>
+        <div>
+          <div class="opt-title">Copy into project folder</div>
+          <div class="opt-desc">
+            Self-contained, portable, survives unmounting.
+            <span class="path">~/Splitsmith/bromma-spring-cup-2026/raw/</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent ingests -->
+  <div class="recent">
+    <div class="head">
+      <div class="title">Recent sources</div>
+      <span class="help">Drop the same folder again or scan a fresh card</span>
+    </div>
+
+    <div class="recent-row">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M9 6V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"/></svg></span>
+      <div class="path-block">
+        <div class="path">~/SD-card-2026-05-14/</div>
+        <div class="sub">GoPro Hero 11 &middot; chest mount &middot; last scanned 2 hr ago</div>
+      </div>
+      <span class="when">last used 2 hr ago</span>
+      <span class="videos">12 videos</span>
+      <button class="use">Use this &rarr;</button>
+    </div>
+
+    <div class="recent-row">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M9 6V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v3"/></svg></span>
+      <div class="path-block">
+        <div class="path">/Volumes/GOPRO_B/DCIM/</div>
+        <div class="sub">GoPro Hero 9 &middot; helmet mount</div>
+      </div>
+      <span class="when">last used yesterday</span>
+      <span class="videos">11 videos</span>
+      <button class="use">Use this &rarr;</button>
+    </div>
+
+    <div class="recent-row">
+      <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+      <div class="path-block">
+        <div class="path">~/Footage/2026-04-12-vads-easter/</div>
+        <div class="sub">Mixed source &middot; previously imported into VADS Easter Shoot 2026</div>
+      </div>
+      <span class="when">1 month ago</span>
+      <span class="videos">23 videos</span>
+      <button class="use">Use this &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Tips -->
+  <div class="tips">
+    <div class="tip">
+      <span class="ic">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      </span>
+      <div><b>Use recording timestamps.</b> Splitsmith reads each video's mtime to suggest the right stage. Don't rename files before import.</div>
+    </div>
+    <div class="tip">
+      <span class="ic">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3"/></svg>
+      </span>
+      <div><b>Filename prefix = camera.</b> Files starting with <code style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text);">GH01</code>, <code style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text);">GX01</code> etc. get grouped automatically into per-camera lanes.</div>
+    </div>
+    <div class="tip">
+      <span class="ic">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      </span>
+      <div><b>Detection runs in the background.</b> The jobs drawer shows beep detection per video as soon as you confirm assignments -- you can move on while it processes.</div>
+    </div>
+  </div>
+
+  <div class="footnote">
+    Wireframe 18 of N &nbsp;&middot;&nbsp; ./docs/ux-redesign/wireframes/18-ingest-empty.html
+  </div>
+</main>
+
+</body>
+</html>
