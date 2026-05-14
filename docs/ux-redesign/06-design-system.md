@@ -82,6 +82,51 @@ Every token here has been spot-checked for AA contrast against its
 intended background in `05-accessibility.md`. New tokens must clear
 the same bar before they enter the file.
 
+### 1.2.1 Per-shooter identity tokens
+
+Introduced in polished surface 07 (Stage Compare). Each shooter has a
+5-token palette (base / soft / deep / glow / tint). Used wherever
+multiple shooters appear together (Compare, Coach, Shooters
+management). The user (Mathias / MA) always uses the LED-red family
+because they are "you". The other three intentionally overlap with
+the live/done semantic colors so the same scale renders consistently:
+
+```
+/* MA -- LED red (you / audio source) */
+--c-ma:       #FF2D2D;            /* matches --led */
+--c-ma-soft:  #FF5555;
+--c-ma-deep:  #B91C1C;
+--c-ma-glow:  rgba(255, 45, 45, 0.32);
+--c-ma-tint:  rgba(255, 45, 45, 0.10);
+
+/* JL -- amber */
+--c-jl:       #FBBF24;            /* matches --live */
+--c-jl-soft:  #FCD34D;
+--c-jl-deep:  #B45309;
+--c-jl-glow:  rgba(251, 191, 36, 0.32);
+--c-jl-tint:  rgba(251, 191, 36, 0.10);
+
+/* PE -- green (leader-coded) */
+--c-pe:       #4ADE80;            /* matches --done */
+--c-pe-soft:  #86EFAC;
+--c-pe-deep:  #166534;
+--c-pe-glow:  rgba(74, 222, 128, 0.32);
+--c-pe-tint:  rgba(74, 222, 128, 0.10);
+
+/* RJ -- blue (new addition for 4th-shooter slot) */
+--c-rj:       #60A5FA;
+--c-rj-soft:  #93C5FD;
+--c-rj-deep:  #1E3A8A;
+--c-rj-glow:  rgba(96, 165, 250, 0.32);
+--c-rj-tint:  rgba(96, 165, 250, 0.10);
+```
+
+In production, shooter color assignment should be generated from a
+stable shooter ID (not initials), drawing from a rotation of 4-6
+identity palettes. The "you" shooter always gets the LED-red family.
+Reference shooters (future feature) should use a desaturated variant
+to distinguish from local participants.
+
 ### 1.3 Typography
 
 Three families, each with a clear purpose:
