@@ -1355,9 +1355,7 @@ def _bind_project_to_state(
             )
         shooter_slug = match.shooters[0]
         shooter_root = match_model.Match.shooter_root(resolved, shooter_slug)
-        user_config.record_project_open(
-            resolved, match.name or fallback_name, kind="match"
-        )
+        user_config.record_project_open(resolved, match.name or fallback_name, kind="match")
         return _bind_legacy_root_to_state(
             state, shooter_root, fallback_name=match.name or fallback_name
         )
@@ -1418,9 +1416,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.name = match.name or rp.name
             detail.shooter_count = len(match.shooters)
             detail.stage_count = len(match.stages)
-            detail.match_date = (
-                match.match_date.isoformat() if match.match_date else None
-            )
+            detail.match_date = match.match_date.isoformat() if match.match_date else None
             detail.manual = match.scoreboard_match_id is None
             # Audited = sum of audited stages across shooters / shooter_count.
             audited_total = 0
@@ -1429,13 +1425,9 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                     shooter = match.load_shooter(path, slug)
                 except (FileNotFoundError, KeyError):
                     continue
-                audited_total += sum(
-                    1 for s in shooter.stages if s.time_seconds > 0 or s.skipped
-                )
+                audited_total += sum(1 for s in shooter.stages if s.time_seconds > 0 or s.skipped)
             detail.stages_audited = (
-                audited_total // max(len(match.shooters), 1)
-                if match.shooters
-                else 0
+                audited_total // max(len(match.shooters), 1) if match.shooters else 0
             )
             metadata_path = path / match_model.MATCH_FILE
         else:
@@ -1444,9 +1436,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.name = project.name or rp.name
             detail.shooter_count = 1
             detail.stage_count = len(project.stages)
-            detail.match_date = (
-                project.match_date.isoformat() if project.match_date else None
-            )
+            detail.match_date = project.match_date.isoformat() if project.match_date else None
             detail.manual = project.scoreboard_match_id is None
             detail.stages_audited = sum(
                 1 for s in project.stages if s.time_seconds > 0 or s.skipped
@@ -5677,9 +5667,7 @@ def create_app(
         projects = user_config.get_recent_projects()
         if detail:
             enriched = [_enrich_recent_project(p) for p in projects]
-            return JSONResponse(
-                {"projects": [p.model_dump(mode="json") for p in enriched]}
-            )
+            return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
     @app.post("/api/user/recent-projects/forget")
@@ -5808,8 +5796,7 @@ def create_app(
                         time_seconds=0.0,
                         stage_rounds=(
                             StageRounds(expected=draft.expected_rounds)
-                            if draft.expected_rounds is not None
-                            and draft.expected_rounds > 0
+                            if draft.expected_rounds is not None and draft.expected_rounds > 0
                             else None
                         ),
                         placeholder=False,
@@ -5818,9 +5805,7 @@ def create_app(
         legacy.save(shooter_root)
 
         try:
-            recorded = _bind_project_to_state(
-                state, shooter_root, fallback_name=req.name
-            )
+            recorded = _bind_project_to_state(state, shooter_root, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         # Also record the *match* path in the recent-projects index so the
@@ -5887,9 +5872,7 @@ def create_app(
         legacy.save(shooter_root)
 
         try:
-            recorded = _bind_project_to_state(
-                state, shooter_root, fallback_name=req.name
-            )
+            recorded = _bind_project_to_state(state, shooter_root, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         user_config.record_project_open(target.resolve(), match.name, kind="match")

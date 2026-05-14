@@ -30,7 +30,6 @@ from splitsmith.match_model import (
 )
 from splitsmith.ui.project import MatchProject, StageEntry
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -236,9 +235,7 @@ def test_plan_merge_happy_path(tmp_path: Path):
     a = _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton Johansson")
     b = _make_legacy(tmp_path / "martin", name="VADS", competitor="Martin Engström")
 
-    plan = plan_merge(
-        [tmp_path / "anton", tmp_path / "martin"], tmp_path / "merged"
-    )
+    plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], tmp_path / "merged")
 
     assert plan.name == "VADS"
     assert plan.scoreboard_match_id == "27242"
@@ -282,9 +279,7 @@ def test_plan_merge_tolerates_placeholder_loss(tmp_path: Path):
     )
     proj_a.stages[0].placeholder = True
     proj_a.save(tmp_path / "a")
-    _make_legacy(
-        tmp_path / "b", name="X", competitor="B", stage_names=["Egg Grab", "S2", "S3"]
-    )
+    _make_legacy(tmp_path / "b", name="X", competitor="B", stage_names=["Egg Grab", "S2", "S3"])
 
     plan = plan_merge([tmp_path / "a", tmp_path / "b"], tmp_path / "merged")
     assert plan.stages[0].stage_name == "Egg Grab"
@@ -365,7 +360,8 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
         assert (sroot / "raw").is_dir(), slug
 
     # User data carried across.
-    assert (out / SHOOTERS_DIR / "anton-johansson" / "raw" / "fake.mp4").read_bytes() == b"raw-anton"
+    raw_file = out / SHOOTERS_DIR / "anton-johansson" / "raw" / "fake.mp4"
+    assert raw_file.read_bytes() == b"raw-anton"
     assert (
         out / SHOOTERS_DIR / "anton-johansson" / "audit" / "stage1.json"
     ).read_text() == '{"shots": []}'
@@ -416,9 +412,7 @@ def test_execute_merge_shooter_json_has_no_match_fields(tmp_path: Path):
     plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
     execute_merge(plan, move=False)
 
-    shooter_json = json.loads(
-        (out / SHOOTERS_DIR / "anton" / SHOOTER_FILE).read_text()
-    )
+    shooter_json = json.loads((out / SHOOTERS_DIR / "anton" / SHOOTER_FILE).read_text())
     for forbidden in ("name", "scoreboard_match_id", "scoreboard_content_type", "match_date"):
         # ``name`` IS a Shooter field (the human-readable shooter name), so
         # only the *match*-flavored fields are forbidden. The shooter's own

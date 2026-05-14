@@ -484,7 +484,9 @@ def plan_merge(
         )
     sb_id = next(iter(scoreboard_ids), None)
 
-    content_types = {p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None}
+    content_types = {
+        p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None
+    }
     if len(content_types) > 1:
         raise MergeConflictError(
             f"inputs disagree on scoreboard_content_type: {sorted(content_types)}"
@@ -501,9 +503,7 @@ def plan_merge(
 
     dates = {p.match_date for _, p in projects if p.match_date}
     if len(dates) > 1:
-        raise MergeConflictError(
-            f"inputs disagree on match_date: {sorted(str(d) for d in dates)}"
-        )
+        raise MergeConflictError(f"inputs disagree on match_date: {sorted(str(d) for d in dates)}")
     match_date = next(iter(dates), None)
 
     # Merge stage definitions.
@@ -627,9 +627,7 @@ def execute_merge(
         # Note: any pre-existing scoreboard cache stays under the shooter's
         # scoreboard/ subdir. The match-level scoreboard/ at the top is
         # reserved for future shared caches; today it stays empty.
-        logger.info(
-            "merge: %s -> %s (%s)", src, dst, "moved" if move else "copied"
-        )
+        logger.info("merge: %s -> %s (%s)", src, dst, "moved" if move else "copied")
 
     # Write the match.json last, after every shooter dir is in place, so a
     # crashed merge leaves either no match.json (nothing committed) or a
@@ -685,9 +683,7 @@ def load_match_or_legacy(
     kind, root = from_path(path)
     if kind == "match":
         match = Match.load(root)
-        roots: dict[str, Path] = {
-            slug: Match.shooter_root(root, slug) for slug in match.shooters
-        }
+        roots: dict[str, Path] = {slug: Match.shooter_root(root, slug) for slug in match.shooters}
         return match, roots
     # legacy
     project = MatchProject.load(root)

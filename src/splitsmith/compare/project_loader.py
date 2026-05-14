@@ -134,9 +134,7 @@ def _trim_path_for_shooter_stage(
     """Same naming as :func:`trim_path_for_stage` but rooted at a shooter dir."""
     base = f"stage{stage_number}_{_slugify(stage_name)}"
     exports = (
-        Path(shooter.exports_dir).expanduser()
-        if shooter.exports_dir
-        else shooter_root / "exports"
+        Path(shooter.exports_dir).expanduser() if shooter.exports_dir else shooter_root / "exports"
     )
     if not exports.is_absolute():
         exports = shooter_root / exports
@@ -174,9 +172,7 @@ def load_shooter_from_match(
         if primary is None or primary.beep_time is None:
             continue
         stage_name = stage_names.get(stage.stage_number, f"stage{stage.stage_number}")
-        trim = _trim_path_for_shooter_stage(
-            shooter, shooter_root, stage.stage_number, stage_name
-        )
+        trim = _trim_path_for_shooter_stage(shooter, shooter_root, stage.stage_number, stage_name)
         if not trim.exists():
             continue
         meta = probe(trim)

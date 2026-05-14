@@ -174,10 +174,7 @@ def test_compare_via_manifest_and_via_merged_match_produce_same_structure(
         output=tmp_path / "via_match.fcpxml",
         audio_from=audio_label,
         layout_2up="horizontal",
-        shooters=[
-            CompareShooter(project=merged_root, label=b.label)
-            for b in bundles_via_match
-        ],
+        shooters=[CompareShooter(project=merged_root, label=b.label) for b in bundles_via_match],
     )
     emit_compare_fcpxml(
         manifest=synthetic,
@@ -225,14 +222,10 @@ def test_load_shooter_from_match_skips_stages_with_missing_trims(tmp_path: Path)
     execute_merge(plan, move=False)
 
     # Delete one shooter's stage-1 trim post-merge.
-    victim = (
-        merged_root / "shooters" / "anton" / "exports" / "stage1_egg-grab_trimmed.mp4"
-    )
+    victim = merged_root / "shooters" / "anton" / "exports" / "stage1_egg-grab_trimmed.mp4"
     assert victim.exists()
     victim.unlink()
 
-    bundle = load_shooter_from_match(
-        merged_root, "anton", label="Anton", probe=_stub_probe
-    )
+    bundle = load_shooter_from_match(merged_root, "anton", label="Anton", probe=_stub_probe)
     assert 1 not in bundle.stages_by_number
     assert 2 in bundle.stages_by_number

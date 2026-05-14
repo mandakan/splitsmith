@@ -7,10 +7,10 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from ..match_model import Match, is_match_folder, slugify
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import project_loader
-from ..match_model import Match, is_match_folder, slugify
 
 compare_app = typer.Typer(
     name="compare",
@@ -64,14 +64,10 @@ def export(
     """
     if source.is_dir() and is_match_folder(source):
         if audio_from is None:
-            console.print(
-                "[red]Error:[/] --audio-from is required when SOURCE is a match folder."
-            )
+            console.print("[red]Error:[/] --audio-from is required when SOURCE is a match folder.")
             raise typer.Exit(code=2)
         if output is None:
-            console.print(
-                "[red]Error:[/] --output is required when SOURCE is a match folder."
-            )
+            console.print("[red]Error:[/] --output is required when SOURCE is a match folder.")
             raise typer.Exit(code=2)
         _export_from_match(source, audio_from=audio_from, output=output)
         return
@@ -119,9 +115,7 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
     for slug in match.shooters:
         shooter = match.load_shooter(match_root, slug)
         label = shooter.name or slug
-        bundles.append(
-            project_loader.load_shooter_from_match(match_root, slug, label)
-        )
+        bundles.append(project_loader.load_shooter_from_match(match_root, slug, label))
         if slug == resolved_audio_slug:
             audio_label = label
 
@@ -132,13 +126,9 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
         output=output,
         audio_from=audio_label,
         layout_2up="horizontal",
-        shooters=[
-            manifest_mod.CompareShooter(project=match_root, label=b.label) for b in bundles
-        ],
+        shooters=[manifest_mod.CompareShooter(project=match_root, label=b.label) for b in bundles],
     )
-    emitter_mod.emit_compare_fcpxml(
-        manifest=synthetic, shooters=bundles, output_path=output
-    )
+    emitter_mod.emit_compare_fcpxml(manifest=synthetic, shooters=bundles, output_path=output)
     console.print(f"[green]Wrote[/] {output}")
 
 

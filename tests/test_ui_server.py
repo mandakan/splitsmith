@@ -5024,9 +5024,7 @@ def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path)
     assert client.get("/api/user/scoreboard-identity").status_code == 404
 
 
-def test_recent_projects_detail_enriches_metadata(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_home: Path) -> None:
     """`?detail=true` returns kind + stage/shooter counts for the redesign picker (#322)."""
     from splitsmith import match_model, user_config
 
@@ -5062,9 +5060,7 @@ def test_recent_projects_detail_enriches_metadata(
     assert by_kind["legacy"]["shooter_count"] == 1
 
 
-def test_recent_projects_detail_marks_missing_path(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import user_config
 
     ghost = tmp_path / "ghost"
@@ -5150,9 +5146,7 @@ def test_create_match_manual_refuses_existing_match_folder(
     assert resp.json()["detail"]["code"] == "match_already_exists"
 
 
-def test_bind_match_folder_routes_to_first_shooter(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_bind_match_folder_routes_to_first_shooter(tmp_path: Path, _user_config_home: Path) -> None:
     """Binding a Match folder transparently switches state to the first shooter."""
     from splitsmith import match_model
 

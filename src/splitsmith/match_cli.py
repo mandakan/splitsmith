@@ -20,8 +20,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import match_model
-from . import user_config
+from . import match_model, user_config
 from .match_model import (
     MATCH_FILE,
     Match,
@@ -56,7 +55,10 @@ def merge(
         ...,
         "--output",
         "-o",
-        help="Path for the new merged match folder. Must not exist (or must not already contain match.json).",
+        help=(
+            "Path for the new merged match folder. Must not exist (or must "
+            "not already contain match.json)."
+        ),
     ),
     name: str | None = typer.Option(
         None,
@@ -107,10 +109,10 @@ def merge(
         plan = plan_merge(inputs, output, name=name)
     except MergeConflictError as exc:
         console.print(f"[red]Conflict:[/] {exc}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from exc
     except ValueError as exc:
         console.print(f"[red]Error:[/] {exc}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=2) from exc
 
     _render_plan(plan, dry_run=dry_run, move=move)
 
@@ -121,18 +123,15 @@ def merge(
         match = execute_merge(plan, move=move)
     except FileExistsError as exc:
         console.print(f"[red]Refused:[/] {exc}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     console.print(
-        f"\n[green]Merged[/] {len(match.shooters)} shooter(s) into "
-        f"[bold]{plan.output_root}[/]."
+        f"\n[green]Merged[/] {len(match.shooters)} shooter(s) into " f"[bold]{plan.output_root}[/]."
     )
 
     if register:
         user_config.record_project_open(plan.output_root, match.name, kind="match")
-        console.print(
-            f"[dim]Registered as a recent project in {user_config.user_config_dir()}.[/]"
-        )
+        console.print(f"[dim]Registered as a recent project in {user_config.user_config_dir()}.[/]")
 
 
 @match_app.command("info")
@@ -161,9 +160,7 @@ def info(
                 shooters.append((slug, None))
         kind = "match"
     elif is_legacy_project_folder(path):
-        match, shooter = match_model.legacy_to_match_view(
-            match_model.MatchProject.load(path)
-        )
+        match, shooter = match_model.legacy_to_match_view(match_model.MatchProject.load(path))
         shooters = [(shooter.slug, shooter)]
         kind = "legacy"
     else:
