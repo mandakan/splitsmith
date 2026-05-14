@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith -- wireframe 01: shell + match picker</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --border: #e5e5e8;
+    --border-strong: #d4d4d8;
+    --text: #18181b;
+    --text-muted: #71717a;
+    --text-subtle: #a1a1aa;
+    --accent: #4338ca;
+    --accent-soft: #eef2ff;
+    --green: #15803d;
+    --green-soft: #dcfce7;
+    --amber: #b45309;
+    --amber-soft: #fef3c7;
+    --slate: #475569;
+    --slate-soft: #f1f5f9;
+    --shadow: 0 1px 2px rgba(15, 15, 20, 0.04), 0 1px 1px rgba(15, 15, 20, 0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  button { font: inherit; cursor: pointer; }
+
+  /* -------- Wireframe banner -------- */
+  .wf-banner {
+    background: #1f2937;
+    color: #e5e7eb;
+    font-size: 12px;
+    padding: 6px 16px;
+    text-align: center;
+    letter-spacing: 0.02em;
+  }
+  .wf-banner b { color: white; }
+
+  /* -------- Shell -------- */
+  .shell {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .shell-top {
+    display: flex;
+    align-items: center;
+    padding: 10px 24px;
+    gap: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .brand-dot {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, var(--accent), #6d28d9);
+  }
+  .mode-switch {
+    display: inline-flex;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2px;
+  }
+  .mode-switch button {
+    background: transparent;
+    border: 0;
+    padding: 6px 14px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .mode-switch button.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+  }
+  .shell-spacer { flex: 1; }
+  .shell-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .icon-btn {
+    width: 32px; height: 32px;
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--text-muted);
+  }
+  .icon-btn:hover { background: var(--surface-2); }
+  .avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #ef4444);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    margin-left: 4px;
+  }
+
+  /* -------- Context bar -------- */
+  .context-bar {
+    display: flex;
+    align-items: center;
+    padding: 8px 24px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .crumb-sep { color: var(--text-subtle); }
+
+  /* -------- Page -------- */
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 24px 80px; }
+  .page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+  .page-sub { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+
+  /* -------- Toolbar -------- */
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+  }
+  .search {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .search input {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    outline: none;
+    font: inherit;
+    color: var(--text);
+  }
+  .search svg { color: var(--text-subtle); }
+  .filter-chip {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .filter-chip.active {
+    background: var(--accent-soft);
+    border-color: var(--accent-soft);
+    color: var(--accent);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover { filter: brightness(1.05); }
+
+  /* -------- Match list -------- */
+  .match-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .match-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr 130px 150px 170px 110px;
+    column-gap: 18px;
+    align-items: center;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .match-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow);
+  }
+  .match-card.archived { opacity: 0.7; }
+  .match-title {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.3;
+  }
+  .match-meta {
+    color: var(--text-muted);
+    font-size: 12.5px;
+    margin-top: 3px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .match-meta .sep { color: var(--text-subtle); }
+  .col-label {
+    font-size: 11px;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 2px;
+  }
+  .shooters {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .shooters .stack {
+    display: inline-flex;
+  }
+  .stack .av {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--surface);
+    margin-left: -6px;
+    color: white;
+    font-size: 9.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center; justify-content: center;
+  }
+  .stack .av:first-child { margin-left: 0; }
+  .av.a { background: #f59e0b; }
+  .av.b { background: #14b8a6; }
+  .av.c { background: #6366f1; }
+  .av.d { background: #ef4444; }
+  .av.more { background: var(--neutral, #71717a); }
+
+  .progress-row {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .progress-text { font-size: 12.5px; color: var(--text-muted); }
+  .progress {
+    height: 5px;
+    background: var(--slate-soft);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress > span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .badge.in-progress { background: var(--amber-soft); color: var(--amber); }
+  .badge.in-progress .dot { background: var(--amber); }
+  .badge.exported { background: var(--green-soft); color: var(--green); }
+  .badge.exported .dot { background: var(--green); }
+  .badge.archived { background: var(--slate-soft); color: var(--slate); }
+  .badge.archived .dot { background: var(--slate); }
+  .badge.empty { background: var(--slate-soft); color: var(--slate); }
+  .badge.empty .dot { background: var(--slate); }
+
+  .row-actions {
+    display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+  }
+  .ghost-btn {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    padding: 6px 8px;
+    border-radius: 6px;
+  }
+  .ghost-btn:hover { background: var(--surface-2); color: var(--text); }
+
+  /* -------- Footer note -------- */
+  .footnote {
+    margin-top: 28px;
+    color: var(--text-subtle);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  /* -------- Empty group divider -------- */
+  .group-header {
+    margin: 22px 0 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+
+<div class="wf-banner">
+  <b>Wireframe 01</b> &nbsp;&middot;&nbsp; Shell + Match picker
+  &nbsp;&middot;&nbsp; Structure, not visual identity. Reaction welcome on hierarchy, density, mode switcher placement.
+</div>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      Splitsmith
+    </div>
+
+    <div class="mode-switch" role="tablist" aria-label="Mode">
+      <button class="active" aria-selected="true">Match</button>
+      <button aria-selected="false">Developer</button>
+    </div>
+
+    <div class="shell-spacer"></div>
+
+    <div class="shell-actions">
+      <button class="icon-btn" title="Help (?)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
+      </button>
+      <button class="icon-btn" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg>
+      </button>
+      <span class="avatar" title="Mathias Axell">MA</span>
+    </div>
+  </div>
+
+  <div class="context-bar">
+    <div class="crumb">
+      <span>No match selected</span>
+      <span class="crumb-sep">&middot;</span>
+      <span>Pick or create one to start</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Matches</h1>
+      <div class="page-sub">Recent first. Click a match to open it, or start a new one.</div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+        Import backup
+      </button>
+      <button class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+        New match
+      </button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <input type="text" placeholder="Search by match, club, or shooter..." />
+    </div>
+    <button class="filter-chip active">All</button>
+    <button class="filter-chip">In progress</button>
+    <button class="filter-chip">Exported</button>
+    <button class="filter-chip">Archived</button>
+  </div>
+
+  <div class="match-list" role="list">
+
+    <div class="match-card" role="listitem">
+      <div>
+        <div class="match-title">VADS Easter Shoot 2026</div>
+        <div class="match-meta">
+          <span>2026-04-12</span><span class="sep">&middot;</span>
+          <span>Vasterort PK &middot; Indoor</span><span class="sep">&middot;</span>
+          <span>Level II</span>
+        </div>
+      </div>
+      <div>
+        <div class="col-label">Shooters</div>
+        <div class="shooters">
+          <span class="stack">
+            <span class="av a">MA</span>
+            <span class="av b">JL</span>
+            <span class="av c">PE</span>
+            <span class="av more">+1</span>
+          </span>
+        </div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-text">8 of 12 stages audited</div>
+        <div class="progress"><span style="width: 66%"></span></div>
+      </div>
+      <div>
+        <div class="col-label">Status</div>
+        <span class="badge in-progress"><span class="dot"></span>In progress</span>
+      </div>
+      <div class="row-actions">
+        <button class="btn btn-primary">Open</button>
+        <button class="ghost-btn" title="More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="match-card" role="listitem">
+      <div>
+        <div class="match-title">Bofors Bombardment 2026</div>
+        <div class="match-meta">
+          <span>2026-03-22</span><span class="sep">&middot;</span>
+          <span>Bofors PSK &middot; Outdoor</span><span class="sep">&middot;</span>
+          <span>Level II</span>
+        </div>
+      </div>
+      <div>
+        <div class="col-label">Shooters</div>
+        <div class="shooters">
+          <span class="stack">
+            <span class="av a">MA</span>
+          </span>
+        </div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-text">6 of 6 stages audited</div>
+        <div class="progress"><span style="width: 100%"></span></div>
+      </div>
+      <div>
+        <div class="col-label">Status</div>
+        <span class="badge exported"><span class="dot"></span>Exported</span>
+      </div>
+      <div class="row-actions">
+        <button class="btn">Open</button>
+        <button class="ghost-btn" title="More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="match-card" role="listitem">
+      <div>
+        <div class="match-title">Bromma Classifier 2026</div>
+        <div class="match-meta">
+          <span>2026-02-08</span><span class="sep">&middot;</span>
+          <span>Bromma PK &middot; Indoor</span><span class="sep">&middot;</span>
+          <span>Club match</span>
+        </div>
+      </div>
+      <div>
+        <div class="col-label">Shooters</div>
+        <div class="shooters">
+          <span class="stack">
+            <span class="av a">MA</span>
+            <span class="av b">JL</span>
+            <span class="av c">PE</span>
+          </span>
+        </div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-text">4 of 4 stages audited</div>
+        <div class="progress"><span style="width: 100%"></span></div>
+      </div>
+      <div>
+        <div class="col-label">Status</div>
+        <span class="badge exported"><span class="dot"></span>Exported</span>
+      </div>
+      <div class="row-actions">
+        <button class="btn">Open</button>
+        <button class="ghost-btn" title="More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="match-card" role="listitem">
+      <div>
+        <div class="match-title">Practice Session -- draw drills</div>
+        <div class="match-meta">
+          <span>2026-01-30</span><span class="sep">&middot;</span>
+          <span>Manual setup &middot; No scoreboard</span>
+        </div>
+      </div>
+      <div>
+        <div class="col-label">Shooters</div>
+        <div class="shooters">
+          <span class="stack">
+            <span class="av a">MA</span>
+          </span>
+        </div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-text">2 of 3 stages audited</div>
+        <div class="progress"><span style="width: 66%"></span></div>
+      </div>
+      <div>
+        <div class="col-label">Status</div>
+        <span class="badge in-progress"><span class="dot"></span>In progress</span>
+      </div>
+      <div class="row-actions">
+        <button class="btn btn-primary">Open</button>
+        <button class="ghost-btn" title="More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="group-header">Archived</div>
+
+    <div class="match-card archived" role="listitem">
+      <div>
+        <div class="match-title">Solvalla Open 2025</div>
+        <div class="match-meta">
+          <span>2025-09-14</span><span class="sep">&middot;</span>
+          <span>Solvalla PK &middot; Outdoor</span><span class="sep">&middot;</span>
+          <span>Level II</span>
+        </div>
+      </div>
+      <div>
+        <div class="col-label">Shooters</div>
+        <div class="shooters">
+          <span class="stack">
+            <span class="av a">MA</span>
+            <span class="av d">RJ</span>
+          </span>
+        </div>
+      </div>
+      <div class="progress-row">
+        <div class="progress-text">10 of 10 stages audited</div>
+        <div class="progress"><span style="width: 100%"></span></div>
+      </div>
+      <div>
+        <div class="col-label">Status</div>
+        <span class="badge archived"><span class="dot"></span>Archived</span>
+      </div>
+      <div class="row-actions">
+        <button class="btn">Restore</button>
+        <button class="ghost-btn" title="More">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footnote">
+    Wireframe 01 of N &nbsp;&middot;&nbsp; ./docs/ux-redesign/wireframes/01-match-picker.html
+  </div>
+</main>
+
+</body>
+</html>
