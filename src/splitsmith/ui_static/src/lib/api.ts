@@ -1312,16 +1312,32 @@ export const api = {
       json: req,
     }),
 
-  scanVideos: (sourceDir: string, autoAssignPrimary = true) =>
+  scanVideos: (
+    sourceDir: string,
+    autoAssignPrimary = true,
+    linkMode: "symlink" | "copy" = "symlink",
+  ) =>
     request<ScanResponse>("/api/videos/scan", {
       method: "POST",
-      json: { source_dir: sourceDir, auto_assign_primary: autoAssignPrimary },
+      json: {
+        source_dir: sourceDir,
+        auto_assign_primary: autoAssignPrimary,
+        link_mode: linkMode,
+      },
     }),
 
-  scanFiles: (sourcePaths: string[], autoAssignPrimary = true) =>
+  scanFiles: (
+    sourcePaths: string[],
+    autoAssignPrimary = true,
+    linkMode: "symlink" | "copy" = "symlink",
+  ) =>
     request<ScanResponse>("/api/videos/scan", {
       method: "POST",
-      json: { source_paths: sourcePaths, auto_assign_primary: autoAssignPrimary },
+      json: {
+        source_paths: sourcePaths,
+        auto_assign_primary: autoAssignPrimary,
+        link_mode: linkMode,
+      },
     }),
 
   /** Per-video filesystem status of the ``raw/<name>`` symlinks. The
