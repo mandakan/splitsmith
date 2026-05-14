@@ -1,324 +1,233 @@
 /**
- * Coach screen (#161).
+ * Coach routes (#329).
  *
- * Read-only on shot timing -- the user can't drag markers here. The page
- * is built around the Coach API (#161): it fetches the per-stage coach
- * payload, lets the user override classifications, flag improvement
- * shots, and leave coaching notes. All edits round-trip through the
- * audit JSON so Audit and Coach see each other's writes.
+ * - ``/coach``       -- match-wide instrument view (polished/13)
+ * - ``/coach/:stage`` -- per-stage deep dive (polished/14)
  *
- * Click any shot row -> the primary video seeks to that shot's source
- * time and every synced secondary follows. Stale badges surface
- * auto-classifications whose stored class disagrees with the current
- * rule (typical after an Audit timestamp edit); click to accept the
- * recompute.
+ * Both mount under MatchShell; navigation is via the sidebar Coach
+ * link + the stage list.
  *
- * Multi-camera: VideoPanel handles the tab/grid layout. Coach owns the
- * single playback source (primary) and offsets each secondary by
- * ``(secondary.beep_time - primary.beep_time)`` so the beep aligns and
- * shots appear at the same scrub position across every camera.
+ * Match-wide aggregates per-stage coach data client-side because the
+ * server's /api/coach/distributions returns only histogram + top shots;
+ * the rest (per-stage times, ranking, annotations feed) loops over the
+ * project's audited stages.
+ *
+ * Per-stage preserves the existing wiring:
+ *   - GET /api/stages/{n}/coach loads shots + videos + beep
+ *   - POST .../reclassify reruns auto-classification
+ *   - PATCH .../shots/{s}/coach writes class / flag / note edits
+ * but the chrome / layout is the polished design.
  */
 
 import {
-  ClipboardCheck,
+  ArrowLeft,
+  ArrowRight,
   Flag,
+  Loader2,
+  MessageSquare,
   Pause,
   Play,
-  Radio,
   RefreshCw,
+  Save,
+  Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { VideoPanel } from "@/components/VideoPanel";
-import { Badge } from "@/components/ui/badge";
+import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
+  ApiError,
   api,
   type CoachIntervalClass,
-  type CoachIntervalDistribution,
+  type CoachMatchDistributions,
   type CoachShot,
-  type CoachShotPatch,
-  type CoachStageDistributions,
   type CoachStageResponse,
   type MatchProject,
-  type StageVideo,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const CLASS_OPTIONS: { value: CoachIntervalClass; label: string }[] = [
-  { value: "first_shot", label: "First shot" },
-  { value: "split", label: "Split" },
-  { value: "transition", label: "Transition" },
-  { value: "movement", label: "Movement" },
-  { value: "reload", label: "Reload" },
-  { value: "activation", label: "Activation" },
+const INTERVAL_LABEL: Record<CoachIntervalClass, string> = {
+  first_shot: "Draw",
+  split: "Fire",
+  transition: "Transition",
+  movement: "Movement",
+  reload: "Reload",
+  activation: "Activation",
+};
+
+const INTERVAL_TONE: Record<CoachIntervalClass, string> = {
+  first_shot: "text-led border-led-deep bg-led/10",
+  split: "text-done border-done/40 bg-done/10",
+  transition: "text-live border-live/40 bg-live/10",
+  movement: "text-beep border-beep/40 bg-beep-tint",
+  reload: "text-manual border-manual/40 bg-manual/10",
+  activation: "text-ink-2 border-rule-strong bg-surface-3",
+};
+
+const SPLIT_BUCKETS = [
+  { max: 0.25, label: "fast", color: "var(--color-done)" },
+  { max: 0.45, label: "ok", color: "var(--color-ink-2)" },
+  { max: 0.85, label: "slow", color: "var(--color-live)" },
+  { max: Infinity, label: "vslow", color: "var(--color-led)" },
 ];
+
+function splitBucket(s: number): { label: string; color: string } {
+  for (const b of SPLIT_BUCKETS) if (s <= b.max) return b;
+  return SPLIT_BUCKETS[SPLIT_BUCKETS.length - 1];
+}
 
 export function Coach() {
   const { stage: stageParam } = useParams();
+  if (stageParam) {
+    const n = Number(stageParam);
+    if (!Number.isFinite(n)) {
+      return <div className="px-7 py-8 text-sm text-muted">Bad stage.</div>;
+    }
+    return <CoachStage key={n} stage={n} />;
+  }
+  return <CoachMatch />;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Match-wide view                                                            */
+/* -------------------------------------------------------------------------- */
+
+interface PerStageAggregate {
+  stage_number: number;
+  stage_name: string;
+  audited: boolean;
+  total_seconds: number;
+  shot_count: number;
+  avg_split: number | null;
+  fastest_split: number | null;
+  slowest_split: number | null;
+  split_buckets: Record<string, number>;
+  flagged_count: number;
+}
+
+function CoachMatch() {
   const navigate = useNavigate();
-
   const [project, setProject] = useState<MatchProject | null>(null);
-  const [coach, setCoach] = useState<CoachStageResponse | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [reclassifying, setReclassifying] = useState(false);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
-
-  const [listHeight, setListHeight] = useState<number | null>(null);
-  const videoCardRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      setListHeight(el.offsetHeight);
-    });
-    ro.observe(el);
-  }, []);
-
-  // Multi-camera state. VideoPanel renders both modes; Coach owns the
-  // single playback source (the primary) and the secondary refs/offsets
-  // so click-to-scrub seeks every synced camera in lockstep. Grid is
-  // the default because side-by-side comparison is the entire point of
-  // the Coach view.
-  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
-  const [gridMode, setGridMode] = useState(true);
-  const secondaryRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
-  // path -> (secondary.beep_in_clip - primary.beep_in_clip). When the
-  // primary sits at clipTime T, the synced secondary should be at
-  // T + offset so both cameras show the same real-world instant.
-  // Computed in clip coords so the page works off the project-local
-  // trimmed cache; source files don't need to be reachable.
-  const secondaryOffsets = useRef<Map<string, number>>(new Map());
-
-  const stageNumber = useMemo(() => {
-    if (!stageParam) return null;
-    const n = Number.parseInt(stageParam, 10);
-    return Number.isFinite(n) ? n : null;
-  }, [stageParam]);
-
-  // Project (stage list).
-  useEffect(() => {
-    let alive = true;
-    api
-      .getProject()
-      .then((p) => {
-        if (alive) setProject(p);
-      })
-      .catch((err) => {
-        if (alive) setLoadError(String(err));
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const auditedStages = useMemo(() => {
-    if (!project) return [];
-    return project.stages.filter((s) => s.videos.some((v) => v.role === "primary"));
-  }, [project]);
-
-  // Auto-pick first stage if URL has no stage.
-  useEffect(() => {
-    if (stageNumber != null) return;
-    if (auditedStages.length === 0) return;
-    navigate(`/coach/${auditedStages[0].stage_number}`, { replace: true });
-  }, [stageNumber, auditedStages, navigate]);
-
-  const stage = useMemo(() => {
-    if (!project || stageNumber == null) return null;
-    return project.stages.find((s) => s.stage_number === stageNumber) ?? null;
-  }, [project, stageNumber]);
-
-  // VideoPanel expects [primary, ...secondaries]. Sort secondaries by
-  // added_at to match Audit's tab order so the user's mental model of
-  // "Cam 2 / Cam 3" stays stable across pages.
-  const videos = useMemo<StageVideo[]>(() => {
-    if (!stage) return [];
-    const primary = stage.videos.find((v) => v.role === "primary");
-    const secondaries = stage.videos
-      .filter((v) => v.role === "secondary")
-      .slice()
-      .sort((a, b) => a.added_at.localeCompare(b.added_at));
-    return primary ? [primary, ...secondaries] : [...secondaries];
-  }, [stage]);
-
-  const primaryVideo = videos[0] ?? null;
-  const activeVideo = videos[activeVideoIndex] ?? primaryVideo;
-  const videoSrc = activeVideo ? api.videoStreamUrl(activeVideo.path) : "";
-
-  // Offsets: derive from the Coach API's per-video ``beep_in_clip``
-  // values. Each camera's served clip has its own coordinate system
-  // (trimmed clips are cut around their own beep), so the offset that
-  // keeps two clips visually aligned is
-  //   secondary.beep_in_clip - primary.beep_in_clip.
-  // Only secondaries with a beep are synced; cameras without one stay
-  // disabled in VideoPanel's tab list.
-  useEffect(() => {
-    const next = new Map<string, number>();
-    const coachVideos = coach?.videos ?? [];
-    const primaryEntry = coachVideos.find((v) => v.role === "primary");
-    const primaryClipBeep = primaryEntry?.beep_in_clip ?? null;
-    if (primaryClipBeep != null) {
-      for (const v of coachVideos) {
-        if (v.role === "primary") continue;
-        if (v.beep_in_clip == null) continue;
-        next.set(v.path, v.beep_in_clip - primaryClipBeep);
-      }
-    }
-    secondaryOffsets.current = next;
-  }, [coach]);
-
-  // Reset active tab to primary on stage swap so the user lands on the
-  // headcam by default; grid stays sticky across stages because that's
-  // usually the workflow ("compare these two angles for every shot").
-  useEffect(() => {
-    setActiveVideoIndex(0);
-  }, [stageNumber]);
-
-  const handleSecondaryRef = useCallback(
-    (path: string, el: HTMLVideoElement | null) => {
-      if (el) {
-        secondaryRefs.current.set(path, el);
-        const off = secondaryOffsets.current.get(path);
-        const v = videoRef.current;
-        if (off != null && v != null) {
-          const target = v.currentTime + off;
-          if (el.readyState >= 1) {
-            el.currentTime = target;
-          } else {
-            el.addEventListener(
-              "loadedmetadata",
-              () => {
-                el.currentTime = target;
-              },
-              { once: true },
-            );
-          }
-        }
-      } else {
-        secondaryRefs.current.delete(path);
-      }
-    },
-    [],
-  );
-
-  // Coach is paused-by-default review; we don't need the play/pause loop
-  // logic Audit uses. timeupdate just keeps secondaries glued to the
-  // primary if the user hits the native controls. Clamp to each
-  // secondary's content range so we don't seek past a shorter clip.
-  // Also track which shot the playhead is currently inside so the table
-  // highlights and auto-scrolls along with the video -- the user expects
-  // the rows to follow as the recording plays out.
-  const coachShotsRef = useRef<CoachShot[]>([]);
-  const beepTimeRef = useRef<number>(0);
-  useEffect(() => {
-    coachShotsRef.current = coach?.shots ?? [];
-    beepTimeRef.current = coach?.beep_time ?? 0;
-  }, [coach]);
-
-  const handlePrimaryTimeUpdate = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    for (const [path, sv] of secondaryRefs.current) {
-      const off = secondaryOffsets.current.get(path);
-      if (off == null) continue;
-      const expected = v.currentTime + off;
-      const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-      if (expected < 0) continue;
-      if (dur != null && expected > dur) continue;
-      // Only re-seek when drift exceeds ~80 ms; cheap timeupdate firings
-      // would otherwise cause continuous re-seeks during native playback.
-      if (Math.abs(sv.currentTime - expected) > 0.08) {
-        sv.currentTime = expected;
-      }
-    }
-
-    // Active-shot tracking: the row whose time_absolute most recently
-    // passed under the playhead. ``shot 0`` (beep) covers the lead-in
-    // before shot 1 fires.
-    const shots = coachShotsRef.current;
-    const t = v.currentTime;
-    let nextActive: number | null = t >= beepTimeRef.current ? 0 : null;
-    for (const s of shots) {
-      if (s.time_absolute <= t + 0.01) {
-        nextActive = s.shot_number;
-      } else {
-        break;
-      }
-    }
-    setActiveShotNumber((prev) => (prev === nextActive ? prev : nextActive));
-  }, []);
-
-  const handleSecondaryBuffering = useCallback(
-    (_path: string, _buffering: boolean) => {
-      // Coach doesn't surface a panel-level buffering state -- the
-      // SecondarySlot's own overlay is enough for review.
-    },
-    [],
-  );
-
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) {
-      void v.play().catch(() => {});
-      for (const sv of secondaryRefs.current.values()) {
-        if (sv.paused) void sv.play().catch(() => {});
-      }
-    } else {
-      v.pause();
-      for (const sv of secondaryRefs.current.values()) sv.pause();
-    }
-  }, [videoRef, secondaryRefs]);
+  const [perStage, setPerStage] = useState<PerStageAggregate[]>([]);
+  const [distributions, setDistributions] =
+    useState<CoachMatchDistributions | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<
+    {
+      stage_number: number;
+      stage_name: string;
+      shot_number: number;
+      time_from_beep: number | null;
+      interval_class: CoachIntervalClass | null;
+      note: string;
+      flagged: boolean;
+    }[]
+  >([]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "Space") return;
-      const tag = (document.activeElement?.tagName ?? "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
-      e.preventDefault();
-      togglePlay();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [togglePlay]);
-
-  // Load coach payload whenever the stage changes; on first hit we
-  // auto-reclassify if any shot is unclassified, so the user always
-  // lands on a populated table.
-  useEffect(() => {
-    if (stageNumber == null) return;
     let alive = true;
     setLoading(true);
-    setLoadError(null);
-    setActiveShotNumber(null);
+    setError(null);
     (async () => {
       try {
-        const initial = await api.getStageCoach(stageNumber);
+        const proj = await api.getProject();
         if (!alive) return;
-        if (!initial) {
-          setCoach(null);
-          setLoadError("This stage has no audit JSON yet -- audit it first.");
-          return;
-        }
-        const needsAuto = initial.shots.some((s) => s.interval_class === null);
-        if (needsAuto) {
-          const populated = await api.reclassifyStageCoach(stageNumber);
-          if (!alive) return;
-          setCoach(populated);
-        } else {
-          setCoach(initial);
-        }
-      } catch (err) {
-        if (alive) setLoadError(String(err));
+        setProject(proj);
+        const auditedStages = proj.stages.filter(
+          (s) => !s.skipped && s.time_seconds > 0,
+        );
+        const [coachResults, dist] = await Promise.all([
+          Promise.all(
+            auditedStages.map((s) =>
+              api
+                .getStageCoach(s.stage_number)
+                .catch(() => null as CoachStageResponse | null),
+            ),
+          ),
+          api.getMatchCoachDistributions().catch(() => null),
+        ]);
+        if (!alive) return;
+        setDistributions(dist);
+
+        const coachByStage = new Map<number, CoachStageResponse | null>();
+        auditedStages.forEach((s, i) =>
+          coachByStage.set(s.stage_number, coachResults[i]),
+        );
+        const annot: typeof annotations = [];
+        const aggs: PerStageAggregate[] = proj.stages.map((s) => {
+          const coach = coachByStage.get(s.stage_number);
+          if (!coach) {
+            return {
+              stage_number: s.stage_number,
+              stage_name: s.stage_name,
+              audited: false,
+              total_seconds: s.time_seconds || 0,
+              shot_count: 0,
+              avg_split: null,
+              fastest_split: null,
+              slowest_split: null,
+              split_buckets: { fast: 0, ok: 0, slow: 0, vslow: 0 },
+              flagged_count: 0,
+            };
+          }
+          const splits = coach.shots.map((shot) => shot.split);
+          const buckets = { fast: 0, ok: 0, slow: 0, vslow: 0 };
+          for (const sp of splits) {
+            const b = splitBucket(sp);
+            (buckets as Record<string, number>)[b.label] += 1;
+          }
+          for (const shot of coach.shots) {
+            if (shot.coaching_note && shot.coaching_note.trim()) {
+              annot.push({
+                stage_number: s.stage_number,
+                stage_name: s.stage_name,
+                shot_number: shot.shot_number,
+                time_from_beep: shot.time_from_beep,
+                interval_class: shot.interval_class,
+                note: shot.coaching_note,
+                flagged: shot.improvement_flag,
+              });
+            } else if (shot.improvement_flag) {
+              annot.push({
+                stage_number: s.stage_number,
+                stage_name: s.stage_name,
+                shot_number: shot.shot_number,
+                time_from_beep: shot.time_from_beep,
+                interval_class: shot.interval_class,
+                note: "",
+                flagged: true,
+              });
+            }
+          }
+          return {
+            stage_number: s.stage_number,
+            stage_name: s.stage_name,
+            audited: true,
+            total_seconds: s.time_seconds || 0,
+            shot_count: coach.shots.length,
+            avg_split:
+              splits.length === 0
+                ? null
+                : splits.reduce((a, b) => a + b, 0) / splits.length,
+            fastest_split: splits.length === 0 ? null : Math.min(...splits),
+            slowest_split: splits.length === 0 ? null : Math.max(...splits),
+            split_buckets: buckets,
+            flagged_count: coach.shots.filter((sh) => sh.improvement_flag).length,
+          };
+        });
+        setPerStage(aggs);
+        setAnnotations(annot);
+      } catch (e) {
+        if (alive) setError(e instanceof ApiError ? e.detail : String(e));
       } finally {
         if (alive) setLoading(false);
       }
@@ -326,338 +235,1195 @@ export function Coach() {
     return () => {
       alive = false;
     };
-  }, [stageNumber]);
-
-  const onReclassify = useCallback(async () => {
-    if (stageNumber == null) return;
-    setReclassifying(true);
-    try {
-      const updated = await api.reclassifyStageCoach(stageNumber);
-      setCoach(updated);
-    } catch (err) {
-      setLoadError(String(err));
-    } finally {
-      setReclassifying(false);
-    }
-  }, [stageNumber]);
-
-  const seekTo = useCallback((shot: CoachShot) => {
-    setActiveShotNumber(shot.shot_number);
-    const v = videoRef.current;
-    if (v) {
-      v.currentTime = shot.time_absolute;
-    }
-    for (const [path, sv] of secondaryRefs.current) {
-      const off = secondaryOffsets.current.get(path);
-      if (off == null) continue;
-      const expected = shot.time_absolute + off;
-      const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-      if (expected < 0) continue;
-      if (dur != null && expected > dur) continue;
-      sv.currentTime = expected;
-    }
   }, []);
 
-  const patchShot = useCallback(
-    async (shotNumber: number, patch: CoachShotPatch) => {
-      if (stageNumber == null) return;
-      try {
-        const updated = await api.patchStageShotCoach(stageNumber, shotNumber, patch);
-        setCoach(updated);
-      } catch (err) {
-        setLoadError(String(err));
-      }
-    },
-    [stageNumber],
-  );
+  const auditedAggs = perStage.filter((s) => s.audited);
+  const headline = useMemo(() => computeHeadline(auditedAggs), [auditedAggs]);
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted">
+        <Loader2 className="size-4 animate-spin" /> Loading coach data...
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="px-7 py-8">
+        <div className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+          {error}
+        </div>
+      </div>
+    );
+  }
+  if (!project) return null;
+
+  if (auditedAggs.length === 0) {
+    return (
+      <div className="px-7 py-8">
+        <Kicker className="mb-2">Match analysis</Kicker>
+        <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
+          Coach
+        </h1>
+        <p className="max-w-xl text-sm text-muted">
+          Audit a stage on the audit page to unlock match-wide coaching
+          insights -- splits, interval breakdowns, and per-stage rankings.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <ClipboardCheck className="size-6 text-primary" />
-            Coach
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Review shots, classify intervals, flag improvements. Marker timing is read-only here -- edit in Audit.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onReclassify}
-          disabled={reclassifying || stageNumber == null}
-        >
-          <RefreshCw className={cn("size-4", reclassifying && "animate-spin")} />
-          Reclassify
-        </Button>
+    <div className="flex flex-col gap-5 px-7 py-5">
+      <div>
+        <Kicker className="mb-2">Match analysis</Kicker>
+        <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
+          Coach
+          <span className="ml-3 rounded border border-rule-strong bg-surface-2 px-2 py-1 align-middle font-mono text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-ink-2">
+            Match-wide
+          </span>
+        </h1>
+        <p className="font-mono text-[0.75rem] uppercase tracking-[0.06em] text-muted">
+          <b className="font-bold text-ink">{pad2(auditedAggs.length)}</b>{" "}
+          stages audited &middot;{" "}
+          <b className="font-bold text-ink">{headline.shotCount}</b> shots
+          logged &middot;{" "}
+          <span className="text-led">
+            {project.competitor_name ?? "you"}
+          </span>
+        </p>
       </div>
 
-      <StagePicker stages={auditedStages} active={stageNumber} />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Match time"
+          value={formatMinSec(headline.totalSeconds)}
+          unit="audited"
+          sub={`${auditedAggs.length} stages · ${headline.shotCount} shots`}
+        />
+        <StatCard
+          label="Avg split"
+          value={
+            headline.avgSplit != null
+              ? `${headline.avgSplit.toFixed(2)}s`
+              : "--"
+          }
+          unit="across all shots"
+          tone="done"
+        />
+        <StatCard
+          label="Fastest split"
+          value={
+            headline.fastestSplit != null
+              ? `${headline.fastestSplit.value.toFixed(3)}s`
+              : "--"
+          }
+          tone="led"
+          sub={
+            headline.fastestSplit
+              ? `stage ${pad2(headline.fastestSplit.stage)} · ${headline.fastestSplit.stage_name}`
+              : undefined
+          }
+        />
+        <StatCard
+          label="Slowest split"
+          value={
+            headline.slowestSplit != null
+              ? `${headline.slowestSplit.value.toFixed(3)}s`
+              : "--"
+          }
+          tone={
+            headline.slowestSplit && headline.slowestSplit.value > 0.85
+              ? "warn"
+              : undefined
+          }
+          sub={
+            headline.slowestSplit
+              ? `stage ${pad2(headline.slowestSplit.stage)} · ${headline.slowestSplit.stage_name}`
+              : undefined
+          }
+        />
+      </div>
 
-      {loadError ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Can't load coach view</CardTitle>
-            <CardDescription>{loadError}</CardDescription>
-          </CardHeader>
-        </Card>
-      ) : null}
-
-      {coach && (
-        <div className="space-y-6">
-          {/* Top row: video grid + condensed event list, locked to the
-              same height so the user can scrub the list while watching
-              the video without either disappearing. The event list is
-              fixed-width on lg+; on narrow viewports it stacks below. */}
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,340px)] lg:items-start">
-            <Card ref={videoCardRef} className="flex flex-col">
-              <CardHeader>
-                <CardTitle>
-                  Stage {coach.stage_number} -- {coach.stage_name}
-                </CardTitle>
-                <CardDescription>
-                  Click a shot to seek every synced camera.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex-1">
-                {videos.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground">
-                    No primary video bound to this stage.
-                  </div>
-                ) : (
-                  <>
-                    <VideoPanel
-                      ref={videoRef}
-                      videos={videos}
-                      primaryBeepTime={primaryVideo?.beep_time ?? null}
-                      activeIndex={activeVideoIndex}
-                      onActiveIndexChange={setActiveVideoIndex}
-                      videoSrc={videoSrc}
-                      gridMode={gridMode}
-                      onGridModeToggle={() => setGridMode((g) => !g)}
-                      onSecondaryRef={handleSecondaryRef}
-                      onSecondaryBuffering={handleSecondaryBuffering}
-                      onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
-                    />
-                    <PlaybackBar videoRef={videoRef} onTogglePlay={togglePlay} />
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            <CondensedShotList
-              shots={coach.shots}
-              beepTime={coach.beep_time}
-              activeShotNumber={activeShotNumber}
-              heightPx={listHeight}
-              onRowClick={seekTo}
-              onSeekToBeep={() => {
-                setActiveShotNumber(0);
-                const v = videoRef.current;
-                if (v) v.currentTime = coach.beep_time;
-                for (const [path, sv] of secondaryRefs.current) {
-                  const off = secondaryOffsets.current.get(path);
-                  if (off == null) continue;
-                  const expected = coach.beep_time + off;
-                  const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-                  if (expected < 0) continue;
-                  if (dur != null && expected > dur) continue;
-                  sv.currentTime = expected;
-                }
-              }}
-            />
-          </div>
-
-          {/* Bottom strip: full edit surface for the active event. */}
-          <ActiveShotDetail
-            shot={
-              activeShotNumber == null || activeShotNumber === 0
-                ? null
-                : coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null
-            }
-            beepActive={activeShotNumber === 0}
-            beepTime={coach.beep_time}
-            onPatch={patchShot}
-          />
-
-          {stageNumber != null ? <DistributionsPanel stageNumber={stageNumber} /> : null}
+      <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+        <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+          Per-stage breakdown
+          <span className="ml-2 font-mono text-[0.625rem] font-medium tracking-[0.06em] text-muted">
+            click a row to open audit · double-click for per-stage coach
+          </span>
         </div>
-      )}
+        <div className="grid grid-cols-[40px_1fr_100px_120px_180px_60px_40px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+          <span>#</span>
+          <span>Stage</span>
+          <span className="text-right">Time</span>
+          <span className="text-right">Avg split</span>
+          <span>Distribution</span>
+          <span className="text-right">Shots</span>
+          <span />
+        </div>
+        {perStage.map((s) => (
+          <PerStageRow
+            key={s.stage_number}
+            row={s}
+            onOpen={() => s.audited && navigate(`/audit/${s.stage_number}`)}
+            onCoach={() => s.audited && navigate(`/coach/${s.stage_number}`)}
+          />
+        ))}
+      </section>
 
-      {loading && !coach ? (
-        <Card>
-          <CardHeader>
-            <CardDescription>Loading coach view...</CardDescription>
-          </CardHeader>
-        </Card>
-      ) : null}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+        <IntervalBreakdownCard distributions={distributions} />
+        <CrtHistogramCard distributions={distributions} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+        <RecommendationsCard distributions={distributions} />
+        <AnnotationsCard annotations={annotations} />
+      </div>
     </div>
   );
 }
 
-function StagePicker({
-  stages,
-  active,
+function computeHeadline(aggs: PerStageAggregate[]) {
+  let totalSeconds = 0;
+  let shotCount = 0;
+  let splitSum = 0;
+  let splitCount = 0;
+  let fastest: {
+    value: number;
+    stage: number;
+    stage_name: string;
+  } | null = null;
+  let slowest: {
+    value: number;
+    stage: number;
+    stage_name: string;
+  } | null = null;
+  for (const s of aggs) {
+    totalSeconds += s.total_seconds;
+    shotCount += s.shot_count;
+    if (s.fastest_split != null) {
+      splitSum += s.fastest_split * s.shot_count;
+      splitCount += s.shot_count;
+      if (fastest == null || s.fastest_split < fastest.value) {
+        fastest = {
+          value: s.fastest_split,
+          stage: s.stage_number,
+          stage_name: s.stage_name,
+        };
+      }
+    }
+    if (s.slowest_split != null) {
+      if (slowest == null || s.slowest_split > slowest.value) {
+        slowest = {
+          value: s.slowest_split,
+          stage: s.stage_number,
+          stage_name: s.stage_name,
+        };
+      }
+    }
+  }
+  const avgSplit = splitCount === 0 ? null : splitSum / splitCount;
+  return {
+    totalSeconds,
+    shotCount,
+    avgSplit,
+    fastestSplit: fastest,
+    slowestSplit: slowest,
+  };
+}
+
+function StatCard({
+  label,
+  value,
+  unit,
+  sub,
+  tone,
 }: {
-  stages: { stage_number: number; stage_name: string }[];
-  active: number | null;
+  label: string;
+  value: string;
+  unit?: string;
+  sub?: string;
+  tone?: "led" | "warn" | "done";
 }) {
-  const navigate = useNavigate();
-  if (stages.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-2">
-      {stages.map((s) => {
-        const isActive = s.stage_number === active;
+    <div className="relative overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+      <div className="mb-1 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-subtle">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "font-mono text-3xl font-bold leading-none tabular-nums",
+          tone === "led" && "text-led drop-shadow-[0_0_14px_var(--color-led-glow)]",
+          tone === "warn" && "text-live drop-shadow-[0_0_14px_var(--color-live-glow)]",
+          tone === "done" && "text-done drop-shadow-[0_0_14px_var(--color-done-glow)]",
+          !tone && "text-ink",
+        )}
+      >
+        {value}
+      </div>
+      {unit && (
+        <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
+          {unit}
+        </div>
+      )}
+      {sub && (
+        <div className="mt-1.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PerStageRow({
+  row,
+  onOpen,
+  onCoach,
+}: {
+  row: PerStageAggregate;
+  onOpen: () => void;
+  onCoach: () => void;
+}) {
+  const distTotal = Object.values(row.split_buckets).reduce(
+    (a, b) => a + b,
+    0,
+  );
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[40px_1fr_100px_120px_180px_60px_40px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0 transition-colors",
+        row.audited
+          ? "cursor-pointer hover:bg-surface-2"
+          : "opacity-50",
+        row.flagged_count > 0 && row.audited && "bg-led/[0.04]",
+      )}
+      onClick={onOpen}
+      onDoubleClick={onCoach}
+    >
+      <span className="inline-flex size-8 items-center justify-center rounded-md border border-rule-strong bg-surface-3 font-mono text-xs font-bold tabular-nums text-ink-2">
+        {pad2(row.stage_number)}
+      </span>
+      <div className="min-w-0">
+        <div className="truncate font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
+          {row.stage_name}
+        </div>
+        <div className="mt-0.5 inline-flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {row.audited ? (
+            row.flagged_count > 0 && (
+              <span className="inline-flex items-center gap-1 rounded border border-led/40 bg-led/10 px-1.5 py-0.5 font-bold text-led">
+                <Flag className="size-2.5" /> {row.flagged_count}
+              </span>
+            )
+          ) : (
+            <span>not audited yet</span>
+          )}
+        </div>
+      </div>
+      <span className="text-right font-mono text-sm font-bold tabular-nums text-ink">
+        {row.audited ? `${row.total_seconds.toFixed(2)}s` : "--"}
+      </span>
+      <span className="text-right font-mono text-sm tabular-nums text-ink-2">
+        {row.avg_split != null ? `${row.avg_split.toFixed(3)}s` : "--"}
+      </span>
+      <SplitDistributionBar buckets={row.split_buckets} total={distTotal} />
+      <span className="text-right font-mono text-[0.8125rem] tabular-nums text-muted">
+        {row.shot_count || "--"}
+      </span>
+      <span className="text-right text-subtle">
+        <ArrowRight className="ml-auto size-4" />
+      </span>
+    </div>
+  );
+}
+
+function SplitDistributionBar({
+  buckets,
+  total,
+}: {
+  buckets: Record<string, number>;
+  total: number;
+}) {
+  if (total === 0) {
+    return <span className="font-mono text-[0.625rem] text-subtle">--</span>;
+  }
+  return (
+    <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-3">
+      {SPLIT_BUCKETS.map((b) => {
+        const w = ((buckets[b.label] ?? 0) / total) * 100;
         return (
-          <button
-            key={s.stage_number}
-            type="button"
-            onClick={() => navigate(`/coach/${s.stage_number}`)}
-            className={cn(
-              "rounded-md border px-3 py-1.5 text-sm transition-colors",
-              isActive
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-foreground hover:bg-accent",
-            )}
-          >
-            <span className="font-mono text-xs text-muted-foreground/70 mr-2">
-              #{s.stage_number}
-            </span>
-            {s.stage_name}
-          </button>
+          <span
+            key={b.label}
+            style={{ width: `${w}%`, backgroundColor: b.color }}
+            title={`${b.label}: ${buckets[b.label] ?? 0}`}
+          />
         );
       })}
     </div>
   );
 }
 
-const CLASS_SHORT_LABEL: Record<CoachIntervalClass, string> = {
-  first_shot: "draw",
-  split: "split",
-  transition: "trans",
-  movement: "move",
-  reload: "reload",
-  activation: "activ",
-};
-
-const CLASS_FULL_LABEL: Record<CoachIntervalClass, string> = {
-  first_shot: "First shot (draw)",
-  split: "Split -- same position, different target",
-  transition: "Transition -- short move between positions",
-  movement: "Movement -- longer repositioning",
-  reload: "Reload",
-  activation: "Activation -- activating a target (e.g. mover)",
-};
-
-function CondensedShotList({
-  shots,
-  beepTime,
-  activeShotNumber,
-  heightPx,
-  onRowClick,
-  onSeekToBeep,
+function IntervalBreakdownCard({
+  distributions,
 }: {
-  shots: CoachShot[];
-  beepTime: number;
-  activeShotNumber: number | null;
-  heightPx: number | null;
-  onRowClick: (s: CoachShot) => void;
-  onSeekToBeep: () => void;
+  distributions: CoachMatchDistributions | null;
 }) {
-  const tableRef = useRef<HTMLDivElement | null>(null);
+  const fourClasses: CoachIntervalClass[] = [
+    "first_shot",
+    "split",
+    "transition",
+    "reload",
+  ];
+  return (
+    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+      <div className="border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+        Interval breakdown
+      </div>
+      <div className="grid grid-cols-2 gap-3 p-4">
+        {fourClasses.map((cls) => {
+          const d =
+            distributions?.distributions.find((x) => x.interval_class === cls) ??
+            null;
+          const dotColor =
+            cls === "first_shot"
+              ? "var(--color-led)"
+              : cls === "split"
+                ? "var(--color-done)"
+                : cls === "transition"
+                  ? "var(--color-live)"
+                  : "var(--color-manual)";
+          return (
+            <div
+              key={cls}
+              className="rounded-xl border border-rule bg-bg-glow px-4 py-3"
+            >
+              <div className="mb-1 inline-flex items-center gap-2 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink">
+                <span
+                  aria-hidden
+                  className="inline-block size-1.5 rounded-full"
+                  style={{ backgroundColor: dotColor }}
+                />
+                {INTERVAL_LABEL[cls]}
+              </div>
+              <div className="font-mono text-2xl font-bold tabular-nums text-ink">
+                {d?.mean_s != null ? `${d.mean_s.toFixed(2)}s` : "--"}
+              </div>
+              <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+                {d
+                  ? `${d.count} ${d.count === 1 ? "occurrence" : "occurrences"}`
+                  : "no data"}
+              </div>
+              {d?.median_s != null && (
+                <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+                  median {d.median_s.toFixed(2)}s · p90{" "}
+                  {d.p90_s?.toFixed(2) ?? "--"}s
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CrtHistogramCard({
+  distributions,
+}: {
+  distributions: CoachMatchDistributions | null;
+}) {
+  const splitDist =
+    distributions?.distributions.find((d) => d.interval_class === "split") ??
+    null;
+
+  if (!splitDist || splitDist.count === 0) {
+    return (
+      <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface px-5 py-12 text-center text-sm text-muted">
+        Split histogram appears once a stage with split-class shots is
+        audited.
+      </section>
+    );
+  }
+
+  const ticks = [0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 1.0];
+  const maxCount = Math.max(1, ...splitDist.buckets.map((b) => b.count));
+  const W = 1200;
+  const H = 280;
+  const padX = 40;
+  const padY = 20;
+  const innerW = W - padX * 2;
+  const innerH = H - padY * 2;
+  const xOf = (v: number) => padX + ((v - 0.05) / (1.05 - 0.05)) * innerW;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+        Split histogram
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
+          {splitDist.count} shots · median {splitDist.median_s?.toFixed(2)}s ·
+          p90 {splitDist.p90_s?.toFixed(2)}s
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="block w-full"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id="led-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--color-led-soft)" stopOpacity={0.95} />
+            <stop offset="100%" stopColor="var(--color-led-deep)" stopOpacity={0.55} />
+          </linearGradient>
+          <filter id="led-glow">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        {[0.25, 0.5, 0.75].map((p) => (
+          <line
+            key={p}
+            x1={padX}
+            x2={W - padX}
+            y1={padY + innerH * p}
+            y2={padY + innerH * p}
+            stroke="var(--color-rule)"
+            strokeDasharray="3 5"
+            strokeWidth={1}
+          />
+        ))}
+        {splitDist.buckets.map((b) => {
+          const midX = xOf((b.lo + b.hi) / 2);
+          const w = ((b.hi - b.lo) / (1.05 - 0.05)) * innerW * 0.75;
+          const h = (b.count / maxCount) * innerH;
+          const y = padY + innerH - h;
+          return (
+            <rect
+              key={`${b.lo}-${b.hi}`}
+              x={midX - w / 2}
+              y={y}
+              width={w}
+              height={h}
+              fill="url(#led-fill)"
+              filter="url(#led-glow)"
+              rx={2}
+            />
+          );
+        })}
+        {splitDist.median_s != null && (
+          <g>
+            <line
+              x1={xOf(splitDist.median_s)}
+              x2={xOf(splitDist.median_s)}
+              y1={padY}
+              y2={H - padY}
+              stroke="var(--color-ink)"
+              strokeDasharray="6 4"
+              strokeWidth={1.5}
+            />
+            <text
+              x={xOf(splitDist.median_s) + 4}
+              y={padY + 14}
+              fill="var(--color-ink-2)"
+              fontFamily="JetBrains Mono"
+              fontSize={11}
+              fontWeight={700}
+            >
+              MED {splitDist.median_s.toFixed(2)}s
+            </text>
+          </g>
+        )}
+        {ticks.map((t) => (
+          <g key={t}>
+            <line
+              x1={xOf(t)}
+              x2={xOf(t)}
+              y1={H - padY}
+              y2={H - padY + 4}
+              stroke="var(--color-subtle)"
+              strokeWidth={1}
+            />
+            <text
+              x={xOf(t)}
+              y={H - 2}
+              textAnchor="middle"
+              fill="var(--color-subtle)"
+              fontFamily="JetBrains Mono"
+              fontSize={10}
+            >
+              {t.toFixed(2)}s
+            </text>
+          </g>
+        ))}
+      </svg>
+    </section>
+  );
+}
+
+function RecommendationsCard({
+  distributions,
+}: {
+  distributions: CoachMatchDistributions | null;
+}) {
+  const reco = useMemo(() => buildRecommendations(distributions), [
+    distributions,
+  ]);
+  return (
+    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+        Practice priorities
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          derived from this match
+        </span>
+      </div>
+      {reco.length === 0 ? (
+        <div className="px-5 py-8 text-center text-sm text-muted">
+          Looking good. Nothing leaps out at the priority threshold.
+        </div>
+      ) : (
+        reco.map((r, i) => (
+          <div
+            key={i}
+            className={cn(
+              "flex gap-4 border-b border-rule px-5 py-4 last:border-b-0",
+              i === 0 && "bg-led/[0.04]",
+            )}
+          >
+            <div
+              className={cn(
+                "inline-flex size-10 shrink-0 items-center justify-center rounded-md font-display text-base font-bold tabular-nums",
+                i === 0
+                  ? "bg-led text-bg shadow-[0_0_12px_var(--color-led-glow)]"
+                  : i === 1
+                    ? "border border-live/40 bg-live/10 text-live"
+                    : "border border-rule-strong bg-surface-3 text-ink-2",
+              )}
+            >
+              {pad2(i + 1)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div
+                className={cn(
+                  "mb-0.5 inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em]",
+                  i === 0
+                    ? "bg-led/10 text-led"
+                    : i === 1
+                      ? "bg-live/10 text-live"
+                      : "bg-surface-3 text-ink-2",
+                )}
+              >
+                <Zap className="size-2.5" /> P{i + 1} &middot; {r.tag}
+              </div>
+              <div className="mt-1 font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
+                {r.heading}
+              </div>
+              <p className="mt-1 text-[0.8125rem] leading-relaxed text-muted">
+                {r.body}
+              </p>
+            </div>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
+
+function buildRecommendations(
+  distributions: CoachMatchDistributions | null,
+): {
+  tag: string;
+  heading: string;
+  body: ReactNode;
+}[] {
+  if (!distributions) return [];
+  const ranked = distributions.distributions
+    .filter((d) => d.count > 0 && d.p90_s != null && d.median_s != null)
+    .map((d) => ({
+      cls: d.interval_class,
+      median: d.median_s!,
+      p90: d.p90_s!,
+      gap: d.p90_s! - d.median_s!,
+    }))
+    .sort((a, b) => b.gap - a.gap);
+  return ranked.slice(0, 3).map((r) => ({
+    tag: INTERVAL_LABEL[r.cls],
+    heading: `Tighten ${INTERVAL_LABEL[r.cls].toLowerCase()} consistency`,
+    body: (
+      <>
+        P90 is{" "}
+        <b className="font-bold text-ink">{r.p90.toFixed(2)}s</b> vs median{" "}
+        <b className="font-bold text-ink">{r.median.toFixed(2)}s</b> -- the
+        slow tail is{" "}
+        <b className="font-bold text-led">+{(r.p90 - r.median).toFixed(2)}s</b>{" "}
+        longer than the typical case.
+      </>
+    ),
+  }));
+}
+
+function AnnotationsCard({
+  annotations,
+}: {
+  annotations: {
+    stage_number: number;
+    stage_name: string;
+    shot_number: number;
+    time_from_beep: number | null;
+    interval_class: CoachIntervalClass | null;
+    note: string;
+    flagged: boolean;
+  }[];
+}) {
+  const navigate = useNavigate();
+  return (
+    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+        Annotations
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {annotations.length} notes
+        </span>
+      </div>
+      {annotations.length === 0 ? (
+        <div className="px-5 py-8 text-center text-sm text-muted">
+          No annotations yet. Open per-stage coach and add notes to surface
+          them here.
+        </div>
+      ) : (
+        annotations.slice(0, 8).map((a, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => navigate(`/coach/${a.stage_number}`)}
+            className="grid w-full grid-cols-[40px_1fr_24px] items-start gap-3 border-b border-rule px-5 py-3 text-left last:border-b-0 hover:bg-surface-2"
+          >
+            <span className="inline-flex size-7 items-center justify-center rounded-md border border-rule-strong bg-surface-3 font-mono text-[0.6875rem] font-bold tabular-nums text-ink-2">
+              {pad2(a.stage_number)}
+            </span>
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+                Shot {pad2(a.shot_number)}
+                {a.interval_class && (
+                  <span
+                    className={cn(
+                      "rounded border px-1.5 py-px font-bold",
+                      INTERVAL_TONE[a.interval_class],
+                    )}
+                  >
+                    {INTERVAL_LABEL[a.interval_class]}
+                  </span>
+                )}
+                {a.flagged && (
+                  <span className="inline-flex items-center gap-1 text-led">
+                    <Flag className="size-2.5" />
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 truncate text-[0.8125rem] text-ink-2">
+                {a.note || (a.flagged ? "Flagged for review" : "--")}
+              </p>
+            </div>
+            <ArrowRight className="ml-auto mt-1.5 size-3.5 text-subtle" />
+          </button>
+        ))
+      )}
+    </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Per-stage view                                                             */
+/* -------------------------------------------------------------------------- */
+
+function CoachStage({ stage }: { stage: number }) {
+  const navigate = useNavigate();
+  const [project, setProject] = useState<MatchProject | null>(null);
+  const [coach, setCoach] = useState<CoachStageResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reclassifying, setReclassifying] = useState(false);
+  const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    if (activeShotNumber == null) return;
-    const container = tableRef.current;
-    if (!container) return;
-    const row = container.querySelector<HTMLElement>(
-      `[data-active-shot="${activeShotNumber}"]`,
-    );
-    if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [activeShotNumber]);
+    let alive = true;
+    (async () => {
+      try {
+        const [p, c] = await Promise.all([
+          api.getProject(),
+          api.getStageCoach(stage),
+        ]);
+        if (!alive) return;
+        setProject(p);
+        setCoach(c);
+        if (c && c.shots.length > 0) {
+          setActiveShotNumber(c.shots[0].shot_number);
+        }
+      } catch (e) {
+        if (alive) setError(e instanceof ApiError ? e.detail : String(e));
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [stage]);
 
-  return (
-    <Card
-      className="flex flex-col overflow-hidden"
-      style={heightPx != null ? { height: heightPx } : undefined}
-    >
-      <CardHeader className="shrink-0 pb-2">
-        <CardTitle className="text-base">Shots ({shots.length + 1})</CardTitle>
-        <CardDescription className="text-xs">
-          Click a row to seek. Select to annotate below.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
-        <div ref={tableRef} className="h-full overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 border-b border-border bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-2 py-1.5 text-left">#</th>
-                <th className="px-2 py-1.5 text-right">T</th>
-                <th className="px-2 py-1.5 text-right">Split</th>
-                <th className="px-2 py-1.5 text-left">Class</th>
-              </tr>
-            </thead>
-            <tbody>
-              <CondensedBeepRow
-                beepTime={beepTime}
-                active={activeShotNumber === 0}
-                onClick={onSeekToBeep}
-              />
-              {shots.map((s) => (
-                <CondensedShotRow
-                  key={s.shot_number}
-                  shot={s}
-                  active={s.shot_number === activeShotNumber}
-                  onClick={() => onRowClick(s)}
-                />
-              ))}
-            </tbody>
-          </table>
+  useEffect(() => {
+    if (!coach) return;
+    const anyUnclassified = coach.shots.some((s) => s.interval_class === null);
+    if (anyUnclassified && !reclassifying) {
+      setReclassifying(true);
+      api
+        .reclassifyStageCoach(stage)
+        .then((c) => setCoach(c))
+        .catch(() => {})
+        .finally(() => setReclassifying(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!coach || activeShotNumber == null) return;
+    const shot = coach.shots.find((s) => s.shot_number === activeShotNumber);
+    setNoteDraft(shot?.coaching_note ?? "");
+  }, [activeShotNumber, coach]);
+
+  const reclassify = useCallback(async () => {
+    setReclassifying(true);
+    try {
+      const c = await api.reclassifyStageCoach(stage);
+      setCoach(c);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setReclassifying(false);
+    }
+  }, [stage]);
+
+  const patchShot = useCallback(
+    async (
+      shotNumber: number,
+      patch: Parameters<typeof api.patchStageShotCoach>[2],
+    ) => {
+      try {
+        const c = await api.patchStageShotCoach(stage, shotNumber, patch);
+        setCoach(c);
+      } catch (e) {
+        setError(e instanceof ApiError ? e.detail : String(e));
+      }
+    },
+    [stage],
+  );
+
+  const seekToShot = useCallback((shot: CoachShot) => {
+    setActiveShotNumber(shot.shot_number);
+    if (videoRef.current) videoRef.current.currentTime = shot.time_absolute;
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) void v.play().catch(() => {});
+    else v.pause();
+  }, []);
+
+  if (error) {
+    return (
+      <div className="px-7 py-8">
+        <div className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+          {error}
         </div>
-      </CardContent>
-    </Card>
-  );
-}
+      </div>
+    );
+  }
+  if (!coach || !project) {
+    return (
+      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted">
+        <Loader2 className="size-4 animate-spin" /> Loading stage coach...
+      </div>
+    );
+  }
 
-function CondensedBeepRow({
-  beepTime,
-  active,
-  onClick,
-}: {
-  beepTime: number;
-  active: boolean;
-  onClick: () => void;
-}) {
+  const allStages = project.stages
+    .map((s) => s.stage_number)
+    .sort((a, b) => a - b);
+  const idx = allStages.indexOf(stage);
+  const prevStage = idx > 0 ? allStages[idx - 1] : null;
+  const nextStage =
+    idx >= 0 && idx < allStages.length - 1 ? allStages[idx + 1] : null;
+
+  const activeShot =
+    coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null;
+  const primary = coach.videos.find((v) => v.role === "primary");
+  const streamUrl = primary ? api.videoStreamUrl(primary.path) : null;
+  const maxAbs =
+    coach.shots.length > 0
+      ? Math.max(...coach.shots.map((s) => s.time_absolute))
+      : 0;
+  const minAbs =
+    coach.shots.length > 0
+      ? Math.min(...coach.shots.map((s) => s.time_absolute))
+      : 0;
+  const span = Math.max(0.0001, maxAbs - minAbs);
+
   return (
-    <tr
-      className={cn(
-        "cursor-pointer border-b border-border/50 bg-muted/20 transition-colors hover:bg-accent/40",
-        active && "bg-accent",
-      )}
-      onClick={onClick}
-      data-active-shot={0}
-      title={`Seek to the start signal (source t = ${beepTime.toFixed(3)} s)`}
-    >
-      <td className="px-2 py-1.5 font-mono text-[11px] text-primary">
-        <Radio className="inline size-3 align-text-bottom" aria-hidden /> beep
-      </td>
-      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
-        0.000
-      </td>
-      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground/60">
-        --
-      </td>
-      <td className="px-2 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-        start
-      </td>
-    </tr>
+    <div className="flex flex-col gap-4 px-7 py-5">
+      {/* Compact stage header */}
+      <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => prevStage != null && navigate(`/coach/${prevStage}`)}
+            disabled={prevStage == null}
+            aria-label="Previous stage"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => nextStage != null && navigate(`/coach/${nextStage}`)}
+            disabled={nextStage == null}
+            aria-label="Next stage"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+          >
+            <ArrowRight className="size-4" />
+          </button>
+        </div>
+        <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink">
+          <span className="text-led">STAGE {pad2(stage)}</span>
+          <span className="mx-2 text-whisper">·</span>
+          {coach.stage_name}
+        </h1>
+        <nav
+          aria-label="Stage views"
+          className="ml-auto inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
+        >
+          <button
+            type="button"
+            onClick={() => navigate(`/audit/${stage}`)}
+            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink-2"
+          >
+            Audit
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(`/compare/${stage}`)}
+            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink-2"
+          >
+            Compare
+          </button>
+          <span className="inline-flex min-h-9 items-center rounded-md bg-led px-3.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-bg shadow-[0_0_12px_var(--color-led-glow)]">
+            Coach
+          </span>
+        </nav>
+      </div>
+
+      {/* Action bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void reclassify()}
+          disabled={reclassifying}
+          title="Re-run auto-classification"
+        >
+          {reclassifying ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="size-3.5" />
+          )}
+          <span className="font-display uppercase tracking-[0.08em]">
+            Reclassify
+          </span>
+        </Button>
+        <span className="ml-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          shot legend
+        </span>
+        {SPLIT_BUCKETS.map((b) => (
+          <span
+            key={b.label}
+            className="inline-flex items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted"
+          >
+            <span
+              aria-hidden
+              className="inline-block size-1.5 rounded-full"
+              style={{ backgroundColor: b.color }}
+            />
+            {b.label}
+            {b.max !== Infinity ? ` ≤ ${b.max}s` : " > 0.85s"}
+          </span>
+        ))}
+      </div>
+
+      {/* Shot ruler */}
+      <div className="overflow-hidden rounded-xl border border-rule-strong bg-surface px-6 py-5">
+        <div className="relative h-5">
+          <span
+            aria-hidden
+            className="absolute inset-y-1/2 left-0 right-0 h-px -translate-y-1/2 bg-rule"
+          />
+          {coach.shots.map((shot) => {
+            const x = ((shot.time_absolute - minAbs) / span) * 100;
+            const b = splitBucket(shot.split);
+            const active = activeShotNumber === shot.shot_number;
+            return (
+              <button
+                key={shot.shot_number}
+                type="button"
+                onClick={() => seekToShot(shot)}
+                title={`Shot ${shot.shot_number} · ${shot.split.toFixed(3)}s · ${
+                  shot.interval_class
+                    ? INTERVAL_LABEL[shot.interval_class]
+                    : ""
+                }`}
+                aria-label={`Shot ${shot.shot_number}`}
+                className={cn(
+                  "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all",
+                  active
+                    ? "size-4 ring-2 ring-led ring-offset-2 ring-offset-surface shadow-[0_0_8px_var(--color-led-glow)]"
+                    : "size-3 hover:size-3.5",
+                )}
+                style={{
+                  left: `${x}%`,
+                  backgroundColor: b.color,
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Work grid: video + current shot panel on left, full list on right */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
+        <div className="flex flex-col gap-3">
+          <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3">
+            {streamUrl ? (
+              <video
+                ref={videoRef}
+                src={streamUrl}
+                controls={false}
+                preload="metadata"
+                playsInline
+                onTimeUpdate={(e) =>
+                  setCurrentTime((e.target as HTMLVideoElement).currentTime)
+                }
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                className="aspect-video w-full bg-black"
+              />
+            ) : (
+              <div className="flex aspect-video items-center justify-center bg-surface-3 text-sm text-muted">
+                No primary video
+              </div>
+            )}
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={togglePlay}
+                aria-label={isPlaying ? "Pause" : "Play"}
+                className="inline-flex size-10 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+              >
+                {isPlaying ? (
+                  <Pause className="size-4" />
+                ) : (
+                  <Play className="size-4" />
+                )}
+              </button>
+              <span className="font-mono text-sm tabular-nums text-ink-2">
+                {currentTime.toFixed(3)}s
+              </span>
+              {activeShot && (
+                <span className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+                  shot {pad2(activeShot.shot_number)} at{" "}
+                  {activeShot.time_absolute.toFixed(3)}s
+                </span>
+              )}
+            </div>
+          </div>
+
+          {activeShot && (
+            <ActiveShotPanel
+              shot={activeShot}
+              noteDraft={noteDraft}
+              onNoteChange={setNoteDraft}
+              onSave={() =>
+                void patchShot(activeShot.shot_number, {
+                  coaching_note: noteDraft || null,
+                })
+              }
+              onClassify={(cls) =>
+                void patchShot(activeShot.shot_number, {
+                  interval_class: cls,
+                  interval_class_source: "manual",
+                })
+              }
+              onToggleFlag={() =>
+                void patchShot(activeShot.shot_number, {
+                  improvement_flag: !activeShot.improvement_flag,
+                })
+              }
+            />
+          )}
+        </div>
+
+        <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface">
+          <div className="border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+            All shots
+            <span className="ml-2 font-mono text-[0.625rem] font-medium tracking-[0.06em] text-muted">
+              {coach.shots.length} total
+            </span>
+          </div>
+          <div className="grid grid-cols-[40px_70px_70px_110px_30px_24px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+            <span>#</span>
+            <span className="text-right">t</span>
+            <span className="text-right">split</span>
+            <span>interval</span>
+            <span />
+            <span />
+          </div>
+          <div className="max-h-[520px] overflow-y-auto">
+            {coach.shots.map((shot) => (
+              <ShotRow
+                key={shot.shot_number}
+                shot={shot}
+                active={activeShotNumber === shot.shot_number}
+                onClick={() => seekToShot(shot)}
+              />
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
   );
 }
 
-function CondensedShotRow({
+function ActiveShotPanel({
+  shot,
+  noteDraft,
+  onNoteChange,
+  onSave,
+  onClassify,
+  onToggleFlag,
+}: {
+  shot: CoachShot;
+  noteDraft: string;
+  onNoteChange: (v: string) => void;
+  onSave: () => void;
+  onClassify: (cls: CoachIntervalClass) => void;
+  onToggleFlag: () => void;
+}) {
+  const b = splitBucket(shot.split);
+  return (
+    <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface px-5 py-4">
+      <div className="mb-3 flex items-center gap-3">
+        <span
+          className="font-display text-4xl font-bold leading-none tabular-nums text-ink"
+          style={{ color: b.color }}
+        >
+          {pad2(shot.shot_number)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+            Shot {pad2(shot.shot_number)} &middot; {b.label}
+          </div>
+          <div className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
+            {shot.split.toFixed(3)}s split
+          </div>
+          <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
+            {shot.time_from_beep.toFixed(3)}s from beep
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onToggleFlag}
+          aria-pressed={shot.improvement_flag}
+          title={
+            shot.improvement_flag
+              ? "Unflag this shot"
+              : "Flag this shot for review"
+          }
+          className={cn(
+            "inline-flex size-9 items-center justify-center rounded-md border transition-colors",
+            shot.improvement_flag
+              ? "border-led bg-led/10 text-led shadow-[0_0_10px_var(--color-led-glow)]"
+              : "border-rule bg-surface-2 text-muted hover:text-ink",
+          )}
+        >
+          <Flag className="size-4" />
+        </button>
+      </div>
+      <div className="mb-3">
+        <div className="mb-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+          Interval type
+          {shot.interval_class_source === "auto" && (
+            <span className="ml-2 text-muted/70">
+              auto-classified · click to override
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              "first_shot",
+              "split",
+              "transition",
+              "movement",
+              "reload",
+              "activation",
+            ] as CoachIntervalClass[]
+          ).map((cls) => (
+            <button
+              key={cls}
+              type="button"
+              onClick={() => onClassify(cls)}
+              className={cn(
+                "rounded-md border px-2.5 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] transition-colors",
+                shot.interval_class === cls
+                  ? INTERVAL_TONE[cls]
+                  : "border-rule bg-surface-2 text-muted hover:text-ink",
+              )}
+            >
+              {INTERVAL_LABEL[cls]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="mb-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+          Annotation
+        </div>
+        <textarea
+          value={noteDraft}
+          onChange={(e) => onNoteChange(e.target.value)}
+          placeholder="Add a coaching note for this shot..."
+          className="block min-h-[72px] w-full rounded-md border border-rule bg-surface-3 px-3 py-2 text-sm text-ink outline-none focus:border-led focus:bg-bg-glow focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
+        />
+        <div className="mt-2 flex items-center justify-between">
+          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+            edit and click save
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onSave}
+            disabled={noteDraft === (shot.coaching_note ?? "")}
+          >
+            <Save className="size-3.5" />
+            <span className="font-display uppercase tracking-[0.08em]">
+              Save
+            </span>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShotRow({
   shot,
   active,
   onClick,
@@ -666,400 +1432,61 @@ function CondensedShotRow({
   active: boolean;
   onClick: () => void;
 }) {
-  const cls = shot.interval_class;
+  const b = splitBucket(shot.split);
   return (
-    <tr
-      className={cn(
-        "cursor-pointer border-b border-border/50 transition-colors hover:bg-accent/40",
-        active && "bg-accent",
-        shot.improvement_flag && "border-l-2 border-l-amber-500/70",
-      )}
+    <button
+      type="button"
       onClick={onClick}
-      data-active-shot={active ? shot.shot_number : undefined}
-      title={shot.coaching_note ?? undefined}
+      className={cn(
+        "grid w-full grid-cols-[40px_70px_70px_110px_30px_24px] items-center gap-3 border-b border-rule px-5 py-2 text-left transition-colors hover:bg-surface-2 last:border-b-0",
+        active && "bg-led/[0.06]",
+      )}
     >
-      <td className="px-2 py-1.5 font-mono text-[11px]">{shot.shot_number}</td>
-      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px]">
-        {shot.time_from_beep.toFixed(3)}
-      </td>
-      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-[11px]">
-        {shot.split.toFixed(3)}
-      </td>
-      <td className="px-2 py-1.5">
-        <span className="flex items-center gap-1 text-[11px]">
-          {cls ? CLASS_SHORT_LABEL[cls] : "--"}
-          {shot.stale ? (
-            <span
-              className="rounded-sm bg-amber-500/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400"
-              title="Stored class disagrees with the current rule"
-            >
-              !
-            </span>
-          ) : null}
-          {shot.coaching_note ? (
-            <span className="text-[9px] text-muted-foreground" title={shot.coaching_note}>
-              ●
-            </span>
-          ) : null}
-        </span>
-      </td>
-    </tr>
-  );
-}
-
-function ActiveShotDetail({
-  shot,
-  beepActive,
-  beepTime,
-  onPatch,
-}: {
-  shot: CoachShot | null;
-  beepActive: boolean;
-  beepTime: number;
-  onPatch: (shotNumber: number, patch: CoachShotPatch) => void;
-}) {
-  const [noteDraft, setNoteDraft] = useState("");
-  useEffect(() => {
-    setNoteDraft(shot?.coaching_note ?? "");
-  }, [shot?.shot_number, shot?.coaching_note]);
-
-  if (beepActive) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <Radio className="inline size-4 align-text-bottom text-primary" /> Start signal
-          </CardTitle>
-          <CardDescription>
-            Source time: {beepTime.toFixed(3)} s. Click a shot row to edit it.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-  if (!shot) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardDescription>
-            Click an event in the list to flag, classify, or annotate it.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  const onClassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    if (val === "_auto") {
-      onPatch(shot.shot_number, { clear_class: true });
-      return;
-    }
-    onPatch(shot.shot_number, {
-      interval_class: val as CoachIntervalClass,
-      interval_class_source: "manual",
-    });
-  };
-
-  const saveNote = () => {
-    const trimmed = noteDraft.trim();
-    if (trimmed === (shot.coaching_note ?? "")) return;
-    if (trimmed === "") {
-      onPatch(shot.shot_number, { clear_note: true });
-    } else {
-      onPatch(shot.shot_number, { coaching_note: trimmed });
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-baseline gap-3">
-          <span>Shot {shot.shot_number}</span>
-          <span className="font-mono text-sm font-normal tabular-nums text-muted-foreground">
-            T {shot.time_from_beep.toFixed(3)} s · split {shot.split.toFixed(3)} s
-          </span>
-        </CardTitle>
-        <CardDescription>
-          Edits round-trip through the audit JSON; manual classifications survive reclassify.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-[auto_auto_1fr]">
-        <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">Class</label>
-          <div className="flex items-center gap-2">
-            <select
-              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={shot.interval_class ?? ""}
-              onChange={onClassChange}
-            >
-              <option value="" disabled>
-                -- unset --
-              </option>
-              {CLASS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-              {shot.interval_class_source === "manual" ? (
-                <option value="_auto">Reset to auto</option>
-              ) : null}
-            </select>
-            {shot.interval_class && shot.interval_class_source === "auto" ? (
-              <Badge variant="outline" className="text-[10px]">
-                auto
-              </Badge>
-            ) : null}
-            {shot.interval_class && shot.interval_class_source === "manual" ? (
-              <Badge variant="default" className="text-[10px]">
-                manual
-              </Badge>
-            ) : null}
-            {shot.stale ? (
-              <button
-                type="button"
-                onClick={() => onPatch(shot.shot_number, { clear_class: true })}
-                className="rounded-md border border-amber-500/60 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
-                title="Rule disagrees with the stored class. Click to accept the recompute."
-              >
-                Accept rule
-              </button>
-            ) : null}
-            {shot.reload_hint && shot.interval_class !== "reload" ? (
-              <span
-                className="text-xs text-muted-foreground"
-                title="Long gap -- could be a reload"
-              >
-                reload?
-              </span>
-            ) : null}
-          </div>
-          {shot.interval_class ? (
-            <p className="text-xs text-muted-foreground">{CLASS_FULL_LABEL[shot.interval_class]}</p>
-          ) : null}
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">
-            Improvement
-          </label>
-          <button
-            type="button"
-            onClick={() =>
-              onPatch(shot.shot_number, { improvement_flag: !shot.improvement_flag })
-            }
+      <span className="font-mono text-[0.6875rem] font-bold tabular-nums text-ink">
+        {pad2(shot.shot_number)}
+      </span>
+      <span className="text-right font-mono text-[0.6875rem] tabular-nums text-muted">
+        {shot.time_from_beep.toFixed(2)}s
+      </span>
+      <span
+        className="text-right font-mono text-[0.6875rem] font-semibold tabular-nums"
+        style={{ color: b.color }}
+      >
+        {shot.split.toFixed(3)}s
+      </span>
+      <span>
+        {shot.interval_class && (
+          <span
             className={cn(
-              "flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors",
-              shot.improvement_flag
-                ? "border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                : "border-border bg-background text-muted-foreground hover:bg-accent",
+              "inline-block rounded border px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em]",
+              INTERVAL_TONE[shot.interval_class],
             )}
           >
-            <Flag className="size-4" />
-            {shot.improvement_flag ? "Flagged" : "Flag"}
-          </button>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-muted-foreground">Note</label>
-          <input
-            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-            placeholder="What to remember about this shot"
-            value={noteDraft}
-            onChange={(e) => setNoteDraft(e.target.value)}
-            onBlur={saveNote}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-              if (e.key === "Escape") {
-                setNoteDraft(shot.coaching_note ?? "");
-                e.currentTarget.blur();
-              }
-            }}
-          />
-        </div>
-      </CardContent>
-    </Card>
+            {INTERVAL_LABEL[shot.interval_class]}
+          </span>
+        )}
+      </span>
+      <span className="text-center">
+        {shot.coaching_note && <MessageSquare className="size-3 text-led" />}
+      </span>
+      <span className="text-center">
+        {shot.improvement_flag && <Flag className="size-3 text-led" />}
+      </span>
+    </button>
   );
 }
 
-// Minimal playback control: play/pause + a current-time display.
-function PlaybackBar({
-  videoRef,
-  onTogglePlay,
-}: {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
-  onTogglePlay: () => void;
-}) {
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState<number | null>(null);
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
 
-  // Subscribe to playback state on the primary so the toggle button
-  // reflects what the user sees. Re-binds on ref churn (stage switch).
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onTime = () => setCurrentTime(v.currentTime);
-    const onMeta = () => {
-      setDuration(Number.isFinite(v.duration) ? v.duration : null);
-      setCurrentTime(v.currentTime);
-    };
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("timeupdate", onTime);
-    v.addEventListener("loadedmetadata", onMeta);
-    if (v.readyState >= 1) onMeta();
-    return () => {
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-      v.removeEventListener("timeupdate", onTime);
-      v.removeEventListener("loadedmetadata", onMeta);
-    };
-    // The ref identity is stable but the underlying element swaps on
-    // tab change; tying the effect to `videoRef.current` keeps the
-    // listeners pointed at the live element. Reading `.current` inside
-    // the effect deliberately on each run.
-  }, [videoRef, videoRef.current]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <div className="mt-3 flex items-center gap-3">
-      <Button type="button" variant="outline" size="sm" onClick={onTogglePlay}>
-        {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
-        {playing ? "Pause" : "Play"}
-      </Button>
-      <div className="font-mono text-xs tabular-nums text-muted-foreground">
-        {formatTime(currentTime)}
-        {duration != null ? ` / ${formatTime(duration)}` : ""}
-      </div>
-    </div>
-  );
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
 }
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "00:00.000";
-  const mins = Math.floor(seconds / 60);
-  const rest = seconds - mins * 60;
-  const wholeSec = Math.floor(rest);
-  const ms = Math.round((rest - wholeSec) * 1000);
-  const mm = String(mins).padStart(2, "0");
-  const ss = String(wholeSec).padStart(2, "0");
-  const mmm = String(ms).padStart(3, "0");
-  return `${mm}:${ss}.${mmm}`;
-}
-
-// ---------------------------------------------------------------------------
-// Distributions panel (#163)
-// ---------------------------------------------------------------------------
-
-function DistributionsPanel({ stageNumber }: { stageNumber: number }) {
-  const [data, setData] = useState<CoachStageDistributions | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setError(null);
-    api
-      .getStageCoachDistributions(stageNumber)
-      .then((d) => {
-        if (alive) setData(d);
-      })
-      .catch((err) => {
-        if (alive) setError(String(err));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [stageNumber]);
-
-  if (error) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Distributions</CardTitle>
-          <CardDescription>{error}</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-  if (!data) return null;
-  // Splits + transitions are the coachable bread-and-butter; movement
-  // and reload distributions usually have a handful of values per stage
-  // and read better at the match level. Show the top two here, defer
-  // the rest to the (future) match view (#162 / #163 follow-up).
-  const focus = data.distributions.filter(
-    (d) => d.interval_class === "split" || d.interval_class === "transition",
-  );
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Distributions</CardTitle>
-        <CardDescription>
-          {data.first_shot_s != null
-            ? `Draw: ${data.first_shot_s.toFixed(3)} s. Histograms below cover splits + transitions for this stage.`
-            : "Histograms cover splits + transitions for this stage."}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
-        {focus.map((d) => (
-          <Histogram key={d.interval_class} dist={d} />
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Histogram({ dist }: { dist: CoachIntervalDistribution }) {
-  const maxCount = Math.max(0, ...dist.buckets.map((b) => b.count));
-  const label =
-    dist.interval_class === "split"
-      ? "Splits"
-      : dist.interval_class === "transition"
-        ? "Transitions"
-        : dist.interval_class === "movement"
-          ? "Movements"
-          : dist.interval_class === "reload"
-            ? "Reloads"
-            : dist.interval_class;
-  return (
-    <div className="space-y-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="font-mono text-xs text-muted-foreground">
-          n={dist.count}
-          {dist.mean_s != null ? ` · mean ${dist.mean_s.toFixed(3)} s` : ""}
-          {dist.median_s != null ? ` · med ${dist.median_s.toFixed(3)} s` : ""}
-          {dist.p90_s != null ? ` · p90 ${dist.p90_s.toFixed(3)} s` : ""}
-        </span>
-      </div>
-      {dist.count === 0 ? (
-        <div className="rounded-md border border-dashed border-border p-4 text-xs text-muted-foreground">
-          No values on this stage.
-        </div>
-      ) : (
-        <div className="space-y-1 font-mono text-[11px]">
-          {dist.buckets.map((b) => {
-            const w = maxCount > 0 ? (b.count / maxCount) * 100 : 0;
-            return (
-              <div key={`${b.lo}-${b.hi}`} className="flex items-center gap-2">
-                <span className="w-20 shrink-0 text-right tabular-nums text-muted-foreground">
-                  {b.lo.toFixed(2)}-{b.hi.toFixed(2)} s
-                </span>
-                <div className="flex-1">
-                  <div
-                    className="h-3 rounded-sm bg-primary/70"
-                    style={{ width: `${w}%` }}
-                  />
-                </div>
-                <span className="w-6 text-right tabular-nums text-muted-foreground">
-                  {b.count}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+function formatMinSec(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00.00";
+  const m = Math.floor(seconds / 60);
+  const s = seconds - m * 60;
+  return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 }

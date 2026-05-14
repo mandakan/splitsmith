@@ -36,6 +36,8 @@ export function App() {
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
             <Route path="compare/:stage" element={<Compare />} />
+            <Route path="coach" element={<Coach />} />
+            <Route path="coach/:stage" element={<Coach />} />
             <Route path="shooters" element={<Shooters />} />
             <Route path="export" element={<Export />} />
             <Route path="export/:stage" element={<Export />} />
@@ -43,8 +45,6 @@ export function App() {
           {/* Not-yet-redesigned surfaces still mount under AppShell
               until their respective redesign issues land. */}
           <Route element={<AppShell />}>
-            <Route path="coach" element={<Coach />} />
-            <Route path="coach/:stage" element={<Coach />} />
             <Route path="lab" element={<Lab />} />
             <Route path="lab/:slug" element={<Lab />} />
             <Route path="review" element={<Review />} />
