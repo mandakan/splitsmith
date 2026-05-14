@@ -64,7 +64,7 @@ import {
   type StageAudit,
   type StageExportStatus,
 } from "@/lib/api";
-import { slugify } from "@/pages/Audit";
+import { slugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_CONFIG: LabEvalConfig = {

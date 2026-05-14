@@ -25,16 +25,18 @@ export function App() {
               here when it sees /api/health.bound === false. */}
           <Route path="pick" element={<Pick />} />
           <Route path="pick/new" element={<CreateMatch />} />
-          {/* Match overview owns the Shot Timer shell + per-match sidebar
-              (#323). Other surfaces still mount under AppShell until their
-              respective redesign issues land. */}
+          {/* Match-mode surfaces ride under the Shot Timer shell as
+              their redesign issues ship. Ingest stays self-shelled
+              (focused-task page, no sidebar). */}
+          <Route path="ingest" element={<Ingest />} />
           <Route element={<MatchShell />}>
             <Route index element={<Home />} />
-          </Route>
-          <Route element={<AppShell />}>
-            <Route path="ingest" element={<Ingest />} />
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
+          </Route>
+          {/* Not-yet-redesigned surfaces still mount under AppShell
+              until their respective redesign issues land. */}
+          <Route element={<AppShell />}>
             <Route path="coach" element={<Coach />} />
             <Route path="coach/:stage" element={<Coach />} />
             <Route path="export" element={<Export />} />

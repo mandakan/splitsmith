@@ -35,9 +35,7 @@ import {
   ChevronRight,
   ChevronsRight,
   Crosshair,
-  FlaskConical,
   HelpCircle,
-  Link2,
   ListChecks,
   Loader2,
   Pause,
@@ -77,14 +75,12 @@ import {
   type AuditEvent,
   type AuditShot,
   type Job,
-  type LabFixtureRecord,
   type MatchProject,
   type PeaksResult,
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
-import { useLabEnabled } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -94,7 +90,6 @@ const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
 export function Audit() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
-  const labEnabled = useLabEnabled();
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -1250,110 +1245,231 @@ export function Audit() {
   const rejectedCount = markers.filter((m) => m.kind === "rejected").length;
   const manualCount = markers.filter((m) => m.kind === "manual").length;
 
-  const stageNavControls = (
-    <div className="flex shrink-0 items-center gap-1.5">
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={() => prevStageNumber != null && void navigateToStage(prevStageNumber)}
-        disabled={prevStageNumber == null}
-        aria-label="Previous stage ([)"
-        title="Previous stage ([)"
-      >
-        <ChevronLeft className="size-4" />
-      </Button>
-      <StageSelector
-        stages={stageSelectorOptions}
-        selected={stageNumber ?? null}
-        onSelect={navigateToStage}
-      />
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={() => nextStageNumber != null && void navigateToStage(nextStageNumber)}
-        disabled={nextStageNumber == null}
-        aria-label="Next stage (])"
-        title="Next stage (])"
-      >
-        <ChevronRight className="size-4" />
-      </Button>
-    </div>
-  );
-
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-full flex-col gap-4 px-7 py-5 text-ink">
       {stage && primary ? (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-            <div className="min-w-0 flex-1 space-y-1.5">
-            <CardTitle className="flex flex-wrap items-center gap-3">
-              Stage {stage.stage_number} -- {stage.stage_name}
-              {primary.beep_time != null ? (
-                <Badge variant="outline">beep at {primary.beep_time.toFixed(3)}s</Badge>
-              ) : (
-                <Badge variant="destructive">no beep yet</Badge>
-              )}
-              {videos.length > 1 ? (
-                <Badge variant="secondary">{videos.length} videos</Badge>
-              ) : null}
-              {auditLoaded && audit ? (
-                <Badge variant="outline">audit loaded</Badge>
-              ) : auditLoaded ? (
-                <Badge variant="outline">no audit yet</Badge>
-              ) : null}
-              {peaks && !peaks.trimmed ? (
-                <TrimNowBadge
-                  stageNumber={stage.stage_number}
-                  hasBeep={primary.beep_time != null}
-                  hasStageTime={stage.time_seconds > 0}
-                  onProjectUpdate={(p) => {
-                    setProject(p);
-                    // Re-fetch peaks now that the trimmed clip exists.
-                    if (stageNumber != null) {
-                      api
-                        .getStagePeaks(stageNumber, PEAK_BINS)
-                        .then((np) => setPeaks(np))
-                        .catch(() => {});
-                    }
-                  }}
-                />
-              ) : null}
-              {peaks && peaks.trimmed ? (
-                <DetectShotsBadge
-                  stageNumber={stage.stage_number}
-                  hasBeep={primary.beep_time != null}
-                  hasStageTime={stage.time_seconds > 0}
-                  hasCandidates={markers.length > 0}
-                  onComplete={async () => {
-                    // Re-fetch the audit JSON; the SPA derives markers from
-                    // _candidates_pending_audit, which the job just wrote.
-                    if (stageNumber == null) return;
-                    const a = await api.getStageAudit(stageNumber);
-                    setAudit(a);
-                    setMarkers(deriveMarkers(a));
-                  }}
-                />
-              ) : null}
-            </CardTitle>
-            <CardDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>
-                {activeVideoIndex === 0 ? "Primary" : `Cam ${activeVideoIndex + 1}`}:{" "}
-                <code className="text-xs">{activeVideo?.path ?? primary.path}</code>
-              </span>
-              {activeVideo && stageNumber != null ? (
-                <MountSelect
-                  video={activeVideo}
-                  stageNumber={stageNumber}
-                  label="Mount"
-                  onProjectUpdate={setProject}
-                  setError={setProjectError}
-                />
-              ) : null}
-            </CardDescription>
+        <>
+          {/* Compact stage header -- carries #318 prev/next nav + viewport-stable
+              swap. Replaces the legacy CardHeader. */}
+          <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  prevStageNumber != null &&
+                  void navigateToStage(prevStageNumber)
+                }
+                disabled={prevStageNumber == null}
+                aria-label="Previous stage ([)"
+                title="Previous stage ([)"
+                className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:border-rule-strong hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  nextStageNumber != null &&
+                  void navigateToStage(nextStageNumber)
+                }
+                disabled={nextStageNumber == null}
+                aria-label="Next stage (])"
+                title="Next stage (])"
+                className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:border-rule-strong hover:bg-surface-3 hover:text-ink disabled:opacity-40"
+              >
+                <ChevronRight className="size-4" />
+              </button>
             </div>
-            {stageNavControls}
-          </CardHeader>
-          <CardContent className="space-y-4">
+            <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink">
+              <span className="text-led">
+                STAGE {pad2(stage.stage_number)}
+              </span>
+              <span className="mx-2 text-whisper">·</span>
+              <span>{stage.stage_name}</span>
+            </h1>
+            <div className="ml-auto inline-flex items-center gap-2.5">
+              <StageSelector
+                stages={stageSelectorOptions}
+                selected={stageNumber ?? null}
+                onSelect={navigateToStage}
+              />
+              <nav
+                aria-label="Stage views"
+                className="inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
+              >
+                <span className="inline-flex min-h-9 items-center rounded-md bg-led px-3.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-bg shadow-[0_0_12px_var(--color-led-glow)]">
+                  Audit
+                </span>
+                <button
+                  type="button"
+                  disabled
+                  title="Compare arrives in #328"
+                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted/50"
+                >
+                  Compare
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  title="Coach arrives in #329"
+                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted/50"
+                >
+                  Coach
+                </button>
+              </nav>
+            </div>
+          </div>
+
+          {/* Toolbar: Save + Undo + status badges + filter chips + zoom */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Button
+              type="button"
+              onClick={() => void performSave({ advance: true })}
+              disabled={saveStatus.kind === "saving"}
+              aria-label="Save and go to next stage (Cmd+S)"
+              title="Save and advance (Cmd+S)"
+              className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+            >
+              {saveStatus.kind === "saving" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : saveStatus.kind === "saved" ? (
+                <CheckCircle2 className="size-3.5" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              <span className="font-display uppercase tracking-[0.08em]">
+                {saveStatus.kind === "saving" ? "Saving" : "Save & next"}
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={undo}
+              disabled={undoStackRef.current.length === 0}
+              aria-label="Undo (Cmd+Z)"
+              title="Undo (Cmd+Z)"
+            >
+              <Undo2 className="size-3.5" />
+              <span className="font-display uppercase tracking-[0.08em]">
+                Undo
+              </span>
+            </Button>
+            {peaks && !peaks.trimmed ? (
+              <TrimNowBadge
+                stageNumber={stage.stage_number}
+                hasBeep={primary.beep_time != null}
+                hasStageTime={stage.time_seconds > 0}
+                onProjectUpdate={(p) => {
+                  setProject(p);
+                  if (stageNumber != null) {
+                    api
+                      .getStagePeaks(stageNumber, PEAK_BINS)
+                      .then((np) => setPeaks(np))
+                      .catch(() => {});
+                  }
+                }}
+              />
+            ) : null}
+            {peaks && peaks.trimmed ? (
+              <DetectShotsBadge
+                stageNumber={stage.stage_number}
+                hasBeep={primary.beep_time != null}
+                hasStageTime={stage.time_seconds > 0}
+                hasCandidates={markers.length > 0}
+                onComplete={async () => {
+                  if (stageNumber == null) return;
+                  const a = await api.getStageAudit(stageNumber);
+                  setAudit(a);
+                  setMarkers(deriveMarkers(a));
+                }}
+              />
+            ) : null}
+            {peaks ? (
+              <FilterBar
+                filters={filters}
+                counts={{
+                  detected: detectedCount,
+                  rejected: rejectedCount,
+                  manual: manualCount,
+                }}
+                onChange={setFilters}
+              />
+            ) : null}
+            <div className="ml-auto inline-flex items-center gap-2">
+              {peaks ? <ZoomControls zoom={zoom} onZoomChange={setZoom} /> : null}
+              <button
+                type="button"
+                onClick={() => setShowDrawer((v) => !v)}
+                aria-label="Toggle marker drawer (L)"
+                aria-pressed={showDrawer}
+                title="Marker list (L)"
+                className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                <ListChecks className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHelp(true)}
+                aria-label="Keyboard shortcuts (?)"
+                title="Keyboard shortcuts (?)"
+                className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                <HelpCircle className="size-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Shortcuts strip -- the kbd panel #327 calls out */}
+          <ShortcutsStrip />
+
+          {/* Active video info -- path + camera + mount, formerly the
+              CardDescription line. Sits between toolbar and video tile. */}
+          <div className="flex flex-wrap items-center gap-3 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+            <span>
+              <b className="font-semibold text-ink-2">
+                {activeVideoIndex === 0 ? "Primary" : `Cam ${activeVideoIndex + 1}`}
+              </b>{" "}
+              &middot;{" "}
+              <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.625rem] tracking-normal text-ink-2 normal-case">
+                {activeVideo?.path ?? primary.path}
+              </code>
+            </span>
+            {primary.beep_time != null ? (
+              <span className="rounded border border-beep/40 bg-beep-tint px-2 py-0.5 font-bold tabular-nums text-beep">
+                beep at {primary.beep_time.toFixed(3)}s
+              </span>
+            ) : (
+              <span className="rounded border border-led/40 bg-led-tint px-2 py-0.5 font-bold text-led">
+                no beep yet
+              </span>
+            )}
+            {videos.length > 1 ? (
+              <span className="rounded border border-rule-strong bg-surface-2 px-2 py-0.5 font-bold tabular-nums text-ink-2">
+                {videos.length} cams
+              </span>
+            ) : null}
+            {auditLoaded && audit ? (
+              <span className="rounded border border-done/40 bg-done/10 px-2 py-0.5 font-bold text-done">
+                audit loaded
+              </span>
+            ) : auditLoaded ? (
+              <span className="rounded border border-rule-strong bg-surface-2 px-2 py-0.5 font-bold text-muted">
+                no audit yet
+              </span>
+            ) : null}
+            {activeVideo && stageNumber != null ? (
+              <MountSelect
+                video={activeVideo}
+                stageNumber={stageNumber}
+                label="Mount"
+                onProjectUpdate={setProject}
+                setError={setProjectError}
+              />
+            ) : null}
+          </div>
+
+          {/* Video panel wrapped in instrument-panel frame */}
+          <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
             <VideoPanel
               ref={videoRef}
               videos={videos}
@@ -1366,39 +1482,137 @@ export function Audit() {
               onSecondaryRef={handleSecondaryRef}
               onSecondaryBuffering={handleSecondaryBuffering}
               onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
-              // Audit cares more about keeping the waveform + controls
-              // visible than about a big video tile. Cap the video at the
-              // remaining viewport above the waveform stack (~32rem of
-              // chrome) with a 180px floor so the picture stays readable
-              // on small laptops.
               className="[&_video]:!max-h-[max(180px,calc(100vh-32rem))]"
             />
-            {peaks ? (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <FilterBar
-                      filters={filters}
-                      counts={{
-                        detected: detectedCount,
-                        rejected: rejectedCount,
-                        manual: manualCount,
-                      }}
-                      onChange={setFilters}
+          </div>
+
+          {peaks ? (
+            <>
+              {/* Transport bar */}
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rule bg-surface-2 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={togglePlay}
+                  aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
+                  title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+                  className="inline-flex size-11 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+                >
+                  {isPlaying ? (
+                    <Pause className="size-5" />
+                  ) : (
+                    <Play className="size-5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoopMode((v) => !v)}
+                  aria-pressed={loopMode}
+                  title="Loop the audit clip (R)"
+                  aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
+                  className={cn(
+                    "inline-flex size-9 items-center justify-center rounded-md border transition-colors",
+                    loopMode
+                      ? "border-led bg-led/10 text-led shadow-[0_0_10px_var(--color-led-glow)]"
+                      : "border-rule bg-surface-3 text-muted hover:bg-surface-4 hover:text-ink",
+                  )}
+                >
+                  <Repeat className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKAutoProgress((v) => !v)}
+                  aria-pressed={kAutoProgress}
+                  title={
+                    kAutoProgress
+                      ? "Auto-advance on K is on"
+                      : "Auto-advance on K is off"
+                  }
+                  className={cn(
+                    "inline-flex size-9 items-center justify-center rounded-md border transition-colors",
+                    kAutoProgress
+                      ? "border-led bg-led/10 text-led"
+                      : "border-rule bg-surface-3 text-muted hover:bg-surface-4 hover:text-ink",
+                  )}
+                >
+                  <ChevronsRight className="size-4" />
+                </button>
+                <div className="ml-2 flex items-center gap-5 font-mono tabular-nums">
+                  <Readout
+                    label="Position"
+                    value={formatTime(currentTime)}
+                  />
+                  <Readout
+                    label="Clip"
+                    value={formatTime(peaks.duration)}
+                  />
+                  {stage.time_seconds > 0 && (
+                    <Readout
+                      label="Stage"
+                      value={`${stage.time_seconds.toFixed(3)}s`}
                     />
+                  )}
+                </div>
+                <div className="ml-auto flex items-center gap-4 font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted tabular-nums">
+                  <span>
+                    <b className="font-bold text-done">{detectedCount}</b> kept
+                  </span>
+                  <span>
+                    <b className="font-bold text-muted">{rejectedCount}</b> rejected
+                  </span>
+                  <span>
+                    <b className="font-bold text-manual">{manualCount}</b> manual
+                  </span>
+                </div>
+              </div>
+
+              {/* Scope waveform with framed chrome */}
+              <div className="overflow-hidden rounded-2xl border border-rule-strong bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-gradient-to-b from-surface to-transparent px-5 py-3">
+                  <div className="inline-flex items-center gap-2.5 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+                    <Crosshair className="size-4 text-led" />
+                    Oscilloscope
+                  </div>
+                  <div className="flex items-center gap-3 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted tabular-nums">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="inline-block size-1.5 rounded-full bg-beep shadow-[0_0_5px_rgba(6,182,212,0.6)]"
+                      />
+                      Beep
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="inline-block size-1.5 rounded-full bg-ink"
+                      />
+                      Accepted <b className="font-bold text-ink">{detectedCount}</b>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="inline-block size-1.5 rounded-full bg-manual"
+                      />
+                      Manual <b className="font-bold text-ink">{manualCount}</b>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_5px_var(--color-led-glow)]"
+                      />
+                      Rejected <b className="font-bold text-ink">{rejectedCount}</b>
+                    </span>
                     {peaksLoading ? (
                       <span
-                        className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                        className="inline-flex items-center gap-1.5 text-led"
                         aria-live="polite"
                       >
                         <Loader2 className="size-3 animate-spin" aria-hidden />
-                        Loading stage...
+                        Loading
                       </span>
                     ) : null}
                   </div>
-                  <ZoomControls zoom={zoom} onZoomChange={setZoom} />
                 </div>
-                <div ref={waveformWrapperRef}>
+                <div className="relative px-4 py-3" ref={waveformWrapperRef}>
                   <Waveform
                     peaks={peaks.peaks}
                     duration={peaks.duration}
@@ -1407,7 +1621,7 @@ export function Audit() {
                     pixelsPerSecond={pixelsPerSecond}
                     onScrub={handleScrub}
                     onDoubleClick={handleAddManual}
-                    height={160}
+                    height={180}
                   >
                     <MarkerLayer
                       markers={markers}
@@ -1423,143 +1637,32 @@ export function Audit() {
                     />
                   </Waveform>
                 </div>
-                <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={togglePlay}
-                    aria-label={isPlaying ? "Pause" : "Play"}
-                  >
-                    {isPlaying ? (
-                      <Pause className="size-4" />
-                    ) : (
-                      <Play className="size-4" />
-                    )}
-                  </Button>
-                  <Button
-                    variant={loopMode ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setLoopMode((v) => !v)}
-                    aria-pressed={loopMode}
-                    title="Loop the audit clip (R)"
-                    aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
-                  >
-                    <Repeat className="size-4" />
-                  </Button>
-                  <Button
-                    variant={kAutoProgress ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setKAutoProgress((v) => !v)}
-                    aria-pressed={kAutoProgress}
-                    title={
-                      kAutoProgress
-                        ? "Auto-advance to next marker after K (on)"
-                        : "Auto-advance to next marker after K (off)"
-                    }
-                    aria-label={
-                      kAutoProgress
-                        ? "Auto-progress on K is on"
-                        : "Auto-progress on K is off"
-                    }
-                  >
-                    <ChevronsRight className="size-4" />
-                  </Button>
-                  <span className="font-mono text-muted-foreground">
-                    {formatTime(currentTime)} / {formatTime(peaks.duration)}
-                  </span>
-                  {beepOffset !== 0 ? (
-                    <span className="text-xs text-muted-foreground">
-                      (cam offset {beepOffset >= 0 ? "+" : ""}
-                      {beepOffset.toFixed(3)}s)
-                    </span>
-                  ) : null}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={undo}
-                    disabled={undoStackRef.current.length === 0}
-                    aria-label="Undo (Cmd+Z)"
-                  >
-                    <Undo2 className="size-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void performSave({ advance: true })}
-                    disabled={saveStatus.kind === "saving"}
-                    aria-label="Save and go to next stage (Cmd+S)"
-                    title="Save and go to next stage (Cmd+S)"
-                  >
-                    {saveStatus.kind === "saving" ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : saveStatus.kind === "saved" ? (
-                      <CheckCircle2 className="size-4" />
-                    ) : (
-                      <Save className="size-4" />
-                    )}
-                  </Button>
-                  {labEnabled && stageNumber != null && stage && project?.shooter_token && (
-                    <PromoteFixtureButton
-                      stageNumber={stageNumber}
-                      defaultSlug={`stage-shots-${slugify(project.name)}-stage${stageNumber}-${project.shooter_token}`}
-                    />
-                  )}
-                  {labEnabled && stageNumber != null && stage && videos.length > 1 && (
-                    <PromoteSecondaryButton
-                      stageNumber={stageNumber}
-                      secondaries={videos.slice(1)}
-                    />
-                  )}
-                  {labEnabled && stageNumber != null && stage && (
-                    <PromoteAgainstFixtureButton
-                      stageNumber={stageNumber}
-                      videos={videos}
-                      stageName={stage.stage_name}
-                    />
-                  )}
-                  <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>{detectedCount} detected</span>
-                    <span>{rejectedCount} rejected</span>
-                    <span>{manualCount} manual</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowDrawer((v) => !v)}
-                      aria-label="Toggle marker drawer (L)"
-                      title="Marker list (L)"
-                      aria-pressed={showDrawer}
-                    >
-                      <ListChecks className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowHelp(true)}
-                      aria-label="Keyboard shortcuts (?)"
-                      title="Keyboard shortcuts (?)"
-                    >
-                      <HelpCircle className="size-4" />
-                    </Button>
-                  </span>
-                </div>
-                <ShotStepper
-                  shots={keptShots}
-                  currentIndex={currentShotIndex}
-                  onStep={stepShot}
-                  onNoteChange={handleNoteChange}
-                />
-              </>
-            ) : peaksLoading ? (
-              <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Computing waveform...
+                {beepOffset !== 0 ? (
+                  <div className="border-t border-rule px-5 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle tabular-nums">
+                    cam offset {beepOffset >= 0 ? "+" : ""}
+                    {beepOffset.toFixed(3)}s applied to active camera
+                  </div>
+                ) : null}
               </div>
-            ) : peaksError ? (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-                Couldn't load peaks: {peaksError}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+
+              {/* Shot stepper */}
+              <ShotStepper
+                shots={keptShots}
+                currentIndex={currentShotIndex}
+                onStep={stepShot}
+                onNoteChange={handleNoteChange}
+              />
+            </>
+          ) : peaksLoading ? (
+            <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted">
+              <Loader2 className="size-4 animate-spin" /> Computing waveform...
+            </div>
+          ) : peaksError ? (
+            <div className="rounded-md border border-led/40 bg-led/10 p-4 text-sm text-led">
+              Couldn't load peaks: {peaksError}
+            </div>
+          ) : null}
+        </>
       ) : null}
       <ListDrawer
         open={showDrawer}
@@ -1577,6 +1680,52 @@ export function Audit() {
       <SaveToast status={saveStatus} />
     </div>
   );
+}
+
+function Readout({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+        {label}
+      </span>
+      <span className="font-mono text-base font-bold leading-none text-ink">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function ShortcutsStrip() {
+  const items: { keys: string; label: string }[] = [
+    { keys: "Space", label: "Play / Pause" },
+    { keys: "← →", label: "Step playhead" },
+    { keys: "M / Shift+M", label: "Step shots" },
+    { keys: "K", label: "Toggle accept" },
+    { keys: "A / dblclick", label: "Add manual" },
+    { keys: "Alt+← →", label: "Nudge focused" },
+    { keys: "R", label: "Loop" },
+    { keys: "L", label: "Marker list" },
+    { keys: "[ / ]", label: "Prev / next stage" },
+    { keys: "⌘S", label: "Save & next" },
+    { keys: "⌘Z", label: "Undo" },
+    { keys: "?", label: "Shortcuts" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-rule bg-surface-2/60 px-3.5 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+      {items.map((it) => (
+        <span key={it.keys} className="inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.625rem] font-semibold text-ink-2">
+            {it.keys}
+          </kbd>
+          <span>{it.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
 }
 
 function SaveToast({ status }: { status: SaveStatus }) {
@@ -2142,543 +2291,3 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
 }
 
-export function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    || "match";
-}
-
-interface PromoteFixtureButtonProps {
-  stageNumber: number;
-  defaultSlug: string;
-}
-
-function PromoteFixtureButton({ stageNumber, defaultSlug }: PromoteFixtureButtonProps) {
-  const [open, setOpen] = useState(false);
-  const [slug, setSlug] = useState(defaultSlug);
-  const [overwrite, setOverwrite] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Refresh the suggested slug whenever the stage changes.
-  useEffect(() => {
-    setSlug(defaultSlug);
-    setResult(null);
-    setError(null);
-  }, [defaultSlug]);
-
-  const submit = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    setResult(null);
-    try {
-      const rec = await api.promoteFixture({ stage_number: stageNumber, slug, overwrite });
-      setResult(rec.audit_path);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [stageNumber, slug, overwrite]);
-
-  return (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        title="Save audited stage as a test fixture"
-      >
-        <FlaskConical className="size-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-72 rounded-md border border-border bg-popover p-3 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Promote to fixture
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Copies this stage's audit JSON + audit-clip WAV into tests/fixtures/.
-          </p>
-          <label className="mt-2 block text-[11px]">
-            <span className="text-muted-foreground">Slug</span>
-            <input
-              type="text"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
-            />
-          </label>
-          <label className="mt-2 flex items-center gap-2 text-[11px]">
-            <input
-              type="checkbox"
-              checked={overwrite}
-              onChange={(e) => setOverwrite(e.target.checked)}
-            />
-            Overwrite if exists
-          </label>
-          {error && (
-            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
-              {error}
-            </div>
-          )}
-          {result && (
-            <div className="mt-2 rounded bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-700 dark:text-emerald-300">
-              Saved: <span className="font-mono">{result}</span>
-            </div>
-          )}
-          <div className="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            <Button size="sm" onClick={submit} disabled={busy || !slug.trim()}>
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface PromoteSecondaryButtonProps {
-  stageNumber: number;
-  secondaries: StageVideo[];
-}
-
-function PromoteSecondaryButton({ stageNumber, secondaries }: PromoteSecondaryButtonProps) {
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const eligible = useMemo(
-    () => secondaries.filter((v) => v.beep_time != null),
-    [secondaries],
-  );
-  const [videoId, setVideoId] = useState(eligible[0]?.video_id ?? "");
-  const [mount, setMount] = useState("hand");
-  const [position, setPosition] = useState("shooter");
-  const [overwrite, setOverwrite] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [job, setJob] = useState<Job | null>(null);
-  const [paths, setPaths] = useState<{ fixture_path: string; anchor_path: string } | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!eligible.find((v) => v.video_id === videoId)) {
-      setVideoId(eligible[0]?.video_id ?? "");
-    }
-  }, [eligible, videoId]);
-
-  useEffect(() => {
-    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled")
-      return;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const j = await api.getJob(job.id);
-        if (stopped) return;
-        setJob(j);
-        if (j.status === "succeeded" && paths) {
-          setOpen(false);
-          setBusy(false);
-          navigate(
-            `/promote-review?fixture=${encodeURIComponent(paths.fixture_path)}&anchor=${encodeURIComponent(paths.anchor_path)}`,
-          );
-        } else if (j.status === "failed") {
-          setBusy(false);
-          setError(j.error ?? "promotion failed");
-        }
-      } catch (err) {
-        if (!stopped) {
-          setBusy(false);
-          setError(String(err));
-        }
-      }
-    };
-    const id = window.setInterval(tick, 1500);
-    return () => {
-      stopped = true;
-      window.clearInterval(id);
-    };
-  }, [job, paths, navigate]);
-
-  const submit = useCallback(async () => {
-    if (!videoId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const resp = await api.promoteSecondary(stageNumber, videoId, {
-        mount,
-        position,
-        overwrite,
-      });
-      setJob(resp.job);
-      setPaths({ fixture_path: resp.fixture_path, anchor_path: resp.anchor_path });
-    } catch (e) {
-      setBusy(false);
-      setError(String(e));
-    }
-  }, [stageNumber, videoId, mount, position, overwrite]);
-
-  const fieldCls =
-    "w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs";
-
-  return (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        title="Promote a secondary camera to a derived fixture"
-        disabled={eligible.length === 0}
-      >
-        <Link2 className="size-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Promote secondary
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Cross-aligns to the primary fixture, runs detection, snaps shots
-            into a derived fixture.
-          </p>
-          {eligible.length === 0 ? (
-            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-              No secondary on this stage has a beep yet.
-            </div>
-          ) : (
-            <>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Secondary</span>
-                <select
-                  value={videoId}
-                  onChange={(e) => setVideoId(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  {eligible.map((v) => (
-                    <option key={v.video_id} value={v.video_id}>
-                      {v.path.split("/").pop() ?? v.path}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Mount</span>
-                <select
-                  value={mount}
-                  onChange={(e) => setMount(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  <option value="hand">hand (handheld)</option>
-                  <option value="tripod">tripod</option>
-                  <option value="monopod">monopod</option>
-                  <option value="gimbal">gimbal</option>
-                  <option value="head">head</option>
-                  <option value="chest">chest</option>
-                  <option value="belt">belt</option>
-                  <option value="helmet">helmet</option>
-                </select>
-              </label>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Position</span>
-                <select
-                  value={position}
-                  onChange={(e) => setPosition(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  <option value="shooter">shooter (follows shooter)</option>
-                  <option value="bay-fixed">bay-fixed</option>
-                  <option value="ro">ro</option>
-                  <option value="squadmate">squadmate</option>
-                </select>
-              </label>
-              <label className="mt-2 flex items-center gap-2 text-[11px]">
-                <input
-                  type="checkbox"
-                  checked={overwrite}
-                  onChange={(e) => setOverwrite(e.target.checked)}
-                />
-                Overwrite if exists
-              </label>
-            </>
-          )}
-          {error && (
-            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
-              {error}
-            </div>
-          )}
-          {job && job.status === "running" && (
-            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-              {job.message ?? "running..."}
-            </div>
-          )}
-          <div className="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            <Button
-              size="sm"
-              onClick={submit}
-              disabled={busy || !videoId || eligible.length === 0}
-            >
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface PromoteAgainstFixtureButtonProps {
-  stageNumber: number;
-  videos: StageVideo[];
-  stageName: string;
-}
-
-/** Anchor any project video against an existing fixture (issue #149).
- *
- * Use case: phone-cam project where the headcam ground truth lives as
- * a fixture in ``tests/fixtures/`` rather than as a video on this
- * project's stage. Click button, pick the video + the fixture
- * anchor (auto-suggested when ``event_id`` matches), submit. */
-function PromoteAgainstFixtureButton({
-  stageNumber,
-  videos,
-  stageName: _stageName,
-}: PromoteAgainstFixtureButtonProps) {
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const [fixtures, setFixtures] = useState<LabFixtureRecord[]>([]);
-  const eligibleVideos = useMemo(
-    () => videos.filter((v) => v.beep_time != null),
-    [videos],
-  );
-  const [videoId, setVideoId] = useState(eligibleVideos[0]?.video_id ?? "");
-  const [anchorSlug, setAnchorSlug] = useState("");
-  const [mount, setMount] = useState("hand");
-  const [position, setPosition] = useState("shooter");
-  const [overwrite, setOverwrite] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [job, setJob] = useState<Job | null>(null);
-  const [paths, setPaths] = useState<{ fixture_path: string; anchor_path: string } | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open || fixtures.length > 0) return;
-    api
-      .listLabFixtures()
-      .then((list) => setFixtures(list))
-      .catch((e) => setError(String(e)));
-  }, [open, fixtures.length]);
-
-  // Auto-suggest the anchor when fixtures or stage changes. Suggest a
-  // fixture whose event_id has ``:<stageNumber>:<shooter>`` -- meaning
-  // the fixture's stage_number matches.
-  useEffect(() => {
-    if (anchorSlug || fixtures.length === 0) return;
-    const match = fixtures.find((f) => {
-      if (!f.event_id) return false;
-      const parts = f.event_id.split(":");
-      return parts.length >= 2 && parts[parts.length - 2] === String(stageNumber);
-    });
-    if (match) setAnchorSlug(match.slug);
-  }, [fixtures, stageNumber, anchorSlug]);
-
-  useEffect(() => {
-    if (!eligibleVideos.find((v) => v.video_id === videoId)) {
-      setVideoId(eligibleVideos[0]?.video_id ?? "");
-    }
-  }, [eligibleVideos, videoId]);
-
-  useEffect(() => {
-    if (!job || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") return;
-    const id = job.id;
-    const controller = new AbortController();
-    const interval = setInterval(async () => {
-      try {
-        const updated = await api.getJob(id, { signal: controller.signal });
-        if (controller.signal.aborted) return;
-        setJob(updated);
-        if (
-          updated.status === "succeeded" ||
-          updated.status === "failed" ||
-          updated.status === "cancelled"
-        ) {
-          setBusy(false);
-        }
-      } catch {
-        // ignore -- next tick retries (or we've been aborted)
-      }
-    }, 500);
-    return () => {
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, [job]);
-
-  useEffect(() => {
-    if (job?.status === "succeeded" && paths) {
-      navigate(
-        `/promote-review?fixture=${encodeURIComponent(paths.fixture_path)}&anchor=${encodeURIComponent(paths.anchor_path)}`,
-      );
-    }
-  }, [job, paths, anchorSlug, navigate]);
-
-  const submit = useCallback(async () => {
-    if (!videoId || !anchorSlug) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const resp = await api.promoteAgainstFixture(stageNumber, videoId, {
-        anchor_slug: anchorSlug,
-        mount,
-        position,
-        overwrite,
-      });
-      setJob(resp.job);
-      setPaths({ fixture_path: resp.fixture_path, anchor_path: resp.anchor_path });
-    } catch (e) {
-      setBusy(false);
-      setError(String(e));
-    }
-  }, [stageNumber, videoId, anchorSlug, mount, position, overwrite]);
-
-  const fieldCls =
-    "w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs";
-
-  return (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        title="Promote a project video against an existing fixture (Lab)"
-        disabled={eligibleVideos.length === 0}
-      >
-        <FlaskConical className="size-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-96 rounded-md border border-border bg-popover p-3 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Promote against fixture
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Aligns a project video against an existing fixture's audited
-            shots and writes a derived fixture. Use when the headcam ground
-            truth lives in tests/fixtures/ but this project only has the
-            phone-cam video.
-          </p>
-          {eligibleVideos.length === 0 ? (
-            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-              No video on this stage has a beep yet.
-            </div>
-          ) : (
-            <>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Project video</span>
-                <select
-                  value={videoId}
-                  onChange={(e) => setVideoId(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  {eligibleVideos.map((v) => (
-                    <option key={v.video_id} value={v.video_id}>
-                      {v.path.split("/").pop() ?? v.path} ({v.role})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Anchor fixture</span>
-                <select
-                  value={anchorSlug}
-                  onChange={(e) => setAnchorSlug(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  <option value="" disabled>
-                    -- pick a fixture --
-                  </option>
-                  {fixtures.map((f) => (
-                    <option key={f.slug} value={f.slug}>
-                      {f.slug}
-                      {f.event_id ? ` -- ${f.event_id}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Mount</span>
-                <select
-                  value={mount}
-                  onChange={(e) => setMount(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  <option value="hand">hand (handheld)</option>
-                  <option value="tripod">tripod</option>
-                  <option value="monopod">monopod</option>
-                  <option value="gimbal">gimbal</option>
-                  <option value="head">head</option>
-                  <option value="chest">chest</option>
-                  <option value="belt">belt</option>
-                  <option value="helmet">helmet</option>
-                </select>
-              </label>
-              <label className="mt-2 block text-[11px]">
-                <span className="text-muted-foreground">Position</span>
-                <select
-                  value={position}
-                  onChange={(e) => setPosition(e.target.value)}
-                  className={`${fieldCls} mt-1`}
-                >
-                  <option value="shooter">shooter</option>
-                  <option value="bay-fixed">bay-fixed</option>
-                  <option value="ro">ro</option>
-                  <option value="squadmate">squadmate</option>
-                </select>
-              </label>
-              <label className="mt-2 flex items-center gap-2 text-[11px]">
-                <input
-                  type="checkbox"
-                  checked={overwrite}
-                  onChange={(e) => setOverwrite(e.target.checked)}
-                />
-                Overwrite if exists
-              </label>
-            </>
-          )}
-          {error && (
-            <div className="mt-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
-              {error}
-            </div>
-          )}
-          {job && job.status === "running" && (
-            <div className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-              {job.message ?? "running..."}
-            </div>
-          )}
-          <div className="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            <Button
-              size="sm"
-              onClick={submit}
-              disabled={busy || !videoId || !anchorSlug || eligibleVideos.length === 0}
-            >
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Promote"}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
