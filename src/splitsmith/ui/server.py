@@ -92,7 +92,7 @@ from starlette.background import BackgroundTask
 
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import beep_detect, cross_align, report, user_config, video_probe
+from .. import beep_detect, cross_align, match_model, report, user_config, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -106,6 +106,7 @@ from ..config import (
     Config,
     IntervalClass,
     IntervalClassSource,
+    StageRounds,
 )
 from ..fixture_schema import (
     AgcState,
@@ -684,6 +685,91 @@ class PromoteAgainstFixtureBody(BaseModel):
     overwrite: bool = False
 
 
+class RecentProjectDetail(BaseModel):
+    """Enriched RecentProject for the redesigned match picker (#322).
+
+    Mirrors :class:`user_config.RecentProject` plus derived metadata read
+    from disk at listing time. ``kind`` is ``"match"`` for a redesign-era
+    Match folder, ``"legacy"`` for a single-shooter project, ``"missing"``
+    when the path no longer exists, ``"unknown"`` for an existing path that
+    is neither.
+
+    Derived fields are best-effort: a stale or unreadable project still
+    shows up with ``kind="unknown"`` so the user can find and remove it
+    rather than silently disappearing.
+    """
+
+    path: str
+    name: str
+    last_opened_at: datetime
+    kind: Literal["match", "legacy", "missing", "unknown"]
+    # The five fields below only populate for resolved kinds.
+    shooter_count: int = 0
+    stage_count: int = 0
+    stages_audited: int = 0
+    match_date: str | None = None
+    club: str | None = None
+    last_modified_at: datetime | None = None
+    status: Literal["in_progress", "exported", "archived", "unknown"] = "unknown"
+    # ``True`` for matches the user created without scoreboard data --
+    # surfaces the "manual" pill in the polished picker.
+    manual: bool = False
+
+
+class CreateMatchStageDraft(BaseModel):
+    """One row of the manual-create stage editor."""
+
+    stage_number: int
+    stage_name: str
+    expected_rounds: int | None = None
+    target_type: str | None = None
+
+
+class CreateMatchPrimaryShooter(BaseModel):
+    """Primary-shooter section of the manual-create form."""
+
+    name: str
+    division: str | None = None
+
+
+class CreateMatchManualRequest(BaseModel):
+    """Body for POST /api/match/create-manual (#322).
+
+    Scaffolds a Match folder with the supplied stages + the primary shooter
+    registered. The first shooter's directory is bound on success so the
+    rest of the server (which still speaks legacy ``MatchProject``) keeps
+    working unchanged.
+    """
+
+    name: str
+    project_folder: str
+    match_date: date | None = None
+    club: str | None = None
+    match_type: str | None = None
+    default_division: str | None = None
+    stages: list[CreateMatchStageDraft]
+    primary_shooter: CreateMatchPrimaryShooter
+
+
+class CreateMatchScoreboardRequest(BaseModel):
+    """Body for POST /api/match/create-from-scoreboard (#322).
+
+    A thin convenience wrapper: scaffolds a Match folder named after the
+    upstream match and binds the primary shooter's project root. The
+    actual scoreboard import (stage names, expected rounds, ``selected_*``
+    pins) happens after binding via the existing ``/api/scoreboard/fetch``
+    + ``/api/scoreboard/select-shooter`` endpoints. The SPA chains these
+    calls so the user sees one progress indicator.
+    """
+
+    project_folder: str
+    name: str
+    match_id: int
+    content_type: int
+    primary_shooter_name: str
+    primary_shooter_division: str | None = None
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -1237,7 +1323,53 @@ def _bind_project_to_state(
     Used both at startup (when ``--project`` was passed) and at runtime
     (when the SPA POSTs to /api/user/recent-projects/bind). Returns the
     on-disk display name so the caller can echo it back.
+
+    When ``root`` is a redesign-era Match folder (has ``match.json``),
+    the first shooter's directory is bound instead so the rest of the
+    server (which still speaks legacy ``MatchProject``) keeps working.
+    The match folder is recorded in the recent-projects index with
+    ``kind="match"`` so the picker can reopen it as a match next time.
+    Multi-shooter selection lives in #324; for now we pick the first
+    registered shooter.
     """
+    resolved = root.resolve()
+    # If this is a Match folder, transparently bind its first shooter.
+    if match_model.is_match_folder(resolved):
+        try:
+            match = match_model.Match.load(resolved)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400,
+                detail=f"failed to load match at {resolved}: {exc}",
+            ) from exc
+        if not match.shooters:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "match_empty",
+                    "message": (
+                        f"Match {resolved} has no shooters yet. "
+                        "Add a shooter or recreate the match."
+                    ),
+                },
+            )
+        shooter_slug = match.shooters[0]
+        shooter_root = match_model.Match.shooter_root(resolved, shooter_slug)
+        user_config.record_project_open(
+            resolved, match.name or fallback_name, kind="match"
+        )
+        return _bind_legacy_root_to_state(
+            state, shooter_root, fallback_name=match.name or fallback_name
+        )
+    return _bind_legacy_root_to_state(state, resolved, fallback_name=fallback_name)
+
+
+def _bind_legacy_root_to_state(
+    state: AppState,
+    root: Path,
+    fallback_name: str,
+) -> str:
+    """Bind a legacy MatchProject directory (project.json layout)."""
     MatchProject.init(root, name=fallback_name)
     resolved = root.resolve()
     loaded_env = _load_env_files(resolved)
@@ -1248,9 +1380,98 @@ def _bind_project_to_state(
         recorded_name = loaded_project.name or fallback_name
     except Exception:  # pragma: no cover -- defensive: never block boot
         recorded_name = fallback_name
-    user_config.record_project_open(resolved, recorded_name)
+    user_config.record_project_open(resolved, recorded_name, kind="legacy")
     state.bind(resolved, recorded_name)
     return recorded_name
+
+
+def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail:
+    """Read on-disk metadata for one recent-project entry.
+
+    Returns a :class:`RecentProjectDetail` that the redesigned match
+    picker (#322) renders directly. Best-effort: anything we can't
+    answer leaves the corresponding field at its default. Errors never
+    propagate -- a stale entry shows up as ``kind="missing"`` so the
+    user can prune it.
+    """
+    detail = RecentProjectDetail(
+        path=rp.path,
+        name=rp.name,
+        last_opened_at=rp.last_opened_at,
+        kind="unknown",
+    )
+    path = Path(rp.path)
+    if not path.exists():
+        detail.kind = "missing"
+        return detail
+
+    try:
+        kind, _ = match_model.from_path(path)
+    except FileNotFoundError:
+        detail.kind = "unknown"
+        return detail
+
+    try:
+        if kind == "match":
+            match = match_model.Match.load(path)
+            detail.kind = "match"
+            detail.name = match.name or rp.name
+            detail.shooter_count = len(match.shooters)
+            detail.stage_count = len(match.stages)
+            detail.match_date = (
+                match.match_date.isoformat() if match.match_date else None
+            )
+            detail.manual = match.scoreboard_match_id is None
+            # Audited = sum of audited stages across shooters / shooter_count.
+            audited_total = 0
+            for slug in match.shooters:
+                try:
+                    shooter = match.load_shooter(path, slug)
+                except (FileNotFoundError, KeyError):
+                    continue
+                audited_total += sum(
+                    1 for s in shooter.stages if s.time_seconds > 0 or s.skipped
+                )
+            detail.stages_audited = (
+                audited_total // max(len(match.shooters), 1)
+                if match.shooters
+                else 0
+            )
+            metadata_path = path / match_model.MATCH_FILE
+        else:
+            project = MatchProject.load(path)
+            detail.kind = "legacy"
+            detail.name = project.name or rp.name
+            detail.shooter_count = 1
+            detail.stage_count = len(project.stages)
+            detail.match_date = (
+                project.match_date.isoformat() if project.match_date else None
+            )
+            detail.manual = project.scoreboard_match_id is None
+            detail.stages_audited = sum(
+                1 for s in project.stages if s.time_seconds > 0 or s.skipped
+            )
+            metadata_path = path / "project.json"
+
+        if metadata_path.exists():
+            mtime = metadata_path.stat().st_mtime
+            detail.last_modified_at = datetime.fromtimestamp(mtime, tz=UTC)
+    except Exception:  # noqa: BLE001 -- defensive: never break listing
+        return detail
+
+    # Derive status. "exported" = every stage audited (heuristic); "archived"
+    # = no modification in 180 days; "in_progress" otherwise.
+    if detail.stage_count > 0 and detail.stages_audited >= detail.stage_count:
+        detail.status = "exported"
+    elif detail.last_modified_at is not None:
+        age = datetime.now(UTC) - detail.last_modified_at
+        if age.days > 180:
+            detail.status = "archived"
+        else:
+            detail.status = "in_progress"
+    else:
+        detail.status = "in_progress"
+    return detail
 
 
 def create_app(
@@ -5443,8 +5664,22 @@ def create_app(
     # scoreboard import flow can prefill 'me' instead of asking each project.
 
     @app.get("/api/user/recent-projects")
-    def list_recent_projects() -> JSONResponse:
+    def list_recent_projects(detail: bool = Query(False)) -> JSONResponse:
+        """Return the recent-projects list.
+
+        ``detail=false`` (default) returns the raw
+        :class:`user_config.RecentProject` entries -- compatible with the
+        legacy picker. ``detail=true`` enriches each entry with on-disk
+        metadata (kind / shooters / stages / status) for the redesigned
+        match picker (#322). The detailed shape is slightly slower; the
+        picker route is the only caller that needs it.
+        """
         projects = user_config.get_recent_projects()
+        if detail:
+            enriched = [_enrich_recent_project(p) for p in projects]
+            return JSONResponse(
+                {"projects": [p.model_dump(mode="json") for p in enriched]}
+            )
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
     @app.post("/api/user/recent-projects/forget")
@@ -5492,6 +5727,172 @@ def create_app(
             )
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project = state.load()
+        return HealthResponse(
+            bound=True,
+            project_name=recorded,
+            project_root=str(state.project_root),
+            schema_version=project.schema_version,
+        )
+
+    @app.post("/api/match/create-manual")
+    def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
+        """Scaffold a Match folder from the manual create-match form (#322).
+
+        Creates ``<project_folder>/match.json`` with the supplied stages,
+        registers the primary shooter under
+        ``<project_folder>/shooters/<slug>/``, and binds the shooter's
+        directory as the active legacy project so existing endpoints keep
+        working. Folder is created if missing; refuses if a ``match.json``
+        is already present (use bind to open existing matches).
+        """
+        target = Path(req.project_folder).expanduser()
+        if (target / match_model.MATCH_FILE).exists():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "match_already_exists",
+                    "message": f"{target} already contains match.json. Open it instead.",
+                },
+            )
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        match = match_model.Match.init(target, name=req.name)
+        match.match_date = req.match_date
+        match.stages = [
+            match_model.MatchStageDefinition(
+                stage_number=draft.stage_number,
+                stage_name=draft.stage_name or f"Stage {draft.stage_number}",
+                stage_rounds=(
+                    StageRounds(expected=draft.expected_rounds)
+                    if draft.expected_rounds is not None and draft.expected_rounds > 0
+                    else None
+                ),
+                placeholder=False,
+            )
+            for draft in req.stages
+        ]
+        match.save(target)
+
+        shooter_slug = match_model.slugify(req.primary_shooter.name)
+        shooter = match_model.Shooter(
+            slug=shooter_slug,
+            name=req.primary_shooter.name,
+            stages=[
+                match_model.ShooterStageData(stage_number=draft.stage_number)
+                for draft in req.stages
+            ],
+        )
+        try:
+            match.add_shooter(target, shooter)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        shooter_root = match_model.Match.shooter_root(target, shooter_slug)
+        # The legacy MatchProject inside the shooter dir needs to mirror the
+        # match-level stage definitions so the existing audit/ingest endpoints
+        # have stages to operate on. We seed it directly rather than relying
+        # on the user re-importing scoreboard data.
+        legacy = MatchProject.init(shooter_root, name=req.name)
+        legacy.competitor_name = req.primary_shooter.name
+        legacy.match_date = req.match_date
+        if not legacy.stages:
+            for draft in req.stages:
+                legacy.stages.append(
+                    StageEntry(
+                        stage_number=draft.stage_number,
+                        stage_name=draft.stage_name or f"Stage {draft.stage_number}",
+                        time_seconds=0.0,
+                        stage_rounds=(
+                            StageRounds(expected=draft.expected_rounds)
+                            if draft.expected_rounds is not None
+                            and draft.expected_rounds > 0
+                            else None
+                        ),
+                        placeholder=False,
+                    )
+                )
+        legacy.save(shooter_root)
+
+        try:
+            recorded = _bind_project_to_state(
+                state, shooter_root, fallback_name=req.name
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Also record the *match* path in the recent-projects index so the
+        # picker can find it. Binding above recorded the shooter dir; the
+        # match folder is what the picker should reopen.
+        user_config.record_project_open(target.resolve(), match.name, kind="match")
+        project = state.load()
+        return HealthResponse(
+            bound=True,
+            project_name=recorded,
+            project_root=str(state.project_root),
+            schema_version=project.schema_version,
+        )
+
+    @app.post("/api/match/create-from-scoreboard")
+    def create_match_from_scoreboard(
+        req: CreateMatchScoreboardRequest,
+    ) -> HealthResponse:
+        """Scaffold a Match folder for a scoreboard-imported match (#322).
+
+        Creates the folder + primary shooter, binds the shooter's
+        directory, and stashes ``(match_id, content_type)`` on the
+        ``MatchProject`` so the SPA can chain
+        ``/api/scoreboard/fetch`` + ``/api/scoreboard/select-shooter``
+        to pull stages and pin the primary competitor. Keeping the
+        scoreboard fetch out of this endpoint means the user sees the
+        same progress UI whether they're creating a match or refreshing
+        an existing one.
+        """
+        target = Path(req.project_folder).expanduser()
+        if (target / match_model.MATCH_FILE).exists():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "match_already_exists",
+                    "message": f"{target} already contains match.json. Open it instead.",
+                },
+            )
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        match = match_model.Match.init(target, name=req.name)
+        match.scoreboard_match_id = str(req.match_id)
+        match.scoreboard_content_type = req.content_type
+        match.save(target)
+
+        shooter_slug = match_model.slugify(req.primary_shooter_name)
+        shooter = match_model.Shooter(
+            slug=shooter_slug,
+            name=req.primary_shooter_name,
+        )
+        try:
+            match.add_shooter(target, shooter)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        shooter_root = match_model.Match.shooter_root(target, shooter_slug)
+        legacy = MatchProject.init(shooter_root, name=req.name)
+        legacy.competitor_name = req.primary_shooter_name
+        legacy.scoreboard_match_id = str(req.match_id)
+        legacy.scoreboard_content_type = req.content_type
+        legacy.save(shooter_root)
+
+        try:
+            recorded = _bind_project_to_state(
+                state, shooter_root, fallback_name=req.name
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        user_config.record_project_open(target.resolve(), match.name, kind="match")
         project = state.load()
         return HealthResponse(
             bound=True,

@@ -5024,6 +5024,156 @@ def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path)
     assert client.get("/api/user/scoreboard-identity").status_code == 404
 
 
+def test_recent_projects_detail_enriches_metadata(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """`?detail=true` returns kind + stage/shooter counts for the redesign picker (#322)."""
+    from splitsmith import match_model, user_config
+
+    # Set up one legacy project + one match folder, both recorded.
+    legacy_root = tmp_path / "legacy"
+    create_app(project_root=legacy_root, project_name="Legacy Match")
+
+    match_root = tmp_path / "fancy-match"
+    match = match_model.Match.init(match_root, name="Fancy Match")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(match_root)
+    shooter = match_model.Shooter(slug="ma", name="Mathias")
+    match.add_shooter(match_root, shooter)
+    user_config.record_project_open(match_root, match.name, kind="match")
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/user/recent-projects?detail=true")
+    assert resp.status_code == 200
+    projects = resp.json()["projects"]
+    by_kind = {p["kind"]: p for p in projects}
+
+    assert by_kind["match"]["name"] == "Fancy Match"
+    assert by_kind["match"]["shooter_count"] == 1
+    assert by_kind["match"]["stage_count"] == 2
+    assert by_kind["match"]["status"] == "in_progress"
+
+    assert by_kind["legacy"]["name"] == "Legacy Match"
+    assert by_kind["legacy"]["shooter_count"] == 1
+
+
+def test_recent_projects_detail_marks_missing_path(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    from splitsmith import user_config
+
+    ghost = tmp_path / "ghost"
+    ghost.mkdir()
+    user_config.record_project_open(ghost, "Ghost", kind="legacy")
+    ghost.rmdir()
+
+    app = create_app()
+    client = TestClient(app)
+    resp = client.get("/api/user/recent-projects?detail=true")
+    kinds = [p["kind"] for p in resp.json()["projects"]]
+    assert kinds == ["missing"]
+
+
+def test_create_match_manual_scaffolds_match_and_binds_shooter(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """The manual create-match endpoint lays out match.json + the first shooter."""
+    from splitsmith import match_model
+
+    target = tmp_path / "new-match"
+    app = create_app()
+    client = TestClient(app)
+
+    body = {
+        "name": "Bromma Practice",
+        "project_folder": str(target),
+        "match_date": "2026-05-14",
+        "club": "Bromma PK",
+        "default_division": "Production Optics",
+        "stages": [
+            {"stage_number": 1, "stage_name": "Draw drill", "expected_rounds": 12},
+            {"stage_number": 2, "stage_name": "Reload", "expected_rounds": 16},
+        ],
+        "primary_shooter": {"name": "Mathias Axell", "division": "Production Optics"},
+    }
+    resp = client.post("/api/match/create-manual", json=body)
+    assert resp.status_code == 200, resp.text
+    health = resp.json()
+    assert health["bound"] is True
+    assert health["project_name"] == "Bromma Practice"
+
+    # match.json + shooter dir + nested project.json all exist.
+    assert (target / "match.json").exists()
+    match = match_model.Match.load(target)
+    assert len(match.stages) == 2
+    assert match.match_date.isoformat() == "2026-05-14"
+    assert match.shooters == ["mathias-axell"]
+
+    shooter_root = match_model.Match.shooter_root(target, "mathias-axell")
+    assert (shooter_root / "shooter.json").exists()
+    assert (shooter_root / "project.json").exists()
+    legacy = MatchProject.load(shooter_root)
+    assert legacy.competitor_name == "Mathias Axell"
+    assert len(legacy.stages) == 2
+
+    # Recent-projects list got both the match folder and the legacy shooter
+    # path; detail listing exposes them as kinds "match" + "legacy".
+    detail = client.get("/api/user/recent-projects?detail=true").json()
+    kinds = sorted(p["kind"] for p in detail["projects"])
+    assert "match" in kinds
+    assert "legacy" in kinds
+
+
+def test_create_match_manual_refuses_existing_match_folder(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    from splitsmith import match_model
+
+    target = tmp_path / "occupied"
+    match_model.Match.init(target, name="Already here")
+    app = create_app()
+    client = TestClient(app)
+
+    body = {
+        "name": "Bromma",
+        "project_folder": str(target),
+        "stages": [{"stage_number": 1, "stage_name": "One"}],
+        "primary_shooter": {"name": "MA"},
+    }
+    resp = client.post("/api/match/create-manual", json=body)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "match_already_exists"
+
+
+def test_bind_match_folder_routes_to_first_shooter(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """Binding a Match folder transparently switches state to the first shooter."""
+    from splitsmith import match_model
+
+    target = tmp_path / "rich-match"
+    match = match_model.Match.init(target, name="Rich Match")
+    shooter = match_model.Shooter(slug="ma", name="Mathias")
+    match.add_shooter(target, shooter)
+
+    app = create_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/user/recent-projects/bind",
+        json={"path": str(target)},
+    )
+    assert resp.status_code == 200
+    # The bound root is the shooter directory, not the match root.
+    body = resp.json()
+    assert body["bound"] is True
+    assert body["project_root"].endswith("/shooters/ma")
+
+
 def test_user_config_disable_flag_makes_endpoints_safe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

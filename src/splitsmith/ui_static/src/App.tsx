@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { ModeProvider } from "@/lib/mode";
 import { Audit } from "@/pages/Audit";
 import { Coach } from "@/pages/Coach";
+import { CreateMatch } from "@/pages/CreateMatch";
 import { Design } from "@/pages/Design";
 import { Export } from "@/pages/Export";
 import { Home } from "@/pages/Home";
@@ -22,6 +23,7 @@ export function App() {
               runs whether or not a project is bound. AppShell redirects
               here when it sees /api/health.bound === false. */}
           <Route path="pick" element={<Pick />} />
+          <Route path="pick/new" element={<CreateMatch />} />
           <Route element={<AppShell />}>
             <Route index element={<Home />} />
             <Route path="ingest" element={<Ingest />} />
