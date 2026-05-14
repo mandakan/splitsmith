@@ -1,0 +1,2335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith — Stage 02 · Tower · Compare</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH — Stage Compare
+   Direction: Shot Timer (extends polished 01 + 03).
+   Multi-shooter race telemetry. Each shooter has a distinct
+   "racing number" color identity carried through the video
+   grid, the sync timeline, and the ranking.
+   ============================================================ */
+
+:root {
+  /* === Tokens carried from polished 01 + 03 === */
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --cold:         #6B7079;
+
+  --beep:         #06B6D4;
+  --beep-glow:    rgba(6, 182, 212, 0.35);
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+  --manual:       #A78BFA;
+  --scope:        #07090E;
+
+  /* === Per-shooter "racing number" identities === */
+  /* MA — LED red (you / audio source) */
+  --c-ma:       #FF2D2D;
+  --c-ma-soft:  #FF5555;
+  --c-ma-deep:  #B91C1C;
+  --c-ma-glow:  rgba(255, 45, 45, 0.32);
+  --c-ma-tint:  rgba(255, 45, 45, 0.10);
+
+  /* JL — amber */
+  --c-jl:       #FBBF24;
+  --c-jl-soft:  #FCD34D;
+  --c-jl-deep:  #B45309;
+  --c-jl-glow:  rgba(251, 191, 36, 0.32);
+  --c-jl-tint:  rgba(251, 191, 36, 0.10);
+
+  /* PE — green (the leader) */
+  --c-pe:       #4ADE80;
+  --c-pe-soft:  #86EFAC;
+  --c-pe-deep:  #166534;
+  --c-pe-glow:  rgba(74, 222, 128, 0.32);
+  --c-pe-tint:  rgba(74, 222, 128, 0.10);
+
+  /* RJ — blue */
+  --c-rj:       #60A5FA;
+  --c-rj-soft:  #93C5FD;
+  --c-rj-deep:  #1E3A8A;
+  --c-rj-glow:  rgba(96, 165, 250, 0.32);
+  --c-rj-tint:  rgba(96, 165, 250, 0.10);
+
+  /* === Type === */
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out:cubic-bezier(0.16, 1, 0.3, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+    radial-gradient(900px 500px at 90% 300px, rgba(74,222,128,0.025), transparent 60%),
+    radial-gradient(700px 400px at 10% 600px, rgba(96, 165, 250, 0.018), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+
+::selection { background: var(--led); color: var(--bg); }
+
+:focus { outline: 0; }
+:focus-visible {
+  outline: 2px solid var(--led);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  text-transform: none;
+}
+
+/* ============================================================
+   SHELL (matches polished 01 + 03)
+   ============================================================ */
+.shell {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: linear-gradient(to bottom, var(--surface), var(--bg));
+  border-bottom: 1px solid var(--rule);
+}
+.shell::after {
+  content: "";
+  position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--led) 18%,
+    var(--led) 22%,
+    var(--rule-strong) 30%,
+    var(--rule-strong) 70%,
+    var(--led) 78%,
+    var(--led) 82%,
+    transparent
+  );
+  opacity: 0.55;
+}
+
+.shell-top {
+  display: flex; align-items: center; gap: 28px;
+  padding: 14px 28px; max-width: 100%; margin: 0 auto;
+}
+
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; flex-shrink: 0; }
+.brand .name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.375rem;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.brand .heartbeat {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow), 0 0 2px var(--led);
+  animation: heartbeat 2.4s ease-in-out infinite;
+}
+@keyframes heartbeat {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.85); }
+}
+
+.mode-switch {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.mode-switch button {
+  padding: 7px 18px;
+  border-radius: 6px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  transition: color 200ms var(--ease);
+}
+.mode-switch button.active {
+  color: var(--bg);
+  background: var(--ink);
+  font-weight: 700;
+}
+.mode-switch button:not(.active):hover { color: var(--ink); }
+
+.spacer { flex: 1; }
+
+/* Race-clock stamp (compare-specific live indicator) */
+.race-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, var(--c-pe-tint), var(--led-tint));
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.race-stamp::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--c-pe);
+  box-shadow: 0 0 8px var(--c-pe-glow);
+  animation: heartbeat 1.6s ease-in-out infinite;
+}
+.race-stamp b { color: var(--ink); font-weight: 700; }
+
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn {
+  width: 38px; height: 38px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  color: var(--muted);
+  transition: background 150ms var(--ease), color 150ms var(--ease);
+  position: relative;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+
+.profile {
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 4px 4px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface-2);
+  min-height: 40px;
+}
+.profile:hover { border-color: var(--rule-strong); background: var(--surface-3); }
+.profile .av {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow);
+}
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+/* Context bar */
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context {
+  padding: 9px 28px; font-size: 0.75rem; color: var(--muted);
+  display: flex; align-items: center; gap: 14px;
+  font-feature-settings: var(--feat-num);
+}
+.context .crumb {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--mono); font-size: 0.6875rem;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--subtle);
+}
+.context .crumb a { color: var(--subtle); transition: color 150ms; }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .stage-num { color: var(--led); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+.context .right {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 18px;
+  font-family: var(--mono); font-size: 0.625rem;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--subtle);
+}
+.context .right b {
+  color: var(--ink-2); font-weight: 700;
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================
+   APP BODY
+   ============================================================ */
+.app-body {
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  min-height: calc(100vh - 86px);
+}
+
+/* ===== Sidebar (matches polished 03) ===== */
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--rule);
+  padding: 18px 12px;
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 86px);
+}
+.match-card {
+  padding: 4px 8px 14px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 12px;
+}
+.match-card .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 6px;
+}
+.match-card .title {
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1.2;
+  margin-bottom: 6px;
+}
+.match-card .meta {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+
+.nav-section { margin: 4px 0 14px; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+  min-height: 36px;
+}
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item .icon { color: var(--muted); display: inline-flex; }
+.nav-item:hover .icon { color: var(--ink); }
+.nav-item .count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--subtle);
+}
+
+.nav-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 6px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.nav-label .pill {
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-feature-settings: var(--feat-num);
+}
+
+.stage-list { display: flex; flex-direction: column; gap: 1px; }
+.stage-item {
+  display: grid;
+  grid-template-columns: 26px 1fr 14px;
+  gap: 9px;
+  align-items: center;
+  padding: 6px 10px 6px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  transition: all 150ms var(--ease);
+  min-height: 34px;
+}
+.stage-item:hover { background: var(--surface-2); }
+.stage-item.current {
+  background: var(--led-tint);
+  border: 1px solid var(--led-deep);
+  padding: 5px 9px 5px 5px;
+}
+.stage-num {
+  width: 26px; height: 26px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+}
+.stage-item.current .stage-num {
+  background: var(--led);
+  color: var(--bg);
+  box-shadow: 0 0 0 1px var(--led), 0 0 10px var(--led-glow);
+}
+.stage-name {
+  color: var(--ink-2);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-item.current .stage-name { color: var(--led); font-weight: 700; }
+.stage-status {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.stage-status.done {
+  background: var(--done);
+  box-shadow: 0 0 5px var(--done-glow);
+}
+.stage-status.done svg { color: var(--bg); }
+.stage-status.partial {
+  background: var(--live);
+  box-shadow: 0 0 5px var(--live-glow);
+}
+.stage-status.flagged {
+  background: var(--led);
+  box-shadow: 0 0 5px var(--led-glow);
+}
+.stage-status.todo {
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+}
+
+/* ============================================================
+   MAIN CONTENT
+   ============================================================ */
+.content { min-width: 0; }
+
+/* === Stage header === */
+.stage-head {
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  padding: 18px 28px 0;
+}
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+.stage-h1 {
+  font-family: var(--display);
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1;
+  margin: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.stage-h1 .num {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--led);
+  font-feature-settings: var(--feat-num);
+}
+.stage-h1 .name { color: var(--ink); }
+
+.stage-nav { display: inline-flex; gap: 4px; }
+.stage-nav .icon-btn {
+  width: 32px; height: 32px;
+  border: 1px solid var(--rule);
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+.stage-nav .icon-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--rule-strong);
+}
+
+.stage-stats {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.stage-stats .stat b { color: var(--ink); font-weight: 700; letter-spacing: 0.04em; font-size: 0.6875rem; }
+.stage-stats .sep { color: var(--whisper); }
+
+/* Tabs */
+.stage-tabs {
+  display: flex;
+  gap: 0;
+  margin-top: 4px;
+}
+.tab {
+  padding: 12px 22px 14px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  position: relative;
+  transition: color 150ms var(--ease);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+.tab .count {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--subtle);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.tab:hover { color: var(--ink-2); }
+.tab.active {
+  color: var(--ink);
+  font-weight: 700;
+}
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow);
+}
+
+/* ============================================================
+   COMPARE TOOLBAR
+   ============================================================ */
+.compare-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.tb-lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+/* Visibility chips */
+.shooter-chips {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+}
+.s-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 4px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+  min-height: 30px;
+}
+.s-chip:hover { color: var(--ink-2); }
+.s-chip .av {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  color: var(--bg);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0,0,0,0.3);
+}
+.s-chip .av.ma { background: linear-gradient(135deg, var(--c-ma-soft), var(--c-ma-deep)); color: var(--ink); }
+.s-chip .av.jl { background: linear-gradient(135deg, var(--c-jl-soft), var(--c-jl-deep)); }
+.s-chip .av.pe { background: linear-gradient(135deg, var(--c-pe-soft), var(--c-pe-deep)); }
+.s-chip .av.rj { background: linear-gradient(135deg, var(--c-rj-soft), var(--c-rj-deep)); color: var(--ink); }
+.s-chip.visible { color: var(--ink); font-weight: 600; }
+.s-chip.audio {
+  background: rgba(255,255,255,0.04);
+  color: var(--ink);
+  font-weight: 700;
+  border-color: var(--led);
+  box-shadow: 0 0 0 1px var(--led), 0 0 12px var(--led-glow);
+}
+.s-chip.audio .av {
+  box-shadow: 0 0 0 1px var(--led-deep), 0 0 10px var(--led-glow);
+}
+.s-chip .audio-tag {
+  font-family: var(--display);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: var(--led);
+  color: var(--bg);
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.s-chip .audio-tag::before {
+  content: "";
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--bg);
+}
+
+/* Layout segmented control */
+.layout-set {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  background: var(--surface-2);
+  border-radius: 7px;
+  padding: 3px;
+}
+.layout-set button {
+  padding: 6px 11px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: all 150ms var(--ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.layout-set button.active {
+  color: var(--bg);
+  background: var(--ink);
+  font-weight: 700;
+}
+.layout-set button:not(.active):hover { color: var(--ink); }
+
+.tb-spacer { flex: 1; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 7px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  transition: all 180ms var(--ease);
+  min-height: 38px;
+}
+.btn:hover {
+  background: var(--surface-3);
+  border-color: var(--ink-2);
+}
+.btn.primary {
+  background: var(--led);
+  color: var(--bg);
+  border-color: var(--led);
+  box-shadow: 0 0 0 1px var(--led), 0 0 16px var(--led-glow);
+}
+.btn.primary:hover {
+  background: var(--led-soft);
+  border-color: var(--led-soft);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--rule);
+  color: var(--ink-2);
+}
+
+/* ============================================================
+   WORKSPACE
+   ============================================================ */
+.workspace { padding: 20px 28px 60px; }
+
+/* === Video grid === */
+.video-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.v-tile {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 11px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.04),
+    0 18px 32px -20px rgba(0,0,0,0.8);
+  transition: all 200ms var(--ease);
+}
+
+/* Per-shooter scene gradients (subtle, identity-tinted) */
+.v-tile .scene { position: absolute; inset: 0; }
+.v-tile.ma .scene {
+  background:
+    radial-gradient(circle at 35% 45%, rgba(255, 100, 50, 0.18), transparent 55%),
+    radial-gradient(circle at 70% 65%, rgba(255, 45, 45, 0.10), transparent 60%),
+    linear-gradient(to bottom, #1A1414, #08060A);
+}
+.v-tile.jl .scene {
+  background:
+    radial-gradient(circle at 40% 40%, rgba(251, 191, 36, 0.14), transparent 60%),
+    radial-gradient(circle at 75% 70%, rgba(180, 83, 9, 0.16), transparent 65%),
+    linear-gradient(to bottom, #1A1612, #0A0806);
+}
+.v-tile.pe .scene {
+  background:
+    radial-gradient(circle at 30% 40%, rgba(74, 222, 128, 0.12), transparent 60%),
+    radial-gradient(circle at 70% 65%, rgba(22, 101, 52, 0.18), transparent 65%),
+    linear-gradient(to bottom, #0E1812, #060A08);
+}
+.v-tile.rj .scene {
+  background:
+    radial-gradient(circle at 40% 35%, rgba(96, 165, 250, 0.12), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(30, 58, 138, 0.18), transparent 65%),
+    linear-gradient(to bottom, #101622, #06080E);
+}
+.v-tile .scene-grain {
+  position: absolute; inset: 0;
+  opacity: 0.55;
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='1' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.95 0 0 0 0 0.95 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+.v-tile .scene-vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55));
+  pointer-events: none;
+}
+
+/* Audio-source tile gets the LED ring */
+.v-tile.audio-source {
+  border-color: var(--led);
+  box-shadow:
+    inset 0 0 0 1px var(--led),
+    0 0 0 1px var(--led),
+    0 0 32px var(--led-glow),
+    0 18px 32px -20px rgba(0,0,0,0.8);
+}
+
+/* Top-left shooter tag */
+.v-tag {
+  position: absolute;
+  top: 12px; left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 12px 4px 4px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(10px);
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.08);
+  z-index: 2;
+}
+.v-tag .av {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  border: 1px solid rgba(0,0,0,0.3);
+}
+.v-tag .av.ma { background: linear-gradient(135deg, var(--c-ma-soft), var(--c-ma-deep)); }
+.v-tag .av.jl { background: linear-gradient(135deg, var(--c-jl-soft), var(--c-jl-deep)); color: var(--bg); }
+.v-tag .av.pe { background: linear-gradient(135deg, var(--c-pe-soft), var(--c-pe-deep)); color: var(--bg); }
+.v-tag .av.rj { background: linear-gradient(135deg, var(--c-rj-soft), var(--c-rj-deep)); }
+.v-tag .name {
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.v-tag .rank {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  background: rgba(255,255,255,0.06);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.v-tag .rank.leader { color: var(--c-pe); border-color: rgba(74,222,128,0.4); background: rgba(74,222,128,0.10); }
+
+/* Audio source pill (only on MA's tile) */
+.audio-source-pill {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--led);
+  color: var(--bg);
+  font-family: var(--display);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  box-shadow: 0 0 16px var(--led-glow);
+  z-index: 2;
+}
+.audio-source-pill::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--bg);
+  animation: heartbeat 1.6s ease-in-out infinite;
+}
+
+/* Top-right actions */
+.v-actions {
+  position: absolute;
+  top: 12px; right: 12px;
+  display: inline-flex;
+  gap: 4px;
+  z-index: 2;
+}
+.v-tile.audio-source .v-actions { top: 50px; }
+.v-actions button {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 150ms var(--ease);
+}
+.v-actions button:hover {
+  background: rgba(0,0,0,0.75);
+  border-color: var(--led);
+  color: var(--led);
+}
+
+/* Bottom strip: timecode + camera */
+.v-strip {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px 14px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  z-index: 1;
+}
+.v-strip .timecode {
+  font-family: var(--mono);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  line-height: 1;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.v-strip .timecode .total {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.v-strip .timecode .total b { color: var(--ink-2); }
+.v-strip .cam-select {
+  background: rgba(0,0,0,0.55);
+  color: var(--ink);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 5px 10px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* FINISHED overlay (when shooter has finished) */
+.v-finished {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(2px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+}
+.v-tile.finished .v-finished { display: flex; }
+.v-finished .pill {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 24px;
+  border: 1px solid var(--c-pe);
+  background: rgba(0,0,0,0.6);
+  border-radius: 8px;
+  box-shadow: 0 0 24px var(--c-pe-glow);
+}
+.v-finished .pill .lbl {
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--c-pe);
+}
+.v-finished .pill .t {
+  font-family: var(--mono);
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+
+/* === Shared transport === */
+.share-transport {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 12px 18px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 11px;
+  margin-bottom: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.st-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tc-btn {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  transition: all 150ms var(--ease);
+}
+.tc-btn:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+  border-color: var(--rule-strong);
+}
+.tc-btn.play {
+  width: 44px; height: 44px;
+  background: var(--led);
+  border-color: var(--led);
+  color: var(--bg);
+  box-shadow: 0 0 0 1px var(--led), 0 0 24px var(--led-glow);
+}
+.tc-btn.play:hover {
+  background: var(--led-soft);
+  border-color: var(--led-soft);
+}
+
+.st-scrub {
+  position: relative;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+.scrub-track {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  overflow: visible;
+}
+.scrub-track .fill {
+  height: 100%;
+  background: linear-gradient(to right, var(--led-deep), var(--led));
+  border-radius: 999px;
+  box-shadow: 0 0 8px var(--led-glow);
+}
+.scrub-track .head {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--led);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--led), 0 0 12px var(--led-glow);
+}
+/* Per-shooter end markers on the scrub */
+.scrub-track .end-mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 11px;
+  border-radius: 1px;
+}
+.scrub-track .end-mark.pe { background: var(--c-pe); box-shadow: 0 0 4px var(--c-pe-glow); }
+.scrub-track .end-mark.ma { background: var(--c-ma); box-shadow: 0 0 4px var(--c-ma-glow); }
+.scrub-track .end-mark.jl { background: var(--c-jl); box-shadow: 0 0 4px var(--c-jl-glow); }
+.scrub-track .end-mark.rj { background: var(--c-rj); box-shadow: 0 0 4px var(--c-rj-glow); }
+
+.st-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 22px;
+}
+.st-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.st-cell .k {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.st-cell .v {
+  font-family: var(--mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  line-height: 1;
+}
+.st-cell .v.led {
+  color: var(--led);
+  text-shadow: 0 0 12px var(--led-glow);
+}
+.st-cell .v small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-left: 3px;
+  font-weight: 500;
+}
+
+.st-status {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--beep);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.st-status::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--beep);
+  box-shadow: 0 0 6px var(--beep-glow);
+}
+
+/* ============================================================
+   SYNC TIMELINE (race telemetry)
+   ============================================================ */
+.sync {
+  position: relative;
+  background: var(--scope);
+  border: 1px solid var(--rule);
+  border-radius: 13px;
+  padding: 14px 14px 12px;
+  margin-bottom: 16px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.03),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.sync::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 13px;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5));
+  pointer-events: none;
+}
+
+.sync-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  position: relative;
+}
+.sync-head .title {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.sync-head .title::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 6px var(--led-glow);
+}
+.sync-head .title .count {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.sync-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.sync-legend .lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sync-legend .lg .sw {
+  width: 14px; height: 4px;
+  border-radius: 2px;
+}
+.sync-legend .lg.ma .sw { background: var(--c-ma); box-shadow: 0 0 4px var(--c-ma-glow); }
+.sync-legend .lg.jl .sw { background: var(--c-jl); box-shadow: 0 0 4px var(--c-jl-glow); }
+.sync-legend .lg.pe .sw { background: var(--c-pe); box-shadow: 0 0 4px var(--c-pe-glow); }
+.sync-legend .lg.rj .sw { background: var(--c-rj); box-shadow: 0 0 4px var(--c-rj-glow); }
+.sync-legend .lg.leader .crown {
+  font-size: 0.625rem;
+  color: var(--c-pe);
+  font-weight: 700;
+}
+
+/* SVG */
+.sync-svg {
+  width: 100%;
+  height: 320px;
+  display: block;
+}
+
+.sync-foot {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.sync-foot kbd { font-size: 0.5625rem; padding: 1px 5px; }
+
+/* ============================================================
+   RANKING TABLE
+   ============================================================ */
+.ranking {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.rank-head {
+  display: grid;
+  grid-template-columns: 60px 1.4fr 130px 100px 110px 70px 80px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.rank-head .title-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.rank-head .title-cell .label {
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+}
+.rank-head .title-cell .sub {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.r-row {
+  display: grid;
+  grid-template-columns: 60px 1.4fr 130px 100px 110px 70px 80px;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+  transition: background 180ms var(--ease);
+}
+.r-row:last-child { border-bottom: 0; }
+.r-row:hover { background: var(--surface-2); }
+.r-row.you {
+  background:
+    linear-gradient(to right, var(--led-tint) 0%, transparent 50%);
+}
+.r-row.you::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow);
+}
+.r-row.leader::after {
+  content: "";
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--c-pe);
+  box-shadow: 0 0 8px var(--c-pe-glow);
+}
+
+.rank-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.rank-pill .n {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.rank-pill.first {
+  background: var(--c-pe-tint);
+  color: var(--c-pe);
+  border: 1px solid rgba(74,222,128,0.3);
+}
+.rank-pill.second {
+  background: var(--surface-3);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+}
+.rank-pill.third {
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+}
+.rank-pill.fourth {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--rule);
+}
+
+.r-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.r-who .av {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+.r-who .av.ma { background: linear-gradient(135deg, var(--c-ma-soft), var(--c-ma-deep)); box-shadow: 0 0 0 1px var(--c-ma-deep), 0 0 12px var(--c-ma-glow); }
+.r-who .av.jl { background: linear-gradient(135deg, var(--c-jl-soft), var(--c-jl-deep)); color: var(--bg); box-shadow: 0 0 0 1px var(--c-jl-deep), 0 0 12px var(--c-jl-glow); }
+.r-who .av.pe { background: linear-gradient(135deg, var(--c-pe-soft), var(--c-pe-deep)); color: var(--bg); box-shadow: 0 0 0 1px var(--c-pe-deep), 0 0 16px var(--c-pe-glow); }
+.r-who .av.rj { background: linear-gradient(135deg, var(--c-rj-soft), var(--c-rj-deep)); box-shadow: 0 0 0 1px var(--c-rj-deep), 0 0 12px var(--c-rj-glow); }
+.r-who .name {
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1.1;
+  margin-bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.r-who .name .you-tag {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--led);
+  background: var(--led-tint);
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--led-deep);
+}
+.r-who .meta {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+
+.r-time {
+  font-family: var(--mono);
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  line-height: 1;
+}
+.r-time small { color: var(--muted); font-size: 0.75rem; margin-left: 3px; font-weight: 500; }
+.r-row.leader .r-time { color: var(--c-pe); text-shadow: 0 0 12px var(--c-pe-glow); }
+
+.r-stat {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.r-stat small { color: var(--subtle); font-size: 0.625rem; margin-left: 3px; font-weight: 500; }
+
+.r-shots {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.r-shots b { color: var(--ink); font-weight: 700; font-size: 0.8125rem; }
+
+.r-gap {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--led);
+  font-feature-settings: var(--feat-num);
+  text-align: right;
+}
+.r-row.leader .r-gap { color: var(--c-pe); }
+
+/* ============================================================
+   PAGE REVEAL
+   ============================================================ */
+.v-tile, .share-transport, .sync, .ranking {
+  animation: rise 600ms var(--ease) backwards;
+}
+.v-tile:nth-of-type(1) { animation-delay:  80ms; }
+.v-tile:nth-of-type(2) { animation-delay: 120ms; }
+.v-tile:nth-of-type(3) { animation-delay: 160ms; }
+.v-tile:nth-of-type(4) { animation-delay: 200ms; }
+.share-transport       { animation-delay: 260ms; }
+.sync                  { animation-delay: 320ms; animation-duration: 800ms; }
+.ranking               { animation-delay: 400ms; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Trace draw-in for sync timeline */
+.track-trail {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: draw 1.4s var(--ease) 450ms forwards;
+}
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .brand .heartbeat,
+  .race-stamp::before,
+  .audio-source-pill::before {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .track-trail { stroke-dashoffset: 0 !important; }
+}
+
+/* Responsive */
+@media (max-width: 1400px) {
+  .video-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 1100px) {
+  .video-grid { grid-template-columns: 1fr; }
+}
+
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     SHELL
+     ============================================================ -->
+<header class="shell">
+  <div class="shell-top">
+
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 36 36" fill="none" aria-label="Splitsmith">
+        <rect x="1.5" y="1.5" width="33" height="33" rx="7" fill="#14171C" stroke="#3A4049" stroke-width="1"/>
+        <rect x="10" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <rect x="23" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <circle cx="18" cy="18" r="2.4" fill="#FF2D2D"/>
+        <circle cx="18" cy="18" r="3.8" fill="none" stroke="#FF2D2D" stroke-width="0.8" opacity="0.4"/>
+        <line x1="3" y1="32" x2="33" y2="32" stroke="#FF2D2D" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
+      </svg>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-hidden="true"></span>
+    </div>
+
+    <div class="mode-switch" role="tablist">
+      <button class="active" role="tab" aria-selected="true">Match</button>
+      <button role="tab" aria-selected="false">Developer</button>
+    </div>
+
+    <span class="spacer"></span>
+
+    <span class="race-stamp">
+      <span>Compare · <b>4 Tracks</b></span>
+    </span>
+
+    <div class="utility">
+      <button class="icon-btn" title="Help" aria-label="Help">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>
+      </button>
+      <button class="icon-btn" title="Notifications" aria-label="Notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 19V11a6 6 0 0 1 12 0v8H6Zm3 0a3 3 0 0 0 6 0"/></svg>
+      </button>
+      <button class="profile" title="Mathias Axell">
+        <span class="av">MA</span>
+        <span class="label">Mathias Axell</span>
+      </button>
+    </div>
+
+  </div>
+
+  <div class="context-wrap">
+    <div class="context">
+      <span class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">·</span>
+        <a href="02-match-overview.html">VADS Easter Shoot 2026</a>
+        <span class="sep">·</span>
+        <span class="stage-num">Stage 02</span>
+        <span class="sep">·</span>
+        <span class="current">Tower — Compare</span>
+      </span>
+      <div class="right">
+        <span>Audio Source <b style="color: var(--led);">MA</b></span>
+        <span>Layout <b>2 × 2</b></span>
+        <span>Session <b>047</b></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================
+     BODY
+     ============================================================ -->
+<div class="app-body">
+
+  <!-- ====== Sidebar ====== -->
+  <aside class="sidebar" aria-label="Match navigation">
+
+    <div class="match-card">
+      <div class="lbl">Active Match</div>
+      <div class="title">VADS Easter<br>Shoot 2026</div>
+      <div class="meta">12 APR · Västerort PK</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+        Overview
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>
+        Coach
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>
+        Shooters
+        <span class="count">04</span>
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>
+        Export
+      </div>
+    </div>
+
+    <div class="nav-label">
+      Stages
+      <span class="pill">08 / 12</span>
+    </div>
+
+    <div class="stage-list">
+      <div class="stage-item">
+        <span class="stage-num">01</span>
+        <span class="stage-name">Snake</span>
+        <span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="stage-item current">
+        <span class="stage-num">02</span>
+        <span class="stage-name">Tower</span>
+        <span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">03</span>
+        <span class="stage-name">Plates</span>
+        <span class="stage-status partial"></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">04</span>
+        <span class="stage-name">Mover</span>
+        <span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">05</span>
+        <span class="stage-name">Standards</span>
+        <span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">06</span>
+        <span class="stage-name">Field 1</span>
+        <span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">07</span>
+        <span class="stage-name">Field 2</span>
+        <span class="stage-status flagged"></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">08</span>
+        <span class="stage-name">Window</span>
+        <span class="stage-status partial"></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">09</span>
+        <span class="stage-name">Long range</span>
+        <span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">10</span>
+        <span class="stage-name">Speed shoot</span>
+        <span class="stage-status todo"></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">11</span>
+        <span class="stage-name">Plate rack</span>
+        <span class="stage-status todo"></span>
+      </div>
+      <div class="stage-item">
+        <span class="stage-num">12</span>
+        <span class="stage-name">Final</span>
+        <span class="stage-status todo"></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ====== Content ====== -->
+  <main class="content">
+
+    <!-- Stage header -->
+    <div class="stage-head">
+      <div class="title-row">
+        <h1 class="stage-h1">
+          <span class="num">STAGE 02</span>
+          <span class="name">Tower</span>
+        </h1>
+        <div class="stage-nav">
+          <button class="icon-btn" title="Previous stage" aria-label="Previous stage">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <button class="icon-btn" title="Next stage" aria-label="Next stage">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+
+        <div class="stage-stats">
+          <span class="stat"><b>16</b> shots</span>
+          <span class="sep">·</span>
+          <span class="stat"><b>04</b> shooters · all audited</span>
+          <span class="sep">·</span>
+          <span class="stat">leader <b style="color: var(--c-pe);">PE 7.832s</b></span>
+        </div>
+      </div>
+
+      <div class="stage-tabs" role="tablist">
+        <button class="tab" role="tab">Audit</button>
+        <button class="tab active" role="tab" aria-selected="true">Compare <span class="count">04</span></button>
+        <button class="tab" role="tab">Coach</button>
+      </div>
+    </div>
+
+    <!-- Compare toolbar -->
+    <div class="compare-toolbar">
+      <span class="tb-lbl">Show</span>
+
+      <div class="shooter-chips" role="tablist" aria-label="Shooter visibility">
+        <button class="s-chip audio">
+          <span class="av ma">MA</span>
+          <span>Mathias</span>
+          <span class="audio-tag">Audio</span>
+        </button>
+        <button class="s-chip visible">
+          <span class="av jl">JL</span>
+          <span>Johan</span>
+        </button>
+        <button class="s-chip visible">
+          <span class="av pe">PE</span>
+          <span>Pia</span>
+        </button>
+        <button class="s-chip visible">
+          <span class="av rj">RJ</span>
+          <span>Robert</span>
+        </button>
+      </div>
+
+      <div class="tb-spacer"></div>
+
+      <span class="tb-lbl">Layout</span>
+      <div class="layout-set" role="tablist" aria-label="Layout">
+        <button class="active" role="tab" aria-selected="true">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+          2 × 2
+        </button>
+        <button role="tab">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="6" width="4" height="12" rx="1"/><rect x="9" y="6" width="4" height="12" rx="1"/><rect x="15" y="6" width="4" height="12" rx="1"/></svg>
+          1 × 4
+        </button>
+        <button role="tab">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
+          Stack
+        </button>
+      </div>
+
+      <button class="btn primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg>
+        Export FCPXML
+      </button>
+    </div>
+
+    <!-- ============================================================
+         WORKSPACE
+         ============================================================ -->
+    <div class="workspace">
+
+      <!-- Video grid 2x2 -->
+      <section class="video-grid">
+
+        <!-- MA — Audio source -->
+        <div class="v-tile ma audio-source">
+          <div class="scene"></div>
+          <div class="scene-grain"></div>
+          <div class="scene-vignette"></div>
+
+          <div class="v-tag">
+            <span class="av ma">MA</span>
+            <span class="name">Mathias</span>
+            <span class="rank">2<sup>nd</sup></span>
+          </div>
+
+          <span class="audio-source-pill">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M19 5a8 8 0 0 1 0 14"/></svg>
+            Audio
+          </span>
+
+          <div class="v-actions">
+            <button title="Solo" aria-label="Solo">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+            </button>
+          </div>
+
+          <div class="v-strip">
+            <span class="timecode">04.182<span class="total">/ <b>08.218s</b></span></span>
+            <select class="cam-select">
+              <option>Cam A · chest</option>
+              <option>Cam B · helmet</option>
+              <option>Split</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- JL — Johan -->
+        <div class="v-tile jl">
+          <div class="scene"></div>
+          <div class="scene-grain"></div>
+          <div class="scene-vignette"></div>
+
+          <div class="v-tag">
+            <span class="av jl">JL</span>
+            <span class="name">Johan</span>
+            <span class="rank">3<sup>rd</sup></span>
+          </div>
+
+          <div class="v-actions">
+            <button title="Unmute" aria-label="Unmute">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>
+            </button>
+            <button title="Solo" aria-label="Solo">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+            </button>
+          </div>
+
+          <div class="v-strip">
+            <span class="timecode">04.182<span class="total">/ <b>09.114s</b></span></span>
+            <select class="cam-select">
+              <option>Cam A · chest</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- PE — Pia (leader) -->
+        <div class="v-tile pe">
+          <div class="scene"></div>
+          <div class="scene-grain"></div>
+          <div class="scene-vignette"></div>
+
+          <div class="v-tag">
+            <span class="av pe">PE</span>
+            <span class="name">Pia</span>
+            <span class="rank leader">1<sup>st</sup></span>
+          </div>
+
+          <div class="v-actions">
+            <button title="Unmute" aria-label="Unmute">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>
+            </button>
+            <button title="Solo" aria-label="Solo">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+            </button>
+          </div>
+
+          <div class="v-strip">
+            <span class="timecode">04.182<span class="total">/ <b>07.832s</b></span></span>
+            <select class="cam-select">
+              <option>Cam A · chest</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- RJ — Robert -->
+        <div class="v-tile rj">
+          <div class="scene"></div>
+          <div class="scene-grain"></div>
+          <div class="scene-vignette"></div>
+
+          <div class="v-tag">
+            <span class="av rj">RJ</span>
+            <span class="name">Robert</span>
+            <span class="rank">4<sup>th</sup></span>
+          </div>
+
+          <div class="v-actions">
+            <button title="Unmute" aria-label="Unmute">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>
+            </button>
+            <button title="Solo" aria-label="Solo">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg>
+            </button>
+          </div>
+
+          <div class="v-strip">
+            <span class="timecode">04.182<span class="total">/ <b>09.412s</b></span></span>
+            <select class="cam-select">
+              <option>Cam A · chest</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Shared transport -->
+      <div class="share-transport">
+        <div class="st-controls">
+          <button class="tc-btn" title="Beep start" aria-label="Jump to beep">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19,4 9,12 19,20"/><line x1="5" y1="4" x2="5" y2="20" stroke-width="2.4"/></svg>
+          </button>
+          <button class="tc-btn" title="Step back" aria-label="Step back">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,6 9,12 15,18"/></svg>
+          </button>
+          <button class="tc-btn play" title="Play / pause" aria-label="Play or pause">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="7,4 20,12 7,20"/></svg>
+          </button>
+          <button class="tc-btn" title="Step forward" aria-label="Step forward">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,6 15,12 9,18"/></svg>
+          </button>
+          <button class="tc-btn" title="Last shot" aria-label="Last shot">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="4" x2="19" y2="20" stroke-width="2.4"/></svg>
+          </button>
+        </div>
+
+        <div class="st-scrub" aria-label="Playback position">
+          <div class="scrub-track">
+            <div class="fill" style="width: 44%;"></div>
+            <div class="head" style="left: 44%;"></div>
+            <!-- End markers for each shooter, positioned at their stage-time / max-time -->
+            <!-- Max is 9.412s (RJ). Positions: PE 7.832/9.412 = 83.2%, MA 8.218/9.412 = 87.3%, JL 9.114/9.412 = 96.8%, RJ 100% -->
+            <div class="end-mark pe" style="left: 83.2%;" title="Pia finishes"></div>
+            <div class="end-mark ma" style="left: 87.3%;" title="Mathias finishes"></div>
+            <div class="end-mark jl" style="left: 96.8%;" title="Johan finishes"></div>
+            <div class="end-mark rj" style="left: 100%;" title="Robert finishes"></div>
+          </div>
+        </div>
+
+        <div class="st-readout">
+          <div class="st-cell">
+            <span class="k">Position</span>
+            <span class="v led">+04.182<small>s</small></span>
+          </div>
+          <div class="st-cell">
+            <span class="k">Longest</span>
+            <span class="v">09.412<small>s</small></span>
+          </div>
+          <span class="st-status">All synced · beep</span>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SYNC TIMELINE — the design challenge
+           ============================================================ -->
+      <div class="sync">
+        <div class="sync-head">
+          <div class="title">
+            Sync Telemetry
+            <span class="count">· shots aligned to beep · 04 tracks</span>
+          </div>
+          <div class="sync-legend">
+            <span class="lg pe leader"><span class="sw"></span>Pia <span class="crown">★</span></span>
+            <span class="lg ma"><span class="sw"></span>Mathias</span>
+            <span class="lg jl"><span class="sw"></span>Johan</span>
+            <span class="lg rj"><span class="sw"></span>Robert</span>
+          </div>
+        </div>
+
+        <svg class="sync-svg" viewBox="0 0 1200 320" preserveAspectRatio="none" aria-label="Sync telemetry: 4 shooters' shots aligned to beep">
+
+          <defs>
+            <filter id="trail-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="1.5" result="blur"/>
+              <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+            <filter id="hot-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+            <linearGradient id="trail-pe" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#4ADE80" stop-opacity="0.1"/>
+              <stop offset="100%" stop-color="#4ADE80" stop-opacity="0.6"/>
+            </linearGradient>
+            <linearGradient id="trail-ma" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#FF2D2D" stop-opacity="0.1"/>
+              <stop offset="100%" stop-color="#FF2D2D" stop-opacity="0.55"/>
+            </linearGradient>
+            <linearGradient id="trail-jl" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#FBBF24" stop-opacity="0.1"/>
+              <stop offset="100%" stop-color="#FBBF24" stop-opacity="0.5"/>
+            </linearGradient>
+            <linearGradient id="trail-rj" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#60A5FA" stop-opacity="0.1"/>
+              <stop offset="100%" stop-color="#60A5FA" stop-opacity="0.5"/>
+            </linearGradient>
+          </defs>
+
+          <!-- ===== TIME RULER (top) ===== -->
+          <!-- Scale: 100px per second; beep at x=100, runs end at x=1041 (9.412s) -->
+          <g font-family="JetBrains Mono, monospace" font-size="10" fill="rgba(255,255,255,0.45)" letter-spacing="0.06em">
+            <text x="100" y="20" text-anchor="middle" fill="#06B6D4" font-weight="700">BEEP · 0.0s</text>
+            <text x="200" y="20" text-anchor="middle">1.0s</text>
+            <text x="300" y="20" text-anchor="middle">2.0s</text>
+            <text x="400" y="20" text-anchor="middle">3.0s</text>
+            <text x="500" y="20" text-anchor="middle">4.0s</text>
+            <text x="600" y="20" text-anchor="middle">5.0s</text>
+            <text x="700" y="20" text-anchor="middle">6.0s</text>
+            <text x="800" y="20" text-anchor="middle">7.0s</text>
+            <text x="900" y="20" text-anchor="middle">8.0s</text>
+            <text x="1000" y="20" text-anchor="middle">9.0s</text>
+            <text x="1080" y="20" text-anchor="middle">9.5s</text>
+          </g>
+
+          <!-- ===== GRATICULE (subtle vertical lines every 1s) ===== -->
+          <g stroke="rgba(255,255,255,0.05)" stroke-width="0.5">
+            <line x1="200" y1="30" x2="200" y2="300"/>
+            <line x1="300" y1="30" x2="300" y2="300"/>
+            <line x1="400" y1="30" x2="400" y2="300"/>
+            <line x1="500" y1="30" x2="500" y2="300"/>
+            <line x1="600" y1="30" x2="600" y2="300"/>
+            <line x1="700" y1="30" x2="700" y2="300"/>
+            <line x1="800" y1="30" x2="800" y2="300"/>
+            <line x1="900" y1="30" x2="900" y2="300"/>
+            <line x1="1000" y1="30" x2="1000" y2="300"/>
+          </g>
+
+          <!-- ===== BEEP MARKER (full height, cyan dashed) ===== -->
+          <g filter="url(#trail-glow)">
+            <line x1="100" y1="30" x2="100" y2="300" stroke="#06B6D4" stroke-width="2.2" stroke-dasharray="5 3"/>
+          </g>
+
+          <!-- ===== TRACK 1 — PE (leader, top) y=58 ===== -->
+          <!-- Lane label -->
+          <g>
+            <rect x="20" y="46" width="58" height="32" rx="6" fill="#0E1612" stroke="rgba(74,222,128,0.4)" stroke-width="1"/>
+            <text x="34" y="63" font-family="JetBrains Mono, monospace" font-size="14" fill="#4ADE80" font-weight="800" letter-spacing="0.04em">PE</text>
+            <text x="34" y="74" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#86EFAC" font-weight="700" letter-spacing="0.1em">1ST</text>
+            <text x="58" y="71" font-family="JetBrains Mono, monospace" font-size="10" fill="#86EFAC" font-weight="700">★</text>
+          </g>
+          <!-- Lane background -->
+          <rect x="92" y="50" width="958" height="24" rx="3" fill="rgba(74,222,128,0.04)"/>
+          <!-- Trail (gradient bar from beep to end at 7.832 -> x = 100 + 783.2 = 883.2) -->
+          <rect class="track-trail" x="100" y="56" width="783" height="12" fill="url(#trail-pe)" rx="2"/>
+          <line class="track-trail" x1="100" y1="62" x2="883" y2="62" stroke="#4ADE80" stroke-width="2.2" filter="url(#trail-glow)"/>
+          <!-- Shot markers (16 shots distributed at PE's pace, avg 0.522s) -->
+          <g fill="#4ADE80" filter="url(#trail-glow)">
+            <circle cx="148" cy="62" r="5"/>
+            <circle cx="198" cy="62" r="5"/>
+            <circle cx="245" cy="62" r="5"/>
+            <circle cx="293" cy="62" r="5"/>
+            <circle cx="343" cy="62" r="5"/>
+            <circle cx="396" cy="62" r="5"/>
+            <circle cx="450" cy="62" r="5"/>
+            <circle cx="502" cy="62" r="5"/>
+            <circle cx="557" cy="62" r="5"/>
+            <circle cx="608" cy="62" r="5"/>
+            <circle cx="660" cy="62" r="5"/>
+            <circle cx="714" cy="62" r="5"/>
+            <circle cx="763" cy="62" r="5"/>
+            <circle cx="811" cy="62" r="5"/>
+            <circle cx="854" cy="62" r="5"/>
+            <circle cx="883" cy="62" r="5"/>
+          </g>
+          <!-- End marker (checkered-flag style) -->
+          <g filter="url(#hot-glow)">
+            <rect x="881" y="46" width="4" height="32" fill="#4ADE80"/>
+            <polygon points="885,46 905,46 905,52 885,52" fill="#4ADE80"/>
+            <polygon points="885,52 895,52 895,58 885,58" fill="#86EFAC"/>
+            <polygon points="895,58 905,58 905,64 895,64" fill="#86EFAC"/>
+            <text x="912" y="58" font-family="JetBrains Mono, monospace" font-size="14" font-weight="800" fill="#4ADE80" letter-spacing="0.04em">7.832s</text>
+            <text x="912" y="71" font-family="JetBrains Mono, monospace" font-size="8" fill="#86EFAC" font-weight="700" letter-spacing="0.1em">FASTEST</text>
+          </g>
+
+          <!-- ===== TRACK 2 — MA (you) y=128 ===== -->
+          <g>
+            <rect x="20" y="116" width="58" height="32" rx="6" fill="#1A1414" stroke="rgba(255,45,45,0.4)" stroke-width="1"/>
+            <text x="34" y="133" font-family="JetBrains Mono, monospace" font-size="14" fill="#FF5555" font-weight="800" letter-spacing="0.04em">MA</text>
+            <text x="34" y="144" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#FF5555" font-weight="700" letter-spacing="0.1em">2ND</text>
+            <text x="58" y="141" font-family="Antonio, sans-serif" font-size="8.5" fill="#FF2D2D" font-weight="800" letter-spacing="0.18em">YOU</text>
+          </g>
+          <rect x="92" y="120" width="958" height="24" rx="3" fill="rgba(255,45,45,0.04)"/>
+          <rect class="track-trail" x="100" y="126" width="822" height="12" fill="url(#trail-ma)" rx="2"/>
+          <line class="track-trail" x1="100" y1="132" x2="922" y2="132" stroke="#FF2D2D" stroke-width="2.2" filter="url(#trail-glow)"/>
+          <!-- 16 shots at MA's avg 0.548s -->
+          <g fill="#FF2D2D" filter="url(#trail-glow)">
+            <circle cx="152" cy="132" r="5"/>
+            <circle cx="206" cy="132" r="5"/>
+            <circle cx="258" cy="132" r="5"/>
+            <circle cx="310" cy="132" r="5"/>
+            <circle cx="366" cy="132" r="5"/>
+            <circle cx="420" cy="132" r="5"/>
+            <circle cx="478" cy="132" r="5"/>
+            <circle cx="533" cy="132" r="5"/>
+            <circle cx="588" cy="132" r="5"/>
+            <circle cx="640" cy="132" r="5"/>
+            <circle cx="695" cy="132" r="5"/>
+            <circle cx="748" cy="132" r="5"/>
+            <circle cx="800" cy="132" r="5"/>
+            <circle cx="852" cy="132" r="5"/>
+            <circle cx="893" cy="132" r="5"/>
+            <circle cx="922" cy="132" r="5"/>
+          </g>
+          <g filter="url(#trail-glow)">
+            <rect x="920" y="116" width="4" height="32" fill="#FF2D2D"/>
+            <text x="932" y="128" font-family="JetBrains Mono, monospace" font-size="14" font-weight="800" fill="#FF2D2D" letter-spacing="0.04em">8.218s</text>
+            <text x="932" y="141" font-family="JetBrains Mono, monospace" font-size="8" fill="#FF5555" font-weight="700" letter-spacing="0.1em">+0.386 GAP</text>
+          </g>
+
+          <!-- ===== TRACK 3 — JL y=198 ===== -->
+          <g>
+            <rect x="20" y="186" width="58" height="32" rx="6" fill="#1A1612" stroke="rgba(251,191,36,0.4)" stroke-width="1"/>
+            <text x="34" y="203" font-family="JetBrains Mono, monospace" font-size="14" fill="#FBBF24" font-weight="800" letter-spacing="0.04em">JL</text>
+            <text x="34" y="214" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#FBBF24" font-weight="700" letter-spacing="0.1em">3RD</text>
+          </g>
+          <rect x="92" y="190" width="958" height="24" rx="3" fill="rgba(251,191,36,0.04)"/>
+          <rect class="track-trail" x="100" y="196" width="911" height="12" fill="url(#trail-jl)" rx="2"/>
+          <line class="track-trail" x1="100" y1="202" x2="1011" y2="202" stroke="#FBBF24" stroke-width="2.2" filter="url(#trail-glow)"/>
+          <!-- 16 shots at JL's avg 0.608s -->
+          <g fill="#FBBF24" filter="url(#trail-glow)">
+            <circle cx="158" cy="202" r="5"/>
+            <circle cx="218" cy="202" r="5"/>
+            <circle cx="278" cy="202" r="5"/>
+            <circle cx="338" cy="202" r="5"/>
+            <circle cx="396" cy="202" r="5"/>
+            <circle cx="456" cy="202" r="5"/>
+            <circle cx="516" cy="202" r="5"/>
+            <circle cx="574" cy="202" r="5"/>
+            <circle cx="636" cy="202" r="5"/>
+            <circle cx="694" cy="202" r="5"/>
+            <circle cx="754" cy="202" r="5"/>
+            <circle cx="812" cy="202" r="5"/>
+            <circle cx="870" cy="202" r="5"/>
+            <circle cx="924" cy="202" r="5"/>
+            <circle cx="976" cy="202" r="5"/>
+            <circle cx="1011" cy="202" r="5"/>
+          </g>
+          <g filter="url(#trail-glow)">
+            <rect x="1009" y="186" width="4" height="32" fill="#FBBF24"/>
+            <text x="1021" y="198" font-family="JetBrains Mono, monospace" font-size="14" font-weight="800" fill="#FBBF24" letter-spacing="0.04em">9.114s</text>
+            <text x="1021" y="211" font-family="JetBrains Mono, monospace" font-size="8" fill="#FCD34D" font-weight="700" letter-spacing="0.1em">+1.282 GAP</text>
+          </g>
+
+          <!-- ===== TRACK 4 — RJ y=268 ===== -->
+          <g>
+            <rect x="20" y="256" width="58" height="32" rx="6" fill="#101622" stroke="rgba(96,165,250,0.4)" stroke-width="1"/>
+            <text x="34" y="273" font-family="JetBrains Mono, monospace" font-size="14" fill="#60A5FA" font-weight="800" letter-spacing="0.04em">RJ</text>
+            <text x="34" y="284" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#60A5FA" font-weight="700" letter-spacing="0.1em">4TH</text>
+          </g>
+          <rect x="92" y="260" width="958" height="24" rx="3" fill="rgba(96,165,250,0.04)"/>
+          <rect class="track-trail" x="100" y="266" width="941" height="12" fill="url(#trail-rj)" rx="2"/>
+          <line class="track-trail" x1="100" y1="272" x2="1041" y2="272" stroke="#60A5FA" stroke-width="2.2" filter="url(#trail-glow)"/>
+          <!-- 16 shots at RJ's avg 0.627s -->
+          <g fill="#60A5FA" filter="url(#trail-glow)">
+            <circle cx="163" cy="272" r="5"/>
+            <circle cx="228" cy="272" r="5"/>
+            <circle cx="290" cy="272" r="5"/>
+            <circle cx="352" cy="272" r="5"/>
+            <circle cx="415" cy="272" r="5"/>
+            <circle cx="476" cy="272" r="5"/>
+            <circle cx="540" cy="272" r="5"/>
+            <circle cx="601" cy="272" r="5"/>
+            <circle cx="663" cy="272" r="5"/>
+            <circle cx="726" cy="272" r="5"/>
+            <circle cx="788" cy="272" r="5"/>
+            <circle cx="852" cy="272" r="5"/>
+            <circle cx="914" cy="272" r="5"/>
+            <circle cx="970" cy="272" r="5"/>
+            <circle cx="1010" cy="272" r="5"/>
+            <circle cx="1041" cy="272" r="5"/>
+          </g>
+          <g filter="url(#trail-glow)">
+            <rect x="1039" y="256" width="4" height="32" fill="#60A5FA"/>
+            <text x="1051" y="268" font-family="JetBrains Mono, monospace" font-size="14" font-weight="800" fill="#60A5FA" letter-spacing="0.04em">9.412s</text>
+            <text x="1051" y="281" font-family="JetBrains Mono, monospace" font-size="8" fill="#93C5FD" font-weight="700" letter-spacing="0.1em">+1.580 GAP</text>
+          </g>
+
+          <!-- ===== PLAYHEAD (vertical line through all tracks at +4.182s, x = 100 + 418 = 518) ===== -->
+          <g filter="url(#hot-glow)">
+            <line x1="518" y1="30" x2="518" y2="300" stroke="#FF2D2D" stroke-width="2.4" opacity="0.95"/>
+            <polygon points="518,28 524,22 512,22" fill="#FF2D2D"/>
+            <polygon points="518,302 524,308 512,308" fill="#FF2D2D"/>
+            <rect x="495" y="306" width="46" height="13" rx="2" fill="#FF2D2D"/>
+            <text x="518" y="316" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#0A0B0D" font-weight="800" letter-spacing="0.04em">+4.182</text>
+          </g>
+
+        </svg>
+
+        <div class="sync-foot">
+          <span>Click any shot dot to scrub all videos · <kbd>Tab</kbd> cycle shooters · <kbd>1</kbd>–<kbd>4</kbd> solo</span>
+          <span>Time scale · 100px = 1.0s</span>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           RANKING TABLE
+           ============================================================ -->
+      <div class="ranking">
+        <div class="rank-head">
+          <span></span>
+          <span class="title-cell">
+            <span class="label">Ranking</span>
+            <span class="sub">Tower · stage time = beep to last shot</span>
+          </span>
+          <span>Stage Time</span>
+          <span>Avg Split</span>
+          <span>Fastest Split</span>
+          <span>Shots</span>
+          <span style="text-align: right;">Gap to 1st</span>
+        </div>
+
+        <!-- 1st — Pia (leader) -->
+        <div class="r-row leader">
+          <span class="rank-pill first">
+            <span class="n">01</span>
+            1<sup>st</sup>
+          </span>
+          <div class="r-who">
+            <span class="av pe">PE</span>
+            <div>
+              <div class="name">Pia Eriksson</div>
+              <div class="meta">Cam A · chest · Production Optics</div>
+            </div>
+          </div>
+          <span class="r-time">7.832<small>s</small></span>
+          <span class="r-stat">0.522<small>s</small></span>
+          <span class="r-stat">0.298<small>s</small></span>
+          <span class="r-shots"><b>16</b></span>
+          <span class="r-gap">— Leader</span>
+        </div>
+
+        <!-- 2nd — Mathias (you) -->
+        <div class="r-row you">
+          <span class="rank-pill second">
+            <span class="n">02</span>
+            2<sup>nd</sup>
+          </span>
+          <div class="r-who">
+            <span class="av ma">MA</span>
+            <div>
+              <div class="name">Mathias Axell <span class="you-tag">You</span></div>
+              <div class="meta">Cam A · chest · Production Optics</div>
+            </div>
+          </div>
+          <span class="r-time">8.218<small>s</small></span>
+          <span class="r-stat">0.548<small>s</small></span>
+          <span class="r-stat">0.337<small>s</small></span>
+          <span class="r-shots"><b>16</b></span>
+          <span class="r-gap">+0.386<small>s</small></span>
+        </div>
+
+        <!-- 3rd — Johan -->
+        <div class="r-row">
+          <span class="rank-pill third">
+            <span class="n">03</span>
+            3<sup>rd</sup>
+          </span>
+          <div class="r-who">
+            <span class="av jl">JL</span>
+            <div>
+              <div class="name">Johan Larsson</div>
+              <div class="meta">Cam A · chest · Standard</div>
+            </div>
+          </div>
+          <span class="r-time">9.114<small>s</small></span>
+          <span class="r-stat">0.608<small>s</small></span>
+          <span class="r-stat">0.412<small>s</small></span>
+          <span class="r-shots"><b>16</b></span>
+          <span class="r-gap">+1.282<small>s</small></span>
+        </div>
+
+        <!-- 4th — Robert -->
+        <div class="r-row">
+          <span class="rank-pill fourth">
+            <span class="n">04</span>
+            4<sup>th</sup>
+          </span>
+          <div class="r-who">
+            <span class="av rj">RJ</span>
+            <div>
+              <div class="name">Robert Janson</div>
+              <div class="meta">Cam A · chest · Production</div>
+            </div>
+          </div>
+          <span class="r-time">9.412<small>s</small></span>
+          <span class="r-stat">0.627<small>s</small></span>
+          <span class="r-stat">0.401<small>s</small></span>
+          <span class="r-shots"><b>16</b></span>
+          <span class="r-gap">+1.580<small>s</small></span>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>
