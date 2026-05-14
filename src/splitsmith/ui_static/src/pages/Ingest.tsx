@@ -1,3785 +1,1238 @@
 /**
- * Ingest screen (#13).
+ * Ingest route (/ingest) -- redesigned in the Shot Timer aesthetic (#325).
  *
- * Lets the user:
- *   1. Drop in a SSI Scoreboard JSON to populate the stage list
- *   2. Scan a folder of videos -- the backend symlinks them into <project>/raw/
- *      and runs video_match.py to suggest primary assignments
- *   3. Reassign videos: make primary / secondary / ignored, or unassign
+ * Two states selected from project state:
  *
- * Re-enterable: the ingest page is the persistent stage-assignment view, not
- * a one-shot wizard. The user returns here to add more videos (e.g. friend's
- * bay-cam dropped in days later) without losing audit work.
+ *   Empty -- no videos assigned to any stage. Renders polished/18:
+ *   dashed drop zone, storage-choice radio, tip cards. Picking a folder
+ *   triggers the scan and transitions to Review.
+ *
+ *   Review -- post-drop. Renders polished/05: drop summary, storage
+ *   choice (compact), cameras card derived from probed metadata, per-
+ *   stage assignment cards with per-video role toggles + reassignment
+ *   dropdown, unassigned tray, footer with Confirm.
+ *
+ * Storage choice (reference-in-place vs copy-into-project) is honored
+ * end-to-end via the existing /api/videos/scan ``link_mode`` parameter.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle,
-  CalendarDays,
-  CheckCircle2,
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  Check,
   Clock,
-  Crosshair,
-  FastForward,
-  FileJson,
-  FolderInput,
-  FolderOpen,
-  HardDrive,
-  Link2,
-  Monitor,
-  PlayCircle,
-  RefreshCw,
-  Search,
-  Sparkles,
-  Trash2,
-  User,
-  Video as VideoIcon,
-  WifiOff,
+  Folder,
+  Info,
+  Package,
+  Plus,
+  Video,
   XCircle,
 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
-import { BeepSection } from "@/components/BeepSection";
-import { StageTimeSection } from "@/components/StageTimeSection";
-import { CleanupDialog } from "@/components/CleanupDialog";
-import { RelinkDialog } from "@/components/RelinkDialog";
 import { FolderPicker } from "@/components/FolderPicker";
-import { HitlQueuePanel } from "@/components/HitlQueuePanel";
-import { CameraModelSelect } from "@/components/CameraModelSelect";
-import { MountSelect } from "@/components/MountSelect";
-import { SettingProvenance } from "@/components/SettingProvenance";
-import { Badge } from "@/components/ui/badge";
+import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
   ApiError,
-  CAMERA_MOUNTS,
   api,
-  asScoreboardError,
   type CameraMount,
-  type ExportOverview,
-  type FsProbeResponse,
-  type MatchAnalysis,
   type MatchProject,
-  type NonEmptyOldDirsDetail,
-  type ResolvedAutomationResponse,
-  type ScoreboardErrorDetail,
-  type ScoreboardMatchRef,
-  type ScoreboardShooterRef,
-  type ScoreboardSource,
+  type ServerHealth,
   type StageEntry,
-  type StageExportStatus,
-  type StageMatchWindow,
   type StageVideo,
-  type VideoMatchAnalysisEntry,
   type VideoRole,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-/** Drag payload mime type: enough to namespace from random file drops, and
- *  carries the source video path so the drop target can move/remove it. */
-const DRAG_MIME = "application/x-splitsmith-video";
+type StorageMode = "symlink" | "copy";
 
 export function Ingest() {
+  const navigate = useNavigate();
   const [project, setProject] = useState<MatchProject | null>(null);
-  const [analysis, setAnalysis] = useState<MatchAnalysis | null>(null);
+  const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scoreboardError, setScoreboardError] = useState<ScoreboardErrorDetail | null>(null);
-  const [scoreboardSource, setScoreboardSource] = useState<ScoreboardSource | null>(null);
-  const [exportOverview, setExportOverview] = useState<ExportOverview | null>(null);
+  const [storage, setStorage] = useState<StorageMode>("symlink");
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [removeTarget, setRemoveTarget] = useState<{
-    video: StageVideo;
-    stage: StageEntry | null;
-  } | null>(null);
-  // Tracks which video is currently being dragged so we can surface a
-  // floating "remove from project" zone only while a drag is active.
-  const [dragging, setDragging] = useState<{
-    video: StageVideo;
-    stage: StageEntry | null;
-  } | null>(null);
+  const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
 
-  // Match window for the FolderPicker highlight + "Select N in match
-  // window" affordance: union of every stage's analysis window, padded
-  // by ~2h on each side to cover warm-up and the drive home with the
-  // cam still rolling. ``null`` until a scoreboard with at least one
-  // scorecard time is loaded.
-  const matchWindow = useMemo(() => computeMatchWindow(analysis), [analysis]);
-
-  const refreshAnalysis = useCallback(async () => {
-    // Cheap GET that re-runs the heuristic over current project state. Fire
-    // after any mutation that could change classifications (scan, move,
-    // remove, swap) so the timeline never lags behind reality.
+  async function reload() {
+    setError(null);
     try {
-      setAnalysis(await api.getMatchAnalysis());
-    } catch {
-      // Best effort: if the analysis endpoint is unavailable, the SPA
-      // just renders a project without timeline -- the rest of ingest
-      // keeps working.
-    }
-  }, []);
-
-  const reload = useCallback(async () => {
-    try {
-      // Fetch project + match analysis in parallel: the SPA never renders
-      // the timeline from its own state, only from the backend's canonical
-      // heuristic output. Analysis lags slightly when the project is a
-      // bare placeholder (no scoreboard yet); that's fine, the timeline
-      // just doesn't show until stages have scorecard times.
-      //
-      // Export overview (#218) feeds the per-stage badge so we can
-      // distinguish ``trimmed-only`` / ``shots-pending`` / ``shots-audited``
-      // terminal states without re-deriving audit state on the client.
-      const [proj, ana, src, overview] = await Promise.all([
+      const [p, h] = await Promise.all([
         api.getProject(),
-        api.getMatchAnalysis().catch(() => null),
-        api.getScoreboardSource().catch(() => null),
-        api.getExportOverview().catch(() => null),
+        api.getHealth(),
       ]);
-      setProject(proj);
-      setAnalysis(ana);
-      setScoreboardSource(src);
-      setExportOverview(overview);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setProject(p);
+      setHealth(h);
+      if (p.last_scanned_dir) setLastScannedDir(p.last_scanned_dir);
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
     }
-  }, []);
-
-  const refreshScoreboardSource = useCallback(async () => {
-    try {
-      setScoreboardSource(await api.getScoreboardSource());
-    } catch {
-      // best effort
-    }
-  }, []);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  const handleScoreboard = async (file: File) => {
-    setBusy(true);
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      // Real (non-placeholder) stages need explicit overwrite; placeholders
-      // are overlaid automatically without losing video assignments.
-      const realStages = (project?.stages ?? []).filter((s) => !s.placeholder);
-      const overwrite = realStages.length > 0;
-      if (overwrite) {
-        const ok = window.confirm(
-          "This project already has scoreboard-backed stages. Importing will replace them and orphan any current video assignments. Continue?",
-        );
-        if (!ok) {
-          setBusy(false);
-          return;
-        }
-      }
-      // Auto-detect: SSI v1 ``MatchData`` has a top-level ``stages`` array;
-      // the legacy ``examples/`` shape is wrapped in ``{match, competitors}``
-      // with per-competitor stage scores. Dispatch to the matching endpoint
-      // so both formats keep working without forcing the user to choose.
-      const updated = isSsiV1MatchData(data)
-        ? await api.uploadScoreboard(data, overwrite)
-        : await api.importScoreboard(data, overwrite);
-      setProject(updated);
-      await refreshScoreboardSource();
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleSelectShooter = async (
-    shooterId: number,
-    competitorId: number,
-  ) => {
-    setBusy(true);
-    setScoreboardError(null);
-    try {
-      const resp = await api.selectScoreboardShooter(shooterId, competitorId);
-      setProject(resp);
-      void refreshAnalysis();
-      setError(null);
-    } catch (e) {
-      const detail = asScoreboardError(e);
-      if (detail) setScoreboardError(detail);
-      else setError(e instanceof Error ? e.message : String(e));
-      // Even on stage-times failure the server persists the pin, so
-      // pull the project to surface the new selected_* state.
-      try {
-        setProject(await api.getProject());
-      } catch {
-        /* best effort */
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRefreshTimes = async () => {
-    setBusy(true);
-    setScoreboardError(null);
-    try {
-      const resp = await api.refreshScoreboardTimes();
-      setProject(resp);
-      void refreshAnalysis();
-      setError(null);
-    } catch (e) {
-      const detail = asScoreboardError(e);
-      if (detail) setScoreboardError(detail);
-      else setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleFetchOnline = async (
-    contentType: number,
-    matchId: number,
-  ) => {
-    setBusy(true);
-    setScoreboardError(null);
-    try {
-      const realStages = (project?.stages ?? []).filter((s) => !s.placeholder);
-      const overwrite = realStages.length > 0;
-      if (overwrite) {
-        const ok = window.confirm(
-          "This project already has scoreboard-backed stages. Fetching will replace them and orphan any current video assignments. Continue?",
-        );
-        if (!ok) {
-          setBusy(false);
-          return;
-        }
-      }
-      const updated = await api.fetchScoreboardMatch(contentType, matchId, overwrite);
-      setProject(updated);
-      await refreshScoreboardSource();
-      setError(null);
-    } catch (e) {
-      const detail = asScoreboardError(e);
-      if (detail) setScoreboardError(detail);
-      else setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleStartFromVideos = async (
-    files: { path: string; mtime: number | null }[],
-    stageCount: number,
-    matchName: string | null,
-    matchDate: string | null,
-  ) => {
-    setBusy(true);
-    try {
-      await api.createPlaceholderStages({
-        stage_count: stageCount,
-        match_name: matchName,
-        match_date: matchDate,
-      });
-      await api.scanFiles(
-        files.map((f) => f.path),
-        false,
-      );
-      await reload();
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleScan = async (sourceDir: string) => {
-    setBusy(true);
-    try {
-      await api.scanVideos(sourceDir, true);
-      await reload();
-      setError(null);
-    } catch (e) {
-      if (e instanceof ApiError) {
-        setError(`Scan failed: ${e.detail}`);
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleScanFiles = async (sourcePaths: string[]) => {
-    setBusy(true);
-    try {
-      await api.scanFiles(sourcePaths, true);
-      await reload();
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRemove = async (videoPath: string, resetAudit: boolean) => {
-    setBusy(true);
-    try {
-      const resp = await api.removeVideo(videoPath, resetAudit);
-      setProject(resp.project);
-      setRemoveTarget(null);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const move = async (videoPath: string, toStage: number | null, role: VideoRole) => {
-    setBusy(true);
-    try {
-      // Promotion to primary uses the audit-safe swap endpoint when a stage
-      // already has a primary. The endpoint returns 409 with {code:
-      // "audit_exists"} when the current primary has shots in audit; we then
-      // ask the user and retry with confirm=true. For the no-existing-audit
-      // case, the swap is silent.
-      if (toStage !== null && role === "primary") {
-        const targetStage = project?.stages.find((s) => s.stage_number === toStage);
-        const existingPrimary = targetStage?.videos.find((v) => v.role === "primary");
-        if (existingPrimary && existingPrimary.path !== videoPath) {
-          try {
-            const updated = await api.swapPrimary(videoPath, toStage, false);
-            setProject(updated);
-            void refreshAnalysis();
-            return;
-          } catch (e) {
-            if (
-              e instanceof ApiError &&
-              e.status === 409 &&
-              e.body &&
-              typeof e.body === "object" &&
-              (e.body as { code?: string }).code === "audit_exists"
-            ) {
-              const ok = window.confirm(
-                `Stage ${toStage} has audited shots on the current primary.\n\n` +
-                  "Confirm the swap to back the audit JSON up to .bak and " +
-                  "re-run detection on the new primary's audio. Existing " +
-                  "shot decisions on the old primary will be preserved in " +
-                  "the .bak file but no longer drive the audit screen.",
-              );
-              if (!ok) return;
-              const updated = await api.swapPrimary(videoPath, toStage, true);
-              setProject(updated);
-              void refreshAnalysis();
-              return;
-            }
-            throw e;
-          }
-        }
-      }
-      const updated = await api.moveAssignment(videoPath, toStage, role);
-      setProject(updated);
-      void refreshAnalysis();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setStageSkipped = async (stageNumber: number, skipped: boolean) => {
-    setBusy(true);
-    try {
-      const updated = await api.setStageSkipped(stageNumber, skipped);
-      setProject(updated);
-      void refreshAnalysis();
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!project && !error) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-7 w-1/3" />
-        <Skeleton className="h-4 w-2/3" />
-        <Skeleton className="h-32" />
-      </div>
-    );
   }
-
-  return (
-    <div className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Ingest</h1>
-        <p className="text-sm text-muted-foreground">
-          Bootstrap from a scoreboard JSON or just point at your videos -- a
-          real scoreboard can be uploaded later and will overlay onto the
-          placeholder stages without losing assignments.
-        </p>
-      </header>
-
-      {error ? (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-2 text-sm text-destructive">
-              <AlertCircle className="size-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {scoreboardError ? (
-        <ScoreboardErrorBanner
-          detail={scoreboardError}
-          onDismiss={() => setScoreboardError(null)}
-        />
-      ) : null}
-
-      {project && project.stages.length === 0 ? (
-        // Stack on a fresh project: the FolderPicker inside Start-from-videos
-        // (and the search results inside Scoreboard) need full card width to
-        // render filenames + dates without clipping. Squeezing two of these
-        // into a 50/50 grid produced the clipped picker rows we saw on first
-        // launch -- give each card the row.
-        <div className="space-y-4">
-          <ModeChoiceHero
-            project={project}
-            busy={busy}
-            setBusy={setBusy}
-            setError={setError}
-            onProjectUpdate={setProject}
-          />
-          <ScoreboardSection
-            project={project}
-            source={scoreboardSource}
-            busy={busy}
-            onScoreboard={handleScoreboard}
-            onFetchOnline={handleFetchOnline}
-            onSelectShooter={handleSelectShooter}
-            onRefreshTimes={handleRefreshTimes}
-            setScoreboardError={setScoreboardError}
-          />
-          <StartFromVideosSection
-            project={project}
-            busy={busy}
-            matchWindow={matchWindow}
-            onSubmit={handleStartFromVideos}
-          />
-        </div>
-      ) : (
-        <ScoreboardSection
-          project={project}
-          source={scoreboardSource}
-          busy={busy}
-          onScoreboard={handleScoreboard}
-          onFetchOnline={handleFetchOnline}
-          onSelectShooter={handleSelectShooter}
-          onRefreshTimes={handleRefreshTimes}
-          setScoreboardError={setScoreboardError}
-        />
-      )}
-
-      <ScanSection
-        disabled={busy || !project || project.stages.length === 0}
-        initialPath={project?.last_scanned_dir ?? null}
-        matchWindow={matchWindow}
-        onScan={handleScan}
-        onScanFiles={handleScanFiles}
-      />
-
-      {project ? (
-        <SettingsSection project={project} busy={busy} setBusy={setBusy} setError={setError} onProjectUpdate={setProject} />
-      ) : null}
-
-      {project ? (
-        <AutomationSettingsPanel
-          busy={busy}
-          setBusy={setBusy}
-          setError={setError}
-          onProjectUpdate={setProject}
-        />
-      ) : null}
-
-      {project ? (
-        <>
-          <ReadyBanner project={project} analysis={analysis} />
-          {project.stages.length > 0 ? (
-            <HitlQueuePanel
-              onJumpToStage={(stageNumber) => {
-                // Stage rows tag themselves with id="stage-row-{n}"
-                // (added below). Falling back to no-op when the row
-                // hasn't rendered yet keeps the click safe.
-                const el = document.getElementById(`stage-row-${stageNumber}`);
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "start" });
-                }
-              }}
-            />
-          ) : null}
-          <UnassignedSection
-            project={project}
-            analysis={analysis}
-            busy={busy}
-            dragging={dragging}
-            setDragging={setDragging}
-            onAssign={(path, stage, role) => move(path, stage, role)}
-            onRemove={(video, stage) => setRemoveTarget({ video, stage })}
-          />
-          <StagesSection
-            project={project}
-            analysis={analysis}
-            exportOverview={exportOverview}
-            busy={busy}
-            dragging={dragging}
-            setDragging={setDragging}
-            setBusy={setBusy}
-            setError={setError}
-            onProjectUpdate={setProject}
-            onMove={move}
-            onSetSkipped={setStageSkipped}
-            onRemove={(video, stage) => setRemoveTarget({ video, stage })}
-          />
-          {dragging ? (
-            <RemoveDropZone
-              dragging={dragging}
-              busy={busy}
-              onDrop={() => setRemoveTarget({ video: dragging.video, stage: dragging.stage })}
-            />
-          ) : null}
-        </>
-      ) : null}
-
-      {removeTarget ? (
-        <RemoveVideoDialog
-          target={removeTarget}
-          busy={busy}
-          onCancel={() => setRemoveTarget(null)}
-          onConfirm={(resetAudit) => handleRemove(removeTarget.video.path, resetAudit)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/** Empty-state hero pitching the two paths through splitsmith (#218 phase 3).
- *
- *  The mode choice is orthogonal to where the user gets stages from
- *  (scoreboard import vs scan-and-create). It just sets the project's
- *  ``automation.shot_detect_on_beep_verified`` override so the rest
- *  of the app behaves accordingly:
- *
- *  - **Quick export (trim only)**: override = false. Beep -> trim ->
- *    export. No CLAP / GBDT / PANN cycles. Stage badge stays at
- *    "Ready"; export skips CSV / overlay / shot markers.
- *
- *  - **Full analysis (with shots)**: override = true. Beep verified
- *    fires shot detection; stages walk "Shots pending" -> "Shots
- *    audited"; export includes markers, CSV, overlay.
- *
- *  Hidden once the project has an explicit override (the user has
- *  picked) so the empty-state doesn't keep nagging on subsequent
- *  visits with the same project.
- */
-function ModeChoiceHero({
-  project,
-  busy,
-  setBusy,
-  setError,
-  onProjectUpdate,
-}: {
-  project: MatchProject;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (p: MatchProject) => void;
-}) {
-  const explicitChoice = project.automation?.shot_detect_on_beep_verified;
-  // Already chose? Render a tiny inline indicator with a "Change"
-  // button instead of the full hero so the empty-state doesn't keep
-  // re-pitching the same question.
-  const choose = async (autoDetect: boolean | null) => {
-    setBusy(true);
-    try {
-      const updated = await api.updateSettings({
-        automation: { shot_detect_on_beep_verified: autoDetect },
-      });
-      onProjectUpdate(updated);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (explicitChoice === true || explicitChoice === false) {
-    const label =
-      explicitChoice === true ? "Full analysis" : "Quick export (trim only)";
-    return (
-      <div className="flex items-center justify-between gap-2 rounded border border-border bg-muted/30 px-3 py-2 text-xs">
-        <span className="flex items-center gap-1.5">
-          <CheckCircle2 className="size-3.5 text-status-success" />
-          Mode: <span className="font-medium">{label}</span>
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs"
-          disabled={busy}
-          onClick={() => void choose(null)}
-        >
-          Change
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Sparkles className="size-4" />
-          How do you want to use splitsmith for this match?
-        </CardTitle>
-        <CardDescription>
-          Pick a mode to set sensible defaults. You can change this
-          later in Automation settings.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 md:grid-cols-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void choose(false)}
-            className={cn(
-              "group flex flex-col gap-2 rounded border border-border bg-background p-4 text-left transition-colors",
-              "hover:border-primary/50 hover:bg-accent/40",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <FastForward className="size-4 text-primary" />
-              <span className="text-sm font-semibold">
-                Quick export (trim only)
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Trim each stage around the start beep and stitch a match
-              timeline. No shot detection, no CSV, no overlay -- the
-              shortest path from raw videos to a stitched FCPXML / MP4.
-            </p>
-            <span className="text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
-              Choose this --&gt;
-            </span>
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void choose(true)}
-            className={cn(
-              "group flex flex-col gap-2 rounded border border-border bg-background p-4 text-left transition-colors",
-              "hover:border-primary/50 hover:bg-accent/40",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <Crosshair className="size-4 text-primary" />
-              <span className="text-sm font-semibold">
-                Full analysis (with shot times)
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              After you confirm the beep, splitsmith fires shot
-              detection. Audit the candidates and export with shot
-              markers, splits CSV, and the optional overlay layer.
-            </p>
-            <span className="text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
-              Choose this --&gt;
-            </span>
-          </button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ScoreboardSection({
-  project,
-  source,
-  busy,
-  onScoreboard,
-  onFetchOnline,
-  onSelectShooter,
-  onRefreshTimes,
-  setScoreboardError,
-}: {
-  project: MatchProject | null;
-  source: ScoreboardSource | null;
-  busy: boolean;
-  onScoreboard: (f: File) => void;
-  onFetchOnline: (contentType: number, matchId: number) => void;
-  onSelectShooter: (shooterId: number, competitorId: number) => void;
-  onRefreshTimes: () => void;
-  setScoreboardError: (e: ScoreboardErrorDetail | null) => void;
-}) {
-  const isLocal = source?.mode === "local";
-  const tokenReady = source?.http_token_set ?? false;
-  // Online search goes through SsiHttpClient, so it's only useful when the
-  // token is set. When it isn't, gate it behind a single inline hint
-  // instead of letting the request fire and surface a duplicate top-level
-  // banner.
-  const onlineReady = isLocal || tokenReady;
-  const stages = project?.stages ?? [];
-  const realCount = stages.filter((s) => !s.placeholder).length;
-  const placeholderCount = stages.filter((s) => s.placeholder).length;
-  // The card is "done" when the user has picked a match *and* pinned
-  // themselves -- only then are placeholder stages overlaid with real
-  // times and there's no further work to do here. Auto-collapse fires
-  // on that transition; a match alone isn't enough because the user
-  // still needs to find their row inside it.
-  const matchLoaded = !!project?.scoreboard_match_id;
-  const shooterPinned = project?.selected_shooter_id != null;
-  const ingestComplete = matchLoaded && shooterPinned;
-  const [expanded, setExpanded] = useState(!ingestComplete);
-  // Track the last "complete" state so we collapse on the transition
-  // (false -> true) without overriding manual user toggles. A subsequent
-  // un-pin or match-change re-expands.
-  const [lastComplete, setLastComplete] = useState(ingestComplete);
-  useEffect(() => {
-    if (ingestComplete && !lastComplete) {
-      setExpanded(false);
-    } else if (!ingestComplete && lastComplete) {
-      setExpanded(true);
-    }
-    setLastComplete(ingestComplete);
-  }, [ingestComplete, lastComplete]);
-
-  const stageSummary = realCount
-    ? `${realCount} stages loaded`
-    : placeholderCount
-      ? `${placeholderCount} placeholder stages -- upload a real scoreboard or pin yourself online to fill in stage times`
-      : "No stages yet. Drop in an SSI Scoreboard JSON, or search the live scoreboard.";
-  const dropLabel = realCount
-    ? "Replace scoreboard JSON (warns first)"
-    : placeholderCount
-      ? "Upload scoreboard to overlay placeholders"
-      : "Drop or pick an SSI Scoreboard JSON";
-
-  // Collapsed-state summary: lead with the human-readable identity
-  // (match name + competitor name) so the user can see who's pinned
-  // without expanding. Numeric ids stay tucked into a tooltip.
-  const matchTitle = project?.name && project.name !== "Untitled match" ? project.name : null;
-  const competitorLabel = project?.competitor_name ?? null;
-  const idsTooltip = project?.scoreboard_match_id
-    ? `match ${project.scoreboard_match_id}${
-        project.scoreboard_content_type != null
-          ? ` (ct ${project.scoreboard_content_type})`
-          : ""
-      }${project.selected_competitor_id != null ? ` · cid ${project.selected_competitor_id}` : ""}`
-    : undefined;
-
-  return (
-    <Card>
-      <CardHeader
-        className="cursor-pointer"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <CardTitle className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-2">
-            <FileJson className="size-5" />
-            Scoreboard
-          </span>
-          <span className="text-xs font-normal text-muted-foreground">
-            {expanded ? "Hide" : "Change"}
-          </span>
-        </CardTitle>
-        <CardDescription
-          className="flex flex-wrap items-center gap-x-2"
-          title={idsTooltip}
-        >
-          {matchTitle ? (
-            <span className="font-medium text-foreground">{matchTitle}</span>
-          ) : null}
-          {competitorLabel ? (
-            <span className="text-foreground">
-              · {competitorLabel}
-            </span>
-          ) : null}
-          <span className="text-muted-foreground">
-            {matchTitle || competitorLabel ? "· " : ""}
-            {stageSummary}
-          </span>
-        </CardDescription>
-      </CardHeader>
-      {expanded ? (
-        // Order is intentional: source badge (status), then the primary
-        // happy-path inputs (live search, then shooter pinner once a
-        // match is loaded), then the offline drop-zone fallback last
-        // and compact since most users will go online.
-        <CardContent className="space-y-4">
-          {source ? <ScoreboardSourceBadge source={source} /> : null}
-
-          {!isLocal && onlineReady ? (
-            <OnlineMatchSearch
-              busy={busy}
-              onFetch={onFetchOnline}
-              onError={setScoreboardError}
-            />
-          ) : null}
-
-          {project && matchLoaded ? (
-            <ShooterPinner
-              project={project}
-              busy={busy}
-              onSelect={onSelectShooter}
-              onRefreshTimes={onRefreshTimes}
-              onError={setScoreboardError}
-            />
-          ) : null}
-
-          <CompactFileDropZone
-            accept=".json,application/json"
-            label={dropLabel}
-            disabled={busy}
-            onFile={onScoreboard}
-          />
-        </CardContent>
-      ) : null}
-    </Card>
-  );
-}
-
-function ScoreboardSourceBadge({ source }: { source: ScoreboardSource }) {
-  if (source.mode === "local") {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-status-success/40 bg-status-success/5 px-3 py-2 text-xs">
-        <HardDrive className="size-4 text-status-success" />
-        <span>
-          Loaded from local JSON, no network used.
-          {source.local_match_json_path ? (
-            <>
-              {" "}
-              <span className="font-mono text-muted-foreground" title={source.local_match_json_path}>
-                {source.local_match_json_path.split("/").slice(-3).join("/")}
-              </span>
-            </>
-          ) : null}
-        </span>
-      </div>
-    );
-  }
-  if (!source.http_token_set) {
-    // The auth-needed state is *not* a runtime error -- the user simply
-    // hasn't configured a token yet. Render this as guidance and gate
-    // search/fetch behind it so we don't fire requests we know will fail
-    // (and surface a duplicate banner). The setup hint lives here only.
-    return (
-      <div className="space-y-1 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs">
-        <div className="flex items-center gap-2 font-medium">
-          <AlertCircle className="size-4 text-status-warning" />
-          <span>
-            Set <code>SPLITSMITH_SSI_TOKEN</code> to enable live search.
-          </span>
-        </div>
-        <p className="text-muted-foreground">
-          Drop the line into <code>&lt;project&gt;/.env.local</code> (preferred) or
-          <code> .env</code>, then restart the server. The drop-JSON path above
-          works without any token.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
-      <Search className="size-4 text-muted-foreground" />
-      <span>Online mode: queries hit the live SSI scoreboard.</span>
-    </div>
-  );
-}
-
-function OnlineMatchSearch({
-  busy,
-  onFetch,
-  onError,
-}: {
-  busy: boolean;
-  onFetch: (contentType: number, matchId: number) => void;
-  onError: (e: ScoreboardErrorDetail | null) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ScoreboardMatchRef[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  // Per #50: debounce typing at ~250ms so each keystroke doesn't fire a
-  // request. Cleared on every keystroke so the trailing edge wins.
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setResults(null);
-      return;
-    }
-    const handle = window.setTimeout(async () => {
-      setSearching(true);
-      try {
-        const refs = await api.searchScoreboardMatches(trimmed);
-        setResults(refs);
-        onError(null);
-      } catch (e) {
-        const detail = asScoreboardError(e);
-        if (detail) onError(detail);
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 250);
-    return () => window.clearTimeout(handle);
-  }, [query, onError]);
-
-  return (
-    <div className="space-y-2">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="flex items-center gap-1.5 font-medium">
-          <Search className="size-3.5" />
-          Search the live scoreboard
-        </span>
-        <span className="text-xs text-muted-foreground">
-          Find a match by name, then "Fetch full match" to populate the stage list.
-        </span>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          disabled={busy}
-          placeholder="e.g. SPSK Open"
-          className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </label>
-      {searching ? (
-        <p className="text-xs text-muted-foreground">Searching...</p>
-      ) : null}
-      {results && results.length > 0 ? (
-        <ul className="max-h-72 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-1">
-          {results.map((m) => (
-            <li
-              key={`${m.content_type}-${m.id}`}
-              role="button"
-              tabIndex={0}
-              className={cn(
-                "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none",
-                busy && "pointer-events-none opacity-50",
-              )}
-              onClick={() => {
-                // Collapse the dropdown immediately so the user isn't
-                // staring at stale results while the populate request
-                // is in flight. The shooter pinner stays visible so the
-                // user can complete the next step.
-                onFetch(m.content_type, m.id);
-                setQuery("");
-                setResults(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onFetch(m.content_type, m.id);
-                  setQuery("");
-                  setResults(null);
-                }
-              }}
-            >
-              <div className="min-w-0 text-xs">
-                <div className="truncate font-medium">{m.name}</div>
-                <div className="truncate text-muted-foreground">
-                  {m.date.slice(0, 10)} &middot; {m.level} &middot;{" "}
-                  {m.venue ?? "venue tba"}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {results && results.length === 0 && query.trim().length >= 2 && !searching ? (
-        <p className="text-xs text-muted-foreground">No matches found.</p>
-      ) : null}
-    </div>
-  );
-}
-
-/** Always-on shooter combobox: type-to-search, pick a row to pin. After
- *  a successful pin shows a compact "this is me" badge with Refresh /
- *  Change controls. Gated by ``ScoreboardSection`` on the project having
- *  a match loaded -- without that the pin has nothing to merge into. */
-function ShooterPinner({
-  project,
-  busy,
-  onSelect,
-  onRefreshTimes,
-  onError,
-}: {
-  project: MatchProject;
-  busy: boolean;
-  onSelect: (shooterId: number, competitorId: number) => void;
-  onRefreshTimes: () => void;
-  onError: (e: ScoreboardErrorDetail | null) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ScoreboardShooterRef[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [picking, setPicking] = useState(false);
-  // Pre-pinned: render the compact badge but allow re-search via the
-  // input below. Newly cleared / first-pin: render the input directly.
-  const isPinned = project.selected_shooter_id != null;
-  const [showSearch, setShowSearch] = useState(!isPinned);
-
-  useEffect(() => {
-    setShowSearch(!isPinned);
-  }, [isPinned]);
-
-  useEffect(() => {
-    if (!showSearch) return;
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setResults(null);
-      return;
-    }
-    const handle = window.setTimeout(async () => {
-      setSearching(true);
-      try {
-        const refs = await api.searchScoreboardShooters(trimmed);
-        setResults(refs);
-        onError(null);
-      } catch (e) {
-        const detail = asScoreboardError(e);
-        if (detail) onError(detail);
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 250);
-    return () => window.clearTimeout(handle);
-  }, [query, showSearch, onError]);
-
-  const pickShooter = async (shooter: ScoreboardShooterRef) => {
-    setPicking(true);
-    try {
-      const md = await api.getScoreboardMatchData();
-      const competitor = md.competitors.find((c) => c.shooterId === shooter.shooterId);
-      if (!competitor) {
-        onError({
-          code: "competitor_not_in_match",
-          message: `${shooter.name} isn't a competitor in this match. Pick a different shooter.`,
-        });
-        return;
-      }
-      onSelect(shooter.shooterId, competitor.id);
-      setQuery("");
-      setResults(null);
-      setShowSearch(false);
-    } catch (e) {
-      const detail = asScoreboardError(e);
-      if (detail) onError(detail);
-    } finally {
-      setPicking(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      {isPinned && !showSearch ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs">
-          <span className="flex items-center gap-2">
-            <User className="size-3.5" />
-            Pinned shooter <code>{project.selected_shooter_id}</code> ·
-            competitor <code>{project.selected_competitor_id}</code>
-          </span>
-          <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={onRefreshTimes}
-              title="Re-pull stage times for this competitor"
-            >
-              <RefreshCw className="size-3.5" />
-              Refresh times
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => setShowSearch(true)}
-            >
-              Change
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="flex items-center gap-1.5 font-medium">
-              <User className="size-3.5" />
-              Pin yourself to load stage times
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Type your name -- pick your row to merge in your scorecard times.
-            </span>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              disabled={busy || picking}
-              placeholder="your name"
-              autoFocus={!isPinned}
-              className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </label>
-          {searching ? (
-            <p className="text-xs text-muted-foreground">Searching...</p>
-          ) : null}
-          {picking ? (
-            <p className="text-xs text-muted-foreground">
-              Pinning + fetching stage times...
-            </p>
-          ) : null}
-          {results && results.length > 0 ? (
-            <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border bg-background p-1">
-              {results.map((s) => (
-                <li
-                  key={s.shooterId}
-                  role="button"
-                  tabIndex={0}
-                  className={cn(
-                    "flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none",
-                    (busy || picking) && "pointer-events-none opacity-50",
-                  )}
-                  onClick={() => void pickShooter(s)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      void pickShooter(s);
-                    }
-                  }}
-                >
-                  <div className="min-w-0 text-xs">
-                    <div className="truncate font-medium">{s.name}</div>
-                    <div className="truncate text-muted-foreground">
-                      {s.club ?? "no club"} &middot; {s.division ?? "—"}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {results && results.length === 0 && query.trim().length >= 2 && !searching ? (
-            <p className="text-xs text-muted-foreground">No shooters found.</p>
-          ) : null}
-          {isPinned ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy || picking}
-              onClick={() => {
-                setShowSearch(false);
-                setQuery("");
-                setResults(null);
-              }}
-            >
-              Cancel
-            </Button>
-          ) : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-function ScoreboardErrorBanner({
-  detail,
-  onDismiss,
-}: {
-  detail: ScoreboardErrorDetail;
-  onDismiss: () => void;
-}) {
-  let icon: React.ReactNode;
-  let title: string;
-  let body: React.ReactNode;
-  if (detail.code === "scoreboard_auth") {
-    icon = <AlertCircle className="size-4 text-status-warning" />;
-    title = "Scoreboard rejected the bearer token.";
-    body = (
-      <>
-        Check that <code>{detail.env_var}</code> is current (tokens can rotate
-        or expire) and restart the server.{" "}
-        <a
-          href={detail.docs_url}
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          Docs
-        </a>
-        .
-      </>
-    );
-  } else if (detail.code === "scoreboard_rate_limited") {
-    icon = <AlertCircle className="size-4 text-status-warning" />;
-    title = "Rate-limited by the scoreboard.";
-    body = detail.retry_after !== null
-      ? `Retry in ${Math.ceil(detail.retry_after)} seconds.`
-      : "Wait a moment and retry.";
-  } else if (detail.code === "stage_times_blocked_on_upstream") {
-    icon = <AlertCircle className="size-4 text-status-warning" />;
-    title = "Stage times aren't published by the live API yet.";
-    body = (
-      <>
-        Tracked upstream in{" "}
-        <a
-          href={detail.upstream_url}
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          {detail.upstream_issue}
-        </a>
-        . Until that ships, drop an offline JSON that carries per-competitor
-        stage results (the legacy <code>examples/*.json</code> shape, or a
-        combined SSI v1 export) to populate stage times.
-      </>
-    );
-  } else if (detail.code === "stage_times_offline_pure_matchdata") {
-    icon = <AlertCircle className="size-4 text-status-warning" />;
-    title = "The dropped JSON has no stage times.";
-    body =
-      "It's pure SSI v1 MatchData (match shell only). Drop a richer file, or remove the local match.json so splitsmith goes online and pulls stage times via the live API.";
-  } else if (detail.code === "competitor_not_in_match") {
-    icon = <AlertCircle className="size-4 text-status-warning" />;
-    title = "That shooter isn't in this match.";
-    body =
-      "Pick a different row, or check the match itself in the SSI scoreboard. The pin wasn't saved.";
-  } else {
-    icon = <WifiOff className="size-4 text-status-warning" />;
-    title = "Couldn't reach the scoreboard.";
-    body = "Try the offline JSON path -- drop a file into the scoreboard zone above.";
-  }
-  return (
-    <Card className="border-status-warning/50 bg-status-warning/5">
-      <CardContent className="flex items-start gap-2 py-3 text-sm">
-        {icon}
-        <div className="flex-1">
-          <div className="font-medium">{title}</div>
-          <div className="text-xs text-muted-foreground">{body}</div>
-        </div>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
-          Dismiss
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Heuristic: SSI v1 ``MatchData`` carries a top-level ``stages: []`` array
- *  alongside ``competitors: []``; the legacy ``examples/`` shape wraps both
- *  in ``{match: {...}, competitors: [...]}`` with per-competitor stages. The
- *  drop handler dispatches to the matching backend endpoint so users don't
- *  have to know which they have. */
-function isSsiV1MatchData(data: unknown): boolean {
-  if (!data || typeof data !== "object") return false;
-  const obj = data as Record<string, unknown>;
-  return (
-    Array.isArray(obj.stages) &&
-    Array.isArray(obj.competitors) &&
-    typeof obj.stages_count !== "undefined"
-  );
-}
-
-function StartFromVideosSection({
-  project,
-  busy,
-  matchWindow,
-  onSubmit,
-}: {
-  project: MatchProject;
-  busy: boolean;
-  matchWindow: { startEpoch: number; endEpoch: number } | null;
-  onSubmit: (
-    files: { path: string; mtime: number | null }[],
-    stageCount: number,
-    matchName: string | null,
-    matchDate: string | null,
-  ) => void;
-}) {
-  const [picking, setPicking] = useState(false);
-  const [picked, setPicked] = useState<
-    { path: string; mtime: number | null }[] | null
-  >(null);
-  const [stageCount, setStageCount] = useState<number>(0);
-  const [matchName, setMatchName] = useState<string>(project.name);
-  const [matchDate, setMatchDate] = useState<string>("");
-
-  const beginPick = () => {
-    setPicking(true);
-  };
-
-  const onFilesChosen = (files: { path: string; mtime: number | null }[]) => {
-    setPicking(false);
-    setPicked(files);
-    setStageCount(files.length);
-    const earliest = files
-      .map((f) => f.mtime)
-      .filter((m): m is number => m !== null)
-      .sort((a, b) => a - b)[0];
-    if (earliest !== undefined) {
-      // mtime is seconds since epoch; toISOString().slice(0, 10) gives YYYY-MM-DD.
-      setMatchDate(new Date(earliest * 1000).toISOString().slice(0, 10));
-    } else {
-      setMatchDate(new Date().toISOString().slice(0, 10));
-    }
-  };
-
-  const submit = () => {
-    if (!picked || stageCount < 1) return;
-    onSubmit(
-      picked,
-      stageCount,
-      matchName.trim() || null,
-      matchDate || null,
-    );
-    setPicked(null);
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <PlayCircle className="size-5" />
-          Start from videos
-        </CardTitle>
-        <CardDescription>
-          No scoreboard yet? Pick the videos you shot and tell splitsmith how
-          many stages you ran. Stage count and date are detected from the
-          files; you can adjust before continuing.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {picking ? (
-          <FolderPicker
-            initialPath={project.last_scanned_dir ?? null}
-            matchWindow={matchWindow}
-            onSelect={() => {
-              /* not used: this card always wants files, not a folder. */
-            }}
-            onSelectFiles={onFilesChosen}
-            onCancel={() => setPicking(false)}
-          />
-        ) : picked ? (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              {picked.length} video{picked.length === 1 ? "" : "s"} selected.
-            </p>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium">Number of stages</span>
-              <span className="text-xs text-muted-foreground">
-                Defaulted to the number of files. Adjust if your camera split a
-                stage across multiple clips, or rolled across stages.
-              </span>
-              <input
-                type="number"
-                min={1}
-                value={stageCount}
-                onChange={(e) => setStageCount(Number(e.target.value))}
-                disabled={busy}
-                className="flex h-8 w-24 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium">Match name</span>
-              <input
-                type="text"
-                value={matchName}
-                onChange={(e) => setMatchName(e.target.value)}
-                disabled={busy}
-                className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="flex items-center gap-1.5 font-medium">
-                <CalendarDays className="size-3.5" />
-                Match date
-              </span>
-              <input
-                type="date"
-                value={matchDate}
-                onChange={(e) => setMatchDate(e.target.value)}
-                disabled={busy}
-                className="flex h-8 w-44 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </label>
-            <div className="flex gap-2">
-              <Button onClick={submit} disabled={busy || stageCount < 1}>
-                Create {stageCount || "?"} placeholder stage
-                {stageCount === 1 ? "" : "s"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setPicked(null)}
-                disabled={busy}
-              >
-                Back
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button onClick={beginPick} disabled={busy}>
-            <FolderInput />
-            Pick videos
-          </Button>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ScanSection({
-  disabled,
-  initialPath,
-  matchWindow,
-  onScan,
-  onScanFiles,
-}: {
-  disabled: boolean;
-  initialPath: string | null;
-  matchWindow: { startEpoch: number; endEpoch: number } | null;
-  onScan: (sourceDir: string) => void;
-  onScanFiles: (sourcePaths: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FolderInput className="size-5" />
-          Scan videos
-        </CardTitle>
-        <CardDescription>
-          Pick a folder to scan in bulk, or check specific files (e.g. straight
-          off your camera over USB). Source files are <em>referenced via
-          symlink</em> — splitsmith never copies them. Confident timestamp
-          matches are auto-assigned as primary.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {!open ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button disabled={disabled} onClick={() => setOpen(true)}>
-              <FolderInput />
-              Browse / pick files
-            </Button>
-            {initialPath ? (
-              <>
-                <Button
-                  variant="outline"
-                  disabled={disabled}
-                  onClick={() => onScan(initialPath)}
-                  title={`Re-scan ${initialPath}`}
-                >
-                  Re-scan {shortPath(initialPath)}
-                </Button>
-                <span className="font-mono text-xs text-muted-foreground" title={initialPath}>
-                  last: {initialPath}
-                </span>
-              </>
-            ) : null}
-          </div>
-        ) : (
-          <FolderPicker
-            initialPath={initialPath}
-            matchWindow={matchWindow}
-            onSelect={(p) => {
-              setOpen(false);
-              onScan(p);
-            }}
-            onSelectFiles={(files) => {
-              setOpen(false);
-              onScanFiles(files.map((f) => f.path));
-            }}
-            onCancel={() => setOpen(false)}
-            allowEmptyFolder
-            selectLabel="Scan this folder"
-          />
-        )}
-        {disabled ? (
-          <p className="text-xs text-muted-foreground">
-            Bootstrap the project first (upload a scoreboard or start from videos).
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function SettingsSection({
-  project,
-  busy,
-  setBusy,
-  setError,
-  onProjectUpdate,
-}: {
-  project: MatchProject;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (p: MatchProject) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [relinkOpen, setRelinkOpen] = useState(false);
-  const [pickerFor, setPickerFor] = useState<
-    null | "raw" | "audio" | "trimmed" | "exports" | "probes" | "thumbs"
-  >(null);
-  const fields: {
-    key: "raw_dir" | "audio_dir" | "trimmed_dir" | "exports_dir" | "probes_dir" | "thumbs_dir";
-    label: string;
-    help: string;
-  }[] = [
-    { key: "raw_dir", label: "Source video links", help: "Symlinks to source files (default: <project>/raw)." },
-    { key: "audio_dir", label: "Audio cache", help: "Extracted WAVs (default: <project>/audio). Heavy intermediate; SSD-friendly." },
-    { key: "trimmed_dir", label: "Trimmed clips", help: "Short-GOP MP4s used by the audit screen (default: <project>/trimmed)." },
-    { key: "exports_dir", label: "Outputs", help: "CSV / FCPXML / report (default: <project>/exports)." },
-    { key: "probes_dir", label: "ffprobe cache", help: "Cached duration / codec metadata (default: <project>/probes)." },
-    { key: "thumbs_dir", label: "Thumbnail cache", help: "Cached preview JPGs (default: <project>/thumbs)." },
-  ];
-  const labelFor = (field: string) =>
-    fields.find((f) => f.key === field)?.label ?? field;
-
-  const update = async (patch: Partial<Record<typeof fields[number]["key"], string | null>>) => {
-    setBusy(true);
-    try {
-      const updated = await api.updateSettings(patch);
-      onProjectUpdate(updated);
-      setError(null);
-    } catch (e) {
-      if (
-        e instanceof ApiError &&
-        e.status === 409 &&
-        e.body &&
-        typeof e.body === "object" &&
-        (e.body as { code?: string }).code === "non_empty_old_dirs"
-      ) {
-        const detail = e.body as NonEmptyOldDirsDetail;
-        const lines = detail.dirs
-          .map(
-            (d) =>
-              `  - ${labelFor(d.field)}: ${d.path} (${d.file_count} item${d.file_count === 1 ? "" : "s"})`,
-          )
-          .join("\n");
-        const ok = window.confirm(
-          `The following directories contain files that will be left behind ` +
-            `(splitsmith does not migrate cache or exports between paths):\n\n${lines}\n\n` +
-            `Proceed anyway?`,
-        );
-        if (ok) {
-          try {
-            const updated = await api.updateSettings({ ...patch, confirm: true });
-            onProjectUpdate(updated);
-            setError(null);
-          } catch (e2) {
-            setError(e2 instanceof Error ? e2.message : String(e2));
-          }
-        } else {
-          setError(null);
-        }
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader className="cursor-pointer" onClick={() => setExpanded((v) => !v)}>
-        <CardTitle className="flex items-center justify-between gap-2 text-base">
-          <span className="flex items-center gap-2">
-            <FolderInput className="size-4" />
-            Project storage
-          </span>
-          <span className="text-xs font-normal text-muted-foreground">
-            {expanded ? "Hide" : "Configure paths"}
-          </span>
-        </CardTitle>
-        <CardDescription>
-          Source videos are <em>never copied</em>; the project just references
-          them. Cache and outputs default to subfolders of the project root —
-          override them per project if you want heavy intermediates on a scratch
-          SSD or outputs next to your FCP library.
-        </CardDescription>
-      </CardHeader>
-      {expanded ? (
-        <CardContent className="space-y-3">
-          {fields.map(({ key, label, help }) => {
-            const current = project[key] ?? "";
-            return (
-              <div key={key} className="space-y-1">
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium">{label}</span>
-                  <span className="text-xs text-muted-foreground">{help}</span>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      defaultValue={current}
-                      placeholder={`<project>/${key.replace("_dir", "")}`}
-                      className="flex h-8 flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      disabled={busy}
-                      onBlur={(e) => {
-                        const value = e.target.value.trim();
-                        if (value === (project[key] ?? "")) return;
-                        void update({ [key]: value || "" } as never);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() =>
-                        setPickerFor(
-                          key.replace("_dir", "") as
-                            | "raw"
-                            | "audio"
-                            | "trimmed"
-                            | "exports"
-                            | "probes"
-                            | "thumbs",
-                        )
-                      }
-                    >
-                      Browse
-                    </Button>
-                    {current ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => void update({ [key]: "" } as never)}
-                        title="Reset to default (subfolder of project root)"
-                      >
-                        Reset
-                      </Button>
-                    ) : null}
-                  </div>
-                </label>
-              </div>
-            );
-          })}
-          {pickerFor ? (
-            <FolderPicker
-              initialPath={project[`${pickerFor}_dir` as keyof MatchProject] as string | null}
-              onSelect={(p) => {
-                void update({ [`${pickerFor}_dir`]: p } as never);
-                setPickerFor(null);
-              }}
-              onCancel={() => setPickerFor(null)}
-            />
-          ) : null}
-          <TrimBufferRow
-            label="Pre-beep buffer (seconds)"
-            help="Pad before the beep in the trimmed clip. Longer = more pre-roll for FCP fades."
-            value={project.trim_pre_buffer_seconds}
-            disabled={busy}
-            onCommit={(seconds) => void update({ trim_pre_buffer_seconds: seconds } as never)}
-          />
-          <TrimBufferRow
-            label="Post-stage buffer (seconds)"
-            help="Pad after the stage end. Longer = more tail for FCP fades and transitions."
-            value={project.trim_post_buffer_seconds}
-            disabled={busy}
-            onCommit={(seconds) => void update({ trim_post_buffer_seconds: seconds } as never)}
-          />
-          <div className="flex items-center justify-between border-t border-border pt-3">
-            <div className="text-sm">
-              <div className="font-medium">Relink sources</div>
-              <div className="text-xs text-muted-foreground">
-                Repoint <code>raw/</code> symlinks after the originals moved
-                (e.g. onto a network share). Walks the picked folder
-                recursively and matches by filename.
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => setRelinkOpen(true)}
-            >
-              <Link2 className="size-4" />
-              Relink sources...
-            </Button>
-          </div>
-          <div className="flex items-center justify-between border-t border-border pt-3">
-            <div className="text-sm">
-              <div className="font-medium">Reclaim disk space</div>
-              <div className="text-xs text-muted-foreground">
-                Delete generated artifacts (caches, exports, trimmed clips). Sources are never touched.
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => setCleanupOpen(true)}
-            >
-              <Trash2 className="size-4" />
-              Clean up...
-            </Button>
-          </div>
-        </CardContent>
-      ) : null}
-      {cleanupOpen ? <CleanupDialog onClose={() => setCleanupOpen(false)} /> : null}
-      {relinkOpen ? <RelinkDialog onClose={() => setRelinkOpen(false)} /> : null}
-    </Card>
-  );
-}
-
-/** Project-level automation panel (#215 / #216).
- *
- * Renders a collapsible card with each automation toggle, a tristate
- * select that lets the user inherit / override per project, and a
- * SettingProvenance badge that names the layer supplying the current
- * effective value.
- *
- * Pulls from ``GET /api/automation`` so the badge and the select are
- * driven by the same resolution logic the server uses; writes flow
- * through the existing ``POST /api/project/settings`` endpoint with
- * the ``automation`` patch field.
- */
-function AutomationSettingsPanel({
-  busy,
-  setBusy,
-  setError,
-  onProjectUpdate,
-}: {
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (p: MatchProject) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [resolved, setResolved] = useState<ResolvedAutomationResponse | null>(
-    null,
-  );
-
-  const reload = useCallback(async () => {
-    try {
-      const r = await api.getAutomation();
-      setResolved(r);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [setError]);
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, []);
 
-  const setShotDetect = async (value: boolean | null) => {
-    setBusy(true);
+  const assignedCount = useMemo(() => {
+    if (!project) return 0;
+    return project.stages.reduce((sum, s) => sum + (s.videos?.length ?? 0), 0);
+  }, [project]);
+  const isEmpty = (project?.stages.length ?? 0) === 0 || assignedCount === 0;
+
+  async function scanFolder(path: string) {
+    setShowFolderPicker(false);
+    setScanning(true);
+    setError(null);
     try {
-      const updated = await api.updateSettings({
-        automation: { shot_detect_on_beep_verified: value },
-      });
-      onProjectUpdate(updated);
-      setError(null);
+      await api.scanVideos(path, true, storage);
+      setLastScannedDir(path);
       await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const shotDetectProv = resolved?.provenance.shot_detect_on_beep_verified;
-  // The ``select`` reflects the project-level *override* (not the
-  // resolved value): "inherit", "true", or "false". Resolution is
-  // shown via the badge + the helper line so the user sees both
-  // layers at once without the select lying about its state.
-  // ``project_value`` is union-typed (bool | number) since the
-  // automation block now mixes toggles and thresholds; this select
-  // controls a boolean toggle only, so anything non-boolean is
-  // treated as "inherit".
-  const projectValueRaw = shotDetectProv?.project_value;
-  const projectValue: boolean | null | undefined =
-    typeof projectValueRaw === "boolean" ? projectValueRaw : null;
-  const selectValue: "inherit" | "on" | "off" =
-    projectValue === true ? "on" : projectValue === false ? "off" : "inherit";
-
-  return (
-    <Card>
-      <CardHeader
-        className="cursor-pointer"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <CardTitle className="flex items-center justify-between gap-2 text-base">
-          <span className="flex items-center gap-2">
-            <FolderInput className="size-4" />
-            Automation
-          </span>
-          <span className="text-xs font-normal text-muted-foreground">
-            {expanded ? "Hide" : "Configure"}
-          </span>
-        </CardTitle>
-        <CardDescription>
-          When splitsmith runs the next step automatically. Override
-          per project; the global default lives in your config.yaml.
-        </CardDescription>
-      </CardHeader>
-      {expanded ? (
-        <CardContent className="space-y-3">
-          {resolved && shotDetectProv ? (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="font-medium">
-                  Auto-detect shots after beep verified
-                </span>
-                <SettingProvenance provenance={shotDetectProv} />
-                <span className="text-xs text-muted-foreground">
-                  effective:{" "}
-                  {resolved.settings.shot_detect_on_beep_verified
-                    ? "on"
-                    : "off"}
-                </span>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                When you mark a beep reviewed, splitsmith fires the
-                CLAP / GBDT / PANN ensemble to seed audited shots.
-                Turn off if you only want trim + export, or to gate
-                detection manually.
-              </div>
-              <select
-                className="rounded border border-border bg-background px-2 py-1 text-sm"
-                value={selectValue}
-                disabled={busy}
-                onChange={(e) => {
-                  const v = e.target.value as "inherit" | "on" | "off";
-                  void setShotDetect(
-                    v === "inherit" ? null : v === "on" ? true : false,
-                  );
-                }}
-              >
-                <option value="inherit">
-                  Use global default ({shotDetectProv.global_value ? "on" : "off"})
-                </option>
-                <option value="on">Always on (project override)</option>
-                <option value="off">Always off (project override)</option>
-              </select>
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">Loading...</div>
-          )}
-        </CardContent>
-      ) : null}
-    </Card>
-  );
-}
-
-function TrimBufferRow({
-  label,
-  help,
-  value,
-  disabled,
-  onCommit,
-}: {
-  label: string;
-  help: string;
-  value: number;
-  disabled: boolean;
-  onCommit: (seconds: number) => void;
-}) {
-  return (
-    <div className="space-y-1">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">{label}</span>
-        <span className="text-xs text-muted-foreground">{help}</span>
-        <input
-          type="number"
-          min={0}
-          step={0.5}
-          defaultValue={value}
-          disabled={disabled}
-          className="flex h-8 w-32 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onBlur={(e) => {
-            const next = Number.parseFloat(e.target.value);
-            if (!Number.isFinite(next) || next < 0) return;
-            if (Math.abs(next - value) < 1e-6) return;
-            onCommit(next);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-        />
-      </label>
-    </div>
-  );
-}
-
-function shortPath(p: string): string {
-  const parts = p.split("/").filter(Boolean);
-  if (parts.length <= 2) return p;
-  return `…/${parts.slice(-2).join("/")}`;
-}
-
-function UnassignedSection({
-  project,
-  analysis,
-  busy,
-  dragging,
-  setDragging,
-  onAssign,
-  onRemove,
-}: {
-  project: MatchProject;
-  analysis: MatchAnalysis | null;
-  busy: boolean;
-  dragging: { video: StageVideo; stage: StageEntry | null } | null;
-  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
-  onAssign: (videoPath: string, stage: number | null, role: VideoRole) => void;
-  onRemove: (video: StageVideo, stage: StageEntry | null) => void;
-}) {
-  const [over, setOver] = useState(false);
-  // The unassigned tray accepts drops only when the dragged video is currently
-  // assigned to a stage; dragging within the tray is a no-op.
-  const canAccept = dragging !== null && dragging.stage !== null;
-
-  // Build a quick lookup so each card can pull its own match-analysis entry
-  // without re-scanning the array per render.
-  const analysisByPath = useMemo(() => {
-    const out = new Map<string, VideoMatchAnalysisEntry>();
-    for (const e of analysis?.videos ?? []) out.set(e.path, e);
-    return out;
-  }, [analysis]);
-
-  if (project.unassigned_videos.length === 0 && !canAccept) return null;
-
-  return (
-    <Card
-      className={cn(
-        canAccept && "border-dashed border-ring/60",
-        canAccept && over && "border-ring bg-accent/30",
-      )}
-      onDragOver={(e) => {
-        if (!canAccept) return;
-        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        if (!canAccept) return;
-        const path = e.dataTransfer.getData(DRAG_MIME);
-        if (!path) return;
-        e.preventDefault();
-        setOver(false);
-        onAssign(path, null, "secondary");
-      }}
-    >
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <VideoIcon className="size-5" />
-          Unassigned videos · {project.unassigned_videos.length}
-        </CardTitle>
-        <CardDescription>
-          Hit play on any row to scrub the clip. Drag a row onto a stage card
-          to assign, or back here to unassign. Trash removes the video from
-          the project (cache is cleared; the original source on USB / external
-          storage is never touched).
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {project.unassigned_videos.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            Drop here to unassign the video you're dragging.
-          </p>
-        ) : null}
-        {project.unassigned_videos.map((v) => (
-          <UnassignedVideoCard
-            key={v.path}
-            video={v}
-            project={project}
-            matchEntry={analysisByPath.get(v.path) ?? null}
-            busy={busy}
-            setDragging={setDragging}
-            onAssign={onAssign}
-            onRemove={onRemove}
-          />
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Rich row for the unassigned tray. Surfaces enough metadata (recording
- *  time, duration, resolution, codec, size, suggested stage) that the user
- *  can identify which clip is which without opening it in another player,
- *  and offers an inline preview that scrubs the real video. */
-function UnassignedVideoCard({
-  video,
-  project,
-  matchEntry,
-  busy,
-  setDragging,
-  onAssign,
-  onRemove,
-}: {
-  video: StageVideo;
-  project: MatchProject;
-  matchEntry: VideoMatchAnalysisEntry | null;
-  busy: boolean;
-  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
-  onAssign: (videoPath: string, stage: number | null, role: VideoRole) => void;
-  onRemove: (video: StageVideo, stage: StageEntry | null) => void;
-}) {
-  const [meta, setMeta] = useState<FsProbeResponse | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .probeFile(video.path)
-      .then((r) => {
-        if (!cancelled) setMeta(r);
-      })
-      .catch(() => {
-        // Best effort; row still renders without metadata.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [video.path]);
-
-  const filename = video.path.split("/").pop() ?? video.path;
-  const parentDir = video.path.slice(0, video.path.length - filename.length).replace(/\/$/, "");
-
-  const suggestedStages = matchEntry?.stage_numbers ?? [];
-  const classification = matchEntry?.classification ?? null;
-  const suggestedSet = new Set(suggestedStages);
-  // Sort: suggested stages first (in suggestion order), then the rest in
-  // ascending stage number, so the eye lands on the most likely target.
-  const stagesOrdered = [...project.stages].sort((a, b) => {
-    const ai = suggestedStages.indexOf(a.stage_number);
-    const bi = suggestedStages.indexOf(b.stage_number);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return a.stage_number - b.stage_number;
-  });
-
-  return (
-    <DraggableVideoRow
-      video={video}
-      stage={null}
-      setDragging={setDragging}
-      className="rounded-md border border-border bg-muted/40 p-3"
-      hoverPreview={false}
-    >
-      <div className="flex flex-col gap-3 sm:flex-row">
-        {/* Inline video with the cached JPG as poster -- click the native
-            play control to start. The <video> element renders as soon as
-            we know the source URL (no waiting on the probe round-trip);
-            the thumbnail just upgrades the poster image when it arrives.
-            preload="metadata" pulls the moov atom so browsers can fall
-            back to the first frame as a poster while the JPG loads. */}
-        <div className="relative w-full shrink-0 overflow-hidden rounded bg-black/40 sm:w-48 aspect-video">
-          <video
-            src={api.videoStreamUrl(video.path)}
-            poster={meta?.thumbnail_url ?? undefined}
-            controls
-            preload="metadata"
-            className="h-full w-full"
-            // Stop drag events bubbling to DraggableVideoRow so the
-            // user can scrub the timeline without accidentally
-            // dragging the row out of the unassigned tray.
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-
-        {/* Metadata */}
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold" title={video.path}>
-              {filename}
-            </div>
-            {parentDir ? (
-              <div
-                className="truncate font-mono text-xs text-muted-foreground"
-                title={parentDir}
-              >
-                {parentDir}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {video.match_timestamp ? (
-              <span
-                className="inline-flex items-center gap-1"
-                title={`Recorded ${video.match_timestamp}`}
-              >
-                <Clock className="size-3.5" />
-                {formatLocalTimestamp(video.match_timestamp)}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-amber-500">
-                <Clock className="size-3.5" />
-                no timestamp
-              </span>
-            )}
-            {meta?.duration != null ? (
-              <span className="inline-flex items-center gap-1">
-                <PlayCircle className="size-3.5" />
-                {formatDurationShort(meta.duration)}
-              </span>
-            ) : null}
-            {meta?.width != null && meta?.height != null ? (
-              <span className="inline-flex items-center gap-1">
-                <Monitor className="size-3.5" />
-                {meta.width}×{meta.height}
-              </span>
-            ) : null}
-            {meta?.codec ? (
-              <span className="font-mono uppercase">{meta.codec}</span>
-            ) : null}
-            {meta?.size_bytes != null ? (
-              <span className="inline-flex items-center gap-1">
-                <HardDrive className="size-3.5" />
-                {formatBytesShort(meta.size_bytes)}
-              </span>
-            ) : null}
-          </div>
-
-          {/* Match-window suggestion */}
-          {suggestedStages.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">Match:</span>
-              {suggestedStages.map((n) => {
-                const stage = project.stages.find((s) => s.stage_number === n);
-                return (
-                  <Badge
-                    key={n}
-                    variant="statusInProgress"
-                    className="cursor-default"
-                    title={
-                      stage
-                        ? `Timestamp falls inside Stage ${n} (${stage.stage_name}) window`
-                        : `Stage ${n}`
-                    }
-                  >
-                    S{n}
-                    {stage ? ` · ${stage.stage_name}` : ""}
-                  </Badge>
-                );
-              })}
-              {classification === "contested" ? (
-                <Badge variant="statusWarning" title="Timestamp matches more than one stage window">
-                  contested
-                </Badge>
-              ) : null}
-            </div>
-          ) : classification === "orphan" ? (
-            <div className="text-xs text-amber-500">
-              No stage window matches this timestamp.
-            </div>
-          ) : null}
-        </div>
-
-        {/* Actions */}
-        <div className="flex shrink-0 flex-row flex-wrap gap-1 sm:flex-col sm:items-end">
-          <div className="flex flex-wrap gap-1 sm:justify-end">
-            {stagesOrdered.map((s) => {
-              const isSuggested = suggestedSet.has(s.stage_number);
-              return (
-                <Button
-                  key={s.stage_number}
-                  size="sm"
-                  variant={isSuggested ? "default" : "outline"}
-                  disabled={busy}
-                  onClick={() => onAssign(video.path, s.stage_number, "secondary")}
-                  title={`Assign to stage ${s.stage_number}: ${s.stage_name}${isSuggested ? " (matches timestamp)" : ""}`}
-                >
-                  → S{s.stage_number}
-                </Button>
-              );
-            })}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                void api.revealVideo(video.path).catch(() => {
-                  /* best effort */
-                });
-              }}
-              title="Reveal the source file in the OS file manager"
-              aria-label={`Reveal ${video.path} in file manager`}
-            >
-              <FolderOpen className="size-3.5" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => onRemove(video, null)}
-              title="Remove from project"
-              aria-label={`Remove ${video.path}`}
-            >
-              <Trash2 />
-            </Button>
-          </div>
-        </div>
-      </div>
-    </DraggableVideoRow>
-  );
-}
-
-function formatLocalTimestamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}
-
-function formatDurationShort(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "?";
-  const total = Math.round(seconds);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function formatBytesShort(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
-}
-
-function StagesSection({
-  project,
-  analysis,
-  exportOverview,
-  busy,
-  dragging,
-  setDragging,
-  setBusy,
-  setError,
-  onProjectUpdate,
-  onMove,
-  onSetSkipped,
-  onRemove,
-}: {
-  project: MatchProject;
-  analysis: MatchAnalysis | null;
-  exportOverview: ExportOverview | null;
-  busy: boolean;
-  dragging: { video: StageVideo; stage: StageEntry | null } | null;
-  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (next: MatchProject) => void;
-  onMove: (path: string, stage: number | null, role: VideoRole) => void;
-  onSetSkipped: (stageNumber: number, skipped: boolean) => void;
-  onRemove: (video: StageVideo, stage: StageEntry) => void;
-}) {
-  const dismissedStages = project.nudges_dismissed_stages ?? [];
-  if (project.stages.length === 0) return null;
-
-  // Compute primary-conflict highlighting: a video appearing as primary on more
-  // than one stage. Belt-and-braces; the data model prevents this today, but
-  // surface it just in case some future flow allows it.
-  const primaryCounts = new Map<string, number>();
-  for (const s of project.stages) {
-    for (const v of s.videos) {
-      if (v.role === "primary") {
-        primaryCounts.set(v.path, (primaryCounts.get(v.path) ?? 0) + 1);
-      }
+      setScanning(false);
     }
   }
 
-  const handleRedetectAll = async (reset: boolean) => {
-    if (busy) return;
-    const verb = reset ? "Re-detect AND reset shots" : "Re-detect (preserve current shots)";
-    if (
-      !window.confirm(
-        `${verb} on every eligible stage?\n\n` +
-          (reset
-            ? "This will discard each stage's current ``shots[]`` (kept / rejected decisions) and re-seed from the new consensus. Ineligible stages (no primary, no beep, no time_seconds) are skipped."
-            : "Existing ``shots[]`` are kept untouched; only the candidate universe is refreshed. Use this when you've already audited shots and only want updated voter signals."),
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
+  async function scanFiles(files: { path: string }[]) {
+    setShowFolderPicker(false);
+    setScanning(true);
+    setError(null);
     try {
-      const resp = await api.detectShotsAll({ reset });
-      if (resp.skipped.length > 0) {
-        setError(
-          `Submitted ${resp.jobs.length} job(s); skipped ${resp.skipped.length}: ` +
-            resp.skipped.map((s) => `stage ${s.stage_number} (${s.reason})`).join(", "),
-        );
-      } else {
-        setError(null);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      await api.scanFiles(files.map((f) => f.path), true, storage);
+      await reload();
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
-      setBusy(false);
+      setScanning(false);
     }
-  };
+  }
 
-  return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold tracking-tight">Stages</h2>
-        <div className="flex flex-wrap gap-1">
-          <BulkMountControl
-            project={project}
-            busy={busy}
-            setBusy={setBusy}
-            setError={setError}
-            onProjectUpdate={onProjectUpdate}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => handleRedetectAll(false)}
-            title="Re-run shot detection on every stage. Existing shots[] are kept; only the candidate universe / voter signals are refreshed."
-          >
-            <Crosshair className="size-3.5" />
-            Re-detect all
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => handleRedetectAll(true)}
-            title="Re-run shot detection AND clear each stage's shots[] so consensus reseeds from scratch. Discards prior keep/reject decisions."
-          >
-            <Crosshair className="size-3.5" />
-            Re-detect all + reset
-          </Button>
-        </div>
-      </div>
-      {/* Each stage card now embeds inline thumbnail-as-poster <video>
-          players for the primary + each secondary plus role action
-          buttons; that needs ~700px of horizontal room before things
-          start clipping. Stay single-column up to 2xl, two-column only
-          above (typically 1536px+ viewports). */}
-      <div className="grid gap-3 2xl:grid-cols-2">
-        {project.stages.map((s) => (
-          <StageCard
-            key={s.stage_number}
-            stage={s}
-            allStages={project.stages}
-            window={analysis?.stages.find((w) => w.stage_number === s.stage_number) ?? null}
-            videoEntries={analysis?.videos ?? []}
-            exportStatus={
-              exportOverview?.stages.find(
-                (r) => r.stage_number === s.stage_number,
-              ) ?? null
-            }
-            dismissedStages={dismissedStages}
-            busy={busy}
-            dragging={dragging}
-            setDragging={setDragging}
-            primaryCounts={primaryCounts}
-            setBusy={setBusy}
-            setError={setError}
-            onProjectUpdate={onProjectUpdate}
-            onMove={onMove}
-            onSetSkipped={onSetSkipped}
-            onRemove={onRemove}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** Toolbar control: pick a mount, apply it to every stage's primary in one
- *  shot. Useful for projects shot entirely with one camera type (e.g. all
- *  iPhone-handheld for tallmilan-2025) where flipping the per-row select
- *  on every stage would be tedious. The select doesn't fire on change --
- *  user must click "Apply" -- so a stray click on the dropdown can't mass-
- *  rewrite metadata. */
-function BulkMountControl({
-  project,
-  busy,
-  setBusy,
-  setError,
-  onProjectUpdate,
-}: {
-  project: MatchProject;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (p: MatchProject) => void;
-}) {
-  const [pending, setPending] = useState<CameraMount | "" | "none">("");
-  const targets = useMemo(
-    () =>
-      project.stages
-        .map((s) => {
-          const primary = s.videos.find((v) => v.role === "primary");
-          return primary ? { stage: s.stage_number, video: primary } : null;
-        })
-        .filter((x): x is { stage: number; video: StageVideo } => x !== null),
-    [project.stages],
-  );
-
-  const apply = async () => {
-    if (busy || pending === "" || targets.length === 0) return;
-    const next: CameraMount | null = pending === "none" ? null : pending;
-    const label = next ?? "auto";
-    if (
-      !window.confirm(
-        `Set primary mount to "${label}" on ${targets.length} stage${
-          targets.length === 1 ? "" : "s"
-        }?\n\nThis only updates metadata; existing shots[] are untouched. ` +
-          "Re-run shot detection afterwards to score with the new threshold class.",
-      )
-    ) {
-      return;
-    }
+  async function moveAssignment(
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+  ) {
     setBusy(true);
     setError(null);
-    let last: MatchProject | null = null;
     try {
-      for (const t of targets) {
-        last = await api.setCameraMount(t.stage, t.video.video_id, next);
-      }
-      if (last) onProjectUpdate(last);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      await api.moveAssignment(videoPath, toStage, role);
+      await reload();
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  if (targets.length === 0) return null;
+  async function removeVideo(videoPath: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.removeVideo(videoPath, false);
+      await reload();
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div
-      className="flex items-center gap-1"
-      title={`Set the camera mount on every stage's primary (${targets.length} target${targets.length === 1 ? "" : "s"})`}
+      className="relative min-h-screen text-ink"
+      style={{
+        backgroundImage:
+          "radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
+        backgroundAttachment: "fixed",
+      }}
     >
-      <span className="text-[11px] text-muted-foreground">Primary mount:</span>
-      <select
-        className="h-7 rounded border border-input bg-background px-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
-        value={pending}
-        disabled={busy}
-        onChange={(e) => setPending(e.target.value as CameraMount | "" | "none")}
-        aria-label="Bulk-set primary mount"
-      >
-        <option value="" disabled>
-          select...
-        </option>
-        <option value="none">(auto)</option>
-        {CAMERA_MOUNTS.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-      </select>
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={busy || pending === ""}
-        onClick={() => void apply()}
-      >
-        Apply to all
-      </Button>
+      <header className="sticky top-0 z-40 border-b border-rule bg-gradient-to-b from-surface to-bg">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
+          style={{
+            background:
+              "linear-gradient(to right, transparent, var(--color-led) 18%, var(--color-led) 22%, var(--color-rule-strong) 30%, var(--color-rule-strong) 70%, var(--color-led) 78%, var(--color-led) 82%, transparent)",
+            opacity: 0.55,
+          }}
+        />
+        <div className="mx-auto flex max-w-[1240px] items-center gap-6 px-8 py-3.5">
+          <Brand variant="compact" />
+          <div className="ml-auto inline-flex items-center gap-3 text-[0.8125rem]">
+            <span className="text-muted">{health?.project_name ?? ""}</span>
+          </div>
+        </div>
+        <div className="border-t border-rule bg-bg">
+          <div className="mx-auto flex max-w-[1240px] items-center gap-3 px-8 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
+            <button
+              type="button"
+              onClick={() => navigate("/pick")}
+              className="inline-flex items-center gap-1.5 text-subtle transition-colors hover:text-ink-2"
+            >
+              <ArrowLeft className="size-3" />
+              Matches
+            </button>
+            <span className="text-whisper">/</span>
+            <Link to="/" className="text-subtle hover:text-ink-2">
+              {health?.project_name ?? "..."}
+            </Link>
+            <span className="text-whisper">/</span>
+            <span className="font-bold text-ink">Add footage</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[1240px] px-8 pb-20 pt-9">
+        <div className="mb-6">
+          <Kicker className="mb-2.5">
+            Ingest &middot; {isEmpty ? "drop state" : "auto-matched"}
+          </Kicker>
+          <h1 className="mb-2.5 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
+            Add footage
+          </h1>
+          <p className="max-w-[40rem] text-[0.875rem] text-muted">
+            {isEmpty
+              ? "Drop a folder of videos. Splitsmith auto-matches each video to a stage by recording timestamp."
+              : "Auto-matched to stages by recording timestamp. Review the assignments and confirm to start processing."}
+          </p>
+        </div>
+
+        <ShooterBanner project={project} />
+
+        {error && (
+          <div className="mb-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+            {error}
+          </div>
+        )}
+
+        {showFolderPicker && (
+          <div className="mb-5 rounded-2xl border border-rule-strong bg-surface p-4">
+            <FolderPicker
+              initialPath={lastScannedDir ?? undefined}
+              onSelect={(path) => void scanFolder(path)}
+              onSelectFiles={(files) => void scanFiles(files)}
+              onCancel={() => setShowFolderPicker(false)}
+              mode="inline"
+            />
+          </div>
+        )}
+
+        {scanning ? (
+          <div className="rounded-2xl border border-rule-strong bg-surface px-10 py-14 text-center">
+            <div className="mb-3 inline-block size-9 animate-spin rounded-full border-[3px] border-rule-strong border-t-led shadow-[0_0_8px_var(--color-led-glow)]" />
+            <div className="font-display text-lg font-bold uppercase tracking-tight text-ink">
+              Scanning...
+            </div>
+            <p className="mt-2 text-xs text-muted">
+              Probing video metadata and matching to stages.
+            </p>
+          </div>
+        ) : isEmpty ? (
+          <EmptyState
+            storage={storage}
+            onStorageChange={setStorage}
+            onPickFolder={() => setShowFolderPicker(true)}
+            project={project}
+            lastScannedDir={lastScannedDir}
+          />
+        ) : project ? (
+          <ReviewState
+            project={project}
+            storage={storage}
+            onStorageChange={setStorage}
+            onAddMore={() => setShowFolderPicker(true)}
+            onMoveAssignment={moveAssignment}
+            onRemoveVideo={removeVideo}
+            onConfirm={() => navigate("/")}
+            busy={busy}
+            lastScannedDir={lastScannedDir}
+          />
+        ) : null}
+      </main>
     </div>
   );
 }
 
-function StageCard({
+/* -------------------------------------------------------------------------- */
+/* Empty state                                                                */
+/* -------------------------------------------------------------------------- */
+
+function EmptyState({
+  storage,
+  onStorageChange,
+  onPickFolder,
+  project,
+  lastScannedDir,
+}: {
+  storage: StorageMode;
+  onStorageChange: (s: StorageMode) => void;
+  onPickFolder: () => void;
+  project: MatchProject | null;
+  lastScannedDir: string | null;
+}) {
+  return (
+    <>
+      <DropZone onPickFolder={onPickFolder} />
+      <StorageChoice
+        storage={storage}
+        onChange={onStorageChange}
+        project={project}
+        variant="block"
+      />
+      {lastScannedDir && (
+        <RecentSources
+          items={[
+            {
+              path: lastScannedDir,
+              label: "Last scanned",
+              when: "previously",
+            },
+          ]}
+          onUse={onPickFolder}
+        />
+      )}
+      <TipCards />
+    </>
+  );
+}
+
+function DropZone({ onPickFolder }: { onPickFolder: () => void }) {
+  return (
+    <div
+      className="relative mb-5 overflow-hidden rounded-2xl border-2 border-dashed border-led-deep bg-surface px-10 py-14 text-center transition-all hover:border-led hover:shadow-[0_0_0_1px_var(--color-led),0_0_28px_var(--color-led-glow)]"
+      style={{
+        backgroundImage:
+          "radial-gradient(800px 320px at 50% 30%, rgba(255,45,45,0.10), transparent 65%), linear-gradient(180deg, var(--color-surface) 0%, var(--color-surface-2) 100%)",
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute left-[18px] top-[18px] size-20 rounded-tl-[14px] border-t-2 border-l-2 border-led opacity-60"
+      />
+      <span
+        aria-hidden
+        className="absolute bottom-[18px] right-[18px] size-20 rounded-br-[14px] border-b-2 border-r-2 border-led opacity-60"
+      />
+      <div className="mx-auto mb-4 inline-flex size-[72px] items-center justify-center rounded-2xl border border-led-deep bg-led/10 text-led shadow-[0_0_24px_var(--color-led-glow)]">
+        <Package className="size-9" strokeWidth={1.6} />
+      </div>
+      <h2 className="mb-3 font-display text-3xl font-bold uppercase tracking-tight text-ink">
+        Drop a folder of videos
+      </h2>
+      <p className="mx-auto mb-5 max-w-xl text-[0.9375rem] leading-relaxed text-muted">
+        Drag and drop your SD-card folder, or pick videos manually.
+        Splitsmith will scan for camera-prefixed files (e.g.{" "}
+        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-ink-2">
+          GH010032.MP4
+        </code>
+        ) and group them by camera.
+      </p>
+      <div className="inline-flex gap-2.5">
+        <Button
+          onClick={onPickFolder}
+          className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+        >
+          <Folder className="size-3.5" />
+          <span className="font-display uppercase tracking-[0.1em]">
+            Pick a folder
+          </span>
+        </Button>
+      </div>
+      <p className="mt-5 font-mono text-[0.625rem] tabular-nums text-subtle">
+        Supported:{" "}
+        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
+          .mp4
+        </code>{" "}
+        &middot;{" "}
+        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
+          .mov
+        </code>{" "}
+        &middot;{" "}
+        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
+          .mkv
+        </code>{" "}
+        &middot;{" "}
+        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
+          .360
+        </code>
+      </p>
+    </div>
+  );
+}
+
+function RecentSources({
+  items,
+  onUse,
+}: {
+  items: { path: string; label: string; when: string }[];
+  onUse: () => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-5 overflow-hidden rounded-xl border border-rule-strong bg-surface">
+      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
+        <span className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
+          Recent sources
+        </span>
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          Drop the same folder again
+        </span>
+      </div>
+      {items.map((it, i) => (
+        <div
+          key={i}
+          className="grid grid-cols-[32px_1fr_120px_100px] items-center gap-3.5 border-t border-rule px-5 py-3 first:border-t-0 hover:bg-surface-2"
+        >
+          <span className="inline-flex size-8 items-center justify-center rounded-md border border-rule-strong bg-surface-3 text-muted">
+            <Folder className="size-3.5" />
+          </span>
+          <div>
+            <div className="truncate font-mono text-[0.8125rem] font-semibold text-ink">
+              {it.path}
+            </div>
+            <div className="mt-1 font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-muted">
+              {it.label}
+            </div>
+          </div>
+          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+            {it.when}
+          </span>
+          <button
+            type="button"
+            onClick={onUse}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-led hover:bg-led/10 hover:text-led"
+          >
+            Use this <ArrowRight className="size-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TipCards() {
+  return (
+    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+      <TipCard
+        icon={<Clock className="size-3.5" />}
+        title="Use recording timestamps"
+        body="Splitsmith reads each video's mtime to suggest the right stage. Don't rename files before import."
+      />
+      <TipCard
+        icon={<Camera className="size-3.5" />}
+        title="Filename prefix = camera"
+        body="Files starting with GH01, GX01, etc. group into per-camera lanes automatically."
+      />
+      <TipCard
+        icon={<Info className="size-3.5" />}
+        title="Detection runs in background"
+        body="The jobs drawer shows beep detection per video as soon as you confirm -- keep working while it processes."
+      />
+    </div>
+  );
+}
+
+function TipCard({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="flex gap-3 rounded-xl border border-rule-strong bg-surface p-4">
+      <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-led-deep bg-led/10 text-led">
+        {icon}
+      </span>
+      <div className="text-[0.8125rem] leading-relaxed text-ink-2">
+        <b className="font-display font-bold uppercase tracking-[0.04em] text-ink">
+          {title}.
+        </b>{" "}
+        {body}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Storage choice                                                             */
+/* -------------------------------------------------------------------------- */
+
+function StorageChoice({
+  storage,
+  onChange,
+  project,
+  variant = "block",
+}: {
+  storage: StorageMode;
+  onChange: (s: StorageMode) => void;
+  project: MatchProject | null;
+  variant?: "block" | "inline";
+}) {
+  const targetPath = project?.raw_dir
+    ? project.raw_dir
+    : "<project>/raw/";
+
+  return (
+    <div
+      className={cn(
+        "mb-5 overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]",
+        variant === "inline" && "mb-0",
+      )}
+    >
+      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
+        <div className="inline-flex items-center gap-2.5 font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
+          <Package className="size-4 text-led" />
+          {variant === "inline"
+            ? "How should these videos be stored?"
+            : "Storage for this ingest"}
+        </div>
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {variant === "inline"
+            ? "Override per video later"
+            : "Choose before dropping"}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
+        <StorageOption
+          selected={storage === "symlink"}
+          onClick={() => onChange("symlink")}
+          title="Reference in place"
+          badge="Default"
+          desc="Keep originals where they are. Splitsmith only stores links."
+          pros={[
+            <>
+              No extra disk space &middot; <b className="text-ink">0 GB added</b>
+            </>,
+            <>Faster -- no copy step before processing</>,
+          ]}
+          warns={[
+            <>If sources move or unmount, the project will need re-linking</>,
+          ]}
+        />
+        <StorageOption
+          selected={storage === "copy"}
+          onClick={() => onChange("copy")}
+          title="Copy into project folder"
+          desc="Self-contained project. Originals can be removed afterwards."
+          pros={[
+            <>Project is portable &middot; backup includes raw footage</>,
+            <>Survives unmounting source media</>,
+          ]}
+          warns={[<>Adds disk usage &middot; copy step before processing</>]}
+          footer={
+            <>
+              Target:{" "}
+              <span className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 font-mono text-[0.6875rem] text-ink-2">
+                {targetPath}
+              </span>
+            </>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function StorageOption({
+  selected,
+  onClick,
+  title,
+  badge,
+  desc,
+  pros,
+  warns,
+  footer,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  title: string;
+  badge?: string;
+  desc: string;
+  pros: React.ReactNode[];
+  warns: React.ReactNode[];
+  footer?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className={cn(
+        "relative flex items-start gap-3.5 overflow-hidden rounded-xl border-[1.5px] p-4 text-left transition-all",
+        selected
+          ? "border-led bg-led/10 shadow-[0_0_0_1px_var(--color-led-deep),0_0_18px_var(--color-led-glow)]"
+          : "border-rule-strong bg-bg-glow hover:border-ink-2",
+      )}
+    >
+      {selected && (
+        <span
+          aria-hidden
+          className="absolute inset-y-0 left-0 w-[3px] bg-led shadow-[0_0_12px_var(--color-led-glow)]"
+        />
+      )}
+      <span
+        aria-hidden
+        className={cn(
+          "relative mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px]",
+          selected
+            ? "border-led bg-led shadow-[0_0_10px_var(--color-led-glow)]"
+            : "border-rule-strong bg-surface",
+        )}
+      >
+        {selected && <span className="size-2 rounded-full bg-bg" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "mb-2 inline-flex items-center gap-2.5 font-display text-sm font-bold uppercase tracking-[0.04em]",
+            selected ? "text-led" : "text-ink",
+          )}
+        >
+          {title}
+          {badge && (
+            <span className="rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
+              {badge}
+            </span>
+          )}
+        </div>
+        <p className="mb-3 text-[0.8125rem] leading-relaxed text-muted">
+          {desc}
+        </p>
+        <div className="flex flex-col gap-1.5">
+          {pros.map((p, i) => (
+            <div
+              key={`p${i}`}
+              className="flex items-start gap-2 font-mono text-[0.6875rem] leading-relaxed text-muted"
+            >
+              <Check className="mt-0.5 size-3 shrink-0 text-done" strokeWidth={3} />
+              <span>{p}</span>
+            </div>
+          ))}
+          {warns.map((w, i) => (
+            <div
+              key={`w${i}`}
+              className="flex items-start gap-2 font-mono text-[0.6875rem] leading-relaxed text-muted"
+            >
+              <AlertTriangle
+                className="mt-0.5 size-3 shrink-0 text-live"
+                strokeWidth={2}
+              />
+              <span>{w}</span>
+            </div>
+          ))}
+          {footer && (
+            <div className="ml-5 mt-1 font-mono text-[0.6875rem] text-muted">
+              {footer}
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shooter banner                                                             */
+/* -------------------------------------------------------------------------- */
+
+function ShooterBanner({ project }: { project: MatchProject | null }) {
+  const name = project?.competitor_name ?? "You";
+  return (
+    <div className="relative mb-5 flex items-center gap-3.5 overflow-hidden rounded-xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 px-4.5 py-3.5">
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-[3px] bg-led shadow-[0_0_12px_var(--color-led-glow)]"
+      />
+      <span
+        aria-hidden
+        className="inline-flex size-10 items-center justify-center rounded-full font-mono text-[0.8125rem] font-bold text-ink"
+        style={{
+          background:
+            "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
+          boxShadow:
+            "0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--color-led-glow)",
+        }}
+      >
+        {initials(name)}
+      </span>
+      <div className="flex-1">
+        <div className="mb-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-subtle">
+          Adding footage for
+        </div>
+        <div className="inline-flex items-center gap-2.5 font-display text-base font-bold uppercase tracking-[0.04em] text-ink">
+          {name}
+          <span className="rounded bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
+            YOU
+          </span>
+        </div>
+        {project?.match_date && (
+          <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+            Match {project.match_date}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Review state                                                               */
+/* -------------------------------------------------------------------------- */
+
+function ReviewState({
+  project,
+  storage,
+  onStorageChange,
+  onAddMore,
+  onMoveAssignment,
+  onRemoveVideo,
+  onConfirm,
+  busy,
+  lastScannedDir,
+}: {
+  project: MatchProject;
+  storage: StorageMode;
+  onStorageChange: (s: StorageMode) => void;
+  onAddMore: () => void;
+  onMoveAssignment: (
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+  ) => Promise<void>;
+  onRemoveVideo: (videoPath: string) => Promise<void>;
+  onConfirm: () => void;
+  busy: boolean;
+  lastScannedDir: string | null;
+}) {
+  const assignedVideos: { video: StageVideo; stage: StageEntry }[] = useMemo(
+    () =>
+      project.stages.flatMap((s) =>
+        (s.videos ?? []).map((video) => ({ video, stage: s })),
+      ),
+    [project],
+  );
+  const unassignedVideos = project.unassigned_videos ?? [];
+
+  // Camera grouping: by camera_model+camera_mount. Label A/B/C in order.
+  const cameras = useMemo(() => groupByCamera(assignedVideos), [assignedVideos]);
+
+  // Total scan summary
+  const totalVideos = assignedVideos.length + unassignedVideos.length;
+  const willProcess = assignedVideos.filter(
+    (v) => v.video.role !== "ignored",
+  ).length;
+  const ignoredCount = assignedVideos.filter(
+    (v) => v.video.role === "ignored",
+  ).length + unassignedVideos.filter((v) => v.role === "ignored").length;
+
+  return (
+    <>
+      <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+        {/* Drop summary */}
+        <div className="relative flex items-center gap-4 border-b border-rule bg-gradient-to-r from-led/10 to-transparent px-6 py-4">
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-0.5 bg-led shadow-[0_0_12px_var(--color-led-glow)]"
+          />
+          <span className="inline-flex size-11 items-center justify-center rounded-[10px] bg-led text-bg shadow-[0_0_16px_var(--color-led-glow)]">
+            <Package className="size-5" strokeWidth={2.2} />
+          </span>
+          <div className="flex-1">
+            <div className="font-display text-[0.9375rem] font-bold uppercase tracking-[0.04em] text-ink tabular-nums">
+              <b className="text-led">{totalVideos}</b>{" "}
+              {totalVideos === 1 ? "video" : "videos"} detected &middot;{" "}
+              <b className="text-led">{cameras.length}</b>{" "}
+              {cameras.length === 1 ? "camera" : "cameras"} inferred
+            </div>
+            {lastScannedDir && (
+              <div className="mt-1 truncate font-mono text-[0.6875rem] tracking-[0.04em] text-muted">
+                {lastScannedDir}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onAddMore}
+            className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-3.5 py-2 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-ink-2 hover:bg-surface-3"
+          >
+            <Plus className="size-3" /> Add more
+          </button>
+        </div>
+
+        {/* Storage choice (inline variant) */}
+        <div className="border-b border-rule p-0">
+          <StorageChoice
+            storage={storage}
+            onChange={onStorageChange}
+            project={project}
+            variant="inline"
+          />
+        </div>
+
+        {/* Cameras */}
+        {cameras.length > 0 && (
+          <div className="border-b border-rule">
+            <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
+              <div className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
+                Cameras{" "}
+                <span className="ml-2 font-mono text-[0.625rem] font-medium tracking-[0.04em] text-muted">
+                  detected from probe metadata
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3.5 p-5 md:grid-cols-2">
+              {cameras.map((cam) => (
+                <CameraCard key={cam.id} camera={cam} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stage assignments */}
+        <div>
+          <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
+            <div className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
+              Stage assignments{" "}
+              <span className="ml-2 font-mono text-[0.625rem] font-medium tracking-[0.04em] text-muted">
+                auto-matched by timestamp &middot; review and confirm
+              </span>
+            </div>
+          </div>
+
+          {project.stages.map((stage) => {
+            const videos = stage.videos ?? [];
+            if (videos.length === 0) return null;
+            return (
+              <StageBlock
+                key={stage.stage_number}
+                stage={stage}
+                allStages={project.stages}
+                videos={videos}
+                cameras={cameras}
+                onMove={onMoveAssignment}
+                onRemove={onRemoveVideo}
+                busy={busy}
+              />
+            );
+          })}
+
+          {unassignedVideos.length > 0 && (
+            <UnassignedBlock
+              videos={unassignedVideos}
+              allStages={project.stages}
+              cameras={cameras}
+              onMove={onMoveAssignment}
+              onRemove={onRemoveVideo}
+              busy={busy}
+            />
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule bg-surface px-6 py-4">
+          <div className="font-mono text-[0.75rem] uppercase tracking-[0.06em] text-muted tabular-nums">
+            <b className="font-bold text-ink">{totalVideos}</b> videos &middot;{" "}
+            <b className="font-bold text-ink">{willProcess}</b> will process{" "}
+            {ignoredCount > 0 && (
+              <>
+                &middot;{" "}
+                <b className="font-bold text-ink">{ignoredCount}</b> ignored
+              </>
+            )}
+          </div>
+          <Button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy || willProcess === 0}
+            className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+          >
+            <span className="font-display uppercase tracking-[0.08em]">
+              Confirm &amp; start processing
+            </span>
+            <ArrowRight className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-dashed border-live/40 bg-live/10 px-5 py-4 font-mono text-[0.75rem] leading-relaxed tracking-[0.04em] text-ink-2">
+        <b className="block font-display font-bold uppercase tracking-[0.1em] text-live">
+          What happens after confirm
+        </b>
+        Background jobs queue immediately (audio extract + beep detect per
+        video). Stages with confirmed beeps become available for audit.
+        Continue to <Link to="/" className="text-led hover:text-led-soft">match overview</Link>{" "}
+        or open the <Link to="/audit" className="text-led hover:text-led-soft">audit</Link>{" "}
+        page to start reviewing.
+      </div>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Stage block                                                                */
+/* -------------------------------------------------------------------------- */
+
+interface CameraGroup {
+  id: string;
+  label: string;
+  make: string | null;
+  model: string | null;
+  mount: CameraMount | null;
+  videoCount: number;
+  videoPaths: Set<string>;
+}
+
+function groupByCamera(
+  assigned: { video: StageVideo; stage: StageEntry }[],
+): CameraGroup[] {
+  const map = new Map<string, CameraGroup>();
+  for (const { video } of assigned) {
+    const key = `${video.camera_make ?? ""}|${video.camera_model ?? ""}|${video.camera_mount ?? ""}`;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        id: key,
+        label: "",
+        make: video.camera_make,
+        model: video.camera_model,
+        mount: video.camera_mount,
+        videoCount: 0,
+        videoPaths: new Set(),
+      };
+      map.set(key, g);
+    }
+    g.videoCount += 1;
+    g.videoPaths.add(video.path);
+  }
+  const groups = Array.from(map.values());
+  groups.forEach((g, i) => {
+    g.label = `Camera ${String.fromCharCode(65 + i)}`;
+  });
+  return groups;
+}
+
+function StageBlock({
   stage,
   allStages,
-  window: matchWindow,
-  videoEntries,
-  exportStatus,
-  dismissedStages,
-  busy,
-  dragging,
-  setDragging,
-  primaryCounts,
-  setBusy,
-  setError,
-  onProjectUpdate,
+  videos,
+  cameras,
   onMove,
-  onSetSkipped,
   onRemove,
+  busy,
 }: {
   stage: StageEntry;
   allStages: StageEntry[];
-  window: StageMatchWindow | null;
-  videoEntries: VideoMatchAnalysisEntry[];
-  exportStatus: StageExportStatus | null;
-  dismissedStages: number[];
+  videos: StageVideo[];
+  cameras: CameraGroup[];
+  onMove: (
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+  ) => Promise<void>;
+  onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
-  dragging: { video: StageVideo; stage: StageEntry | null } | null;
-  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
-  primaryCounts: Map<string, number>;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (next: MatchProject) => void;
-  onMove: (path: string, stage: number | null, role: VideoRole) => void;
-  onSetSkipped: (stageNumber: number, skipped: boolean) => void;
-  onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
-  const [over, setOver] = useState(false);
-  const primary = stage.videos.find((v) => v.role === "primary");
-  const secondaries = stage.videos.filter((v) => v.role === "secondary");
-  const ignored = stage.videos.filter((v) => v.role === "ignored");
-  const hasConflict = primary && (primaryCounts.get(primary.path) ?? 0) > 1;
-  // Accept drops only when the dragged video is from a different stage (or
-  // from the unassigned tray). Dropping onto the source stage is a no-op so
-  // we don't visually invite it.
-  const canAccept =
-    dragging !== null && dragging.stage?.stage_number !== stage.stage_number;
-
+  const primaryCount = videos.filter((v) => v.role === "primary").length;
+  const status: "ok" | "warn" =
+    primaryCount === 0 ? "warn" : "ok";
   return (
-    <Card
-      // Stable anchor for the HITL queue panel (#219): clicking
-      // "Open" on a low-confidence row scrolls to this stage.
-      id={`stage-row-${stage.stage_number}`}
-      className={cn(
-        hasConflict && "border-status-warning",
-        canAccept && "border-dashed border-ring/50",
-        canAccept && over && "border-ring bg-accent/30",
-      )}
-      onDragOver={(e) => {
-        if (!canAccept) return;
-        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        if (!canAccept) return;
-        const path = e.dataTransfer.getData(DRAG_MIME);
-        if (!path) return;
-        e.preventDefault();
-        setOver(false);
-        // First video on a stage becomes primary (per #13 spec); otherwise
-        // it lands as secondary so the user has to opt in to swapping primary.
-        const role: VideoRole = primary ? "secondary" : "primary";
-        onMove(path, stage.stage_number, role);
-      }}
-    >
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-base">
-              Stage {stage.stage_number}: {stage.stage_name}
-            </CardTitle>
-            <CardDescription className="font-mono tabular-nums">
-              {stage.time_seconds.toFixed(2)}s &middot;{" "}
-              {stage.scorecard_updated_at
-                ? new Date(stage.scorecard_updated_at).toLocaleString()
-                : stage.time_seconds_manual
-                  ? "manual time"
-                  : stage.placeholder
-                    ? "times pending -- pin yourself in Scoreboard"
-                    : "no scorecard time"}
-            </CardDescription>
+    <div className="border-b border-rule last:border-b-0">
+      <div className="flex flex-wrap items-center gap-3 border-b border-rule bg-surface-2 px-5 py-3">
+        <span className="inline-flex h-7 w-8 items-center justify-center rounded-md border border-led-deep bg-led/10 font-mono text-xs font-bold tabular-nums text-led">
+          {pad2(stage.stage_number)}
+        </span>
+        <span className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
+          {stage.stage_name}
+        </span>
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
+          {videos.length} video{videos.length === 1 ? "" : "s"}
+        </span>
+        <span
+          className={cn(
+            "ml-auto inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em]",
+            status === "ok"
+              ? "border-done/40 bg-done/10 text-done"
+              : "border-live/40 bg-live/10 text-live",
+          )}
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "inline-block size-1 rounded-full",
+              status === "ok"
+                ? "bg-done shadow-[0_0_5px_var(--color-done-glow)]"
+                : "bg-live shadow-[0_0_5px_var(--color-live-glow)]",
+            )}
+          />
+          {status === "ok" ? "Primary set" : "No primary"}
+        </span>
+      </div>
+      {videos.map((v) => (
+        <VideoRow
+          key={v.video_id}
+          video={v}
+          camera={cameras.find((c) => c.videoPaths.has(v.path))}
+          currentStage={stage.stage_number}
+          allStages={allStages}
+          onMove={onMove}
+          onRemove={onRemove}
+          busy={busy}
+        />
+      ))}
+    </div>
+  );
+}
+
+function UnassignedBlock({
+  videos,
+  allStages,
+  cameras,
+  onMove,
+  onRemove,
+  busy,
+}: {
+  videos: StageVideo[];
+  allStages: StageEntry[];
+  cameras: CameraGroup[];
+  onMove: (
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+  ) => Promise<void>;
+  onRemove: (videoPath: string) => Promise<void>;
+  busy: boolean;
+}) {
+  return (
+    <div className="border-y border-live/30 bg-gradient-to-r from-live/[0.06] to-transparent">
+      <div className="flex items-center gap-3.5 px-5 py-3.5">
+        <span className="inline-flex size-8 items-center justify-center rounded-md bg-live font-mono font-bold text-bg shadow-[0_0_12px_var(--color-live-glow)]">
+          !
+        </span>
+        <div>
+          <div className="font-display text-sm font-bold uppercase tracking-[0.06em] text-live">
+            Unassigned &middot; {videos.length} video{videos.length === 1 ? "" : "s"}
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <StatusGlyph stage={stage} exportStatus={exportStatus} />
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-[11px]"
-              disabled={busy}
-              onClick={() => onSetSkipped(stage.stage_number, !stage.skipped)}
-              title={
-                stage.skipped
-                  ? "Un-skip this stage so it counts toward ingest gating again"
-                  : "Skip this stage; it won't block the next-step gate even without a primary"
-              }
-            >
-              {stage.skipped ? "Un-skip" : "Skip stage"}
-            </Button>
+          <div className="mt-1 font-mono text-[0.6875rem] tracking-[0.04em] text-muted">
+            No stage matched by timestamp -- likely pre/post-match footage.
+            Assign manually or leave ignored.
           </div>
         </div>
-        <MatchWindowTimeline
-          stage={stage}
-          window={matchWindow}
-          videoEntries={videoEntries}
-        />
-      </CardHeader>
-      <CardContent className="space-y-2 pt-0">
-        <AuditPendingNudge
-          stage={stage}
-          exportStatus={exportStatus}
-          dismissedStages={dismissedStages}
+      </div>
+      {videos.map((v) => (
+        <VideoRow
+          key={v.video_id}
+          video={v}
+          camera={cameras.find((c) => c.videoPaths.has(v.path))}
+          currentStage={null}
+          allStages={allStages}
+          onMove={onMove}
+          onRemove={onRemove}
           busy={busy}
-          setBusy={setBusy}
-          setError={setError}
-          onProjectUpdate={onProjectUpdate}
         />
-        {stage.videos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No videos assigned.</p>
-        ) : null}
-        {primary ? (
-          <div className="space-y-2 rounded-md border border-border bg-muted/10 p-2">
-            <VideoRow
-              video={primary}
-              stage={stage}
-              setDragging={setDragging}
-              bare
-              busy={busy}
-              setBusy={setBusy}
-              setError={setError}
-              onProjectUpdate={onProjectUpdate}
-              badge={
-                <Badge
-                  variant={hasConflict ? "statusWarning" : "statusInProgress"}
-                  className="gap-1"
-                >
-                  <Crosshair className="size-3" /> Primary
-                </Badge>
-              }
-              actions={
-                <RoleActions
-                  video={primary}
-                  stage={stage}
-                  allStages={allStages}
-                  busy={busy}
-                  currentRole="primary"
-                  onMove={onMove}
-                  onRemove={onRemove}
-                />
-              }
-            />
-            <BeepSection
-              stageNumber={stage.stage_number}
-              video={primary}
-              bare
-              setError={setError}
-              onProjectUpdate={onProjectUpdate}
-            />
-            <StageTimeSection
-              stageNumber={stage.stage_number}
-              stage={stage}
-              primary={primary}
-              setError={setError}
-              onProjectUpdate={onProjectUpdate}
-            />
-          </div>
-        ) : null}
-        {secondaries.map((v, idx) => (
-          <div
-            key={v.path}
-            className="space-y-2 rounded-md border border-border bg-muted/10 p-2"
-          >
-            <VideoRow
-              video={v}
-              stage={stage}
-              setDragging={setDragging}
-              bare
-              busy={busy}
-              setBusy={setBusy}
-              setError={setError}
-              onProjectUpdate={onProjectUpdate}
-              badge={<Badge variant="secondary">Secondary {idx + 1}</Badge>}
-              actions={
-                <RoleActions
-                  video={v}
-                  stage={stage}
-                  allStages={allStages}
-                  busy={busy}
-                  currentRole="secondary"
-                  onMove={onMove}
-                  onRemove={onRemove}
-                />
-              }
-            />
-            <BeepSection
-              stageNumber={stage.stage_number}
-              video={v}
-              bare
-              setError={setError}
-              onProjectUpdate={onProjectUpdate}
-            />
-          </div>
-        ))}
-        {ignored.map((v) => (
-          <VideoRow
-            key={v.path}
-            video={v}
-            stage={stage}
-            setDragging={setDragging}
-            inlinePlayer={false}
-            badge={
-              <Badge variant="outline" className="gap-1 opacity-70">
-                <XCircle className="size-3" /> Ignored
-              </Badge>
-            }
-            actions={
-              <RoleActions
-                video={v}
-                stage={stage}
-                allStages={allStages}
-                busy={busy}
-                currentRole="ignored"
-                onMove={onMove}
-                onRemove={onRemove}
-              />
-            }
-          />
-        ))}
-      </CardContent>
-    </Card>
+      ))}
+    </div>
   );
 }
 
 function VideoRow({
   video,
-  stage,
-  setDragging,
-  badge,
-  actions,
-  inlinePlayer = true,
-  bare = false,
-  busy = false,
-  setBusy,
-  setError,
-  onProjectUpdate,
-}: {
-  video: StageVideo;
-  stage: StageEntry | null;
-  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
-  badge: React.ReactNode;
-  actions: React.ReactNode;
-  // Render an inline thumbnail-as-poster <video> on the row. Disabled for
-  // ignored videos because the row is collapsed visual-noise by design.
-  inlinePlayer?: boolean;
-  // Drop the row's own border/background when nested inside a video panel
-  // so the panel is the single visual frame for "this video + its beep".
-  bare?: boolean;
-  // Threaded through so the in-row mount selector can patch the project
-  // without bubbling state changes back up to the page. Optional because
-  // the unassigned-tray version of VideoRow has no stage to target.
-  busy?: boolean;
-  setBusy?: (b: boolean) => void;
-  setError?: (msg: string | null) => void;
-  onProjectUpdate?: (p: MatchProject) => void;
-}) {
-  const [meta, setMeta] = useState<FsProbeResponse | null>(null);
-
-  useEffect(() => {
-    if (!inlinePlayer) return;
-    let cancelled = false;
-    api
-      .probeFile(video.path)
-      .then((r) => {
-        if (!cancelled) setMeta(r);
-      })
-      .catch(() => {
-        // Best effort; the <video> element still renders without a poster.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [video.path, inlinePlayer]);
-
-  const reveal = async () => {
-    try {
-      await api.revealVideo(video.path);
-    } catch {
-      // Best effort; don't block the user on a Finder hiccup.
-    }
-  };
-
-  return (
-    <DraggableVideoRow
-      video={video}
-      stage={stage}
-      setDragging={setDragging}
-      className={cn(
-        !bare && "rounded-md border border-border/60 bg-muted/20 px-2 py-1.5",
-      )}
-      hoverPreview={false}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        {inlinePlayer ? (
-          <div className="relative w-32 shrink-0 overflow-hidden rounded bg-black/40 aspect-video">
-            <video
-              src={api.videoStreamUrl(video.path)}
-              poster={meta?.thumbnail_url ?? undefined}
-              controls
-              preload="metadata"
-              className="h-full w-full"
-              // Stop drag events bubbling so the user can scrub without
-              // accidentally dragging the row.
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        ) : null}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2 text-xs">
-            {badge}
-            <span className="truncate font-mono" title={video.path}>
-              {video.path.split("/").pop()}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {stage && setBusy && setError && onProjectUpdate ? (
-              <>
-                <MountSelect
-                  video={video}
-                  stageNumber={stage.stage_number}
-                  disabled={busy}
-                  setBusy={setBusy}
-                  setError={setError}
-                  onProjectUpdate={onProjectUpdate}
-                />
-                {video.camera_mount === "head" ||
-                video.camera_mount === "chest" ||
-                video.camera_mount === "helmet" ||
-                video.camera_mount === "belt" ? (
-                  <CameraModelSelect
-                    video={video}
-                    stageNumber={stage.stage_number}
-                    disabled={busy}
-                    setBusy={setBusy}
-                    setError={setError}
-                    onProjectUpdate={onProjectUpdate}
-                  />
-                ) : null}
-              </>
-            ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void reveal()}
-              title="Reveal the source file in the OS file manager"
-              aria-label={`Reveal ${video.path} in file manager`}
-            >
-              <FolderOpen className="size-3.5" />
-            </Button>
-            {actions}
-          </div>
-        </div>
-      </div>
-    </DraggableVideoRow>
-  );
-}
-
-/** Draggable wrapper with hover-thumbnail. Used for both stage video rows
- *  (the badge + filename + actions row inside StageCard) and unassigned-tray
- *  rows (the path + per-stage assign buttons). The `stage` is `null` when the
- *  source is the unassigned tray; `setDragging` lets the page surface a
- *  floating "remove from project" zone while the drag is active. */
-function DraggableVideoRow({
-  video,
-  stage,
-  setDragging,
-  className,
-  children,
-  hoverPreview = true,
-}: {
-  video: StageVideo;
-  stage: StageEntry | null;
-  setDragging: (d: { video: StageVideo; stage: StageEntry | null } | null) => void;
-  className?: string;
-  children: React.ReactNode;
-  // Disable the floating thumbnail popover when the row already renders an
-  // inline preview (e.g. the unassigned tray's <video> element); the popover
-  // would otherwise cover the play button.
-  hoverPreview?: boolean;
-}) {
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const [thumb, setThumb] = useState<string | null>(null);
-  const [probing, setProbing] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  // Suppress the hover preview while dragging anything; the floating image
-  // would otherwise track the cursor and obscure the drop target.
-  const [dragInFlight, setDragInFlight] = useState(false);
-
-  const ensureProbe = useCallback(async () => {
-    if (thumb !== null || probing) return;
-    setProbing(true);
-    try {
-      const r = await api.probeFile(video.path);
-      setThumb(r.thumbnail_url);
-    } catch {
-      // Best effort; row still renders without preview.
-    } finally {
-      setProbing(false);
-    }
-  }, [thumb, probing, video.path]);
-
-  return (
-    <div
-      ref={ref}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(DRAG_MIME, video.path);
-        e.dataTransfer.effectAllowed = "move";
-        setDragInFlight(true);
-        setRect(null);
-        setDragging({ video, stage });
-      }}
-      onDragEnd={() => {
-        setDragInFlight(false);
-        setDragging(null);
-      }}
-      onMouseEnter={() => {
-        if (!hoverPreview) return;
-        if (dragInFlight) return;
-        setRect(ref.current?.getBoundingClientRect() ?? null);
-        void ensureProbe();
-      }}
-      onMouseLeave={() => setRect(null)}
-      className={cn("cursor-grab active:cursor-grabbing", className)}
-    >
-      {children}
-      {hoverPreview && rect && thumb && !dragInFlight ? (
-        <ThumbnailFloat anchor={rect} src={thumb} alt={video.path} />
-      ) : null}
-    </div>
-  );
-}
-
-/** Fixed-position hover preview, mirrors the FolderPicker pattern: anchor to
- *  the row's right edge, flip left if it would overflow the viewport, clamp
- *  the vertical position so it never paints off-screen. */
-function ThumbnailFloat({
-  anchor,
-  src,
-  alt,
-}: {
-  anchor: DOMRect;
-  src: string;
-  alt: string;
-}) {
-  const W = 320;
-  const H = 192;
-  const margin = 8;
-  const flipLeft = anchor.right + W + margin > window.innerWidth;
-  const left = flipLeft
-    ? Math.max(margin, anchor.left - W - margin)
-    : anchor.right + margin;
-  const desiredTop = anchor.top + anchor.height / 2 - H / 2;
-  const top = Math.max(
-    margin,
-    Math.min(window.innerHeight - H - margin, desiredTop),
-  );
-  return (
-    <div
-      role="presentation"
-      style={{ position: "fixed", top, left, width: W, zIndex: 50 }}
-      className="pointer-events-none rounded-md border border-border bg-popover p-1 shadow-xl"
-    >
-      <img src={src} alt={`${alt} thumbnail`} className="w-full rounded" />
-    </div>
-  );
-}
-
-/** Match-window timeline for one stage. Pure renderer: every value comes
- *  from the backend's :func:`MatchProject.match_analysis` so the SPA never
- *  duplicates the heuristic.
- *
- *  Window is asymmetric -- the band ends at ``scorecard_updated_at`` (the
- *  upper bound) and extends ``tolerance_minutes`` to the left. Videos
- *  classified as ``contested`` or ``in_window`` for *this* stage get a tick
- *  inside the band; videos in another stage's window or orphaned still get
- *  a faint tick so the user can see neighbours visually. Videos without a
- *  timestamp are skipped entirely. */
-/** Per-stage timeline showing the window during which a video had to be
- *  recorded to match this stage (``scorecard_updated_at - tolerance_minutes``
- *  through ``scorecard_updated_at``), with marks for any registered
- *  videos whose timestamp lands in or near the window.
- *
- *  Only renders when there's something useful to look at -- assigned
- *  videos, or unassigned-but-contested videos pointing at this stage.
- *  Stage cards with no relevant ticks would just show empty bars +
- *  jargon, which confused users (#NN); the previous version drew
- *  neighbour-stage ticks at low opacity, which read as decoration. */
-function MatchWindowTimeline({
-  stage,
-  window: matchWindow,
-  videoEntries,
-}: {
-  stage: StageEntry;
-  window: StageMatchWindow | null;
-  videoEntries: VideoMatchAnalysisEntry[];
-}) {
-  if (!matchWindow || !matchWindow.lower || !matchWindow.upper) return null;
-
-  const lowerSec = new Date(matchWindow.lower).getTime() / 1000;
-  const upperSec = new Date(matchWindow.upper).getTime() / 1000;
-  if (!Number.isFinite(lowerSec) || !Number.isFinite(upperSec)) return null;
-  const tolSec = matchWindow.tolerance_minutes * 60;
-
-  const allTicks = videoEntries
-    .filter((e) => e.timestamp !== null)
-    .map((e) => {
-      const ts = new Date(e.timestamp as string).getTime() / 1000;
-      const role = stage.videos.find((x) => x.path === e.path)?.role ?? null;
-      const inThisStage = e.stage_numbers.includes(stage.stage_number);
-      return {
-        path: e.path,
-        ts,
-        role,
-        inThisStage,
-        contested: e.classification === "contested",
-        otherStages: e.stage_numbers.filter((n) => n !== stage.stage_number),
-      };
-    });
-
-  // Only show ticks that are *about* this stage. Neighbour-stage ticks
-  // at low opacity were the source of the "what is this bar?" confusion
-  // -- they read as decoration when the user expected stage-specific
-  // information.
-  const ticks = allTicks.filter(
-    (t) => t.inThisStage || (t.contested && t.otherStages.includes(stage.stage_number)),
-  );
-
-  // Suppress the whole timeline when there's no relevant tick. An empty
-  // bar with just the window band carries no actionable information.
-  if (ticks.length === 0) return null;
-
-  // Visible range: at least the window plus a half-tolerance on each side,
-  // expanded if any tick falls outside.
-  const tsValues = ticks.map((t) => t.ts);
-  const lo = Math.min(lowerSec - 0.5 * tolSec, ...tsValues);
-  const hi = Math.max(upperSec + 0.5 * tolSec, ...tsValues);
-  const span = Math.max(hi - lo, 1);
-
-  const pct = (t: number) => `${Math.max(0, Math.min(100, ((t - lo) / span) * 100))}%`;
-  const winLowPct = ((lowerSec - lo) / span) * 100;
-  const winHighPct = ((upperSec - lo) / span) * 100;
-  const tickLabel = (t: (typeof ticks)[number]) => {
-    const fname = t.path.split("/").pop();
-    const time = new Date(t.ts * 1000).toLocaleTimeString();
-    if (t.inThisStage) return `${fname} @ ${time} (${t.role ?? "unassigned"})`;
-    return `${fname} @ ${time} (also fits stages ${t.otherStages.join(", ")})`;
-  };
-
-  return (
-    <div
-      className="mt-2 select-none"
-      aria-hidden
-      title={
-        `Match window for stage ${stage.stage_number}: videos recorded within ` +
-        `${matchWindow.tolerance_minutes} minutes before the scorecard time. ` +
-        `Bars mark each registered video's timestamp.`
-      }
-    >
-      <div className="relative h-3 rounded-full border border-border bg-muted/30">
-        <div
-          className="absolute top-0 h-full bg-status-info/20"
-          style={{
-            left: `${Math.max(0, winLowPct)}%`,
-            width: `${Math.min(100, winHighPct) - Math.max(0, winLowPct)}%`,
-          }}
-          title={`match window: ${matchWindow.tolerance_minutes} min before scorecard`}
-        />
-        <div
-          className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-status-info"
-          style={{ left: pct(upperSec) }}
-          title={`scorecard: ${new Date(upperSec * 1000).toLocaleTimeString()}`}
-        />
-        {ticks.map((t) => (
-          <div
-            key={t.path}
-            className={cn(
-              "absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-sm",
-              t.role === "primary" ? "h-4 w-1 bg-status-info" : "bg-foreground",
-              t.contested && "outline outline-1 outline-status-warning",
-            )}
-            style={{ left: pct(t.ts) }}
-            title={tickLabel(t)}
-          />
-        ))}
-      </div>
-      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
-        <span>{new Date(lo * 1000).toLocaleTimeString()}</span>
-        <span>match window ({matchWindow.tolerance_minutes} min before scorecard)</span>
-        <span>{new Date(hi * 1000).toLocaleTimeString()}</span>
-      </div>
-    </div>
-  );
-}
-
-/** Top-of-page status banner: lists everything that blocks the user from
- *  advancing to the audit screen. Hard blockers: video claimed as primary
- *  by two stages; stage with no primary that isn't explicitly skipped.
- *  Soft warnings (advisory, do not block): contested unassigned videos
- *  (the heuristic says they fit two stages' windows). Renders nothing
- *  blocking when ingest is ready. */
-function ReadyBanner({
-  project,
-  analysis,
-}: {
-  project: MatchProject;
-  analysis: MatchAnalysis | null;
-}) {
-  const primaryCounts = new Map<string, number>();
-  for (const s of project.stages) {
-    for (const v of s.videos) {
-      if (v.role === "primary") {
-        primaryCounts.set(v.path, (primaryCounts.get(v.path) ?? 0) + 1);
-      }
-    }
-  }
-  const conflictPaths = Array.from(primaryCounts.entries())
-    .filter(([, n]) => n > 1)
-    .map(([p]) => p);
-  const stagesWithoutPrimary = project.stages.filter(
-    (s) => !s.skipped && s.videos.find((v) => v.role === "primary") === undefined,
-  );
-
-  // Surface heuristic-detected ambiguity for unassigned videos: the
-  // classifier says they fall in 2+ stages' windows, so the auto-assignment
-  // would have to pick one. Advisory only -- the user can resolve by
-  // dragging onto the right stage.
-  const contestedUnassigned = (analysis?.videos ?? []).filter(
-    (v) =>
-      v.classification === "contested" &&
-      project.unassigned_videos.some((u) => u.path === v.path),
-  );
-
-  const blocking = conflictPaths.length > 0 || stagesWithoutPrimary.length > 0;
-  if (!blocking && contestedUnassigned.length === 0) {
-    return (
-      <Card className="border-status-success/40 bg-status-success/5">
-        <CardContent className="flex items-center gap-2 py-3 text-sm">
-          <CheckCircle2 className="size-4 text-status-success" />
-          <span>
-            Ingest looks good. Every stage has a primary (or is skipped); no
-            video is claimed as primary by two stages.
-          </span>
-        </CardContent>
-      </Card>
-    );
-  }
-  return (
-    <Card
-      className={cn(
-        blocking
-          ? "border-status-warning/50 bg-status-warning/5"
-          : "border-status-info/40 bg-status-info/5",
-      )}
-    >
-      <CardContent className="space-y-2 py-3 text-sm">
-        <div className="flex items-center gap-2 font-medium">
-          <AlertCircle
-            className={cn(
-              "size-4",
-              blocking ? "text-status-warning" : "text-status-info",
-            )}
-          />
-          <span>
-            {blocking
-              ? "Ingest is not ready to advance."
-              : "Ingest is ready, with advisories from the match heuristic."}
-          </span>
-        </div>
-        {conflictPaths.length > 0 ? (
-          <div>
-            <div className="text-xs font-semibold">
-              Video claimed as primary by more than one stage:
-            </div>
-            <ul className="ml-5 list-disc text-xs text-muted-foreground">
-              {conflictPaths.map((p) => (
-                <li key={p} className="font-mono">{p}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {stagesWithoutPrimary.length > 0 ? (
-          <div>
-            <div className="text-xs font-semibold">
-              Stages without a primary (skip or assign one):
-            </div>
-            <ul className="ml-5 list-disc text-xs text-muted-foreground">
-              {stagesWithoutPrimary.map((s) => (
-                <li key={s.stage_number}>
-                  Stage {s.stage_number}: {s.stage_name}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {contestedUnassigned.length > 0 ? (
-          <div>
-            <div className="text-xs font-semibold">
-              Unassigned videos that fit multiple stage windows
-              (heuristic, advisory):
-            </div>
-            <ul className="ml-5 list-disc text-xs text-muted-foreground">
-              {contestedUnassigned.map((v) => (
-                <li key={v.path}>
-                  <span className="font-mono">{v.path.split("/").pop()}</span>
-                  {" -- candidates: "}
-                  {v.stage_numbers.map((n) => `S${n}`).join(", ")}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Floating bottom-right drop zone visible only while a drag is in flight.
- *  Dropping here triggers the same removal dialog the trash button uses, so
- *  audited primaries still get the keep-audit-or-reset choice. */
-function RemoveDropZone({
-  dragging,
-  busy,
-  onDrop,
-}: {
-  dragging: { video: StageVideo; stage: StageEntry | null };
-  busy: boolean;
-  onDrop: () => void;
-}) {
-  const [over, setOver] = useState(false);
-  const filename = dragging.video.path.split("/").pop() ?? dragging.video.path;
-  return (
-    <div
-      role="region"
-      aria-label="Remove from project"
-      className={cn(
-        "fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-lg border-2 border-dashed border-destructive/60 bg-destructive/10 px-4 py-3 shadow-lg",
-        over && "border-destructive bg-destructive/25",
-        busy && "opacity-50",
-      )}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        const path = e.dataTransfer.getData(DRAG_MIME);
-        if (!path) return;
-        e.preventDefault();
-        setOver(false);
-        onDrop();
-      }}
-    >
-      <Trash2 className="size-5 text-destructive" />
-      <div className="flex flex-col text-xs">
-        <span className="font-medium text-destructive">Drop to remove</span>
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {filename}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function RoleActions({
-  video,
-  stage,
+  camera,
+  currentStage,
   allStages,
-  busy,
-  currentRole,
   onMove,
   onRemove,
+  busy,
 }: {
   video: StageVideo;
-  stage: StageEntry;
+  camera?: CameraGroup;
+  currentStage: number | null;
   allStages: StageEntry[];
+  onMove: (
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+  ) => Promise<void>;
+  onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
-  currentRole: VideoRole;
-  onMove: (path: string, stage: number | null, role: VideoRole) => void;
-  onRemove: (video: StageVideo, stage: StageEntry) => void;
 }) {
-  return (
-    <>
-      {currentRole !== "primary" ? (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => onMove(video.path, stage.stage_number, "primary")}
-          title="Make primary (audit truth)"
-        >
-          Make primary
-        </Button>
-      ) : null}
-      {currentRole !== "ignored" ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          onClick={() => onMove(video.path, stage.stage_number, "ignored")}
-          title="Mark as ignored (kept on stage but skipped by pipeline)"
-        >
-          Ignore
-        </Button>
-      ) : null}
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={busy}
-        onClick={() => onMove(video.path, null, "secondary")}
-        title="Unassign (move back to tray)"
-      >
-        Unassign
-      </Button>
-      {allStages.length > 1 ? (
-        <select
-          aria-label="Move to a different stage"
-          className="h-8 max-w-[8rem] truncate rounded-md border border-input bg-background px-2 text-xs"
-          disabled={busy}
-          value=""
-          onChange={(e) => {
-            const next = e.target.value;
-            if (next === "") return;
-            onMove(video.path, Number(next), "secondary");
-          }}
-        >
-          <option value="">→ stage…</option>
-          {allStages
-            .filter((s) => s.stage_number !== stage.stage_number)
-            .map((s) => (
-              <option key={s.stage_number} value={s.stage_number}>
-                S{s.stage_number} — {s.stage_name}
-              </option>
-            ))}
-        </select>
-      ) : null}
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={busy}
-        onClick={() => onRemove(video, stage)}
-        title="Remove from project (clears caches; source on disk is untouched)"
-        aria-label={`Remove ${video.path}`}
-      >
-        <Trash2 />
-      </Button>
-    </>
-  );
-}
-
-function RemoveVideoDialog({
-  target,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  target: { video: StageVideo; stage: StageEntry | null };
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: (resetAudit: boolean) => void;
-}) {
-  const { video, stage } = target;
   const filename = video.path.split("/").pop() ?? video.path;
-  const isPrimary = video.role === "primary" && stage !== null;
-  const hasAudit = video.processed.beep || video.processed.shot_detect || video.processed.trim;
-  const offerAuditChoice = isPrimary && hasAudit;
+  const cameraLabel = camera?.label ?? "Camera";
+  const cameraDetail = [
+    camera?.model ?? null,
+    camera?.mount ?? null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const recordedAt =
+    video.match_timestamp &&
+    new Date(video.match_timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  async function setRole(next: VideoRole) {
+    await onMove(video.path, currentStage, next);
+  }
+
+  async function changeStage(next: string) {
+    if (next === "unassigned") {
+      await onMove(video.path, null, video.role);
+    } else {
+      const n = Number(next);
+      if (!Number.isNaN(n)) await onMove(video.path, n, video.role);
+    }
+  }
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="remove-dialog-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
-      onClick={onCancel}
+      className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_36px] items-center gap-3.5 border-b border-rule px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
     >
-      <Card
-        className="w-full max-w-lg shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <CardHeader>
-          <CardTitle id="remove-dialog-title" className="flex items-center gap-2">
-            <Trash2 className="size-5" />
-            Remove video
-          </CardTitle>
-          <CardDescription>
-            <span className="font-mono text-xs">{filename}</span>
-            {stage ? (
-              <>
-                {" "}
-                from Stage {stage.stage_number}: {stage.stage_name}
-              </>
-            ) : (
-              " (unassigned)"
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p>
-            The symlink in the project's <code>raw/</code> folder is removed
-            and any cached audio / trimmed clip for this video is cleared.{" "}
-            <strong>The original source file is never touched.</strong>
-          </p>
-          {offerAuditChoice ? (
-            <div className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-xs">
-              <p className="mb-2 font-semibold">
-                Stage {stage!.stage_number} has audit data.
-              </p>
-              <p>
-                <em>Keep audit</em> preserves detected beep / shot times so you
-                can re-ingest a different file for this stage and pick up
-                where you left off.{" "}
-                <em>Reset audit</em> wipes the stage audit JSON and clears the
-                processed flags.
-              </p>
-            </div>
-          ) : null}
-          <div className="flex flex-wrap justify-end gap-2 pt-2">
-            <Button variant="ghost" disabled={busy} onClick={onCancel}>
-              Cancel
-            </Button>
-            {offerAuditChoice ? (
-              <>
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => onConfirm(false)}
-                >
-                  Remove, keep audit
-                </Button>
-                <Button
-                  variant="destructive"
-                  disabled={busy}
-                  onClick={() => onConfirm(true)}
-                >
-                  Remove and reset audit
-                </Button>
-              </>
-            ) : (
-              <Button
-                variant="destructive"
-                disabled={busy}
-                onClick={() => onConfirm(false)}
-              >
-                Remove
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/** Inline audit-pending reminder rendered inside a StageCard (#218 phase 4).
- *
- *  Renders only when the stage is in the "shots pending" terminal
- *  state: shot detection ran, candidates exist, but ``shots[]`` is
- *  still empty. Dismissible via a per-project list persisted on
- *  ``MatchProject.nudges_dismissed_stages`` so the nag doesn't
- *  reappear on every reload. The dismissal is automatically obviated
- *  when the user audits a candidate (``audit_shot_count > 0`` -> the
- *  whole nudge stops emitting), so we don't bother clearing dismissed
- *  entries here.
- */
-function AuditPendingNudge({
-  stage,
-  exportStatus,
-  dismissedStages,
-  busy,
-  setBusy,
-  setError,
-  onProjectUpdate,
-}: {
-  stage: StageEntry;
-  exportStatus: StageExportStatus | null;
-  dismissedStages: number[];
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  setError: (msg: string | null) => void;
-  onProjectUpdate: (p: MatchProject) => void;
-}) {
-  if (!exportStatus) return null;
-  if (
-    !exportStatus.primary_processed.shot_detect ||
-    exportStatus.audit_shot_count > 0 ||
-    exportStatus.total_candidate_count === 0
-  ) {
-    return null;
-  }
-  if (dismissedStages.includes(stage.stage_number)) return null;
-
-  const dismiss = async () => {
-    setBusy(true);
-    try {
-      const updated = await api.dismissNudge(stage.stage_number, true);
-      onProjectUpdate(updated);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const count = exportStatus.total_candidate_count;
-  return (
-    <div className="flex items-start justify-between gap-2 rounded border border-status-warning/40 bg-status-warning/10 px-2.5 py-1.5 text-xs">
-      <span>
-        Stage {stage.stage_number} has {count} detected shot
-        {count === 1 ? "" : "s"} awaiting your review. Open the Audit
-        screen to keep / reject and seed shots[].
-      </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="-mr-1 h-5 px-1.5 text-[11px]"
-        disabled={busy}
-        onClick={() => void dismiss()}
-        title="Hide this reminder for this stage. It will come back automatically once you audit at least one shot."
-      >
-        Dismiss
-      </Button>
-    </div>
-  );
-}
-
-function StatusGlyph({
-  stage,
-  exportStatus,
-}: {
-  stage: StageEntry;
-  exportStatus: StageExportStatus | null;
-}) {
-  if (stage.skipped) {
-    return (
-      <Badge variant="outline" className="gap-1">
-        <XCircle className="size-3" /> Skipped
-      </Badge>
-    );
-  }
-  if (!stage.videos.length) {
-    return (
-      <Badge variant="statusNotStarted" className="gap-1">
-        ○ No videos
-      </Badge>
-    );
-  }
-  const primary = stage.videos.find((v) => v.role === "primary");
-  if (!primary) {
-    return (
-      <Badge variant="statusWarning" className="gap-1">
-        ▲ No primary
-      </Badge>
-    );
-  }
-  if (primary.beep_time == null) {
-    return (
-      <Badge variant="statusInProgress" className="gap-1">
-        ○ Detect beep
-      </Badge>
-    );
-  }
-  if (!primary.beep_reviewed) {
-    return (
-      <Badge variant="statusWarning" className="gap-1">
-        ▲ Beep review
-      </Badge>
-    );
-  }
-  // Primary is locked in -- secondaries are nice-to-have for multi-cam
-  // sync but the stage is auditable + exportable on the primary alone.
-  const pendingSecondaries = stage.videos.filter(
-    (v) => v.role === "secondary" && (v.beep_time == null || !v.beep_reviewed),
-  ).length;
-  if (pendingSecondaries > 0) {
-    return (
-      <Badge
-        variant="statusComplete"
-        className="gap-1"
-        title={`Ready to audit. ${pendingSecondaries} secondary cam${
-          pendingSecondaries === 1 ? "" : "s"
-        } still need beep alignment to sync with the primary timeline.`}
-      >
-        <CheckCircle2 className="size-3" /> Ready · {pendingSecondaries} cam
-        pending
-      </Badge>
-    );
-  }
-  // #218 -- once the beep ladder is climbed, the next axis is shot
-  // state. Three terminal labels:
-  //
-  //   * Shots audited: at least one row in audit JSON shots[].
-  //   * Shots pending: detection has run + produced candidates but the
-  //     user hasn't audited yet.
-  //   * Ready: beep verified, no detection run yet (e.g., automation
-  //     turned off, or user hasn't reached audit). Stays as the
-  //     fallback so the badge isn't misleading for trim-only flows.
-  if (exportStatus) {
-    if (exportStatus.audit_shot_count > 0) {
-      return (
-        <Badge
-          variant="statusComplete"
-          className="gap-1"
-          title={
-            `${exportStatus.audit_shot_count} shot${
-              exportStatus.audit_shot_count === 1 ? "" : "s"
-            } audited. Ready to export with shot markers.`
-          }
-        >
-          <CheckCircle2 className="size-3" /> Shots audited
-        </Badge>
-      );
-    }
-    if (
-      exportStatus.primary_processed.shot_detect &&
-      exportStatus.total_candidate_count > 0
-    ) {
-      return (
-        <Badge
-          variant="statusInProgress"
-          className="gap-1"
-          title={
-            `${exportStatus.total_candidate_count} candidate${
-              exportStatus.total_candidate_count === 1 ? "" : "s"
-            } detected -- open the Audit screen to keep / reject and seed shots[].`
-          }
-        >
-          ○ Shots pending
-        </Badge>
-      );
-    }
-  }
-  return (
-    <Badge variant="statusComplete" className="gap-1">
-      <CheckCircle2 className="size-3" /> Ready
-    </Badge>
-  );
-}
-
-/** Compact, single-row drop zone used in the Scoreboard card.
- *
- *  The offline JSON path is the secondary option (most users will go
- *  online), so it sits last in the card and reads as a one-line
- *  affordance instead of the full-bleed marketing-style box. Same drag
- *  + click semantics as ``FileDropZone``, just less screen real estate.
- */
-function CompactFileDropZone({
-  accept,
-  label,
-  disabled,
-  onFile,
-}: {
-  accept: string;
-  label: string;
-  disabled?: boolean;
-  onFile: (f: File) => void;
-}) {
-  const [over, setOver] = useState(false);
-  return (
-    <label
-      className={cn(
-        "group flex cursor-pointer items-center justify-between gap-3 rounded-md border border-dashed border-border bg-muted/10 px-3 py-2 text-xs transition-colors hover:bg-muted/20",
-        over && "border-ring bg-muted/30",
-        disabled && "pointer-events-none opacity-50",
-      )}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) onFile(file);
-      }}
-    >
-      <span className="flex items-center gap-2 text-muted-foreground">
-        <FileJson className="size-3.5 shrink-0" />
-        <span>{label}</span>
-      </span>
-      <span className="text-muted-foreground/70">drag &amp; drop or click</span>
-      <input
-        type="file"
-        accept={accept}
-        className="sr-only"
-        disabled={disabled}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onFile(file);
-          e.target.value = "";
+      <span
+        aria-hidden
+        className="inline-flex size-8 items-center justify-center rounded-md text-ink"
+        style={{
+          background:
+            camera && camera.id.includes("|")
+              ? "linear-gradient(135deg, var(--color-surface-3), var(--color-surface-4))"
+              : "var(--color-surface-3)",
+          border: "1px solid var(--color-rule-strong)",
         }}
-      />
-    </label>
+      >
+        <Video className="size-3.5" />
+      </span>
+      <div className="min-w-0">
+        <div className="truncate font-mono text-[0.75rem] font-semibold text-ink">
+          {filename}
+        </div>
+        <div className="mt-0.5 font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-muted">
+          {cameraLabel}
+          {cameraDetail && <> &middot; {cameraDetail}</>}
+        </div>
+      </div>
+      <div className="font-mono text-[0.6875rem] tabular-nums text-muted">
+        {recordedAt ?? "no timestamp"}
+      </div>
+      <select
+        value={currentStage === null ? "unassigned" : String(currentStage)}
+        onChange={(e) => void changeStage(e.target.value)}
+        disabled={busy}
+        className="min-h-9 rounded-md border border-rule bg-surface-3 px-3 py-1.5 font-mono text-[0.6875rem] text-ink outline-none focus:border-led focus:shadow-[0_0_0_2px_var(--color-led-tint)]"
+      >
+        <option value="unassigned">-- Unassigned --</option>
+        {allStages.map((s) => (
+          <option key={s.stage_number} value={s.stage_number}>
+            Stage {pad2(s.stage_number)} -- {s.stage_name}
+          </option>
+        ))}
+      </select>
+      <RoleToggles value={video.role} onChange={(r) => void setRole(r)} disabled={busy} />
+      <button
+        type="button"
+        onClick={() => void onRemove(video.path)}
+        disabled={busy}
+        title="Remove video"
+        aria-label="Remove video"
+        className="inline-flex size-8 items-center justify-center rounded-md text-subtle transition-colors hover:bg-led/10 hover:text-led"
+      >
+        <XCircle className="size-4" />
+      </button>
+    </div>
   );
 }
 
+function RoleToggles({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: VideoRole;
+  onChange: (r: VideoRole) => void;
+  disabled?: boolean;
+}) {
+  const opts: { v: VideoRole; label: string }[] = [
+    { v: "primary", label: "Primary" },
+    { v: "secondary", label: "Secondary" },
+    { v: "ignored", label: "Ignore" },
+  ];
+  return (
+    <div className="inline-flex gap-0.5 rounded-md border border-rule bg-surface-2 p-0.5">
+      {opts.map((o) => {
+        const on = value === o.v;
+        return (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => onChange(o.v)}
+            disabled={disabled}
+            className={cn(
+              "rounded px-2.5 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.06em] transition-all",
+              on && o.v === "primary" && "border border-led-deep bg-led/10 text-led",
+              on && o.v === "secondary" && "bg-surface-4 text-ink",
+              on && o.v === "ignored" && "bg-surface-4 text-muted line-through",
+              !on && "text-muted hover:text-ink",
+            )}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-/** Compute the union match window from per-stage analysis (epoch
- *  seconds) for the FolderPicker highlight (#NN). Returns null when
- *  no stage has a scorecard time yet -- the picker degrades to no
- *  highlight, which is the right behaviour for placeholder-only
- *  projects. The 2h padding on each side covers warm-up videos shot
- *  before the first stage and clips recorded after the last scorecard
- *  was typed (cool-down chatter, drive home with the cam rolling). */
-const MATCH_WINDOW_PADDING_SECONDS = 2 * 60 * 60;
+function CameraCard({ camera }: { camera: CameraGroup }) {
+  return (
+    <div className="flex items-center gap-3.5 rounded-xl border border-rule bg-bg-glow px-4 py-3.5">
+      <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-[9px] border border-rule-strong bg-surface-3 text-ink-2">
+        <Camera className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 inline-flex items-center gap-2.5">
+          <span className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
+            {camera.label}
+          </span>
+          {camera.mount && (
+            <span className="rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-ink-2">
+              {camera.mount}
+            </span>
+          )}
+        </div>
+        <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {camera.videoCount} file{camera.videoCount === 1 ? "" : "s"}
+          {camera.model && (
+            <>
+              {" "}
+              <span className="text-whisper">&middot;</span> {camera.model}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-function computeMatchWindow(
-  analysis: MatchAnalysis | null,
-): { startEpoch: number; endEpoch: number } | null {
-  if (!analysis) return null;
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const s of analysis.stages) {
-    if (s.lower) {
-      const t = new Date(s.lower).getTime() / 1000;
-      if (Number.isFinite(t) && t < lo) lo = t;
-    }
-    if (s.upper) {
-      const t = new Date(s.upper).getTime() / 1000;
-      if (Number.isFinite(t) && t > hi) hi = t;
-    }
-  }
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
-  return {
-    startEpoch: lo - MATCH_WINDOW_PADDING_SECONDS,
-    endEpoch: hi + MATCH_WINDOW_PADDING_SECONDS,
-  };
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 0 || !parts[0]) return "??";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
