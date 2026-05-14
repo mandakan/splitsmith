@@ -67,22 +67,29 @@ later.
 [Match picker]   <- entry; list, create, archive, backup, restore
 |
 +-- <Match X>
-    +-- Overview          (meta + shooters + stages grid; entry view)
+    +-- Overview             (meta + shooters + stages grid; entry view)
+    +-- Coach                (match-wide: cross-stage analysis, annotations)
     +-- Stages
     |   +-- Stage 1
-    |   |   +-- Audit         (per-shooter timing review)
-    |   |   +-- Compare       (multi-shooter sync preview)
-    |   |   +-- Coach         (shot-by-shot analysis, annotations)
+    |   |   +-- Audit            (per-shooter timing review)
+    |   |   +-- Compare          (multi-shooter sync preview)
+    |   |   +-- Coach            (per-stage deep dive: shot-by-shot)
     |   +-- Stage 2 ...
-    +-- Shooters             (list of contributors and their footage)
-    +-- Export               (overlays, transitions, scope: stage / match)
-    +-- Settings             (rename, archive, delete, backup, source links)
+    +-- Shooters                 (list of contributors and their footage)
+    +-- Export                   (overlays, transitions, scope: stage / match)
+    +-- Settings                 (rename, archive, delete, backup, source links)
 ```
 
-Coach is a per-stage tab next to Audit and Compare. This keeps the
-work in one place: a shooter auditing their run can switch to Coach
-without leaving the stage. A match-wide Coach summary may live on
-Overview; needs validation.
+Coach exists at **two levels**:
+
+- **Match-wide Coach** is a top-level destination inside a match,
+  alongside Stages and Export. It surfaces cross-stage analysis,
+  match-level annotations, and trend views.
+- **Per-stage Coach** is a tab next to Audit and Compare inside a
+  stage. It is the shot-by-shot deep dive: splits, interval
+  classification, form critique with multi-camera playback.
+
+Both are inside Match mode, not a separate top-level mode.
 
 ### Single-shooter UX preservation
 
@@ -94,6 +101,46 @@ The match-as-object shift must not penalize the single-shooter case
   present (a single tile, not a 1xN grid with empty cells).
 - Export defaults are sensible for the one-shooter case; multi-shooter
   options are opt-in.
+
+### Multi-camera per shooter
+
+Each shooter can contribute **multiple videos per stage** with different
+roles (primary, secondary, ignored). This is not a future workstream --
+it is in production today and must be a first-class concept in the IA.
+
+Implications for surfaces:
+
+- **Shooters list inside a match.** Each shooter expands to their
+  videos with role assignment.
+- **Audit.** Already supports multi-camera (grid / side-by-side
+  playback aligned at the beep). The redesigned Audit surface must keep
+  this.
+- **Compare.** A multi-shooter compare tile is really a multi-shooter
+  multi-camera matrix. Default to one tile per shooter using their
+  primary camera, with the ability to switch angle or stack angles
+  within a tile.
+- **Coach.** Multi-angle playback at each shot is a core capability of
+  form critique. Per-stage Coach must expose all of a shooter's cameras
+  for the stage.
+- **Export.** Per-shooter camera-angle selection. Match-wide and
+  per-stage exports should default to the primary camera per shooter
+  but allow override.
+- **Ingest (see below).** Adding footage for a shooter means adding 1
+  to N videos, possibly across multiple stages and multiple cameras.
+
+### Ingest -- drag and drop per shooter
+
+When adding footage to a match, the user assigns videos to a specific
+shooter via **drag and drop a folder** or **multi-select videos** for
+that shooter. The system then auto-matches the dropped videos to
+stages by mtime (existing capability) and the user reviews
+role assignments (primary / secondary / ignored) for each video on
+each stage.
+
+This is per-shooter, not match-wide, because the mental model is "here
+is shooter X's footage." Bulk match-wide ingest with auto-assignment
+of shooters by filename or folder convention is a possible future
+enhancement, not the default flow.
 
 ### Future: reference shooters
 
@@ -195,6 +242,10 @@ These are separate from the UX work but are prerequisites:
 4. **Reference-shooter data model.** The Shooters list must permit
    members without local footage. Future workstream, but design must
    not foreclose it.
+5. **Multi-camera per shooter.** Already present in the data model and
+   playback infrastructure; the IA work must surface it consistently
+   across Audit, Compare, Coach, and Export, and the ingest flow must
+   handle multiple cameras per shooter per stage cleanly.
 
 ## IA principles -- restated and refined
 
@@ -207,22 +258,31 @@ These are separate from the UX work but are prerequisites:
 - **No manual path typing.** Pickers and lists everywhere.
 - **Promotion is portable.** Match mode produces packages; Developer
   mode consumes them. No fuzzy shared filesystem.
+- **Multi-camera per shooter is first-class.** Every surface that
+  shows a shooter's run must handle 1 to N cameras gracefully.
+
+## Resolved questions
+
+- **Match-wide Coach summary.** Resolved: match-wide Coach is its own
+  top-level destination inside a match, parallel to Stages. Per-stage
+  Coach remains as a tab inside a stage for shot-by-shot work.
+- **Compare ingest.** Resolved: drag-and-drop folder or multi-select
+  videos, scoped to a specific shooter. Bulk auto-assignment by
+  filename or folder convention is a possible future enhancement, not
+  the default flow.
 
 ## Open questions to validate
 
-- **Match-wide Coach summary.** Does a cross-stage performance summary
-  belong on Match Overview, on a dedicated Match-level Coach tab, or is
-  per-stage Coach enough?
-- **Compare ingest.** When importing 3-4 shooters' footage for one
-  match, what is the assignment UX? Drag-and-drop folder per shooter?
-  One folder containing all shooters with auto-assignment? Manual after
-  the fact?
-- **Backup vs. fixture package.** How much overlap is there in practice?
-  Code audit needed before deciding whether they share a format or just
-  share infrastructure.
-- **Lab retirement criteria.** What functionality must move out of Lab
-  before it can be deleted? Likely a checklist exercise during
-  implementation.
+- **Backup vs. fixture package overlap.** Needs research. The two have
+  related infrastructure (project export already produces a `.tar.gz`
+  with selective directory inclusion) but the fixture-package use case
+  is narrower. Code audit needed before deciding whether they share a
+  format, share a builder, or just share intent.
+- **Lab retirement checklist.** Lab will be retired, but only once each
+  current responsibility has a real home. At minimum, the **Review
+  feature** (standalone fixture audit, currently the Review page +
+  Lab catalog) must move into Developer mode. A full checklist is a
+  deliverable of the implementation phase, not the IA phase.
 
 ## What this does not decide
 
