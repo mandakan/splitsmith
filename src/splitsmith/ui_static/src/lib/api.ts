@@ -1202,6 +1202,41 @@ export interface CompareStageResponse {
   shooters: CompareShooterRecord[];
 }
 
+/** One pending beep review item in the cross-shooter queue (#326). */
+export interface BeepQueueAltCandidate {
+  time: number;
+  confidence: number | null;
+}
+
+export interface BeepQueueItem {
+  slug: string;
+  shooter_name: string;
+  stage_number: number;
+  stage_name: string;
+  video_id: string;
+  video_path: string;
+  beep_time: number | null;
+  beep_confidence: number | null;
+  beep_reviewed: boolean;
+  status: "missing" | "low_confidence" | "unreviewed";
+  alt_candidates: BeepQueueAltCandidate[];
+}
+
+export interface BeepQueueStageGroup {
+  stage_number: number;
+  stage_name: string;
+  items: BeepQueueItem[];
+  total_primaries: number;
+  confirmed: number;
+}
+
+export interface BeepQueueResponse {
+  total_items: number;
+  pending_count: number;
+  confirmed_count: number;
+  stages: BeepQueueStageGroup[];
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -1729,6 +1764,23 @@ export const api = {
   /** Build a streaming URL for one shooter's lossless trim (#328). */
   shooterVideoStreamUrl: (slug: string, path: string): string =>
     `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`,
+
+  /** Cross-shooter beep review queue (#326). */
+  getBeepQueue: () => request<BeepQueueResponse>("/api/match/beep-queue"),
+
+  /** Confirm one beep in the queue without changing the active
+   *  shooter; writes through to the named shooter's project (#326). */
+  confirmBeepInQueue: (body: {
+    slug: string;
+    stage_number: number;
+    video_id: string;
+    time?: number | null;
+    source?: "detected" | "manual" | "alt";
+  }) =>
+    request<BeepQueueResponse>("/api/match/beep-queue/confirm", {
+      method: "POST",
+      json: body,
+    }),
 
   /** Create a new match from a picked scoreboard match (#322). The SPA
    *  follows up with /api/scoreboard/fetch + /select-shooter to populate

@@ -846,6 +846,62 @@ class CompareStageResponse(BaseModel):
     shooters: list[CompareShooterRecord]
 
 
+class BeepQueueAltCandidate(BaseModel):
+    """One alternative beep candidate carried on a queue item (#326)."""
+
+    time: float
+    confidence: float | None
+
+
+class BeepQueueItem(BaseModel):
+    """One pending beep review item (#326)."""
+
+    slug: str
+    shooter_name: str
+    stage_number: int
+    stage_name: str
+    video_id: str
+    video_path: str
+    beep_time: float | None
+    beep_confidence: float | None
+    beep_reviewed: bool
+    status: Literal["missing", "low_confidence", "unreviewed"]
+    alt_candidates: list[BeepQueueAltCandidate]
+    # Auto-computed cross-align suggestion for secondaries lives on the
+    # shooter's other videos; the SPA fetches them lazily if needed.
+
+
+class BeepQueueStageGroup(BaseModel):
+    """All pending beep items for a single stage, across shooters (#326)."""
+
+    stage_number: int
+    stage_name: str
+    items: list[BeepQueueItem]
+    total_primaries: int
+    confirmed: int
+
+
+class BeepQueueResponse(BaseModel):
+    """GET /api/match/beep-queue payload (#326)."""
+
+    total_items: int
+    pending_count: int
+    confirmed_count: int
+    stages: list[BeepQueueStageGroup]
+
+
+class BeepQueueConfirmRequest(BaseModel):
+    """POST /api/match/beep-queue/confirm body (#326)."""
+
+    slug: str
+    stage_number: int
+    video_id: str
+    # The user-confirmed beep time. When None the existing detected beep
+    # is kept and only ``reviewed`` flips to True.
+    time: float | None = None
+    source: Literal["detected", "manual", "alt"] = "detected"
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -6339,6 +6395,145 @@ def create_app(
 
         media_type = "video/mp4"
         return FileResponse(served_path, media_type=media_type)
+
+    # ----------------------------------------------------------------------
+    # Cross-shooter beep review queue (#326)
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/match/beep-queue", response_model=BeepQueueResponse)
+    def get_beep_queue() -> BeepQueueResponse:
+        """Pending beep items across every shooter in the bound match.
+
+        Surfaces three states per primary video:
+          - ``missing``: detector hasn't run or didn't find a beep
+          - ``low_confidence``: detector found one but below the project's
+            auto-trust threshold
+          - ``unreviewed``: detector found one above threshold but the
+            user hasn't yet listened + approved
+
+        Items are grouped by stage; per-stage shot detection is gated on
+        every shooter's primary in that stage being ``beep_reviewed``.
+        """
+        match_root, match, _ = _resolve_match_context()
+        # Resolve the low-confidence threshold from the active shooter's
+        # automation settings; per-shooter thresholds aren't supported.
+        try:
+            active_project = state.load()
+            resolved = automation_settings.resolve_automation(active_project)
+            threshold = resolved.settings.beep_low_confidence_threshold
+        except Exception:  # noqa: BLE001
+            threshold = 0.5
+
+        stage_lookup = {s.stage_number: s.stage_name for s in match.stages}
+        groups: dict[int, BeepQueueStageGroup] = {}
+        total_pending = 0
+        total_confirmed = 0
+        total_primaries = 0
+
+        for slug in match.shooters:
+            shooter_root = match_model.Match.shooter_root(match_root, slug)
+            try:
+                proj = MatchProject.load(shooter_root)
+            except FileNotFoundError:
+                continue
+            for stage in proj.stages:
+                if stage.skipped:
+                    continue
+                primary = next((v for v in stage.videos if v.role == "primary"), None)
+                if primary is None:
+                    continue
+                total_primaries += 1
+                grp = groups.setdefault(
+                    stage.stage_number,
+                    BeepQueueStageGroup(
+                        stage_number=stage.stage_number,
+                        stage_name=stage_lookup.get(stage.stage_number, stage.stage_name),
+                        items=[],
+                        total_primaries=0,
+                        confirmed=0,
+                    ),
+                )
+                grp.total_primaries += 1
+                # Status classification.
+                if primary.beep_time is None:
+                    status = "missing"
+                elif primary.beep_reviewed:
+                    grp.confirmed += 1
+                    total_confirmed += 1
+                    continue
+                elif primary.beep_confidence is not None and primary.beep_confidence < threshold:
+                    status = "low_confidence"
+                else:
+                    status = "unreviewed"
+                total_pending += 1
+                alts = [
+                    BeepQueueAltCandidate(
+                        time=cand.time,
+                        confidence=cand.confidence,
+                    )
+                    for cand in (primary.beep_candidates or [])[:3]
+                ]
+                grp.items.append(
+                    BeepQueueItem(
+                        slug=slug,
+                        shooter_name=proj.competitor_name or slug,
+                        stage_number=stage.stage_number,
+                        stage_name=stage_lookup.get(stage.stage_number, stage.stage_name),
+                        video_id=primary.video_id,
+                        video_path=primary.path.as_posix(),
+                        beep_time=primary.beep_time,
+                        beep_confidence=primary.beep_confidence,
+                        beep_reviewed=primary.beep_reviewed,
+                        status=status,
+                        alt_candidates=alts,
+                    )
+                )
+
+        ordered_stages = sorted(groups.values(), key=lambda g: g.stage_number)
+        return BeepQueueResponse(
+            total_items=total_primaries,
+            pending_count=total_pending,
+            confirmed_count=total_confirmed,
+            stages=ordered_stages,
+        )
+
+    @app.post("/api/match/beep-queue/confirm", response_model=BeepQueueResponse)
+    def confirm_beep_in_queue(req: BeepQueueConfirmRequest) -> BeepQueueResponse:
+        """Confirm a beep on any shooter without changing the bound state.
+
+        Writes through to the named shooter's ``project.json`` directly so
+        the rest of the SPA's state (active shooter) is unaffected.
+        When ``time`` is supplied, it overrides ``beep_time``; the call
+        always sets ``beep_reviewed = True``.
+        """
+        match_root, match, _ = _resolve_match_context()
+        if req.slug not in match.shooters:
+            raise HTTPException(status_code=404, detail="shooter not found")
+        shooter_root = match_model.Match.shooter_root(match_root, req.slug)
+        try:
+            proj = MatchProject.load(shooter_root)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        target_stage = next(
+            (s for s in proj.stages if s.stage_number == req.stage_number),
+            None,
+        )
+        if target_stage is None:
+            raise HTTPException(status_code=404, detail="stage not found")
+        target_video = next((v for v in target_stage.videos if v.video_id == req.video_id), None)
+        if target_video is None:
+            raise HTTPException(status_code=404, detail="video not found")
+        if req.time is not None:
+            target_video.beep_time = float(req.time)
+            target_video.beep_source = "manual" if req.source == "manual" else "detected"
+        if target_video.beep_time is None:
+            raise HTTPException(
+                status_code=400,
+                detail="cannot mark a beep reviewed before one has been detected",
+            )
+        target_video.beep_reviewed = True
+        proj.save(shooter_root)
+        return get_beep_queue()
 
     @app.post("/api/user/recent-projects/unbind")
     def unbind_recent_project() -> HealthResponse:
