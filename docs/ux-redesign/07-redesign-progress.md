@@ -68,15 +68,17 @@ this session).
 | 12| Developer retrain    | skill         | Run summary banner, 6-stage pipeline with motherboard trace + running pulse + CRT log tail, before/after comparison table (regressions visually unmissable), per-voter panels, history log, sticky promote/rollback action zone. |
 | 13| Coach (match-wide)   | skill         | CRT-oscilloscope split histogram (twin-trace), 4 instrument stat cards, per-stage breakdown with rank pills, interval tiles, practice recommendations with priority rails, annotations timeline. |
 | 14| Coach (per-stage)    | applied       | Shot ruler (color-coded dots), video tile + transport, current-shot panel with classification chips + annotation editor, full per-shot list with interval tags. Self-referential baselines only. |
+| 15| Jobs drawer          | applied       | Right slide-out over faded backdrop. Worker pool chip, running jobs with LED-glowing progress + striped fill, failed-job recovery actions, queued + completed groups. |
+| 16| Shooters management  | applied       | Per-shooter cards with racing-color accent rails (MA red / JL amber / PE green / RJ blue), avatar identity, progress + status pill, camera rows with role pills + stage chips, future reference-shooters section. |
+| 17| Match overview empty | applied       | Just-created variant of polished 02. Empty hero CTA, empty shooters strip (you + add squadmate), stage tiles marked "awaiting footage", 3 help cards. |
+| 18| Ingest empty         | applied       | Drop-state variant. Big dashed drop zone with corner brackets, storage choice up front, recent-sources list, 3 tip cards. |
 
-## Polished surfaces -- still to do
+## Polished surfaces -- ALL COMPLETE
 
-4 surfaces remain (Batch 5 only):
+**18 of 18 polished surfaces shipped.** The redesign visual phase is done.
 
-**Batch 2/3/4 -- COMPLETE.** 14 of 18 polished surfaces shipped.
-
-**Batch 5 (final):**
-- wf15 jobs drawer, wf16 shooters management, wf17 match overview empty, wf18 ingest empty
+Production target next: React 19 + Tailwind 4 + Radix + shadcn-style
+primitives. See `06-design-system.md` for the migration path.
 
 ## How to resume
 
