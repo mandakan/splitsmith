@@ -813,6 +813,39 @@ class AddShooterRequest(BaseModel):
     division: str | None = None
 
 
+class CompareShotPoint(BaseModel):
+    """One shot for a shooter on a stage (#328 timeline)."""
+
+    shot_number: int
+    time_after_beep: float  # seconds since beep (primary stage clock)
+    source: Literal["detected", "manual"]
+
+
+class CompareShooterRecord(BaseModel):
+    """One shooter's data for a stage (#328 multi-shooter timeline)."""
+
+    slug: str
+    name: str
+    is_active: bool
+    # Path to the lossless trim clip on disk; the SPA streams via
+    # GET /api/match/shooters/{slug}/videos/stream?path=...
+    video_path: str | None
+    # Trim is per-shooter and starts at ``beep_offset_in_clip`` seconds
+    # before the beep; SPA uses this to sync all clips to time-since-beep.
+    beep_offset_in_clip: float | None
+    duration_seconds: float | None
+    stage_time_seconds: float | None
+    shots: list[CompareShotPoint]
+
+
+class CompareStageResponse(BaseModel):
+    """GET /api/match/stage/{stage_number}/compare payload (#328)."""
+
+    stage_number: int
+    stage_name: str
+    shooters: list[CompareShooterRecord]
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -6141,6 +6174,171 @@ def create_app(
         match.shooters = [s for s in match.shooters if s != slug]
         match.save(match_root)
         return list_match_shooters()
+
+    # ----------------------------------------------------------------------
+    # Stage compare (#328)
+    # ----------------------------------------------------------------------
+
+    @app.get(
+        "/api/match/stage/{stage_number}/compare",
+        response_model=CompareStageResponse,
+    )
+    def get_stage_compare(stage_number: int) -> CompareStageResponse:
+        """Per-shooter compare data for a stage.
+
+        Each shooter contributes their lossless trim path (if built),
+        ``beep_offset_in_clip`` so the SPA can align all clips to time-
+        since-beep, and the shot list as a list of ``time_after_beep``
+        scalars. Shooters with no trim still appear so the SPA can render
+        empty tiles instead of silently dropping the slot.
+        """
+        match_root, match, active_slug = _resolve_match_context()
+        try:
+            stage_def = match.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        records: list[CompareShooterRecord] = []
+        for slug in match.shooters:
+            shooter_root = match_model.Match.shooter_root(match_root, slug)
+            try:
+                legacy = MatchProject.load(shooter_root)
+            except FileNotFoundError:
+                continue
+            stage = next(
+                (s for s in legacy.stages if s.stage_number == stage_number),
+                None,
+            )
+            primary = (
+                next((v for v in stage.videos if v.role == "primary"), None)
+                if stage is not None
+                else None
+            )
+
+            beep_offset: float | None = None
+            duration_seconds: float | None = None
+            video_path: str | None = None
+            if stage is not None and primary is not None and primary.beep_time is not None:
+                # Build the same trim path the FCPXML emitter uses; that
+                # file holds beep_offset_in_clip seconds of head padding.
+                stage_name = stage_def.stage_name
+                base = f"stage{stage_number}_{match_export_helpers._slugify(stage_name)}"
+                exports = (
+                    Path(legacy.exports_dir).expanduser()
+                    if legacy.exports_dir
+                    else shooter_root / "exports"
+                )
+                if not exports.is_absolute():
+                    exports = shooter_root / exports
+                trim = exports / f"{base}_trimmed.mp4"
+                if trim.exists():
+                    video_path = str(trim)
+                    beep_offset = min(legacy.trim_pre_buffer_seconds, primary.beep_time)
+
+            # Shots come from audit; convert each shot.time to time-after-beep.
+            shots: list[CompareShotPoint] = []
+            if stage is not None and primary is not None and primary.beep_time is not None:
+                audit_path = shooter_root / "audit" / f"stage{stage_number}.json"
+                if audit_path.exists():
+                    try:
+                        audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        audit_data = None
+                    if isinstance(audit_data, dict):
+                        for shot in audit_data.get("shots") or []:
+                            t = shot.get("time")
+                            if t is None:
+                                continue
+                            # Audit stores time in the trim's local clock;
+                            # subtract the trim's beep offset to get
+                            # time-since-beep.
+                            audit_beep = audit_data.get("beep_time")
+                            if audit_beep is None:
+                                continue
+                            shots.append(
+                                CompareShotPoint(
+                                    shot_number=int(shot.get("shot_number", 0)),
+                                    time_after_beep=float(t) - float(audit_beep),
+                                    source=(
+                                        "manual" if shot.get("source") == "manual" else "detected"
+                                    ),
+                                )
+                            )
+
+            records.append(
+                CompareShooterRecord(
+                    slug=slug,
+                    name=legacy.competitor_name or slug,
+                    is_active=slug == active_slug,
+                    video_path=video_path,
+                    beep_offset_in_clip=beep_offset,
+                    duration_seconds=duration_seconds,
+                    stage_time_seconds=(stage.time_seconds if stage is not None else None),
+                    shots=shots,
+                )
+            )
+
+        return CompareStageResponse(
+            stage_number=stage_number,
+            stage_name=stage_def.stage_name,
+            shooters=records,
+        )
+
+    @app.get("/api/match/shooters/{slug}/videos/stream")
+    def stream_shooter_video(
+        slug: str,
+        path: str = Query(...),
+    ) -> FileResponse:
+        """Serve a video registered to any shooter in the bound match (#328).
+
+        The Compare view streams from up to N shooters at once; the
+        regular /api/videos/stream endpoint only sees the active
+        shooter's registry. This thin wrapper validates ``path`` against
+        the named shooter's project then returns a FileResponse on the
+        resolved trim/source.
+        """
+        match_root, match, _ = _resolve_match_context()
+        if slug not in match.shooters:
+            raise HTTPException(status_code=404, detail="shooter not found")
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        try:
+            shooter_project = MatchProject.load(shooter_root)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"shooter project missing: {exc}") from exc
+
+        target = Path(path)
+        # Allow either a registered raw/source path OR the lossless trim
+        # the compare emitter writes (which lives under exports/ and is
+        # not on the registry).
+        located = shooter_project.find_video(target)
+        served_path: Path | None = None
+        if located is not None:
+            stage, video = located
+            served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
+        else:
+            # Fall back to allowing exports/ trims explicitly.
+            resolved = target.expanduser().resolve()
+            exports_dir = (
+                Path(shooter_project.exports_dir).expanduser().resolve()
+                if shooter_project.exports_dir
+                else (shooter_root / "exports").resolve()
+            )
+            try:
+                resolved.relative_to(exports_dir)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"path {path} is neither a registered video nor inside "
+                        f"the shooter's exports dir"
+                    ),
+                ) from exc
+            if not resolved.exists():
+                raise HTTPException(status_code=404, detail=f"file not found: {resolved}")
+            served_path = resolved
+
+        media_type = "video/mp4"
+        return FileResponse(served_path, media_type=media_type)
 
     @app.post("/api/user/recent-projects/unbind")
     def unbind_recent_project() -> HealthResponse:

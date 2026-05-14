@@ -1302,9 +1302,10 @@ export function Audit() {
                 </span>
                 <button
                   type="button"
-                  disabled
-                  title="Compare arrives in #328"
-                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted/50"
+                  onClick={() =>
+                    stageNumber != null && navigate(`/compare/${stageNumber}`)
+                  }
+                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
                 >
                   Compare
                 </button>
