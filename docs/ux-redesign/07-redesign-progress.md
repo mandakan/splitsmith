@@ -56,16 +56,15 @@ this session).
 | 01| Match picker         | skill (twice) | Sets language. Second attempt is current. |
 | 02| Match overview       | applied       | Mission-briefing dashboard         |
 | 03| Stage audit          | skill         | Oscilloscope-style waveform, video tiles, hardware-shuttle transport |
+| 04| Create match         | applied       | Scoreboard variant + manual variant stacked. Form patterns, search results, stage editor table. |
 | 07| Stage compare        | skill         | F1 telemetry sync timeline         |
+| 09| Developer corpus     | applied       | Developer shell variant (cyan accent), workflow stepper, inbox, fixtures table. |
 
 ## Polished surfaces -- still to do
 
-14 surfaces remain. Recommended ordering by primitive coverage:
+12 surfaces remain. Recommended ordering by primitive coverage:
 
-**Batch 2 (in progress, this session):**
-- wf07 stage compare -- DONE
-- wf04 create match -- TO DO -- introduces form patterns (search dropdown, manual stage editor, radio cards)
-- wf09 developer corpus -- TO DO -- introduces mode-switched shell variant + workflow banner + table layouts
+**Batch 2 -- COMPLETE.** wf07 + wf04 + wf09 shipped.
 
 **Batch 3 (recommended):**
 - wf13 coach match-wide -- via skill (data viz: histogram, per-stage breakdown bars, recommendations)

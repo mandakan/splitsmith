@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Create Match</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Create Match
+   Direction: Shot Timer (extends polished 01/02/03/07).
+   Two variants stacked for review:
+     A. From scoreboard.urdr.dev
+     B. Manual setup
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --beep:         #06B6D4;
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input, select, textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--led), var(--led-deep));
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--led-glow);
+}
+.brand .mark svg { color: var(--ink); }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+
+/* ============ Page ============ */
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+.page-head { margin-bottom: 28px; }
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--led); margin-bottom: 12px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.5rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0 0 12px; }
+.page-sub { color: var(--muted); font-size: 0.9375rem; max-width: 620px; }
+
+/* Source toggle */
+.source-toggle {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  padding: 3px;
+  margin-bottom: 20px;
+}
+.source-toggle button {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: all 150ms var(--ease);
+  min-height: 40px;
+}
+.source-toggle button:hover { color: var(--ink-2); }
+.source-toggle button.active {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 700;
+}
+.source-toggle button.active svg { color: var(--bg); }
+
+/* Card */
+.card {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 24px 48px -24px rgba(0,0,0,0.7);
+}
+.card-section { padding: 26px 28px; border-bottom: 1px solid var(--rule); }
+.card-section:last-of-type { border-bottom: 0; }
+
+.section-eyebrow {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin-bottom: 8px;
+}
+.section-title {
+  font-family: var(--display);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+.section-help {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin-bottom: 16px;
+  max-width: 580px;
+}
+
+/* Input */
+.input-wrap {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  transition: all 150ms var(--ease);
+  min-height: 44px;
+}
+.input-wrap:focus-within {
+  border-color: var(--led);
+  background: var(--bg-glow);
+  box-shadow: 0 0 0 3px var(--led-tint);
+}
+.input-wrap svg { color: var(--subtle); flex-shrink: 0; }
+.input-wrap input {
+  flex: 1; font-size: 0.875rem;
+  color: var(--ink);
+}
+.input-wrap input::placeholder { color: var(--subtle); }
+
+/* Search meta */
+.search-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 16px 0 12px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-feature-settings: var(--feat-num);
+}
+.search-meta b { color: var(--ink-2); font-weight: 700; }
+.search-meta .inline-link { color: var(--led); cursor: pointer; }
+.search-meta .inline-link:hover { color: var(--led-soft); }
+
+/* Results list */
+.results {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-glow);
+}
+.result-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 130px 100px 22px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  transition: background 150ms var(--ease);
+}
+.result-row:last-child { border-bottom: 0; }
+.result-row:hover { background: var(--surface-2); }
+.result-row.selected {
+  background: var(--led-tint);
+  position: relative;
+}
+.result-row.selected::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow);
+}
+.result-icon {
+  width: 32px; height: 32px;
+  border-radius: 7px;
+  background: var(--surface-3);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.result-row.selected .result-icon {
+  background: var(--led);
+  color: var(--bg);
+  box-shadow: 0 0 12px var(--led-glow);
+}
+.result-row .name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+}
+.result-row.selected .name { color: var(--led); }
+.result-row .meta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  display: flex; gap: 8px; flex-wrap: wrap;
+  font-feature-settings: var(--feat-num);
+}
+.result-row .meta .sep { color: var(--whisper); }
+.result-row .date {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  text-align: right;
+  font-feature-settings: var(--feat-num);
+}
+.pill-mini {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.pill-mini.l2 { background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); }
+.pill-mini.club { background: var(--surface-3); color: var(--ink-2); border: 1px solid var(--rule-strong); }
+.check {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--led);
+  color: var(--bg);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 12px var(--led-glow);
+}
+
+/* Selected detail card */
+.selected-detail {
+  margin-top: 20px;
+  padding: 20px 22px;
+  background: var(--surface-2);
+  border-radius: 12px;
+  border: 1px solid var(--rule-strong);
+  position: relative;
+  overflow: hidden;
+}
+.selected-detail::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--led);
+  box-shadow: 0 0 12px var(--led-glow);
+}
+.selected-detail .top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.selected-detail .title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+}
+.selected-detail .title .level {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  color: var(--led);
+  font-weight: 700;
+}
+.selected-detail .sub {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  font-feature-settings: var(--feat-num);
+}
+.selected-detail .scoreboard-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--led);
+  flex-shrink: 0;
+}
+.selected-detail .scoreboard-link:hover { color: var(--led-soft); }
+
+.field {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 0;
+}
+.field .label {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.field .label .req { color: var(--led); margin-left: 4px; }
+
+.combobox {
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer;
+  font-size: 0.875rem;
+  min-height: 42px;
+  transition: all 150ms var(--ease);
+}
+.combobox:hover { border-color: var(--rule-strong); }
+.combobox .placeholder { color: var(--subtle); }
+.combobox .selected-val { color: var(--ink); font-weight: 500; }
+.combobox .selected-val.mono { font-family: var(--mono); font-size: 0.8125rem; font-feature-settings: var(--feat-num); }
+.combobox .add-more {
+  color: var(--led);
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-left: 10px;
+}
+.combobox .change-link {
+  color: var(--led);
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.combobox svg { color: var(--muted); flex-shrink: 0; }
+
+/* Preview row */
+.preview-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--done);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, rgba(74,222,128,0.10), rgba(74,222,128,0.02));
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+}
+.preview-row b { color: var(--done); font-weight: 700; }
+.preview-row .sep { color: var(--whisper); margin: 0 6px; }
+.preview-row .icon-ok {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--done);
+  color: var(--bg);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 10px var(--done-glow);
+}
+
+/* Form grid (manual variant) */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px 22px;
+}
+.form-row { display: flex; flex-direction: column; gap: 8px; }
+.form-row label {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.form-row label .req { color: var(--led); margin-left: 4px; }
+.form-row input,
+.form-row select {
+  padding: 11px 14px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: var(--ink);
+  min-height: 44px;
+  transition: all 150ms var(--ease);
+}
+.form-row input.mono { font-family: var(--mono); font-size: 0.8125rem; font-feature-settings: var(--feat-num); }
+.form-row input:focus,
+.form-row select:focus {
+  border-color: var(--led);
+  background: var(--bg-glow);
+  box-shadow: 0 0 0 3px var(--led-tint);
+}
+.form-row select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238E939B' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 38px; }
+.input-with-action { display: flex; gap: 8px; }
+.input-with-action input { flex: 1; }
+
+/* Stage editor */
+.stage-editor {
+  margin-top: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-glow);
+}
+.stage-editor-head {
+  display: grid;
+  grid-template-columns: 56px 1fr 130px 180px 40px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.stage-editor-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 130px 180px 40px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.stage-editor-row:last-of-type { border-bottom: 0; }
+.stage-editor-row input,
+.stage-editor-row select {
+  padding: 8px 11px;
+  background: var(--surface-3);
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  transition: all 150ms var(--ease);
+}
+.stage-editor-row input.mono { font-family: var(--mono); font-feature-settings: var(--feat-num); text-align: right; }
+.stage-editor-row select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238E939B' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+.stage-editor-row input:focus,
+.stage-editor-row select:focus {
+  border-color: var(--led);
+  box-shadow: 0 0 0 2px var(--led-tint);
+}
+.stage-num-pill {
+  width: 38px; height: 30px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-feature-settings: var(--feat-num);
+  border: 1px solid var(--rule-strong);
+}
+.row-remove {
+  width: 30px; height: 30px;
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--subtle);
+  transition: all 150ms var(--ease);
+}
+.row-remove:hover {
+  background: var(--led-tint);
+  color: var(--led);
+}
+.stage-editor-foot {
+  padding: 12px 16px;
+  background: var(--surface-2);
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-feature-settings: var(--feat-num);
+}
+.stage-editor-foot b { color: var(--ink); font-weight: 700; }
+.btn-add {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px dashed var(--rule-strong);
+  color: var(--led);
+  padding: 7px 14px;
+  border-radius: 7px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 150ms var(--ease);
+}
+.btn-add:hover {
+  border-color: var(--led);
+  background: var(--led-tint);
+}
+
+.hint {
+  margin-top: 12px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+/* Footer actions */
+.footer-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 28px;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+}
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 8px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1; border: 1px solid var(--rule-strong); background: var(--surface-2); color: var(--ink); transition: all 180ms var(--ease); min-height: 42px; }
+.btn:hover { background: var(--surface-3); border-color: var(--ink-2); }
+.btn.primary { background: var(--led); color: var(--bg); border-color: var(--led); box-shadow: 0 0 0 1px var(--led), 0 0 16px var(--led-glow); }
+.btn.primary:hover { background: var(--led-soft); border-color: var(--led-soft); box-shadow: 0 0 0 1px var(--led-soft), 0 0 24px var(--led-glow); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: var(--surface-2); }
+
+/* Variant divider */
+.variant-divider {
+  display: flex; align-items: center; gap: 18px;
+  margin: 64px 0 32px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.variant-divider::before,
+.variant-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--rule), transparent);
+}
+.variant-divider .v-num {
+  font-family: var(--display);
+  font-size: 0.75rem;
+  color: var(--led);
+  letter-spacing: 0.16em;
+}
+
+.footnote {
+  margin-top: 36px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--whisper);
+  text-align: center;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .brand .heartbeat { animation: none; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h4l2-7 4 14 2-7h2"/></svg>
+      </span>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-label="Active"></span>
+    </div>
+    <div class="mode-switch" role="tablist">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg></button>
+    </div>
+    <div class="profile">
+      <span class="av">MA</span>
+      <span class="label">Mathias A.</span>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <div class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <span class="current">New match</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- =============== VARIANT A: SCOREBOARD =============== -->
+
+  <div class="page-head">
+    <div class="page-kicker">New match &middot; setup</div>
+    <h1 class="page-h1">Create a match</h1>
+    <p class="page-sub">Import from scoreboard.urdr.dev to auto-fill stages and shooters, or build it manually for matches without scoreboard data.</p>
+  </div>
+
+  <div class="source-toggle" role="tablist">
+    <button class="active">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      From scoreboard
+    </button>
+    <button>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+      Manual setup
+    </button>
+  </div>
+
+  <div class="card">
+
+    <div class="card-section">
+      <div class="section-eyebrow">Step 1 &middot; locate match</div>
+      <h2 class="section-title">Find the match on scoreboard.urdr.dev</h2>
+      <p class="section-help">Search by name, club, or date. Level II+ matches shown by default.</p>
+
+      <div class="input-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+        <input type="text" value="vads easter" placeholder="Search matches..." />
+        <kbd>Esc</kbd>
+      </div>
+
+      <div class="search-meta">
+        <span><b>4</b> matches found</span>
+        <span>Level II and above &middot; <span class="inline-link">include club matches</span></span>
+      </div>
+
+      <div class="results">
+
+        <div class="result-row selected">
+          <span class="result-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21l9-15 9 15H3z"/></svg></span>
+          <div>
+            <div class="name">VADS Easter Shoot 2026</div>
+            <div class="meta">
+              <span>Vasterort PK</span><span class="sep">&middot;</span>
+              <span>Indoor</span><span class="sep">&middot;</span>
+              <span>12 stages</span><span class="sep">&middot;</span>
+              <span>42 competitors</span>
+            </div>
+          </div>
+          <div class="date">2026-04-12</div>
+          <div><span class="pill-mini l2">Level II</span></div>
+          <span class="check">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+          </span>
+        </div>
+
+        <div class="result-row">
+          <span class="result-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21l9-15 9 15H3z"/></svg></span>
+          <div>
+            <div class="name">VADS Spring Open 2026</div>
+            <div class="meta">
+              <span>Vasterort PK</span><span class="sep">&middot;</span>
+              <span>Outdoor</span><span class="sep">&middot;</span>
+              <span>8 stages</span>
+            </div>
+          </div>
+          <div class="date">2026-03-15</div>
+          <div><span class="pill-mini l2">Level II</span></div>
+          <span></span>
+        </div>
+
+        <div class="result-row">
+          <span class="result-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21l9-15 9 15H3z"/></svg></span>
+          <div>
+            <div class="name">VADS Easter Shoot 2025</div>
+            <div class="meta">
+              <span>Vasterort PK</span><span class="sep">&middot;</span>
+              <span>Indoor</span><span class="sep">&middot;</span>
+              <span>10 stages</span>
+            </div>
+          </div>
+          <div class="date">2025-04-06</div>
+          <div><span class="pill-mini l2">Level II</span></div>
+          <span></span>
+        </div>
+
+        <div class="result-row">
+          <span class="result-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21l9-15 9 15H3z"/></svg></span>
+          <div>
+            <div class="name">VADS Winter Classifier 2025</div>
+            <div class="meta">
+              <span>Vasterort PK</span><span class="sep">&middot;</span>
+              <span>Indoor</span><span class="sep">&middot;</span>
+              <span>4 stages</span>
+            </div>
+          </div>
+          <div class="date">2025-11-08</div>
+          <div><span class="pill-mini club">Club</span></div>
+          <span></span>
+        </div>
+      </div>
+
+      <!-- Selected match detail -->
+      <div class="selected-detail">
+        <div class="top">
+          <div>
+            <div class="title">VADS Easter Shoot 2026 <span class="level">&middot; Level II</span></div>
+            <div class="sub">2026-04-12 &middot; Vasterort PK &middot; Indoor &middot; 12 stages &middot; 42 competitors</div>
+          </div>
+          <a class="scoreboard-link">
+            View on scoreboard
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 17l10-10M9 7h8v8"/></svg>
+          </a>
+        </div>
+
+        <div class="field">
+          <div class="label">Which competitor are you <span class="req">*</span></div>
+          <div class="combobox">
+            <span class="selected-val">Mathias Axell &middot; Production Optics &middot; Bromma PK</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <div class="label">Other shooters in this match</div>
+          <div class="combobox">
+            <span class="selected-val">3 selected &middot; Johan Larsson, Pia Eriksson, Robert Janson</span>
+            <span class="add-more">+ Add more</span>
+          </div>
+        </div>
+        <div class="field">
+          <div class="label">Project folder</div>
+          <div class="combobox">
+            <span class="selected-val mono">~/Splitsmith/vads-easter-shoot-2026/</span>
+            <span class="change-link">Change</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="card-section">
+      <div class="section-eyebrow">Preview</div>
+      <div class="preview-row">
+        <span class="icon-ok">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+        </span>
+        <span>
+          <b>12 stages</b><span class="sep">&middot;</span>
+          <b>4 shooters</b> (you + 3)<span class="sep">&middot;</span>
+          <b>Stage times</b> from scoreboard<span class="sep">&middot;</span>
+          ready for footage ingest
+        </span>
+      </div>
+    </div>
+
+    <div class="footer-actions">
+      <button class="btn ghost">Cancel</button>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn">Save as draft</button>
+        <button class="btn primary">
+          Create match &middot; continue to ingest
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- =============== VARIANT B: MANUAL =============== -->
+
+  <div class="variant-divider">
+    <span class="v-num">Variant B</span>
+    <span>Manual setup</span>
+  </div>
+
+  <div class="page-head">
+    <div class="page-kicker">No scoreboard data</div>
+    <h1 class="page-h1">Create a match</h1>
+    <p class="page-sub">For practices, club matches, or anything not on scoreboard.urdr.dev. Set up the match and its stages by hand.</p>
+  </div>
+
+  <div class="source-toggle" role="tablist">
+    <button>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      From scoreboard
+    </button>
+    <button class="active">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+      Manual setup
+    </button>
+  </div>
+
+  <div class="card">
+
+    <div class="card-section">
+      <div class="section-eyebrow">Step 1 &middot; match details</div>
+      <h2 class="section-title">Match details</h2>
+
+      <div class="form-grid" style="margin-top: 12px;">
+        <div class="form-row">
+          <label>Match name <span class="req">*</span></label>
+          <input type="text" value="Bromma club practice -- draw drills" />
+        </div>
+        <div class="form-row">
+          <label>Date <span class="req">*</span></label>
+          <input type="date" value="2026-05-14" class="mono" />
+        </div>
+        <div class="form-row">
+          <label>Club</label>
+          <input type="text" value="Bromma PK" />
+        </div>
+        <div class="form-row">
+          <label>Type</label>
+          <select>
+            <option>Club match</option>
+            <option>Practice</option>
+            <option>Level I</option>
+            <option>Level II</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Default division</label>
+          <select>
+            <option>Production Optics</option>
+            <option>Production</option>
+            <option>Open</option>
+            <option>Standard</option>
+            <option>Classic</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Project folder</label>
+          <div class="input-with-action">
+            <input type="text" value="~/Splitsmith/bromma-practice-2026-05-14/" class="mono" />
+            <button class="btn" style="padding: 0 14px;">Pick</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-section">
+      <div class="section-eyebrow">Step 2 &middot; stages</div>
+      <h2 class="section-title">Stages</h2>
+      <p class="section-help">Add a row per stage. Expected shots and target type feed the stage-aware detector; stage time is used for trim if you have it.</p>
+
+      <div class="stage-editor">
+        <div class="stage-editor-head">
+          <span>#</span>
+          <span>Name</span>
+          <span style="text-align: right;">Expected shots</span>
+          <span>Target type</span>
+          <span></span>
+        </div>
+
+        <div class="stage-editor-row">
+          <span class="stage-num-pill">01</span>
+          <input type="text" value="Draw &amp; transition drill" />
+          <input type="number" value="12" class="mono" />
+          <select><option>Pistol IPSC</option><option>Steel plate</option><option>Mixed</option></select>
+          <button class="row-remove" title="Remove"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+        <div class="stage-editor-row">
+          <span class="stage-num-pill">02</span>
+          <input type="text" value="Reload under stress" />
+          <input type="number" value="16" class="mono" />
+          <select><option>Pistol IPSC</option><option>Steel plate</option><option>Mixed</option></select>
+          <button class="row-remove" title="Remove"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+        <div class="stage-editor-row">
+          <span class="stage-num-pill">03</span>
+          <input type="text" value="Plate rack" />
+          <input type="number" value="8" class="mono" />
+          <select><option>Steel plate</option><option>Pistol IPSC</option><option>Mixed</option></select>
+          <button class="row-remove" title="Remove"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+
+        <div class="stage-editor-foot">
+          <span><b>3 stages</b> &middot; <b>36</b> expected shots total</span>
+          <button class="btn-add">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg>
+            Add stage
+          </button>
+        </div>
+      </div>
+
+      <p class="hint">Stage times can be entered per stage during audit. If you already have official times, you can paste them in bulk after creating the match.</p>
+    </div>
+
+    <div class="card-section">
+      <div class="section-eyebrow">Step 3 &middot; primary shooter</div>
+      <h2 class="section-title">Shooter (you)</h2>
+      <p class="section-help">You can add more shooters after the match is created.</p>
+
+      <div class="form-grid" style="margin-top: 8px;">
+        <div class="form-row">
+          <label>Your name</label>
+          <input type="text" value="Mathias Axell" />
+        </div>
+        <div class="form-row">
+          <label>Division</label>
+          <select>
+            <option>Production Optics</option>
+            <option>Production</option>
+            <option>Open</option>
+            <option>Standard</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-actions">
+      <button class="btn ghost">Cancel</button>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn">Save as draft</button>
+        <button class="btn primary">
+          Create match &middot; continue to ingest
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footnote">
+    Polished 04 &middot; ./docs/ux-redesign/polished/04-create-match.html
+  </div>
+</main>
+
+</body>
+</html>
