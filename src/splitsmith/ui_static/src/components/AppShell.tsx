@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { api, type ServerHealth } from "@/lib/api";
 import { useLabEnabled } from "@/lib/features";
 import { cn } from "@/lib/utils";
@@ -197,7 +197,7 @@ export function AppShell() {
             <ProjectHeader health={health} />
           )}
           <div className="flex items-center gap-2">
-            <ThemeToggle />
+            <ModeSwitch size="sm" />
           </div>
         </header>
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">

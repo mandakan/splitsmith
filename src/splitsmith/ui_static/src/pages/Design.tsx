@@ -1,489 +1,515 @@
 /**
- * /_design — the visual spec for the production UI.
+ * /_design -- visual spec for the Shot Timer redesign.
  *
- * Per issue #12: "if a component renders correctly here, it renders correctly
- * in the app." Render every token, every shadcn component, every custom
- * component on a single scrollable page so visual QA is one page reload away.
+ * Renders every canonical token (color / typography / radius / shadow) and
+ * every foundational primitive in all variants. A mode toggle at the top
+ * lets reviewers verify the Match/Developer accent flip in-place.
+ *
+ * Issue #319. Will grow as later surfaces add primitives.
  */
 
-import { Check, Crosshair, Eye, Plus, Save, Trash2 } from "lucide-react";
+import { Bell, Check, Crosshair, Plus, Save, Settings, Trash2 } from "lucide-react";
 
-import { MarkerGlyph } from "@/components/MarkerGlyph";
-import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarStack } from "@/components/ui/AvatarStack";
+import { Brand, BrandMark } from "@/components/ui/Brand";
+import { Breadcrumb, ContextBar } from "@/components/ui/ContextBar";
+import { DisplayHeading } from "@/components/ui/DisplayHeading";
+import { IconButton } from "@/components/ui/IconButton";
+import { Kbd } from "@/components/ui/Kbd";
+import { Kicker } from "@/components/ui/Kicker";
+import { ModeSwitch } from "@/components/ui/ModeSwitch";
+import { Readout } from "@/components/ui/Readout";
+import { StatusPill } from "@/components/ui/StatusPill";
+import { Tick, TickStrip, type TickState } from "@/components/ui/Tick";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useTheme } from "@/lib/theme";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useMode } from "@/lib/mode";
 
-const SHADCN_TOKENS = [
-  "background",
-  "foreground",
-  "card",
-  "popover",
-  "primary",
-  "secondary",
-  "muted",
-  "accent",
-  "destructive",
-  "border",
-  "input",
-  "ring",
+/* ---------------------------------------------------------------------------
+ * Token tables -- kept in step with styles/index.css.
+ * ------------------------------------------------------------------------- */
+
+const SURFACE_TOKENS = ["bg", "bg-glow", "surface", "surface-2", "surface-3", "surface-4"];
+const TEXT_TOKENS = ["ink", "ink-2", "muted", "subtle", "whisper"];
+const RULE_TOKENS = ["rule", "rule-strong"];
+const BRAND_TOKENS = ["led", "led-soft", "led-deep"];
+const STATUS_TOKENS = ["live", "done", "cold", "beep", "manual"];
+const SHOOTER_TOKENS = [
+  { key: "ma", name: "Mathias (you)" },
+  { key: "jl", name: "Johan" },
+  { key: "pe", name: "Pia" },
+  { key: "rj", name: "Robert" },
 ];
 
-const SPLIT_TOKENS = [
-  {
-    name: "split-good",
-    label: "Split ≤ 0.25s",
-    fg: "split-good-foreground",
-    note: "Okabe-Ito bluish green · 3.4:1 on white (AA UI)",
-  },
-  {
-    name: "split-ok",
-    label: "Split 0.25–0.35s",
-    fg: "split-ok-foreground",
-    note: "Okabe-Ito yellow · paired with dark fg for AA text",
-  },
-  {
-    name: "split-slow",
-    label: "Split > 0.35s",
-    fg: "split-slow-foreground",
-    note: "Okabe-Ito vermillion · 4.0:1 on white (AA UI)",
-  },
-  {
-    name: "split-transition",
-    label: "First / transition / reload",
-    fg: "split-transition-foreground",
-    note: "Okabe-Ito blue · 5.5:1 on white (AA text)",
-  },
-] as const;
-
-const STATUS_TOKENS = [
-  "status-not-started",
-  "status-in-progress",
-  "status-complete",
-  "status-warning",
-] as const;
-
-const MARKER_TOKENS = ["marker-detected", "marker-rejected", "marker-manual"] as const;
+const TYPE_SCALE = [
+  { size: "text-xs", px: "10px", label: "xs -- small-caps labels" },
+  { size: "text-sm", px: "12px", label: "sm -- meta, captions" },
+  { size: "text-md", px: "14px", label: "md -- body sm" },
+  { size: "text-base", px: "15px", label: "base -- body" },
+  { size: "text-lg", px: "16px", label: "lg -- emphasised body" },
+  { size: "text-xl", px: "20px", label: "xl -- subhead" },
+  { size: "text-2xl", px: "24px", label: "2xl -- card titles" },
+  { size: "text-3xl", px: "28px", label: "3xl -- match titles" },
+  { size: "text-4xl", px: "40px", label: "4xl -- big readouts" },
+];
 
 export function Design() {
-  const { theme, resolved, setTheme } = useTheme();
+  const { mode } = useMode();
 
   return (
-    <div className="space-y-12 pb-12">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Design system</h1>
-        <p className="text-sm text-muted-foreground">
-          Live spec for splitsmith UI v1. Tokens, components, and patterns.
-          Mode: <Badge variant="outline">{theme}</Badge>{" "}
-          (resolved: <Badge variant="outline">{resolved}</Badge>).
+    <div className="space-y-12 pb-16 font-sans text-ink">
+      {/* ----- Page header ---------------------------------------------- */}
+      <header className="space-y-4">
+        <Kicker>Project Register · Vol. 01 · Ed. 04</Kicker>
+        <DisplayHeading variant="hero" as="h1">
+          Design system
+        </DisplayHeading>
+        <p className="max-w-2xl text-sm text-muted">
+          Shot Timer instrument-panel system. Every token, every foundational
+          primitive on a single scrollable page. Mode flip is live --
+          everything tagged "accent" follows it.
         </p>
-        <div className="flex gap-2 pt-2">
-          <Button size="sm" variant={theme === "light" ? "default" : "outline"} onClick={() => setTheme("light")}>
-            Light
-          </Button>
-          <Button size="sm" variant={theme === "dark" ? "default" : "outline"} onClick={() => setTheme("dark")}>
-            Dark
-          </Button>
-          <Button size="sm" variant={theme === "system" ? "default" : "outline"} onClick={() => setTheme("system")}>
-            System
-          </Button>
+        <div className="flex items-center gap-3 pt-2">
+          <ModeSwitch />
+          <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted">
+            current: {mode}
+          </span>
         </div>
       </header>
 
-      {/* ------------------------------------------------------------------ */}
-      <Section
-        title="Color tokens — shadcn semantic"
-        description="The standard shadcn palette. Exposed as Tailwind utility classes (bg-primary, text-muted-foreground, etc.)."
-      >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {SHADCN_TOKENS.map((t) => (
-            <ColorSwatch key={t} name={t} />
+      {/* ----- Surfaces ------------------------------------------------- */}
+      <Section title="Surfaces" kicker="01 / Color">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          {SURFACE_TOKENS.map((t) => (
+            <Swatch key={t} token={t} />
           ))}
         </div>
       </Section>
 
-      <Section
-        title="Color tokens — splits (Okabe-Ito, color-blind safe)"
-        description="Distinguishable under deuteranopia, protanopia, and tritanopia. fcpxml_gen.py emits band names ([GREEN]/[YELLOW]/[RED]/[BLUE]) as text only -- FCP renders marker color from FCP-side settings, so changing in-app palette has no effect on FCP output."
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {SPLIT_TOKENS.map((t) => (
+      {/* ----- Text ----------------------------------------------------- */}
+      <Section title="Text" kicker="02 / Color">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          {TEXT_TOKENS.map((t) => (
+            <TextSwatch key={t} token={t} />
+          ))}
+        </div>
+      </Section>
+
+      {/* ----- Rules ---------------------------------------------------- */}
+      <Section title="Rules" kicker="03 / Color">
+        <div className="grid grid-cols-2 gap-3">
+          {RULE_TOKENS.map((t) => (
+            <RuleSwatch key={t} token={t} />
+          ))}
+        </div>
+      </Section>
+
+      {/* ----- Brand + status ------------------------------------------- */}
+      <Section title="Brand / status" kicker="04 / Color">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+          {BRAND_TOKENS.map((t) => (
+            <Swatch key={t} token={t} />
+          ))}
+          {STATUS_TOKENS.map((t) => (
+            <Swatch key={t} token={t} />
+          ))}
+        </div>
+      </Section>
+
+      {/* ----- Per-shooter ---------------------------------------------- */}
+      <Section title="Per-shooter identity" kicker="05 / Color">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {SHOOTER_TOKENS.map((s) => (
+            <ShooterSwatch key={s.key} keyName={s.key} name={s.name} />
+          ))}
+        </div>
+      </Section>
+
+      {/* ----- Typography ----------------------------------------------- */}
+      <Section title="Typography" kicker="06 / Type">
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-4 rounded-lg border border-rule bg-surface p-6">
+            <Kicker tone="muted">Antonio · display</Kicker>
+            <div className="font-display text-5xl font-bold uppercase tracking-tight">
+              VADS Easter
+            </div>
+            <div className="font-display text-2xl font-bold uppercase tracking-tight text-ink-2">
+              Card title
+            </div>
+            <div className="font-display text-base font-semibold uppercase tracking-[0.14em] text-muted">
+              Section label
+            </div>
+          </div>
+          <div className="space-y-4 rounded-lg border border-rule bg-surface p-6">
+            <Kicker tone="muted">Geist · body</Kicker>
+            <p className="text-base">
+              Geist sets the body voice. Comfortable at 15px on dark
+              surfaces, with subtle stylistic alternates enabled.
+            </p>
+            <p className="text-sm text-muted">
+              Smaller meta line in muted ink. Sentence length stays
+              reasonable so a single line never wraps the column.
+            </p>
+          </div>
+          <div className="space-y-4 rounded-lg border border-rule bg-surface p-6 md:col-span-2">
+            <Kicker tone="muted">JetBrains Mono · numerals</Kicker>
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-3 font-mono tabular-nums">
+              <span className="text-5xl text-led">08.218</span>
+              <span className="text-3xl text-ink-2">9.114</span>
+              <span className="text-2xl text-muted">+04.182s</span>
+              <span className="text-base text-muted">2026-04-12 11:21:31</span>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border border-rule bg-surface">
+          <table className="w-full text-sm">
+            <thead className="border-b border-rule text-left">
+              <tr className="text-muted">
+                <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider">Token</th>
+                <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider">Size</th>
+                <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider">Example</th>
+              </tr>
+            </thead>
+            <tbody>
+              {TYPE_SCALE.map((row) => (
+                <tr key={row.size} className="border-b border-rule/60 last:border-b-0">
+                  <td className="px-4 py-3 font-mono text-xs text-muted">{row.size}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted">{row.px}</td>
+                  <td className={`px-4 py-3 ${row.size}`}>{row.label}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* ----- Radii / shadows ----------------------------------------- */}
+      <Section title="Radii / shadows" kicker="07 / Surface">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          {["sm", "md", "lg", "xl", "2xl", "3xl", "full"].map((r) => (
+            <div key={r} className="flex flex-col items-center gap-2">
+              <div
+                className="size-16 bg-surface-3"
+                style={{ borderRadius: `var(--radius-${r})` }}
+              />
+              <span className="font-mono text-xs text-muted">radius-{r}</span>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {[
+            { name: "shadow-card", style: "0 1px 0 rgba(255,255,255,0.02) inset, 0 18px 40px -24px rgba(0,0,0,0.7)" },
+            { name: "shadow-elev", style: "0 1px 0 rgba(255,255,255,0.03) inset, 0 24px 60px -32px rgba(0,0,0,0.8)" },
+            { name: "shadow-led", style: "0 0 0 1px var(--color-led), 0 0 24px var(--color-led-glow)" },
+          ].map((s) => (
             <div
-              key={t.name}
-              className="rounded-lg border border-border p-4"
-              style={{ backgroundColor: `var(--${t.name})`, color: `var(--${t.fg})` }}
+              key={s.name}
+              className="rounded-xl bg-surface-2 p-6 text-center"
+              style={{ boxShadow: s.style }}
             >
-              <div className="font-mono text-xs opacity-80">--{t.name}</div>
-              <div className="text-base font-semibold">{t.label}</div>
-              <div className="mt-1 text-xs opacity-80">{t.note}</div>
+              <span className="font-mono text-xs uppercase tracking-wider text-muted">
+                {s.name}
+              </span>
             </div>
           ))}
         </div>
       </Section>
 
-      <Section
-        title="Color tokens — status & markers"
-        description="Stage status and audit-marker colors. Used in the overview, ingest, and audit screens."
-      >
-        <div>
-          <h3 className="mb-2 text-sm font-medium">Status</h3>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {STATUS_TOKENS.map((t) => (
-              <ColorSwatch key={t} name={t} />
-            ))}
+      {/* ----- Primitives: Brand --------------------------------------- */}
+      <Section title="Brand" kicker="08 / Primitive">
+        <div className="flex flex-wrap items-center gap-12 rounded-lg border border-rule bg-surface p-8">
+          <Brand serial="Vol. 01 · Ed. 04" />
+          <Brand variant="compact" />
+          <BrandMark className="size-12" />
+        </div>
+      </Section>
+
+      {/* ----- Primitives: Buttons + IconButton + Kbd ------------------ */}
+      <Section title="Buttons" kicker="09 / Primitive">
+        <Block>
+          <Button>
+            <Plus className="size-4" />
+            Primary
+          </Button>
+          <Button variant="secondary">Secondary</Button>
+          <Button variant="outline">
+            <Save className="size-4" /> Outline
+          </Button>
+          <Button variant="ghost">Ghost</Button>
+          <Button variant="destructive">
+            <Trash2 className="size-4" /> Destructive
+          </Button>
+          <Button size="sm">Small</Button>
+          <Button size="lg">Large</Button>
+          <Button disabled>Disabled</Button>
+        </Block>
+        <Block>
+          <IconButton label="Notifications">
+            <Bell />
+          </IconButton>
+          <IconButton label="Settings" variant="subtle">
+            <Settings />
+          </IconButton>
+          <IconButton label="Crosshair" variant="led">
+            <Crosshair />
+          </IconButton>
+          <IconButton label="Notifications" size="sm">
+            <Bell />
+          </IconButton>
+          <IconButton label="Notifications" size="lg">
+            <Bell />
+          </IconButton>
+        </Block>
+        <Block>
+          <span className="flex items-center gap-1.5 text-sm text-muted">
+            Save with <Kbd>⌘</Kbd> <Kbd>S</Kbd>
+          </span>
+          <span className="flex items-center gap-1.5 text-sm text-muted">
+            Quick switch <Kbd size="md">⌘</Kbd> <Kbd size="md">K</Kbd>
+          </span>
+        </Block>
+      </Section>
+
+      {/* ----- Primitives: Status / Pills / Ticks ---------------------- */}
+      <Section title="Status pills & ticks" kicker="10 / Primitive">
+        <Block>
+          <StatusPill tone="in-progress">
+            <Check className="size-3" /> In progress
+          </StatusPill>
+          <StatusPill tone="exported">Exported</StatusPill>
+          <StatusPill tone="archived">Archived</StatusPill>
+          <StatusPill tone="beep">Beep review</StatusPill>
+          <StatusPill tone="led">LED accent</StatusPill>
+        </Block>
+        <div className="space-y-3 rounded-lg border border-rule bg-surface p-4">
+          <Kicker tone="muted">Tick states</Kicker>
+          <div className="flex items-end gap-4">
+            <span className="flex flex-col items-center gap-1">
+              <Tick state="todo" />
+              <span className="font-mono text-[0.625rem] text-muted">todo</span>
+            </span>
+            <span className="flex flex-col items-center gap-1">
+              <Tick state="done" />
+              <span className="font-mono text-[0.625rem] text-muted">done</span>
+            </span>
+            <span className="flex flex-col items-center gap-1">
+              <Tick state="flagged" />
+              <span className="font-mono text-[0.625rem] text-muted">flag</span>
+            </span>
+            <span className="flex flex-col items-center gap-1">
+              <Tick state="current" />
+              <span className="font-mono text-[0.625rem] text-muted">now</span>
+            </span>
           </div>
-        </div>
-        <div className="mt-6">
-          <h3 className="mb-2 text-sm font-medium">Markers</h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {MARKER_TOKENS.map((t) => (
-              <ColorSwatch key={t} name={t} />
-            ))}
-          </div>
-        </div>
-      </Section>
-
-      {/* ------------------------------------------------------------------ */}
-      <Section title="Typography" description="Inter for sans, JetBrains Mono for time displays.">
-        <div className="space-y-2">
-          <p className="text-3xl font-semibold tracking-tight">3xl Heading — Inter</p>
-          <p className="text-2xl font-semibold tracking-tight">2xl Heading</p>
-          <p className="text-xl font-medium">xl Title</p>
-          <p className="text-lg">lg Subtitle</p>
-          <p className="text-base">Base body. The quick brown fox jumps over the lazy dog.</p>
-          <p className="text-sm text-muted-foreground">sm muted. Used for help text and captions.</p>
-          <p className="text-xs text-muted-foreground">xs muted. Used sparingly for timestamps and metadata.</p>
-          <p className="font-mono text-base tabular-nums">
-            00:14.732 — JetBrains Mono with tabular-nums
-          </p>
-          <p className="font-mono text-sm tabular-nums">
-            shot 7 / 14 · split 0.213s · confidence 0.624
-          </p>
-        </div>
-      </Section>
-
-      {/* ------------------------------------------------------------------ */}
-      <Section title="Buttons" description="All variants and sizes.">
-        <div className="space-y-4">
-          <Row>
-            <Button>Default</Button>
-            <Button variant="secondary">Secondary</Button>
-            <Button variant="destructive">Destructive</Button>
-            <Button variant="outline">Outline</Button>
-            <Button variant="ghost">Ghost</Button>
-            <Button variant="link">Link</Button>
-          </Row>
-          <Row>
-            <Button size="sm">Small</Button>
-            <Button>Default</Button>
-            <Button size="lg">Large</Button>
-            <Button size="icon" aria-label="Add">
-              <Plus />
-            </Button>
-            <Button size="icon" variant="destructive" aria-label="Delete">
-              <Trash2 />
-            </Button>
-          </Row>
-          <Row>
-            <Button>
-              <Save />
-              With icon
-            </Button>
-            <Button variant="outline">
-              <Crosshair />
-              With icon (outline)
-            </Button>
-            <Button disabled>Disabled</Button>
-          </Row>
-        </div>
-      </Section>
-
-      {/* ------------------------------------------------------------------ */}
-      <Section title="Badges" description="Status, splits, and generic.">
-        <div className="space-y-4">
-          <Row>
-            <Badge>Default</Badge>
-            <Badge variant="secondary">Secondary</Badge>
-            <Badge variant="destructive">Destructive</Badge>
-            <Badge variant="outline">Outline</Badge>
-          </Row>
-          <Row>
-            <Badge variant="good">0.21s</Badge>
-            <Badge variant="ok">0.31s</Badge>
-            <Badge variant="slow">0.42s</Badge>
-            <Badge variant="transition">draw / 1.42s</Badge>
-          </Row>
-          <Row>
-            <Badge variant="statusNotStarted" className="gap-1">
-              ○ Not started
-            </Badge>
-            <Badge variant="statusInProgress" className="gap-1">
-              ◐ In progress
-            </Badge>
-            <Badge variant="statusComplete" className="gap-1">
-              ● Complete
-            </Badge>
-            <Badge variant="statusWarning" className="gap-1">
-              ▲ Needs attention
-            </Badge>
-          </Row>
-        </div>
-      </Section>
-
-      {/* ------------------------------------------------------------------ */}
-      <Section title="Cards" description="The default container pattern.">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Stage 3 — Per told me to do it</CardTitle>
-              <CardDescription>14.74s · 14 shots audited</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Primary video</span>
-                <span className="font-mono text-xs">VID_20260426_162417.mp4</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Beep</span>
-                <span className="font-mono tabular-nums">12.453s</span>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Badge variant="statusComplete">Audited</Badge>
-                <Badge variant="outline">2 angles</Badge>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Loading state</CardTitle>
-              <CardDescription>Skeleton lines for incoming data.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-4 w-2/3" />
-            </CardContent>
-          </Card>
-        </div>
-      </Section>
-
-      {/* ------------------------------------------------------------------ */}
-      <Section
-        title="Marker glyphs — color + shape"
-        description="Audit waveform markers. Each state has a distinct shape so users with color vision deficiencies can tell them apart without color cues. WCAG 1.4.1 (Use of Color)."
-      >
-        <div className="rounded-lg border border-border bg-muted/30 p-6">
-          <div className="grid grid-cols-3 gap-6">
-            <MarkerSpec
-              kind="detected"
-              title="Detected"
-              note="Filled triangle. Detector candidate the user accepted. Default state."
-            />
-            <MarkerSpec
-              kind="rejected"
-              title="Rejected"
-              note="Outline triangle with strikethrough. Detector candidate the user dropped."
-            />
-            <MarkerSpec
-              kind="manual"
-              title="Manual"
-              note="Dashed diamond. User-added shot the detector missed."
+          <div className="mt-4 space-y-2">
+            <Kicker tone="muted">TickStrip · 12 stages, stage 8 current, 1 flagged</Kicker>
+            <TickStrip
+              states={STAGE_DEMO}
+              ariaLabel="6 of 12 stages complete, 1 flagged, currently on stage 8"
             />
           </div>
-          <p className="mt-4 text-xs text-muted-foreground">
-            All three shapes are recognisable at 12px and at 32px, in light and
-            dark mode, and under simulated deuteranopia / protanopia / tritanopia.
-          </p>
         </div>
       </Section>
 
-      {/* ------------------------------------------------------------------ */}
-      <Section
-        title="Accessibility"
-        description="WCAG 2.2 Level AA target. The locked commitments and audit checklist for the production UI."
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Eye className="size-5" />
-                Color is never the only signal
-              </CardTitle>
-              <CardDescription>WCAG 1.4.1 Use of Color</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center gap-2">
-                <MarkerGlyph kind="detected" />
-                <span>Shape encodes meaning, color reinforces it.</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="good" className="gap-1">
-                  <Check className="size-3" /> 0.21s
-                </Badge>
-                <span>Split badges pair color with the value (text).</span>
-              </div>
-              <p className="text-muted-foreground">
-                Status badges, marker glyphs, and split colors all carry a
-                non-color signal (icon, shape, or text).
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Color-blind safety — Okabe-Ito</CardTitle>
-              <CardDescription>
-                Empirically distinguishable across the three common
-                dichromacies.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                <li>
-                  <span className="text-foreground">Deuteranopia / -anomaly</span>{" "}
-                  (most common, ~6% of men): bluish green vs vermillion stay
-                  distinct.
-                </li>
-                <li>
-                  <span className="text-foreground">Protanopia / -anomaly</span>:
-                  same — vermillion shifts but still differs from bluish green.
-                </li>
-                <li>
-                  <span className="text-foreground">Tritanopia / -anomaly</span>{" "}
-                  (rare): yellow vs blue separation handled by the palette
-                  choice.
-                </li>
-                <li>
-                  <span className="text-foreground">Achromatopsia</span>{" "}
-                  (greyscale): rely on shapes + text labels.
-                </li>
-              </ul>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Contrast</CardTitle>
-              <CardDescription>WCAG 1.4.3 + 1.4.11</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <p>
-                Body text ≥ 4.5:1 against background. UI components (icons,
-                borders, button outlines) ≥ 3:1.
-              </p>
-              <p>
-                Split colors meet at-least UI contrast against their containing
-                surface; foreground text on each split swatch is paired for
-                ≥ 4.5:1 (white on vermillion / blue / bluish green; near-black
-                on yellow).
-              </p>
-              <p>
-                shadcn semantic tokens are AA-clean by default in both light and
-                dark mode.
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Keyboard &amp; reduced motion</CardTitle>
-              <CardDescription>WCAG 2.1 + 2.3.3</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <p>
-                Every interactive control reachable by Tab. Focus rings visible
-                in both light and dark mode (shadcn default).
-              </p>
-              <p>
-                <code>prefers-reduced-motion</code> reduces all transitions to
-                near-zero (see Motion section above).
-              </p>
-              <p>
-                Marker drag in the audit screen has keyboard equivalents
-                (arrows step, Enter accepts) — see #15.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Full audit checklist tracked separately. The Accessibility tracking
-          issue lists the per-screen items.
-        </p>
+      {/* ----- Primitives: Avatar / AvatarStack ------------------------ */}
+      <Section title="Shooters" kicker="11 / Primitive">
+        <Block>
+          <Avatar initials="MA" tone="you" name="Mathias Axell" size="lg" />
+          <Avatar initials="JL" tone="jl" name="Johan Larsson" size="lg" />
+          <Avatar initials="PE" tone="pe" name="Pia Eriksson" size="lg" />
+          <Avatar initials="RJ" tone="rj" name="Robert Janson" size="lg" />
+        </Block>
+        <Block>
+          <AvatarStack
+            size="md"
+            avatars={[
+              { initials: "MA", tone: "you", name: "Mathias" },
+              { initials: "JL", tone: "jl", name: "Johan" },
+              { initials: "PE", tone: "pe", name: "Pia" },
+              { initials: "RJ", tone: "rj", name: "Robert" },
+            ]}
+          />
+          <AvatarStack
+            size="sm"
+            overflow={3}
+            avatars={[
+              { initials: "MA", tone: "you" },
+              { initials: "JL", tone: "jl" },
+              { initials: "PE", tone: "pe" },
+            ]}
+          />
+        </Block>
       </Section>
 
-      {/* ------------------------------------------------------------------ */}
-      <Section title="Motion" description="Hover transitions and reduced-motion behavior.">
-        <p className="text-sm text-muted-foreground">
-          Hover the buttons above. Transitions are 150ms ease-out. Respects{" "}
-          <code>prefers-reduced-motion</code>.
-        </p>
+      {/* ----- Primitives: Readout ------------------------------------- */}
+      <Section title="Readouts" kicker="12 / Primitive">
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-rule bg-surface p-6 md:grid-cols-4">
+          <Readout label="Stage time" value="08.218" unit="s" tone="led" size="lg" />
+          <Readout label="Avg split" value="0.548" unit="s" trailing="vs. 0.612 prior" />
+          <Readout label="Status" value="LIVE" tone="live" trailing="recording" />
+          <Readout label="Exported" value="14 / 16" tone="done" />
+        </div>
+      </Section>
+
+      {/* ----- Primitives: ContextBar ---------------------------------- */}
+      <Section title="Context bar" kicker="13 / Primitive">
+        <div className="overflow-hidden rounded-lg border border-rule bg-bg">
+          <ContextBar
+            trailing={
+              <span className="font-mono text-xs uppercase tracking-[0.14em] text-muted">
+                12 / 16 audited
+              </span>
+            }
+          >
+            <Breadcrumb
+              items={[
+                { label: "Matches", href: "#" },
+                { label: "VADS Easter Shoot 2026", href: "#" },
+                { label: "Stage 02 · Tower" },
+              ]}
+            />
+          </ContextBar>
+        </div>
+      </Section>
+
+      {/* ----- Composition smoke test ---------------------------------- */}
+      <Section title="Composition" kicker="14 / Smoke test">
+        <Card className="border-rule bg-surface text-ink">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3">
+              <Avatar initials="MA" tone="you" name="Mathias" size="sm" />
+              <DisplayHeading variant="card" as="span">
+                Stage 02 · Tower
+              </DisplayHeading>
+              <StatusPill tone="in-progress" className="ml-auto">
+                Audit in progress
+              </StatusPill>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <Readout label="Stage time" value="08.218" unit="s" tone="led" size="lg" />
+            <Readout label="Avg split" value="0.548" unit="s" />
+            <Readout label="Fastest" value="0.337" unit="s" tone="done" />
+            <Readout label="Shots" value="16 / 16" />
+          </CardContent>
+        </Card>
       </Section>
     </div>
   );
 }
 
+/* ---------------------------------------------------------------------------
+ * Helper components
+ * ------------------------------------------------------------------------- */
+
 function Section({
   title,
-  description,
+  kicker,
   children,
 }: {
   title: string;
-  description: string;
+  kicker: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
+    <section className="space-y-4">
+      <div className="flex items-baseline gap-3 border-b border-rule pb-3">
+        <Kicker>{kicker}</Kicker>
+        <DisplayHeading variant="section" as="h2">
+          {title}
+        </DisplayHeading>
       </div>
-      <div>{children}</div>
+      <div className="space-y-4">{children}</div>
     </section>
   );
 }
 
-function Row({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-2">{children}</div>;
+function Block({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-rule bg-surface p-4">
+      {children}
+    </div>
+  );
 }
 
-function ColorSwatch({ name }: { name: string }) {
+function Swatch({ token }: { token: string }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
+    <div className="flex flex-col gap-2">
       <div
-        className="h-16 w-full"
-        style={{ backgroundColor: `var(--${name})` }}
+        className="h-16 rounded-md border border-rule"
+        style={{ background: `var(--color-${token})` }}
       />
-      <div className="px-3 py-2">
-        <div className="font-mono text-xs">--{name}</div>
+      <div className="flex items-center justify-between font-mono text-[0.6875rem]">
+        <span className="text-ink-2">{token}</span>
       </div>
     </div>
   );
 }
 
-function MarkerSpec({
-  kind,
-  title,
-  note,
-}: {
-  kind: "detected" | "rejected" | "manual";
-  title: string;
-  note: string;
-}) {
+function TextSwatch({ token }: { token: string }) {
   return (
-    <div className="flex flex-col items-center gap-2 text-center">
-      <div className="flex items-end gap-3">
-        <MarkerGlyph kind={kind} size={32} />
-        <MarkerGlyph kind={kind} size={20} />
-        <MarkerGlyph kind={kind} size={12} />
+    <div className="flex flex-col gap-1 rounded-md border border-rule bg-surface p-3">
+      <span className="text-base" style={{ color: `var(--color-${token})` }}>
+        Sample
+      </span>
+      <span className="font-mono text-[0.6875rem] text-muted">{token}</span>
+    </div>
+  );
+}
+
+function RuleSwatch({ token }: { token: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-md bg-surface p-3">
+      <div className="h-px flex-1" style={{ background: `var(--color-${token})` }} />
+      <span className="font-mono text-[0.6875rem] text-muted">{token}</span>
+    </div>
+  );
+}
+
+function ShooterSwatch({ keyName, name }: { keyName: string; name: string }) {
+  return (
+    <div className="space-y-3 rounded-lg border border-rule bg-surface p-4">
+      <div className="flex items-center gap-3">
+        <Avatar
+          initials={keyName.toUpperCase()}
+          tone={keyName === "ma" ? "you" : (keyName as "jl" | "pe" | "rj")}
+          name={name}
+          size="md"
+        />
+        <div className="flex flex-col leading-tight">
+          <span className="font-display text-sm font-semibold uppercase tracking-wider">
+            {name}
+          </span>
+          <span className="font-mono text-[0.6875rem] text-muted">
+            --color-shooter-{keyName}
+          </span>
+        </div>
       </div>
-      <div>
-        <div className="text-sm font-medium">{title}</div>
-        <div className="text-xs text-muted-foreground">{note}</div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {["", "-soft", "-deep", "-glow", "-tint"].map((suffix) => (
+          <div
+            key={suffix}
+            className="h-6 rounded-sm border border-rule"
+            style={{ background: `var(--color-shooter-${keyName}${suffix})` }}
+            title={`--color-shooter-${keyName}${suffix}`}
+          />
+        ))}
       </div>
     </div>
   );
 }
+
+const STAGE_DEMO: TickState[] = [
+  "done",
+  "done",
+  "done",
+  "done",
+  "flagged",
+  "done",
+  "done",
+  "current",
+  "todo",
+  "todo",
+  "todo",
+  "todo",
+];
