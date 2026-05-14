@@ -33,14 +33,14 @@ export function App() {
             <Route index element={<Home />} />
             <Route path="audit" element={<Audit />} />
             <Route path="audit/:stage" element={<Audit />} />
+            <Route path="export" element={<Export />} />
+            <Route path="export/:stage" element={<Export />} />
           </Route>
           {/* Not-yet-redesigned surfaces still mount under AppShell
               until their respective redesign issues land. */}
           <Route element={<AppShell />}>
             <Route path="coach" element={<Coach />} />
             <Route path="coach/:stage" element={<Coach />} />
-            <Route path="export" element={<Export />} />
-            <Route path="export/:stage" element={<Export />} />
             <Route path="lab" element={<Lab />} />
             <Route path="lab/:slug" element={<Lab />} />
             <Route path="review" element={<Review />} />
