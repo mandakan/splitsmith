@@ -58,20 +58,18 @@ this session).
 | 03| Stage audit          | skill         | Oscilloscope-style waveform, video tiles, hardware-shuttle transport |
 | 04| Create match         | applied       | Scoreboard variant + manual variant stacked. Form patterns, search results, stage editor table. |
 | 07| Stage compare        | skill         | F1 telemetry sync timeline         |
+| 08| Export configurator  | applied       | Numbered sections + sticky summary rail. Radio cards, stage chips, trim presets, transitions, overlays. |
 | 09| Developer corpus     | applied       | Developer shell variant (cyan accent), workflow stepper, inbox, fixtures table. |
+| 13| Coach (match-wide)   | skill         | CRT-oscilloscope split histogram (twin-trace), 4 instrument stat cards, per-stage breakdown with rank pills, interval tiles, practice recommendations with priority rails, annotations timeline. |
+| 14| Coach (per-stage)    | applied       | Shot ruler (color-coded dots), video tile + transport, current-shot panel with classification chips + annotation editor, full per-shot list with interval tags. Self-referential baselines only. |
 
 ## Polished surfaces -- still to do
 
-12 surfaces remain. Recommended ordering by primitive coverage:
+9 surfaces remain. Recommended ordering by primitive coverage:
 
-**Batch 2 -- COMPLETE.** wf07 + wf04 + wf09 shipped.
+**Batch 2 + 3 -- COMPLETE.** wf04, wf07, wf08, wf09, wf13, wf14 shipped.
 
-**Batch 3 (recommended):**
-- wf13 coach match-wide -- via skill (data viz: histogram, per-stage breakdown bars, recommendations)
-- wf14 coach per-stage -- applied (shot ruler + per-shot detail)
-- wf08 export configurator -- applied (form-heavy; overlay/transition previews)
-
-**Batch 4:**
+**Batch 4 (next):**
 - wf05 ingest, wf06 beep review, wf10 developer review queue,
   wf11 developer validate, wf12 developer retrain
 

@@ -1,0 +1,2177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith -- Coach -- VADS Easter Shoot 2026</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH -- Coach (match-wide)
+   Direction: Shot Timer instrument panel.
+   Race-engineer briefing dashboard. The histogram is a twin-trace
+   oscilloscope readout. Everything else is self-referential to
+   the shooter's own career baselines -- no cross-shooter ranks
+   are compared per-shot because shooters take stages in different
+   orders.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --surface-4:    #2A303A;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+
+  --live:         #FBBF24;
+  --live-soft:    #FCD34D;
+  --live-deep:    #B45309;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --live-tint:    rgba(251, 191, 36, 0.10);
+
+  --done:         #4ADE80;
+  --done-soft:    #86EFAC;
+  --done-deep:    #166534;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --done-tint:    rgba(74, 222, 128, 0.10);
+
+  --beep:         #06B6D4;
+  --beep-glow:    rgba(6, 182, 212, 0.32);
+  --beep-tint:    rgba(6, 182, 212, 0.10);
+
+  --cold:         #6B7079;
+
+  /* Per-shooter "racing number" identities (carry from polished 07) */
+  --c-ma:        #FF2D2D;
+  --c-ma-soft:   #FF5555;
+  --c-ma-deep:   #B91C1C;
+  --c-ma-glow:   rgba(255, 45, 45, 0.32);
+  --c-ma-tint:   rgba(255, 45, 45, 0.10);
+
+  --c-jl:        #FBBF24;
+  --c-jl-soft:   #FCD34D;
+  --c-jl-deep:   #B45309;
+  --c-jl-glow:   rgba(251, 191, 36, 0.32);
+  --c-jl-tint:   rgba(251, 191, 36, 0.10);
+
+  --c-pe:        #4ADE80;
+  --c-pe-soft:   #86EFAC;
+  --c-pe-deep:   #166534;
+  --c-pe-glow:   rgba(74, 222, 128, 0.32);
+  --c-pe-tint:   rgba(74, 222, 128, 0.10);
+
+  --c-rj:        #60A5FA;
+  --c-rj-soft:   #93C5FD;
+  --c-rj-deep:   #1E3A8A;
+  --c-rj-glow:   rgba(96, 165, 250, 0.32);
+  --c-rj-tint:   rgba(96, 165, 250, 0.10);
+
+  /* Scope (oscilloscope readout surface) */
+  --scope:               #07090E;
+  --scope-grid:          rgba(255, 255, 255, 0.035);
+  --scope-grid-strong:   rgba(255, 255, 255, 0.08);
+
+  /* Split-time semantic colors */
+  --fast:        #4ADE80;
+  --fast-soft:   #86EFAC;
+  --fast-glow:   rgba(74, 222, 128, 0.32);
+  --ok:          #8E939B;
+  --slow:        #FBBF24;
+  --slow-glow:   rgba(251, 191, 36, 0.32);
+  --vslow:       #FF2D2D;
+  --vslow-glow:  rgba(255, 45, 45, 0.32);
+
+  /* Interval-type colors */
+  --int-draw:        #A78BFA;
+  --int-draw-glow:   rgba(167, 139, 250, 0.32);
+  --int-fire:        #4ADE80;
+  --int-fire-glow:   rgba(74, 222, 128, 0.32);
+  --int-trans:       #06B6D4;
+  --int-trans-glow:  rgba(6, 182, 212, 0.32);
+  --int-reload:      #FBBF24;
+  --int-reload-glow: rgba(251, 191, 36, 0.32);
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: transparent; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+input { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; }
+::selection { background: var(--led); color: var(--bg); }
+:focus { outline: 0; }
+:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; padding: 2px 6px; border: 1px solid var(--rule-strong); border-radius: 4px; letter-spacing: 0.04em; color: var(--ink-2); background: var(--surface-2); }
+
+/* ============ Shell ============ */
+.shell { position: sticky; top: 0; z-index: 50; background: linear-gradient(to bottom, var(--surface), var(--bg)); border-bottom: 1px solid var(--rule); }
+.shell::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, transparent, var(--led) 18%, var(--led) 22%, var(--rule-strong) 30%, var(--rule-strong) 70%, var(--led) 78%, var(--led) 82%, transparent); opacity: 0.55; }
+.shell-top { display: flex; align-items: center; gap: 28px; padding: 14px 28px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 32px; height: 32px; }
+.brand .name { font-family: var(--display); font-weight: 700; font-size: 1.375rem; letter-spacing: 0.005em; text-transform: uppercase; line-height: 1; }
+.brand .heartbeat { width: 6px; height: 6px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led-glow); animation: heartbeat 2.4s ease-in-out infinite; }
+@keyframes heartbeat { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
+.mode-switch { display: inline-flex; background: var(--surface-2); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+.mode-switch button { padding: 7px 18px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.mode-switch button.active { color: var(--bg); background: var(--ink); font-weight: 700; }
+.spacer { flex: 1; }
+.utility { display: flex; align-items: center; gap: 4px; }
+.icon-btn { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted); transition: all 150ms var(--ease); position: relative; }
+.icon-btn:hover { background: var(--surface-2); color: var(--ink); }
+.icon-btn .badge { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--led); box-shadow: 0 0 0 2px var(--bg), 0 0 8px var(--led-glow); }
+.profile { margin-left: 6px; display: inline-flex; align-items: center; gap: 10px; padding: 4px 14px 4px 4px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); min-height: 40px; }
+.profile .av { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--led), var(--led-deep)); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--led-glow); }
+.profile .label { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); }
+.context-wrap { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.context { padding: 9px 28px; font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 14px; font-feature-settings: var(--feat-num); }
+.context .crumb { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--subtle); }
+.context .crumb a { color: var(--subtle); }
+.context .crumb a:hover { color: var(--ink-2); }
+.context .crumb .sep { color: var(--whisper); }
+.context .crumb .current { color: var(--ink); font-weight: 700; }
+.context .right { margin-left: auto; display: inline-flex; gap: 18px; font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--subtle); }
+.context .right b { color: var(--ink-2); font-weight: 700; }
+
+/* ============ App body ============ */
+.app-body { display: grid; grid-template-columns: 248px 1fr; min-height: calc(100vh - 86px); }
+
+/* ============ Sidebar (carry from polished 02) ============ */
+.sidebar { background: var(--surface); border-right: 1px solid var(--rule); padding: 18px 12px; overflow-y: auto; position: sticky; top: 0; align-self: start; max-height: calc(100vh - 86px); }
+.match-card { padding: 4px 8px 14px; border-bottom: 1px solid var(--rule); margin-bottom: 12px; }
+.match-card .lbl { font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); margin-bottom: 6px; }
+.match-card .title { font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.005em; text-transform: uppercase; color: var(--ink); line-height: 1.2; margin-bottom: 6px; }
+.match-card .meta { font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-feature-settings: var(--feat-num); }
+.nav-section { margin: 4px 0 14px; }
+.nav-item { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 7px; color: var(--ink-2); font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: all 150ms var(--ease); min-height: 36px; }
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item .icon { color: var(--muted); display: inline-flex; }
+.nav-item:hover .icon { color: var(--ink); }
+.nav-item.active { background: var(--led-tint); border: 1px solid var(--led-deep); padding: 7px 9px; color: var(--led); font-weight: 700; }
+.nav-item.active .icon { color: var(--led); }
+.nav-item .count { margin-left: auto; font-family: var(--mono); font-size: 0.625rem; font-weight: 700; color: var(--subtle); }
+.nav-item.active .count { color: var(--led); }
+.nav-item .tag {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 0.5625rem; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--led); background: transparent;
+  padding: 2px 7px; border-radius: 4px;
+  border: 1px solid var(--led-deep);
+}
+.nav-label { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px; font-family: var(--mono); font-size: 0.5625rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--subtle); }
+.nav-label .pill { background: var(--surface-2); border: 1px solid var(--rule); color: var(--ink-2); padding: 2px 7px; border-radius: 4px; font-weight: 700; font-feature-settings: var(--feat-num); }
+.stage-list { display: flex; flex-direction: column; gap: 1px; }
+.stage-item { display: grid; grid-template-columns: 26px 1fr 14px; gap: 9px; align-items: center; padding: 6px 10px 6px 6px; border-radius: 6px; cursor: pointer; font-size: 0.8125rem; min-height: 34px; }
+.stage-item:hover { background: var(--surface-2); }
+.stage-num { width: 26px; height: 26px; border-radius: 5px; background: var(--surface-3); color: var(--ink-2); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-feature-settings: var(--feat-num); }
+.stage-name { color: var(--ink-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-status { width: 12px; height: 12px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.stage-status.done { background: var(--done); box-shadow: 0 0 5px var(--done-glow); color: var(--bg); }
+.stage-status.partial { background: var(--live); box-shadow: 0 0 5px var(--live-glow); }
+.stage-status.flagged { background: var(--led); box-shadow: 0 0 5px var(--led-glow); }
+.stage-status.todo { background: transparent; border: 1px solid var(--rule-strong); }
+.stage-item.next-up .stage-num { background: var(--led); color: var(--bg); box-shadow: 0 0 0 1px var(--led), 0 0 8px var(--led-glow); }
+.stage-item.next-up .stage-name { color: var(--led); font-weight: 700; }
+
+/* ============ Page head ============ */
+.content { min-width: 0; }
+
+.page-head { padding: 28px 32px 22px; border-bottom: 1px solid var(--rule); background: linear-gradient(to bottom, var(--surface), transparent); position: relative; overflow: hidden; }
+.page-head::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg, transparent, transparent 4px,
+      rgba(255,255,255,0.012) 4px, rgba(255,255,255,0.012) 5px
+    );
+  pointer-events: none;
+}
+.page-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+}
+.page-kicker { font-family: var(--mono); font-size: 0.625rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--led); margin-bottom: 10px; display: inline-flex; align-items: center; gap: 12px; }
+.page-kicker::before { content: ""; width: 26px; height: 1px; background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.page-title-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.page-h1 { font-family: var(--display); font-weight: 700; font-size: 2.75rem; line-height: 1; letter-spacing: 0.003em; text-transform: uppercase; color: var(--ink); margin: 0; }
+.level-pill { display: inline-flex; align-items: center; padding: 5px 11px; background: var(--surface-2); border: 1px solid var(--rule-strong); color: var(--ink); font-family: var(--mono); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; border-radius: 5px; }
+.page-sub { font-family: var(--mono); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: inline-flex; align-items: center; gap: 14px; font-feature-settings: var(--feat-num); }
+.page-sub .sep { color: var(--whisper); }
+.page-sub b { color: var(--ink-2); font-weight: 700; }
+.page-sub .audited { color: var(--done); }
+
+/* ===== Shooter switcher (top-right) ===== */
+.shooter-switch {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.ss-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 14px 4px 4px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+  min-height: 32px;
+}
+.ss-chip:hover { color: var(--ink-2); background: var(--surface-3); }
+.ss-chip .av {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ss-chip .av.ma { background: linear-gradient(135deg, var(--c-ma-soft), var(--c-ma-deep)); }
+.ss-chip .av.jl { background: linear-gradient(135deg, var(--c-jl-soft), var(--c-jl-deep)); color: var(--bg); }
+.ss-chip .av.pe { background: linear-gradient(135deg, var(--c-pe-soft), var(--c-pe-deep)); color: var(--bg); }
+.ss-chip .av.rj { background: linear-gradient(135deg, var(--c-rj-soft), var(--c-rj-deep)); color: var(--bg); }
+.ss-chip .you-tag {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  background: var(--led-tint);
+  border: 1px solid var(--led-deep);
+  color: var(--led);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: -2px;
+}
+.ss-chip.active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px var(--rule-strong), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.ss-chip.active.ma {
+  background: var(--led-tint);
+  box-shadow: 0 0 0 1px var(--led), inset 0 1px 0 rgba(255,45,45,0.18);
+  color: var(--ink);
+}
+.ss-chip.active.ma .av { box-shadow: 0 0 0 2px var(--led), 0 0 14px var(--led-glow); }
+
+/* ============ Workspace ============ */
+.workspace { padding: 24px 32px 80px; max-width: 1320px; }
+
+/* ===== Headline stats row (4 instrument readouts) ===== */
+.headline {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.stat-card {
+  position: relative;
+  background:
+    linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  min-height: 124px;
+}
+.stat-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--rule-strong);
+}
+.stat-card.alert::before { background: var(--led); box-shadow: 0 0 10px var(--led-glow); }
+.stat-card.good::before  { background: var(--done); box-shadow: 0 0 10px var(--done-glow); }
+.stat-card.pb::before    { background: var(--done); box-shadow: 0 0 10px var(--done-glow); }
+.stat-card.warn::before  { background: var(--live); box-shadow: 0 0 10px var(--live-glow); }
+.stat-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg, transparent, transparent 4px,
+      rgba(255,255,255,0.010) 4px, rgba(255,255,255,0.010) 5px
+    );
+  pointer-events: none;
+}
+.stat-card .lbl {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.stat-card .lbl .badge {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.stat-card .lbl .badge.pb {
+  color: var(--done);
+  background: var(--done-tint);
+  border: 1px solid var(--done-deep);
+}
+.stat-card .lbl .badge.pb::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--done);
+  box-shadow: 0 0 4px var(--done-glow);
+}
+.stat-card .lbl .badge.review {
+  color: var(--led);
+  background: var(--led-tint);
+  border: 1px solid var(--led-deep);
+  text-decoration: none;
+}
+.stat-card .lbl .badge.review:hover { background: rgba(255,45,45,0.18); }
+.stat-card .v {
+  font-family: var(--mono);
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+  line-height: 1;
+  font-feature-settings: var(--feat-num);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.stat-card .v.led { color: var(--led); text-shadow: 0 0 18px var(--led-glow); }
+.stat-card .v.done { color: var(--done); text-shadow: 0 0 18px var(--done-glow); }
+.stat-card .v small {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.stat-card .sub {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stat-card .sub .sep { color: var(--whisper); }
+.stat-card .delta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-feature-settings: var(--feat-num);
+}
+.stat-card .delta.up   { color: var(--done); }
+.stat-card .delta.down { color: var(--led); }
+.stat-card .delta.flat { color: var(--muted); }
+.stat-card .delta .arrow {
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.stat-card .delta.up .arrow   { background: var(--done-tint); color: var(--done); box-shadow: 0 0 8px var(--done-glow); }
+.stat-card .delta.down .arrow { background: var(--led-tint); color: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+.stat-card .delta .caption { color: var(--subtle); font-weight: 600; }
+
+/* ===== Section heading ===== */
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 32px 0 14px; gap: 16px; }
+.section-head .title { display: inline-flex; align-items: baseline; gap: 14px; font-family: var(--display); font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); }
+.section-head .title .num-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-head .title .num-rule::before {
+  content: "";
+  width: 18px; height: 1px;
+  background: var(--led);
+  box-shadow: 0 0 4px var(--led-glow);
+}
+.section-head .title .count { font-family: var(--mono); font-size: 0.6875rem; color: var(--subtle); font-weight: 600; letter-spacing: 0.06em; }
+.section-head .title .count b { color: var(--ink-2); font-weight: 700; font-feature-settings: var(--feat-num); }
+.section-head .help { font-family: var(--mono); font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+
+/* Segmented control */
+.segmented {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 1px;
+}
+.segmented button {
+  padding: 6px 14px;
+  border-radius: 5px;
+  font-family: var(--display);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: all 150ms var(--ease);
+  min-height: 28px;
+}
+.segmented button:hover { color: var(--ink-2); }
+.segmented button.active {
+  color: var(--bg);
+  background: var(--ink);
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* ===== Per-stage breakdown table ===== */
+.perstage {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.perstage-row {
+  display: grid;
+  grid-template-columns: 32px 1.5fr 96px 96px 1fr 84px 28px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+  transition: background 120ms var(--ease);
+}
+.perstage-row.head {
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  padding: 10px 18px;
+}
+.perstage-row:last-child { border-bottom: 0; }
+.perstage-row:not(.head):hover { background: var(--surface-2); }
+.perstage-row.flagged {
+  background: linear-gradient(90deg, rgba(251,191,36,0.06), transparent 60%);
+}
+.perstage-row.flagged:hover {
+  background: linear-gradient(90deg, rgba(251,191,36,0.10), var(--surface-2));
+}
+
+.psr-num {
+  width: 28px; height: 28px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-feature-settings: var(--feat-num);
+}
+.psr-name {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.psr-name .nm {
+  font-family: var(--display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1;
+}
+.psr-name .meta {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-feature-settings: var(--feat-num);
+}
+.psr-badge {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.psr-badge.pb {
+  color: var(--done);
+  background: var(--done-tint);
+  border: 1px solid var(--done-deep);
+}
+.psr-badge.pb::before {
+  content: "";
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--done);
+  box-shadow: 0 0 4px var(--done-glow);
+}
+.psr-badge.flag {
+  color: var(--live);
+  background: var(--live-tint);
+  border: 1px solid var(--live-deep);
+}
+.psr-badge.flag::before {
+  content: ""; width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-bottom: 4px solid var(--live);
+}
+
+.stat-num {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+.stat-num.fast { color: var(--fast); text-shadow: 0 0 10px var(--fast-glow); }
+.stat-num.slow { color: var(--slow); }
+.stat-num.vslow { color: var(--vslow); text-shadow: 0 0 10px var(--vslow-glow); }
+.stat-num small {
+  font-size: 0.6875rem;
+  color: var(--subtle);
+  font-weight: 600;
+  margin-left: 1px;
+}
+
+/* Split distribution mini bar (stacked) */
+.split-dist {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.split-dist .bar {
+  flex: 1;
+  height: 12px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+}
+.split-dist .bar .seg {
+  height: 100%;
+  position: relative;
+}
+.split-dist .bar .seg.fast  { background: var(--fast);  box-shadow: 0 0 8px var(--fast-glow); }
+.split-dist .bar .seg.ok    { background: var(--ok); opacity: 0.55; }
+.split-dist .bar .seg.slow  { background: var(--slow);  box-shadow: 0 0 8px var(--slow-glow); }
+.split-dist .bar .seg.vslow { background: var(--vslow); box-shadow: 0 0 8px var(--vslow-glow); }
+.split-dist .counts {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  font-feature-settings: var(--feat-num);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 88px;
+}
+.split-dist .counts .c.fast  { color: var(--fast); }
+.split-dist .counts .c.ok    { color: var(--ink-2); }
+.split-dist .counts .c.slow  { color: var(--slow); }
+.split-dist .counts .c.vslow { color: var(--vslow); }
+.split-dist .counts .sl      { color: var(--whisper); padding: 0 1px; }
+
+/* Rank pill (overall stage rank, NOT per-shot rank vs other shooters) */
+.rank-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-feature-settings: var(--feat-num);
+  min-height: 22px;
+}
+.rank-pill .ic {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+}
+.rank-pill.r1 { background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); box-shadow: 0 0 8px var(--led-glow); }
+.rank-pill.r1 .ic { background: var(--led); box-shadow: 0 0 6px var(--led-glow); }
+.rank-pill.r2 { background: var(--live-tint); color: var(--live); border: 1px solid var(--live-deep); }
+.rank-pill.r2 .ic { background: var(--live); box-shadow: 0 0 4px var(--live-glow); }
+.rank-pill.r3 { background: var(--done-tint); color: var(--done); border: 1px solid var(--done-deep); }
+.rank-pill.r3 .ic { background: var(--done); box-shadow: 0 0 4px var(--done-glow); }
+.rank-pill.r4 { background: var(--surface-3); color: var(--muted); border: 1px solid var(--rule); }
+.rank-pill.r4 .ic { background: var(--muted); }
+
+.psr-arrow {
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--subtle);
+  transition: all 150ms var(--ease);
+  text-decoration: none;
+}
+.perstage-row:hover .psr-arrow { color: var(--led); background: var(--led-tint); }
+
+.perstage-foot {
+  padding: 12px 18px;
+  background: var(--surface-2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.perstage-foot a {
+  color: var(--led);
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.perstage-foot a:hover { color: var(--led-soft); }
+
+/* ===== Interval breakdown grid ===== */
+.int-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.int-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--rule);
+}
+.int-card-head .left {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.int-card-head .right {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--led);
+  cursor: pointer;
+}
+.int-card-head .right:hover { color: var(--led-soft); }
+.int-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.int-tile {
+  position: relative;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 15px 12px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+}
+.int-tile::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+}
+.int-tile.draw::before    { background: var(--int-draw);    box-shadow: 0 0 10px var(--int-draw-glow); }
+.int-tile.fire::before    { background: var(--int-fire);    box-shadow: 0 0 10px var(--int-fire-glow); }
+.int-tile.trans::before   { background: var(--int-trans);   box-shadow: 0 0 10px var(--int-trans-glow); }
+.int-tile.reload::before  { background: var(--int-reload);  box-shadow: 0 0 10px var(--int-reload-glow); }
+
+.int-tile .name {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.int-tile.draw   .name { color: var(--int-draw); }
+.int-tile.fire   .name { color: var(--int-fire); }
+.int-tile.trans  .name { color: var(--int-trans); }
+.int-tile.reload .name { color: var(--int-reload); }
+.int-tile .name .dot { width: 6px; height: 6px; border-radius: 50%; }
+.int-tile.draw   .name .dot { background: var(--int-draw);    box-shadow: 0 0 6px var(--int-draw-glow); }
+.int-tile.fire   .name .dot { background: var(--int-fire);    box-shadow: 0 0 6px var(--int-fire-glow); }
+.int-tile.trans  .name .dot { background: var(--int-trans);   box-shadow: 0 0 6px var(--int-trans-glow); }
+.int-tile.reload .name .dot { background: var(--int-reload);  box-shadow: 0 0 6px var(--int-reload-glow); }
+
+.int-tile .v {
+  font-family: var(--mono);
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  line-height: 1;
+  font-feature-settings: var(--feat-num);
+  margin-bottom: 4px;
+}
+.int-tile .v small { font-size: 0.875rem; color: var(--muted); font-weight: 600; }
+.int-tile .count {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 12px;
+  font-feature-settings: var(--feat-num);
+}
+.int-tile .delta {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  font-feature-settings: var(--feat-num);
+}
+.int-tile .delta.up   { color: var(--done); }
+.int-tile .delta.down { color: var(--led); }
+.int-tile .delta .arrow {
+  width: 16px; height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.int-tile .delta.up .arrow   { color: var(--done); filter: drop-shadow(0 0 4px var(--done-glow)); }
+.int-tile .delta .caption { color: var(--subtle); font-weight: 600; }
+
+/* ===== Two-col: histogram + recommendations ===== */
+.two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+/* ===== THE SCOPE: Split distribution histogram ===== */
+.scope-card {
+  position: relative;
+  background: var(--scope);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 16px 16px 12px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.03),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.scope-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45));
+  pointer-events: none;
+}
+.scope-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 16px;
+  position: relative;
+  z-index: 2;
+}
+.scope-head .title {
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.scope-head .title::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 6px var(--led-glow);
+  animation: heartbeat 2.4s ease-in-out infinite;
+}
+.scope-legend {
+  display: inline-flex;
+  gap: 14px;
+  align-items: center;
+}
+.scope-legend .lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.scope-legend .lg .sw {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+}
+.scope-legend .lg.you .sw { background: var(--led); box-shadow: 0 0 8px var(--led-glow); }
+.scope-legend .lg.career .sw { background: var(--muted); opacity: 0.55; }
+.scope-legend .lg b { color: var(--ink); font-weight: 700; }
+
+.scope-svg {
+  width: 100%;
+  height: 320px;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.scope-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 6px 0;
+  margin-top: 6px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-feature-settings: var(--feat-num);
+  position: relative;
+  z-index: 1;
+}
+.scope-foot .cell { display: flex; flex-direction: column; gap: 3px; }
+.scope-foot .cell .k { color: var(--whisper); }
+.scope-foot .cell .v { color: var(--ink-2); font-weight: 700; letter-spacing: 0.04em; }
+.scope-foot .cell .v.led { color: var(--led); }
+.scope-foot .cell .v.fast { color: var(--fast); }
+
+/* ===== Practice recommendations card ===== */
+.reco-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  display: flex;
+  flex-direction: column;
+}
+.reco-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(180deg, var(--surface-2), transparent);
+}
+.reco-head .title {
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.reco-head .title .ic {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  background: var(--led-tint);
+  border: 1px solid var(--led-deep);
+  color: var(--led);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.reco-head .count {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.reco-head .count b { color: var(--ink-2); }
+
+.reco-item {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+.reco-item:last-child { border-bottom: 0; }
+.reco-item::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+}
+.reco-item.p1::before { background: var(--led); box-shadow: 0 0 10px var(--led-glow); }
+.reco-item.p2::before { background: var(--live); box-shadow: 0 0 10px var(--live-glow); }
+.reco-item.p3::before { background: var(--beep); box-shadow: 0 0 10px var(--beep-glow); }
+
+.reco-num {
+  width: 30px; height: 30px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-feature-settings: var(--feat-num);
+  flex-shrink: 0;
+}
+.reco-item.p1 .reco-num { background: var(--led-tint); color: var(--led); border: 1px solid var(--led-deep); box-shadow: 0 0 12px var(--led-glow); }
+.reco-item.p2 .reco-num { background: var(--live-tint); color: var(--live); border: 1px solid var(--live-deep); }
+.reco-item.p3 .reco-num { background: var(--beep-tint); color: var(--beep); border: 1px solid rgba(6,182,212,0.35); }
+
+.reco-body { min-width: 0; }
+.reco-tag {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.reco-item.p1 .reco-tag { color: var(--led); }
+.reco-item.p2 .reco-tag { color: var(--live); }
+.reco-item.p3 .reco-tag { color: var(--beep); }
+.reco-tag::before {
+  content: "";
+  width: 4px; height: 4px;
+  border-radius: 50%;
+}
+.reco-item.p1 .reco-tag::before { background: var(--led); box-shadow: 0 0 4px var(--led-glow); }
+.reco-item.p2 .reco-tag::before { background: var(--live); box-shadow: 0 0 4px var(--live-glow); }
+.reco-item.p3 .reco-tag::before { background: var(--beep); box-shadow: 0 0 4px var(--beep-glow); }
+
+.reco-heading {
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-bottom: 5px;
+  line-height: 1.15;
+}
+.reco-desc {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.reco-desc b {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-feature-settings: var(--feat-num);
+  letter-spacing: 0.01em;
+}
+.reco-desc b.led { color: var(--led); }
+.reco-desc b.done { color: var(--done); }
+.reco-desc b.live { color: var(--live); }
+.reco-ctas {
+  display: inline-flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.reco-cta {
+  font-family: var(--display);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--led);
+  padding: 4px 9px;
+  border: 1px solid var(--led-deep);
+  background: var(--led-tint);
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 150ms var(--ease);
+}
+.reco-cta:hover { background: rgba(255,45,45,0.18); border-color: var(--led); color: var(--led-soft); }
+.reco-cta.alt {
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-color: var(--rule-strong);
+}
+.reco-cta.alt:hover { background: var(--surface-3); color: var(--ink); }
+
+/* ===== Annotations timeline ===== */
+.annot-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.annot-row {
+  display: grid;
+  grid-template-columns: 30px 88px 1fr auto;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+}
+.annot-row:last-of-type { border-bottom: 0; }
+.annot-row .annot-num {
+  width: 26px; height: 26px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-feature-settings: var(--feat-num);
+  margin-top: 2px;
+}
+.annot-where {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-feature-settings: var(--feat-num);
+  color: var(--ink-2);
+  padding-top: 4px;
+  border-left: 1px dashed var(--rule);
+  padding-left: 12px;
+}
+.annot-where .at { color: var(--subtle); font-size: 0.5625rem; letter-spacing: 0.16em; }
+.annot-where .ts { color: var(--led); font-weight: 700; }
+.annot-where .ts.flat { color: var(--ink-2); }
+.annot-note {
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  line-height: 1.55;
+  padding-top: 2px;
+}
+.annot-tag {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px;
+  vertical-align: 2px;
+}
+.annot-tag::before {
+  content: "";
+  width: 4px; height: 4px;
+  border-radius: 50%;
+}
+.annot-tag.reload     { color: var(--int-reload); background: var(--live-tint); border: 1px solid var(--live-deep); }
+.annot-tag.reload::before { background: var(--int-reload); box-shadow: 0 0 4px var(--int-reload-glow); }
+.annot-tag.positive   { color: var(--done); background: var(--done-tint); border: 1px solid var(--done-deep); }
+.annot-tag.positive::before { background: var(--done); box-shadow: 0 0 4px var(--done-glow); }
+.annot-tag.transition { color: var(--int-trans); background: var(--beep-tint); border: 1px solid rgba(6,182,212,0.35); }
+.annot-tag.transition::before { background: var(--int-trans); box-shadow: 0 0 4px var(--int-trans-glow); }
+.annot-tag.draw       { color: var(--int-draw); background: rgba(167,139,250,0.10); border: 1px solid rgba(167,139,250,0.35); }
+.annot-tag.draw::before { background: var(--int-draw); box-shadow: 0 0 4px var(--int-draw-glow); }
+.annot-when {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  white-space: nowrap;
+  padding-top: 6px;
+}
+
+.annot-add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  font-family: var(--display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  cursor: pointer;
+  border-top: 1px dashed var(--rule);
+  transition: all 150ms var(--ease);
+}
+.annot-add:hover {
+  color: var(--led);
+  background: linear-gradient(180deg, var(--led-tint), var(--surface));
+}
+.annot-add .plus {
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  border: 1px dashed var(--rule-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+.annot-add:hover .plus { border-color: var(--led); }
+.annot-add .hint {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--subtle);
+  text-transform: uppercase;
+}
+
+/* ===== Page-load reveal ===== */
+.headline, .perstage, .int-card, .two-col, .annot-card {
+  animation: rise 600ms var(--ease) backwards;
+}
+.headline  { animation-delay:  60ms; }
+.perstage  { animation-delay: 140ms; }
+.int-card  { animation-delay: 220ms; }
+.two-col   { animation-delay: 300ms; }
+.annot-card{ animation-delay: 380ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Scope trace draw-in */
+.bar-rise { transform-origin: bottom; animation: barRise 900ms var(--ease) backwards; }
+@keyframes barRise { from { transform: scaleY(0); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Responsive */
+@media (max-width: 1280px) {
+  .page-h1 { font-size: 2.25rem; }
+  .headline { grid-template-columns: repeat(2, 1fr); }
+  .int-grid { grid-template-columns: repeat(2, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 980px) {
+  .page-head-row { flex-direction: column; align-items: stretch; }
+  .perstage-row { grid-template-columns: 32px 1fr 80px 80px 60px; }
+  .perstage-row .col-dist, .perstage-row.head .col-dist,
+  .perstage-row .col-arrow, .perstage-row.head .col-arrow { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ Shell ============ -->
+<header class="shell">
+  <div class="shell-top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 36 36" fill="none" aria-label="Splitsmith">
+        <rect x="1.5" y="1.5" width="33" height="33" rx="7" fill="#14171C" stroke="#3A4049"/>
+        <rect x="10" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <rect x="23" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <circle cx="18" cy="18" r="2.4" fill="#FF2D2D"/>
+        <circle cx="18" cy="18" r="3.8" fill="none" stroke="#FF2D2D" stroke-width="0.8" opacity="0.4"/>
+        <line x1="3" y1="32" x2="33" y2="32" stroke="#FF2D2D" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
+      </svg>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat"></span>
+    </div>
+    <div class="mode-switch">
+      <button class="active">Match</button>
+      <button>Developer</button>
+    </div>
+    <span class="spacer"></span>
+    <div class="utility">
+      <button class="icon-btn" title="Help"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-.8.6-1.5 1-1.5 2v.5"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg></button>
+      <button class="icon-btn" title="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 19V11a6 6 0 0 1 12 0v8H6Zm3 0a3 3 0 0 0 6 0"/></svg><span class="badge"></span></button>
+      <button class="profile" aria-label="Profile">
+        <span class="av">MA</span>
+        <span class="label">Mathias Axell</span>
+      </button>
+    </div>
+  </div>
+  <div class="context-wrap">
+    <div class="context">
+      <span class="crumb">
+        <a href="01-match-picker.html">Matches</a>
+        <span class="sep">/</span>
+        <a href="02-match-overview.html">VADS Easter Shoot 2026</a>
+        <span class="sep">/</span>
+        <span class="current">Coach</span>
+      </span>
+      <div class="right">
+        <span>Session <b>047</b></span>
+        <span>Worker <b style="color: var(--done);">●</b> Local 02</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="app-body">
+
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar">
+    <div class="match-card">
+      <div class="lbl">Active Match</div>
+      <div class="title">VADS Easter<br>Shoot 2026</div>
+      <div class="meta">12 APR · Västerort PK</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+        Overview
+      </div>
+      <div class="nav-item active">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h3l3-8 4 16 3-10 2 6h3"/></svg></span>
+        Coach
+        <span class="tag">match</span>
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="8" r="3"/><path d="M14 20a6 6 0 0 1 7-5"/></svg></span>
+        Shooters
+        <span class="count">04</span>
+      </div>
+      <div class="nav-item">
+        <span class="icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v14M5 10l7 7 7-7M5 21h14"/></svg></span>
+        Export
+      </div>
+    </div>
+
+    <div class="nav-label">Stages <span class="pill">08 / 12</span></div>
+    <div class="stage-list">
+      <div class="stage-item"><span class="stage-num">01</span><span class="stage-name">Snake</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">02</span><span class="stage-name">Tower</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">03</span><span class="stage-name">Plates</span><span class="stage-status partial"></span></div>
+      <div class="stage-item"><span class="stage-num">04</span><span class="stage-name">Mover</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">05</span><span class="stage-name">Standards</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">06</span><span class="stage-name">Field 1</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">07</span><span class="stage-name">Field 2</span><span class="stage-status flagged"></span></div>
+      <div class="stage-item next-up"><span class="stage-num">08</span><span class="stage-name">Window</span><span class="stage-status partial"></span></div>
+      <div class="stage-item"><span class="stage-num">09</span><span class="stage-name">Long range</span><span class="stage-status done"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M5 12l5 5L20 7"/></svg></span></div>
+      <div class="stage-item"><span class="stage-num">10</span><span class="stage-name">Speed shoot</span><span class="stage-status todo"></span></div>
+      <div class="stage-item"><span class="stage-num">11</span><span class="stage-name">Plate rack</span><span class="stage-status todo"></span></div>
+      <div class="stage-item"><span class="stage-num">12</span><span class="stage-name">Final</span><span class="stage-status todo"></span></div>
+    </div>
+  </aside>
+
+  <!-- ============ Content ============ -->
+  <main class="content">
+
+    <!-- ============ Page head ============ -->
+    <div class="page-head">
+      <div class="page-head-row">
+        <div>
+          <span class="page-kicker">Match analysis</span>
+          <div class="page-title-row">
+            <h1 class="page-h1">Coach</h1>
+            <span class="level-pill">Match-wide</span>
+          </div>
+          <div class="page-sub">
+            <span class="audited">● 07 stages audited</span>
+            <span class="sep">·</span>
+            <span><b>142</b> shots logged</span>
+            <span class="sep">·</span>
+            <span>Baseline · Mathias Axell career</span>
+            <span class="sep">·</span>
+            <span>Last build <b>02 min</b> ago</span>
+          </div>
+        </div>
+
+        <!-- Shooter switcher -->
+        <div class="shooter-switch" role="tablist" aria-label="Shooter">
+          <button class="ss-chip active ma" role="tab" aria-selected="true">
+            <span class="av ma">MA</span>
+            Mathias
+            <span class="you-tag">You</span>
+          </button>
+          <button class="ss-chip jl" role="tab" aria-selected="false">
+            <span class="av jl">JL</span>
+            Johan
+          </button>
+          <button class="ss-chip pe" role="tab" aria-selected="false">
+            <span class="av pe">PE</span>
+            Pia
+          </button>
+          <button class="ss-chip rj" role="tab" aria-selected="false">
+            <span class="av rj">RJ</span>
+            Robert
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="workspace">
+
+      <!-- ============ Headline stats ============ -->
+      <section class="headline" aria-label="Match-wide headline metrics">
+
+        <div class="stat-card warn">
+          <div class="lbl">
+            Match time (audited)
+          </div>
+          <div class="v">1:54<small>.32</small></div>
+          <div class="sub">
+            <span>across <b style="color:var(--ink-2)">09</b> stages</span>
+            <span class="sep">·</span>
+            <span>142 shots</span>
+          </div>
+          <div class="delta down" title="Slower than baseline">
+            <span class="arrow" aria-hidden="true">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l7-7 7 7M12 19V5"/></svg>
+            </span>
+            +04.2s
+            <span class="caption">vs career avg</span>
+          </div>
+        </div>
+
+        <div class="stat-card good">
+          <div class="lbl">
+            Avg split
+          </div>
+          <div class="v">0.55<small>s</small></div>
+          <div class="sub">
+            <span>over <b style="color:var(--ink-2)">142</b> shots</span>
+            <span class="sep">·</span>
+            <span>7 stages</span>
+          </div>
+          <div class="delta up" title="Faster than baseline">
+            <span class="arrow" aria-hidden="true">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M19 12l-7 7-7-7M12 5v14"/></svg>
+            </span>
+            &minus;0.03s
+            <span class="caption">vs career avg</span>
+          </div>
+        </div>
+
+        <div class="stat-card pb">
+          <div class="lbl">
+            Fastest split
+            <span class="badge pb">New PB</span>
+          </div>
+          <div class="v done">0.18<small>s</small></div>
+          <div class="sub">
+            <span>stage <b style="color:var(--ink-2)">05</b></span>
+            <span class="sep">·</span>
+            <span>Standards · shot 17→18</span>
+          </div>
+          <div class="delta up" title="Faster than previous PB">
+            <span class="arrow" aria-hidden="true">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M19 12l-7 7-7-7M12 5v14"/></svg>
+            </span>
+            &minus;0.01s
+            <span class="caption">vs prev PB</span>
+          </div>
+        </div>
+
+        <div class="stat-card alert">
+          <div class="lbl">
+            Slowest split
+            <a class="badge review" href="03-stage-audit.html">Review →</a>
+          </div>
+          <div class="v led">1.13<small>s</small></div>
+          <div class="sub">
+            <span>stage <b style="color:var(--ink-2)">08</b></span>
+            <span class="sep">·</span>
+            <span>Window · shot 8→9</span>
+          </div>
+          <div class="delta down" title="Worst transition of the match">
+            <span class="arrow" aria-hidden="true">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l7-7 7 7M12 19V5"/></svg>
+            </span>
+            +0.58s
+            <span class="caption">over stage avg</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Per-stage breakdown ============ -->
+      <div class="section-head">
+        <div class="title">
+          <span class="num-rule">Per-stage breakdown</span>
+          <span class="count"><b>07</b> audited <span style="color:var(--whisper);padding:0 4px">/</span> <b>12</b> total</span>
+        </div>
+        <div class="segmented" role="tablist">
+          <button class="active">Splits</button>
+          <button>Intervals</button>
+          <button>Rank</button>
+        </div>
+      </div>
+
+      <div class="perstage">
+        <div class="perstage-row head">
+          <span></span>
+          <span>Stage</span>
+          <span>Time</span>
+          <span>Avg split</span>
+          <span class="col-dist">Split distribution · fast / ok / slow / v-slow</span>
+          <span>Rank</span>
+          <span class="col-arrow"></span>
+        </div>
+
+        <!-- Stage 1 Snake -->
+        <a class="perstage-row" href="03-stage-audit.html" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">01</span>
+          <div class="psr-name">
+            <span class="nm">Snake</span>
+            <span class="meta">12 shots · sub-stage solo</span>
+          </div>
+          <span class="stat-num">6.421<small>s</small></span>
+          <span class="stat-num">0.518<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="6 fast, 4 ok, 1 slow, 0 very slow">
+              <span class="seg fast"  style="width: 55%;"></span>
+              <span class="seg ok"    style="width: 36%;"></span>
+              <span class="seg slow"  style="width:  9%;"></span>
+              <span class="seg vslow" style="width:  0%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">6</span><span class="sl">/</span><span class="c ok">4</span><span class="sl">/</span><span class="c slow">1</span><span class="sl">/</span><span class="c vslow">0</span></span>
+          </div>
+          <span><span class="rank-pill r2"><span class="ic"></span>02nd</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <!-- Stage 2 Tower -->
+        <a class="perstage-row" href="#" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">02</span>
+          <div class="psr-name">
+            <span class="nm">Tower</span>
+            <span class="meta">16 shots · 1 reload</span>
+          </div>
+          <span class="stat-num">8.218<small>s</small></span>
+          <span class="stat-num">0.548<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="7 fast, 5 ok, 2 slow, 1 very slow">
+              <span class="seg fast"  style="width: 46%;"></span>
+              <span class="seg ok"    style="width: 33%;"></span>
+              <span class="seg slow"  style="width: 13%;"></span>
+              <span class="seg vslow" style="width:  8%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">7</span><span class="sl">/</span><span class="c ok">5</span><span class="sl">/</span><span class="c slow">2</span><span class="sl">/</span><span class="c vslow">1</span></span>
+          </div>
+          <span><span class="rank-pill r2"><span class="ic"></span>02nd</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <!-- Stage 4 Mover -->
+        <a class="perstage-row" href="#" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">04</span>
+          <div class="psr-name">
+            <span class="nm">Mover</span>
+            <span class="meta">10 shots · timed mover</span>
+          </div>
+          <span class="stat-num">5.842<small>s</small></span>
+          <span class="stat-num">0.584<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="4 fast, 4 ok, 2 slow, 0 very slow">
+              <span class="seg fast"  style="width: 38%;"></span>
+              <span class="seg ok"    style="width: 38%;"></span>
+              <span class="seg slow"  style="width: 24%;"></span>
+              <span class="seg vslow" style="width:  0%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">4</span><span class="sl">/</span><span class="c ok">4</span><span class="sl">/</span><span class="c slow">2</span><span class="sl">/</span><span class="c vslow">0</span></span>
+          </div>
+          <span><span class="rank-pill r3"><span class="ic"></span>03rd</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <!-- Stage 5 Standards (PB) -->
+        <a class="perstage-row" href="#" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">05</span>
+          <div class="psr-name">
+            <span class="nm">Standards <span class="psr-badge pb">PB</span></span>
+            <span class="meta">24 shots · standards exercise</span>
+          </div>
+          <span class="stat-num fast">11.232<small>s</small></span>
+          <span class="stat-num fast">0.468<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="15 fast, 7 ok, 1 slow, 0 very slow">
+              <span class="seg fast"  style="width: 65%;"></span>
+              <span class="seg ok"    style="width: 30%;"></span>
+              <span class="seg slow"  style="width:  5%;"></span>
+              <span class="seg vslow" style="width:  0%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">15</span><span class="sl">/</span><span class="c ok">7</span><span class="sl">/</span><span class="c slow">1</span><span class="sl">/</span><span class="c vslow">0</span></span>
+          </div>
+          <span><span class="rank-pill r1"><span class="ic"></span>01st</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <!-- Stage 6 Field 1 -->
+        <a class="perstage-row" href="#" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">06</span>
+          <div class="psr-name">
+            <span class="nm">Field 1</span>
+            <span class="meta">22 shots · 1 reload</span>
+          </div>
+          <span class="stat-num">12.881<small>s</small></span>
+          <span class="stat-num">0.585<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="10 fast, 7 ok, 4 slow, 1 very slow">
+              <span class="seg fast"  style="width: 45%;"></span>
+              <span class="seg ok"    style="width: 32%;"></span>
+              <span class="seg slow"  style="width: 18%;"></span>
+              <span class="seg vslow" style="width:  5%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">10</span><span class="sl">/</span><span class="c ok">7</span><span class="sl">/</span><span class="c slow">4</span><span class="sl">/</span><span class="c vslow">1</span></span>
+          </div>
+          <span><span class="rank-pill r2"><span class="ic"></span>02nd</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <!-- Stage 7 Field 2 (flagged) -->
+        <a class="perstage-row flagged" href="#" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">07</span>
+          <div class="psr-name">
+            <span class="nm">Field 2 <span class="psr-badge flag">Flag</span></span>
+            <span class="meta">22 shots · 2 anomalies</span>
+          </div>
+          <span class="stat-num slow">14.211<small>s</small></span>
+          <span class="stat-num slow">0.646<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="7 fast, 8 ok, 5 slow, 2 very slow">
+              <span class="seg fast"  style="width: 32%;"></span>
+              <span class="seg ok"    style="width: 36%;"></span>
+              <span class="seg slow"  style="width: 23%;"></span>
+              <span class="seg vslow" style="width:  9%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">7</span><span class="sl">/</span><span class="c ok">8</span><span class="sl">/</span><span class="c slow">5</span><span class="sl">/</span><span class="c vslow">2</span></span>
+          </div>
+          <span><span class="rank-pill r4"><span class="ic"></span>04th</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <!-- Stage 9 Long range -->
+        <a class="perstage-row" href="#" style="color:inherit;text-decoration:none;">
+          <span class="psr-num">09</span>
+          <div class="psr-name">
+            <span class="nm">Long range</span>
+            <span class="meta">8 shots · precision</span>
+          </div>
+          <span class="stat-num">7.118<small>s</small></span>
+          <span class="stat-num">0.891<small>s</small></span>
+          <div class="split-dist col-dist">
+            <div class="bar" role="img" aria-label="0 fast, 3 ok, 4 slow, 1 very slow">
+              <span class="seg fast"  style="width:  0%;"></span>
+              <span class="seg ok"    style="width: 37%;"></span>
+              <span class="seg slow"  style="width: 50%;"></span>
+              <span class="seg vslow" style="width: 13%;"></span>
+            </div>
+            <span class="counts"><span class="c fast">0</span><span class="sl">/</span><span class="c ok">3</span><span class="sl">/</span><span class="c slow">4</span><span class="sl">/</span><span class="c vslow">1</span></span>
+          </div>
+          <span><span class="rank-pill r2"><span class="ic"></span>02nd</span></span>
+          <span class="psr-arrow col-arrow">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </span>
+        </a>
+
+        <div class="perstage-foot">
+          <span>Stages <b style="color:var(--ink-2)">03</b>, <b style="color:var(--ink-2)">08</b>, <b style="color:var(--ink-2)">10–12</b> not yet audited</span>
+          <a href="02-match-overview.html">
+            Finish auditing
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- ============ Interval breakdown ============ -->
+      <div class="section-head">
+        <div class="title">
+          <span class="num-rule">By interval type</span>
+          <span class="count">deltas vs <b>career avg</b> · lower is faster</span>
+        </div>
+        <span class="help">classified by movement context</span>
+      </div>
+
+      <div class="int-card">
+        <div class="int-card-head">
+          <span class="left">142 splits classified · 4 categories</span>
+          <span class="right">How are these classified? →</span>
+        </div>
+
+        <div class="int-grid">
+          <div class="int-tile draw">
+            <div class="name"><span class="dot"></span>Draw</div>
+            <div class="v">1.18<small>s</small></div>
+            <div class="count">07 occurrences</div>
+            <div class="delta up">
+              <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M19 12l-7 7-7-7M12 5v14"/></svg></span>
+              &minus;0.04s
+              <span class="caption">vs career</span>
+            </div>
+          </div>
+
+          <div class="int-tile fire">
+            <div class="name"><span class="dot"></span>Fire</div>
+            <div class="v">0.31<small>s</small></div>
+            <div class="count">102 splits</div>
+            <div class="delta up">
+              <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M19 12l-7 7-7-7M12 5v14"/></svg></span>
+              &minus;0.02s
+              <span class="caption">vs career</span>
+            </div>
+          </div>
+
+          <div class="int-tile trans">
+            <div class="name"><span class="dot"></span>Transition</div>
+            <div class="v">0.62<small>s</small></div>
+            <div class="count">28 splits · the flag</div>
+            <div class="delta down">
+              <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l7-7 7 7M12 19V5"/></svg></span>
+              +0.07s
+              <span class="caption">vs career</span>
+            </div>
+          </div>
+
+          <div class="int-tile reload">
+            <div class="name"><span class="dot"></span>Reload</div>
+            <div class="v">1.85<small>s</small></div>
+            <div class="count">05 occurrences</div>
+            <div class="delta down">
+              <span class="arrow"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l7-7 7 7M12 19V5"/></svg></span>
+              +0.12s
+              <span class="caption">vs career</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Two-col: histogram + recommendations ============ -->
+      <div class="section-head">
+        <div class="title">
+          <span class="num-rule">Split distribution</span>
+          <span class="count">match vs <b>career baseline</b></span>
+        </div>
+        <span class="help">142 audited splits · 9 buckets</span>
+      </div>
+
+      <div class="two-col">
+
+        <!-- ===== THE SCOPE: twin-trace histogram ===== -->
+        <div class="scope-card" aria-label="Split distribution histogram">
+          <div class="scope-head">
+            <div class="title">Trace · Splits per bucket</div>
+            <div class="scope-legend">
+              <span class="lg you"><span class="sw"></span>This match <b>142</b></span>
+              <span class="lg career"><span class="sw"></span>Career avg</span>
+            </div>
+          </div>
+
+          <!-- Twin-trace oscilloscope histogram -->
+          <svg class="scope-svg" viewBox="0 0 1200 320" preserveAspectRatio="none" role="img" aria-label="Histogram of split times for this match versus career average. Match average is 0.55s.">
+
+            <defs>
+              <linearGradient id="led-bar" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stop-color="#FF5555" stop-opacity="1"/>
+                <stop offset="100%" stop-color="#B91C1C" stop-opacity="0.85"/>
+              </linearGradient>
+              <linearGradient id="led-bar-glow" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stop-color="#FF2D2D" stop-opacity="0.55"/>
+                <stop offset="100%" stop-color="#FF2D2D" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="career-bar" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"  stop-color="#8E939B" stop-opacity="0.55"/>
+                <stop offset="100%" stop-color="#4B5058" stop-opacity="0.35"/>
+              </linearGradient>
+              <filter id="led-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.4" result="b"/>
+                <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+              <pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse">
+                <circle cx="0.6" cy="0.6" r="0.6" fill="rgba(255,255,255,0.05)"/>
+              </pattern>
+            </defs>
+
+            <!-- Background dot grid (very faint) -->
+            <rect x="60" y="20" width="1100" height="240" fill="url(#dots)"/>
+
+            <!-- ===== Graticule (oscilloscope-style) ===== -->
+            <!-- Horizontal Y-axis grid lines + tick labels -->
+            <g stroke="rgba(255,255,255,0.035)" stroke-width="0.5">
+              <line x1="60" y1="20"  x2="1160" y2="20"/>
+              <line x1="60" y1="80"  x2="1160" y2="80"/>
+              <line x1="60" y1="140" x2="1160" y2="140"/>
+              <line x1="60" y1="200" x2="1160" y2="200"/>
+              <line x1="60" y1="260" x2="1160" y2="260"/>
+            </g>
+            <!-- Baseline (X-axis) -->
+            <line x1="60" y1="260" x2="1160" y2="260" stroke="rgba(255,255,255,0.16)" stroke-width="0.8"/>
+
+            <!-- Y-axis tick labels (count) -->
+            <g font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="#6B7079" font-weight="600" letter-spacing="0.1em">
+              <text x="50" y="24"  text-anchor="end">40</text>
+              <text x="50" y="84"  text-anchor="end">30</text>
+              <text x="50" y="144" text-anchor="end">20</text>
+              <text x="50" y="204" text-anchor="end">10</text>
+              <text x="50" y="264" text-anchor="end">00</text>
+            </g>
+
+            <!-- Y-axis label -->
+            <text x="20" y="148" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="#4B5058" font-weight="700" letter-spacing="0.18em" text-anchor="middle" transform="rotate(-90 20 148)">SPLITS · COUNT</text>
+
+            <!-- Vertical grid every bucket -->
+            <g stroke="rgba(255,255,255,0.025)" stroke-width="0.5">
+              <line x1="180"  y1="20" x2="180"  y2="260"/>
+              <line x1="300"  y1="20" x2="300"  y2="260"/>
+              <line x1="420"  y1="20" x2="420"  y2="260"/>
+              <line x1="540"  y1="20" x2="540"  y2="260"/>
+              <line x1="660"  y1="20" x2="660"  y2="260"/>
+              <line x1="780"  y1="20" x2="780"  y2="260"/>
+              <line x1="900"  y1="20" x2="900"  y2="260"/>
+              <line x1="1020" y1="20" x2="1020" y2="260"/>
+              <line x1="1140" y1="20" x2="1140" y2="260"/>
+            </g>
+
+            <!-- ===== Career-avg bars (background, behind) =====
+                 Each bucket is 120 px wide centered at the 9 bucket positions.
+                 Career bars: width 78, x-offset -33 from bucket center.
+                 height in pixels = count * 6 (since 40 counts = 240px)
+            -->
+            <g>
+              <!-- 0.15 : career=5 -->
+              <rect class="bar-rise" style="animation-delay: 380ms;" x="87"   y="230" width="78" height="30"  fill="url(#career-bar)" rx="2"/>
+              <!-- 0.25 : career=14 -->
+              <rect class="bar-rise" style="animation-delay: 420ms;" x="207"  y="176" width="78" height="84"  fill="url(#career-bar)" rx="2"/>
+              <!-- 0.35 : career=22 -->
+              <rect class="bar-rise" style="animation-delay: 460ms;" x="327"  y="128" width="78" height="132" fill="url(#career-bar)" rx="2"/>
+              <!-- 0.45 : career=28 -->
+              <rect class="bar-rise" style="animation-delay: 500ms;" x="447"  y="92"  width="78" height="168" fill="url(#career-bar)" rx="2"/>
+              <!-- 0.55 : career=24 -->
+              <rect class="bar-rise" style="animation-delay: 540ms;" x="567"  y="116" width="78" height="144" fill="url(#career-bar)" rx="2"/>
+              <!-- 0.65 : career=18 -->
+              <rect class="bar-rise" style="animation-delay: 580ms;" x="687"  y="152" width="78" height="108" fill="url(#career-bar)" rx="2"/>
+              <!-- 0.75 : career=12 -->
+              <rect class="bar-rise" style="animation-delay: 620ms;" x="807"  y="188" width="78" height="72"  fill="url(#career-bar)" rx="2"/>
+              <!-- 0.85 : career=7 -->
+              <rect class="bar-rise" style="animation-delay: 660ms;" x="927"  y="218" width="78" height="42"  fill="url(#career-bar)" rx="2"/>
+              <!-- 1.00+ : career=4 -->
+              <rect class="bar-rise" style="animation-delay: 700ms;" x="1047" y="236" width="78" height="24"  fill="url(#career-bar)" rx="2"/>
+            </g>
+
+            <!-- ===== This-match bars (LED red, in front) =====
+                 width 56, x-offset -18 from bucket center (narrower to overlay)
+                 This-match counts: 4, 12, 20, 30, 28, 22, 14, 9, 3 (sum ~142)
+            -->
+            <g filter="url(#led-glow)">
+              <!-- 0.15 : 4 -->
+              <rect class="bar-rise" style="animation-delay: 800ms;" x="102"  y="236" width="56" height="24"  fill="url(#led-bar)" rx="2"/>
+              <!-- 0.25 : 12 -->
+              <rect class="bar-rise" style="animation-delay: 840ms;" x="222"  y="188" width="56" height="72"  fill="url(#led-bar)" rx="2"/>
+              <!-- 0.35 : 20 -->
+              <rect class="bar-rise" style="animation-delay: 880ms;" x="342"  y="140" width="56" height="120" fill="url(#led-bar)" rx="2"/>
+              <!-- 0.45 : 30 -->
+              <rect class="bar-rise" style="animation-delay: 920ms;" x="462"  y="80"  width="56" height="180" fill="url(#led-bar)" rx="2"/>
+              <!-- 0.55 : 28 (the avg bucket) -->
+              <rect class="bar-rise" style="animation-delay: 960ms;" x="582"  y="92"  width="56" height="168" fill="url(#led-bar)" rx="2"/>
+              <!-- 0.65 : 22 -->
+              <rect class="bar-rise" style="animation-delay: 1000ms;" x="702" y="128" width="56" height="132" fill="url(#led-bar)" rx="2"/>
+              <!-- 0.75 : 14 -->
+              <rect class="bar-rise" style="animation-delay: 1040ms;" x="822" y="176" width="56" height="84"  fill="url(#led-bar)" rx="2"/>
+              <!-- 0.85 : 9 -->
+              <rect class="bar-rise" style="animation-delay: 1080ms;" x="942" y="206" width="56" height="54"  fill="url(#led-bar)" rx="2"/>
+              <!-- 1.00+ : 3 -->
+              <rect class="bar-rise" style="animation-delay: 1120ms;" x="1062" y="242" width="56" height="18"  fill="url(#led-bar)" rx="2"/>
+            </g>
+
+            <!-- Top-edge highlights on this-match bars (LED rim) -->
+            <g>
+              <rect x="102"  y="236" width="56" height="1.5" fill="#FF5555"/>
+              <rect x="222"  y="188" width="56" height="1.5" fill="#FF5555"/>
+              <rect x="342"  y="140" width="56" height="1.5" fill="#FF5555"/>
+              <rect x="462"  y="80"  width="56" height="1.5" fill="#FFAAAA"/>
+              <rect x="582"  y="92"  width="56" height="1.5" fill="#FFAAAA"/>
+              <rect x="702"  y="128" width="56" height="1.5" fill="#FF5555"/>
+              <rect x="822"  y="176" width="56" height="1.5" fill="#FF5555"/>
+              <rect x="942"  y="206" width="56" height="1.5" fill="#FF5555"/>
+              <rect x="1062" y="242" width="56" height="1.5" fill="#FF5555"/>
+            </g>
+
+            <!-- ===== AVG line at 0.55 (bucket 5, center at x=600) ===== -->
+            <line x1="600" y1="20" x2="600" y2="260" stroke="#FF2D2D" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.7"/>
+            <!-- AVG pill label -->
+            <g transform="translate(600 -2)">
+              <rect x="-46" y="2" width="92" height="22" rx="11" fill="#0A0B0D" stroke="#FF2D2D" stroke-width="1"/>
+              <text x="-30" y="17" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#FF2D2D" font-weight="700" letter-spacing="0.18em">AVG</text>
+              <text x="-2" y="17" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#F4F4F5" font-weight="700" letter-spacing="0.06em">0.55s</text>
+            </g>
+
+            <!-- ===== PB marker at 0.18 (in bucket 0.15) ===== -->
+            <line x1="125" y1="60" x2="125" y2="260" stroke="#4ADE80" stroke-width="0.8" stroke-dasharray="2 3" opacity="0.65"/>
+            <g transform="translate(125 60)">
+              <rect x="-30" y="-12" width="60" height="18" rx="3" fill="#0A0B0D" stroke="#4ADE80" stroke-width="0.8"/>
+              <text x="0" y="0" font-family="JetBrains Mono, ui-monospace, monospace" font-size="8.5" fill="#4ADE80" font-weight="700" letter-spacing="0.16em" text-anchor="middle">PB · 0.18</text>
+            </g>
+
+            <!-- ===== X-axis bucket labels ===== -->
+            <g font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#8E939B" font-weight="600" letter-spacing="0.04em">
+              <text x="125"  y="282" text-anchor="middle">0.15</text>
+              <text x="245"  y="282" text-anchor="middle">0.25</text>
+              <text x="365"  y="282" text-anchor="middle">0.35</text>
+              <text x="485"  y="282" text-anchor="middle">0.45</text>
+              <text x="605"  y="282" text-anchor="middle" fill="#FF2D2D" font-weight="700">0.55</text>
+              <text x="725"  y="282" text-anchor="middle">0.65</text>
+              <text x="845"  y="282" text-anchor="middle">0.75</text>
+              <text x="965"  y="282" text-anchor="middle">0.85</text>
+              <text x="1085" y="282" text-anchor="middle">1.00+</text>
+            </g>
+
+            <!-- X-axis unit -->
+            <text x="610" y="306" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="#4B5058" font-weight="700" letter-spacing="0.2em" text-anchor="middle">SPLIT DURATION · SECONDS</text>
+
+            <!-- Corner annotations: corner ticks (scope chrome) -->
+            <g stroke="#3A4049" stroke-width="0.8" fill="none">
+              <polyline points="60,30 60,20 70,20"/>
+              <polyline points="1150,20 1160,20 1160,30"/>
+              <polyline points="60,250 60,260 70,260"/>
+              <polyline points="1150,260 1160,260 1160,250"/>
+            </g>
+
+            <!-- Top-right scope ident -->
+            <g font-family="JetBrains Mono, ui-monospace, monospace" font-size="8" fill="#4B5058" font-weight="700" letter-spacing="0.22em">
+              <text x="1158" y="14" text-anchor="end">CH-01 · MA</text>
+            </g>
+
+            <!-- "Fast zone" / "Slow zone" markers -->
+            <g font-family="JetBrains Mono, ui-monospace, monospace" font-size="8" font-weight="700" letter-spacing="0.18em">
+              <text x="80"  y="36" fill="#4ADE80" opacity="0.55">FAST</text>
+              <text x="1140" y="36" fill="#FF2D2D" opacity="0.55" text-anchor="end">SLOW</text>
+            </g>
+          </svg>
+
+          <!-- Scope foot: telemetry strip -->
+          <div class="scope-foot">
+            <div class="cell">
+              <span class="k">Median</span>
+              <span class="v">0.52s</span>
+            </div>
+            <div class="cell">
+              <span class="k">Mode bucket</span>
+              <span class="v led">0.45s</span>
+            </div>
+            <div class="cell">
+              <span class="k">σ (spread)</span>
+              <span class="v">0.21s</span>
+            </div>
+            <div class="cell">
+              <span class="k">Fast splits</span>
+              <span class="v fast">36 (25%)</span>
+            </div>
+            <div class="cell">
+              <span class="k">Tail (≥0.85)</span>
+              <span class="v">12 (08%)</span>
+            </div>
+            <div class="cell">
+              <span class="k">Δ shape</span>
+              <span class="v">−0.03 left-shift</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== Practice recommendations ===== -->
+        <div class="reco-card">
+          <div class="reco-head">
+            <div class="title">
+              <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 15 8.5 22 9 17 14 18.5 21 12 17.5 5.5 21 7 14 2 9 9 8.5"/></svg></span>
+              Practice priorities
+            </div>
+            <span class="count"><b>03</b> suggestions</span>
+          </div>
+
+          <div class="reco-item p1">
+            <span class="reco-num">01</span>
+            <div class="reco-body">
+              <div class="reco-tag">High priority · Transitions</div>
+              <div class="reco-heading">Transitions are your slowest interval</div>
+              <div class="reco-desc">
+                Avg <b class="led">0.62s</b>, which is <b class="led">+0.07s slower</b> than your career baseline.
+                Worst single transition: shot <b>8 → 9</b> on Stage 08 (Window) at <b class="led">1.13s</b>.
+              </div>
+              <div class="reco-ctas">
+                <a class="reco-cta" href="03-stage-audit.html">Review stage 08 →</a>
+                <a class="reco-cta alt">Filter all transitions →</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="reco-item p2">
+            <span class="reco-num">02</span>
+            <div class="reco-body">
+              <div class="reco-tag">Medium priority · Reloads</div>
+              <div class="reco-heading">Reloads run long</div>
+              <div class="reco-desc">
+                <b>05 reloads</b> averaged <b class="live">1.85s</b>, about <b class="live">+0.12s slower</b> than career baseline.
+                Stage 07 had the worst at <b class="live">2.21s</b> -- the annotated mag-well fumble.
+              </div>
+              <div class="reco-ctas">
+                <a class="reco-cta alt">Watch all reloads →</a>
+                <a class="reco-cta alt">Open stage 07 →</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="reco-item p3">
+            <span class="reco-num">03</span>
+            <div class="reco-body">
+              <div class="reco-tag">Keep this · Standards rhythm</div>
+              <div class="reco-heading">Standards was a PB -- keep that rhythm</div>
+              <div class="reco-desc">
+                <b class="done">0.468s</b> avg with <b class="done">15 fast splits</b> out of 24.
+                Closest you've been to par-level pace on a 24-round stage.
+              </div>
+              <div class="reco-ctas">
+                <a class="reco-cta alt">Watch stage 05 →</a>
+                <a class="reco-cta alt">Compare to last PB →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Annotations ============ -->
+      <div class="section-head">
+        <div class="title">
+          <span class="num-rule">Annotations</span>
+          <span class="count">notes left across stages · <b>04</b> recent</span>
+        </div>
+        <span class="help">newest first · press <kbd>N</kbd> while watching</span>
+      </div>
+
+      <div class="annot-card">
+
+        <div class="annot-row">
+          <span class="annot-num">07</span>
+          <div class="annot-where">
+            <span class="at">SHOT 11</span>
+            <span class="ts">+5.62s</span>
+          </div>
+          <div class="annot-note">
+            <span class="annot-tag reload">Reload</span>
+            Hand slipped off mag-well, fumbled the seat. Practice indexing on the draw stroke.
+          </div>
+          <span class="annot-when">Just now</span>
+        </div>
+
+        <div class="annot-row">
+          <span class="annot-num">05</span>
+          <div class="annot-where">
+            <span class="at">STAGE-WIDE</span>
+            <span class="ts flat">PB</span>
+          </div>
+          <div class="annot-note">
+            <span class="annot-tag positive">Positive</span>
+            Drove the gun cleanly stage-wide. Sight tracking felt locked in -- no recoil drift, no over-corrections.
+          </div>
+          <span class="annot-when">14 min ago</span>
+        </div>
+
+        <div class="annot-row">
+          <span class="annot-num">04</span>
+          <div class="annot-where">
+            <span class="at">SHOT 06</span>
+            <span class="ts">+3.45s</span>
+          </div>
+          <div class="annot-note">
+            <span class="annot-tag transition">Transition</span>
+            Over-swung from T2 to T3 -- decelerate earlier next time. Same pattern as the Bromma drill.
+          </div>
+          <span class="annot-when">28 min ago</span>
+        </div>
+
+        <div class="annot-row">
+          <span class="annot-num">02</span>
+          <div class="annot-where">
+            <span class="at">STAGE-WIDE</span>
+            <span class="ts flat">DRAW</span>
+          </div>
+          <div class="annot-note">
+            <span class="annot-tag draw">Draw</span>
+            Draw to first shot 1.34s -- still aiming for sub-1.20. Garment caught on the grip. Move beltline up half-inch.
+          </div>
+          <span class="annot-when">01 hr ago</span>
+        </div>
+
+        <div class="annot-add">
+          <span class="plus">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+          Add an annotation
+          <span class="hint">press <kbd>N</kbd> while watching a shot</span>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>
