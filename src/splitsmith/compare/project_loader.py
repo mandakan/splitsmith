@@ -1,4 +1,4 @@
-"""Load per-stage trim metadata from a single shooter's MatchProject."""
+"""Load per-stage trim metadata from a shooter -- legacy project or merged Match."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .. import fcpxml_gen
 from ..fcpxml_gen import VideoMetadata
+from ..match_model import Match, Shooter
 from ..ui.match_exports import _slugify
 from ..ui.project import MatchProject
 
@@ -42,11 +43,18 @@ class CompareStageBundle:
 
 @dataclass(frozen=True)
 class CompareShooterBundle:
-    """A shooter's project + the per-stage bundles ready for export."""
+    """A shooter's project + the per-stage bundles ready for export.
+
+    ``project`` is the legacy :class:`MatchProject` when this bundle came
+    from a single-shooter project; ``None`` when it came from a shooter
+    inside a merged :class:`splitsmith.match_model.Match`. The emitter
+    only reads ``label`` and ``stages_by_number``, so the optional field
+    is informational for callers that want to inspect it.
+    """
 
     label: str
     project_root: Path
-    project: MatchProject
+    project: MatchProject | None = None
     stages_by_number: dict[int, CompareStageBundle] = field(default_factory=dict)
 
 
@@ -113,5 +121,81 @@ def load_shooter(
         label=label,
         project_root=project_root,
         project=project,
+        stages_by_number=bundles,
+    )
+
+
+def _trim_path_for_shooter_stage(
+    shooter: Shooter,
+    shooter_root: Path,
+    stage_number: int,
+    stage_name: str,
+) -> Path:
+    """Same naming as :func:`trim_path_for_stage` but rooted at a shooter dir."""
+    base = f"stage{stage_number}_{_slugify(stage_name)}"
+    exports = (
+        Path(shooter.exports_dir).expanduser()
+        if shooter.exports_dir
+        else shooter_root / "exports"
+    )
+    if not exports.is_absolute():
+        exports = shooter_root / exports
+    return exports / f"{base}_trimmed.mp4"
+
+
+def load_shooter_from_match(
+    match_root: Path,
+    slug: str,
+    label: str,
+    *,
+    probe: ProbeFn | None = None,
+) -> CompareShooterBundle:
+    """Build a :class:`CompareShooterBundle` from one shooter inside a merged Match.
+
+    Stage definitions come from the match (shared across shooters); per-
+    stage data (time + videos) comes from the shooter. Same skip rules
+    as :func:`load_shooter`: a stage is omitted when it's marked skipped,
+    has no primary video with a beep time, or its lossless trim is
+    missing from the shooter's exports dir.
+    """
+    if probe is None:
+        probe = fcpxml_gen.probe_video
+    match = Match.load(match_root)
+    shooter = match.load_shooter(match_root, slug)
+    shooter_root = Match.shooter_root(match_root, slug)
+    # Stage name lookup from the match-level definitions.
+    stage_names: dict[int, str] = {s.stage_number: s.stage_name for s in match.stages}
+
+    bundles: dict[int, CompareStageBundle] = {}
+    for stage in shooter.stages:
+        if stage.skipped:
+            continue
+        primary = next((v for v in stage.videos if v.role == "primary"), None)
+        if primary is None or primary.beep_time is None:
+            continue
+        stage_name = stage_names.get(stage.stage_number, f"stage{stage.stage_number}")
+        trim = _trim_path_for_shooter_stage(
+            shooter, shooter_root, stage.stage_number, stage_name
+        )
+        if not trim.exists():
+            continue
+        meta = probe(trim)
+        bundles[stage.stage_number] = CompareStageBundle(
+            stage_number=stage.stage_number,
+            stage_name=stage_name,
+            trim_path=trim,
+            audit_path=shooter_root / "audit" / f"stage{stage.stage_number}.json",
+            beep_offset_in_clip=min(shooter.trim_pre_buffer_seconds, primary.beep_time),
+            duration_seconds=meta.duration_seconds,
+            width=meta.width,
+            height=meta.height,
+            frame_rate_num=meta.frame_rate_num,
+            frame_rate_den=meta.frame_rate_den,
+        )
+
+    return CompareShooterBundle(
+        label=label,
+        project_root=shooter_root,
+        project=None,
         stages_by_number=bundles,
     )

@@ -1,0 +1,723 @@
+"""Match-as-object data model (issue #320).
+
+A *match* is the persistence unit going forward. One physical IPSC match =
+one folder = one ``Match``. N shooters live as ``Shooter`` subdirectories
+under ``<match>/shooters/<slug>/``, each with their own raw/audio/audit/...
+trees. The match folder owns the shared stage definitions, scoreboard
+linkage, and match-date metadata.
+
+On-disk layout::
+
+    <match-root>/
+      match.json                        # Match: shared metadata + stage defs + shooter slugs
+      scoreboard/                       # shared scoreboard cache (if any)
+      shooters/
+        <slug>/
+          shooter.json                  # Shooter: name + scoreboard ids + per-stage data
+          raw/  audio/  trimmed/        # the heavy data, same as legacy projects
+          audit/  exports/  thumbs/
+          probes/  scoreboard/
+
+Legacy single-shooter projects (those with ``project.json`` at the root and
+no ``shooters/`` subdirectory) keep working unmodified. ``Match.load`` can
+adapt a legacy project to a one-shooter ``Match`` *in memory* via the
+:meth:`Match.from_legacy_project` shim -- no disk migration is forced.
+Physical consolidation happens via ``splitsmith match merge``.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, date, datetime
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from .config import StageRounds
+from .ui.project import (
+    PROJECT_FILE,
+    SUBDIRS,
+    MatchProject,
+    StageVideo,
+    atomic_write_json,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MATCH_FILE = "match.json"
+SHOOTER_FILE = "shooter.json"
+SHOOTERS_DIR = "shooters"
+MATCH_SUBDIRS = ("scoreboard",)
+SHOOTER_SUBDIRS = SUBDIRS  # raw / audio / trimmed / audit / exports / scoreboard / probes / thumbs
+
+#: Schema version for ``match.json`` and ``shooter.json``. Continues from
+#: the legacy MatchProject schema (which tops out at 2) so the version space
+#: is shared and "is this a redesign-era match or a legacy project?" can be
+#: answered from a single integer.
+MATCH_SCHEMA_VERSION = 3
+
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+
+class MatchStageDefinition(BaseModel):
+    """Stage as a property of the *match*: identity + rounds prior.
+
+    Per-shooter data (their time, their videos, their audit) lives on the
+    ``Shooter`` side. The fields here are the ones every shooter shares
+    because they describe the same physical stage.
+    """
+
+    stage_number: int
+    stage_name: str
+    stage_rounds: StageRounds | None = None
+    #: True when the stage was created before any scoreboard sync (manual
+    #: ingest of "I shot N stages, let me start now"). Mirrors the legacy
+    #: ``StageEntry.placeholder`` flag.
+    placeholder: bool = False
+
+
+class ShooterStageData(BaseModel):
+    """A single stage's per-shooter data.
+
+    Mirrors the legacy ``StageEntry`` minus the fields that have moved to
+    ``MatchStageDefinition``. ``time_seconds`` is per-shooter (each shooter
+    runs the stage at their own pace) so it belongs here, not on the match
+    stage definition.
+    """
+
+    stage_number: int  # FK into Match.stages
+    time_seconds: float = 0.0
+    time_seconds_manual: bool = False
+    scorecard_updated_at: datetime | None = None
+    skipped: bool = False
+    videos: list[StageVideo] = Field(default_factory=list)
+
+
+class Shooter(BaseModel):
+    """A shooter's data within a match (lives at ``<match>/shooters/<slug>/shooter.json``).
+
+    Slug is the directory name and the stable in-match identifier. The
+    full display name + scoreboard linkage live in the model so the SPA can
+    render rosters without round-tripping to the match.
+    """
+
+    schema_version: int = MATCH_SCHEMA_VERSION
+    slug: str
+    name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    selected_shooter_id: int | None = None
+    selected_competitor_id: int | None = None
+    stages: list[ShooterStageData] = Field(default_factory=list)
+    unassigned_videos: list[StageVideo] = Field(default_factory=list)
+    last_scanned_dir: str | None = None
+    # Per-shooter dir overrides. Resolved against the shooter root, not the
+    # match root, so a shooter can keep heavy intermediates off the project
+    # drive without affecting the rest of the match.
+    raw_dir: str | None = None
+    audio_dir: str | None = None
+    trimmed_dir: str | None = None
+    exports_dir: str | None = None
+    probes_dir: str | None = None
+    thumbs_dir: str | None = None
+    trim_pre_buffer_seconds: float = 5.0
+    trim_post_buffer_seconds: float = 5.0
+    trim_audit_encoder: str = "auto"
+    nudges_dismissed_stages: list[int] = Field(default_factory=list)
+
+    def stage(self, stage_number: int) -> ShooterStageData | None:
+        """Return this shooter's data for a stage, or ``None`` if absent."""
+        for s in self.stages:
+            if s.stage_number == stage_number:
+                return s
+        return None
+
+    @classmethod
+    def load(cls, shooter_root: Path) -> Shooter:
+        """Load shooter.json from ``shooter_root``. Raises FileNotFoundError if missing."""
+        path = shooter_root / SHOOTER_FILE
+        if not path.exists():
+            raise FileNotFoundError(f"no {SHOOTER_FILE} in {shooter_root}")
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls.model_validate(data)
+
+    def save(self, shooter_root: Path) -> None:
+        """Atomically persist this shooter to ``<shooter_root>/shooter.json``."""
+        self.updated_at = datetime.now(UTC)
+        atomic_write_json(shooter_root / SHOOTER_FILE, self.model_dump(mode="json"))
+
+
+class Match(BaseModel):
+    """Top-level on-disk match (lives at ``<match-root>/match.json``).
+
+    Holds the match identity, scoreboard linkage, shared stage definitions,
+    and the list of shooter slugs. Shooter heavy data is loaded lazily via
+    :meth:`load_shooter` so opening a 4-shooter match doesn't read 4x
+    everything up front.
+    """
+
+    schema_version: int = MATCH_SCHEMA_VERSION
+    name: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    scoreboard_match_id: str | None = None
+    scoreboard_content_type: int | None = None
+    match_date: date | None = None
+    stages: list[MatchStageDefinition] = Field(default_factory=list)
+    #: Ordered list of shooter slugs (= subdir names under ``shooters/``).
+    shooters: list[str] = Field(default_factory=list)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def init(cls, root: Path, *, name: str) -> Match:
+        """Create a fresh empty match at ``root``.
+
+        Idempotent: if ``match.json`` already exists, load and return it.
+        Subdirectories (``scoreboard/``, ``shooters/``) are created if
+        missing.
+        """
+        root.mkdir(parents=True, exist_ok=True)
+        for sub in MATCH_SUBDIRS:
+            (root / sub).mkdir(exist_ok=True)
+        (root / SHOOTERS_DIR).mkdir(exist_ok=True)
+        existing = root / MATCH_FILE
+        if existing.exists():
+            return cls.load(root)
+        match = cls(name=name)
+        match.save(root)
+        return match
+
+    @classmethod
+    def load(cls, root: Path) -> Match:
+        """Load ``match.json`` from ``root``.
+
+        Raises ``FileNotFoundError`` if ``root`` is neither a match folder
+        nor a legacy project folder. Use :meth:`is_match_folder` or
+        :meth:`from_path` to inspect a path without raising.
+        """
+        path = root / MATCH_FILE
+        if not path.exists():
+            raise FileNotFoundError(f"no {MATCH_FILE} in {root}")
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls.model_validate(data)
+
+    def save(self, root: Path) -> None:
+        """Atomically persist the match to ``<root>/match.json``."""
+        self.updated_at = datetime.now(UTC)
+        atomic_write_json(root / MATCH_FILE, self.model_dump(mode="json"))
+
+    # ------------------------------------------------------------------
+    # Path resolvers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def shooter_root(match_root: Path, slug: str) -> Path:
+        return match_root / SHOOTERS_DIR / slug
+
+    # ------------------------------------------------------------------
+    # Shooter access
+    # ------------------------------------------------------------------
+
+    def load_shooter(self, match_root: Path, slug: str) -> Shooter:
+        """Load a shooter's ``shooter.json`` by slug.
+
+        Raises ``KeyError`` if the slug isn't registered on this match,
+        ``FileNotFoundError`` if the directory exists but lacks
+        ``shooter.json``.
+        """
+        if slug not in self.shooters:
+            raise KeyError(f"no shooter {slug!r} in match {self.name!r}")
+        return Shooter.load(self.shooter_root(match_root, slug))
+
+    def add_shooter(
+        self,
+        match_root: Path,
+        shooter: Shooter,
+    ) -> None:
+        """Register a shooter on this match and persist their shooter.json.
+
+        Creates the shooter's subdirectory tree if missing. The shooter's
+        slug must be unique within the match; raises ``ValueError`` if it
+        collides with an existing slug.
+        """
+        if shooter.slug in self.shooters:
+            raise ValueError(
+                f"shooter slug {shooter.slug!r} already registered on match {self.name!r}"
+            )
+        shooter_root = self.shooter_root(match_root, shooter.slug)
+        shooter_root.mkdir(parents=True, exist_ok=True)
+        for sub in SHOOTER_SUBDIRS:
+            (shooter_root / sub).mkdir(exist_ok=True)
+        shooter.save(shooter_root)
+        self.shooters.append(shooter.slug)
+        self.save(match_root)
+
+    # ------------------------------------------------------------------
+    # Inspection helpers
+    # ------------------------------------------------------------------
+
+    def stage(self, stage_number: int) -> MatchStageDefinition:
+        """Return the stage definition for ``stage_number``. Raises KeyError."""
+        for s in self.stages:
+            if s.stage_number == stage_number:
+                return s
+        raise KeyError(f"no stage {stage_number} in match {self.name!r}")
+
+
+# ---------------------------------------------------------------------------
+# Path inspection + legacy adaptation
+# ---------------------------------------------------------------------------
+
+
+def is_match_folder(path: Path) -> bool:
+    """True if ``path`` has a ``match.json`` (redesign-era match)."""
+    return (path / MATCH_FILE).is_file()
+
+
+def is_legacy_project_folder(path: Path) -> bool:
+    """True if ``path`` has a ``project.json`` (legacy single-shooter project)."""
+    return (path / PROJECT_FILE).is_file()
+
+
+def from_path(path: Path) -> tuple[str, Path]:
+    """Classify a path as ``"match"`` or ``"legacy"`` and return both.
+
+    Returns ``("match", path)`` for a redesign-era match folder,
+    ``("legacy", path)`` for a legacy single-shooter project folder.
+    Raises ``FileNotFoundError`` if ``path`` is neither.
+    """
+    if is_match_folder(path):
+        return "match", path
+    if is_legacy_project_folder(path):
+        return "legacy", path
+    raise FileNotFoundError(
+        f"{path} has neither {MATCH_FILE} nor {PROJECT_FILE}; not a splitsmith project"
+    )
+
+
+def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
+    """Adapt a legacy ``MatchProject`` into ``(Match, Shooter)`` in memory.
+
+    No disk writes. The legacy project is rendered as a one-shooter match
+    so call sites that expect the new model can consume it without
+    forcing the user to migrate. The shooter slug defaults to a kebab-cased
+    competitor name (or ``"unknown"`` when ``competitor_name`` is empty).
+
+    Used by:
+      - ``splitsmith compare export`` to read merged matches and legacy
+        projects through one code path
+      - the FastAPI endpoint refactor (#321) when it lands, so the SPA can
+        speak the new URL space even against legacy projects on disk
+    """
+    slug = slugify(project.competitor_name or "unknown")
+    match = Match(
+        name=project.name,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        scoreboard_match_id=project.scoreboard_match_id,
+        scoreboard_content_type=project.scoreboard_content_type,
+        match_date=project.match_date,
+        stages=[
+            MatchStageDefinition(
+                stage_number=s.stage_number,
+                stage_name=s.stage_name,
+                stage_rounds=s.stage_rounds,
+                placeholder=s.placeholder,
+            )
+            for s in project.stages
+        ],
+        shooters=[slug],
+    )
+    shooter = Shooter(
+        slug=slug,
+        name=project.competitor_name or "Unknown shooter",
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        selected_shooter_id=project.selected_shooter_id,
+        selected_competitor_id=project.selected_competitor_id,
+        stages=[
+            ShooterStageData(
+                stage_number=s.stage_number,
+                time_seconds=s.time_seconds,
+                time_seconds_manual=s.time_seconds_manual,
+                scorecard_updated_at=s.scorecard_updated_at,
+                skipped=s.skipped,
+                videos=list(s.videos),
+            )
+            for s in project.stages
+        ],
+        unassigned_videos=list(project.unassigned_videos),
+        last_scanned_dir=project.last_scanned_dir,
+        raw_dir=project.raw_dir,
+        audio_dir=project.audio_dir,
+        trimmed_dir=project.trimmed_dir,
+        exports_dir=project.exports_dir,
+        probes_dir=project.probes_dir,
+        thumbs_dir=project.thumbs_dir,
+        trim_pre_buffer_seconds=project.trim_pre_buffer_seconds,
+        trim_post_buffer_seconds=project.trim_post_buffer_seconds,
+        trim_audit_encoder=project.trim_audit_encoder,
+        nudges_dismissed_stages=list(project.nudges_dismissed_stages),
+    )
+    return match, shooter
+
+
+# ---------------------------------------------------------------------------
+# Slug helpers
+# ---------------------------------------------------------------------------
+
+
+def slugify(name: str) -> str:
+    """Kebab-case a name for use as a shooter slug.
+
+    Strips accents, keeps ``[a-z0-9]``, collapses runs of separators to a
+    single dash. Falls back to ``"shooter"`` for empty/garbage input.
+    """
+    import unicodedata
+    import re
+
+    normalized = unicodedata.normalize("NFKD", name)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    lower = ascii_only.lower()
+    slugged = re.sub(r"[^a-z0-9]+", "-", lower).strip("-")
+    return slugged or "shooter"
+
+
+def disambiguate_slug(slug: str, taken: set[str]) -> str:
+    """Append a numeric suffix to ``slug`` until it doesn't collide with ``taken``."""
+    if slug not in taken:
+        return slug
+    n = 2
+    while f"{slug}-{n}" in taken:
+        n += 1
+    return f"{slug}-{n}"
+
+
+# ---------------------------------------------------------------------------
+# Merge planning
+# ---------------------------------------------------------------------------
+
+
+class MergeConflictError(Exception):
+    """Raised when input projects can't be merged into a single match safely."""
+
+
+class MergePlan(BaseModel):
+    """Description of a planned merge.
+
+    Returned by :func:`plan_merge` so callers (the CLI ``--dry-run`` flag,
+    the future GUI wizard, tests) can inspect what *would* happen without
+    executing. Each shooter entry records the source project path, the
+    proposed slug, and the destination subdirectory.
+    """
+
+    output_root: Path
+    name: str
+    scoreboard_match_id: str | None
+    scoreboard_content_type: int | None
+    match_date: date | None
+    stages: list[MatchStageDefinition]
+    shooter_moves: list["ShooterMove"]
+
+
+class ShooterMove(BaseModel):
+    """One source project -> shooter slot in the merged match."""
+
+    source_root: Path
+    slug: str
+    destination_root: Path
+    competitor_name: str
+
+
+def plan_merge(
+    inputs: list[Path],
+    output_root: Path,
+    *,
+    name: str | None = None,
+) -> MergePlan:
+    """Validate inputs and produce a ``MergePlan``.
+
+    All inputs must be legacy single-shooter project folders (``project.json``
+    present). They must share ``scoreboard_match_id`` when set; if unset on
+    every input, ``name`` must be passed explicitly so the merged match has
+    a well-defined identity.
+
+    Stage definitions across inputs must be consistent: same stages with
+    same names + same ``stage_rounds``. Diverging values raise
+    :class:`MergeConflictError` -- the user should reconcile by editing
+    the source projects before retrying.
+
+    No filesystem changes are performed.
+    """
+    if not inputs:
+        raise ValueError("plan_merge requires at least one input project")
+
+    projects: list[tuple[Path, MatchProject]] = []
+    for src in inputs:
+        if not is_legacy_project_folder(src):
+            raise MergeConflictError(
+                f"{src} is not a legacy single-shooter project (no {PROJECT_FILE})"
+            )
+        projects.append((src, MatchProject.load(src)))
+
+    # Validate identity.
+    scoreboard_ids = {p.scoreboard_match_id for _, p in projects if p.scoreboard_match_id}
+    if len(scoreboard_ids) > 1:
+        raise MergeConflictError(
+            f"inputs disagree on scoreboard_match_id: {sorted(scoreboard_ids)}"
+        )
+    sb_id = next(iter(scoreboard_ids), None)
+
+    content_types = {p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None}
+    if len(content_types) > 1:
+        raise MergeConflictError(
+            f"inputs disagree on scoreboard_content_type: {sorted(content_types)}"
+        )
+    sb_ct = next(iter(content_types), None)
+
+    names = {p.name for _, p in projects}
+    if name is None:
+        if len(names) > 1:
+            raise MergeConflictError(
+                f"inputs have different names {sorted(names)}; pass --name explicitly"
+            )
+        name = next(iter(names))
+
+    dates = {p.match_date for _, p in projects if p.match_date}
+    if len(dates) > 1:
+        raise MergeConflictError(
+            f"inputs disagree on match_date: {sorted(str(d) for d in dates)}"
+        )
+    match_date = next(iter(dates), None)
+
+    # Merge stage definitions.
+    stages_by_number: dict[int, MatchStageDefinition] = {}
+    for src, proj in projects:
+        for s in proj.stages:
+            existing = stages_by_number.get(s.stage_number)
+            candidate = MatchStageDefinition(
+                stage_number=s.stage_number,
+                stage_name=s.stage_name,
+                stage_rounds=s.stage_rounds,
+                placeholder=s.placeholder,
+            )
+            if existing is None:
+                stages_by_number[s.stage_number] = candidate
+                continue
+            # An already-merged stage exists; reconcile.
+            if existing.stage_name != candidate.stage_name:
+                # Tolerate placeholder names ("Stage 1") losing to real ones.
+                if existing.placeholder and not candidate.placeholder:
+                    stages_by_number[s.stage_number] = candidate
+                    continue
+                if candidate.placeholder and not existing.placeholder:
+                    continue
+                raise MergeConflictError(
+                    f"stage {s.stage_number}: name disagreement "
+                    f"{existing.stage_name!r} vs {candidate.stage_name!r} (in {src})"
+                )
+            if (
+                existing.stage_rounds is not None
+                and candidate.stage_rounds is not None
+                and existing.stage_rounds != candidate.stage_rounds
+            ):
+                raise MergeConflictError(
+                    f"stage {s.stage_number}: stage_rounds disagreement (in {src})"
+                )
+            # Prefer the one that has stage_rounds populated.
+            if existing.stage_rounds is None and candidate.stage_rounds is not None:
+                stages_by_number[s.stage_number] = candidate
+
+    stage_defs = [stages_by_number[k] for k in sorted(stages_by_number)]
+
+    # Assign slugs (kebab-cased competitor names, disambiguated on collision).
+    taken: set[str] = set()
+    moves: list[ShooterMove] = []
+    for src, proj in projects:
+        base = slugify(proj.competitor_name or src.name)
+        slug = disambiguate_slug(base, taken)
+        taken.add(slug)
+        moves.append(
+            ShooterMove(
+                source_root=src,
+                slug=slug,
+                destination_root=Match.shooter_root(output_root, slug),
+                competitor_name=proj.competitor_name or "Unknown shooter",
+            )
+        )
+
+    return MergePlan(
+        output_root=output_root,
+        name=name,
+        scoreboard_match_id=sb_id,
+        scoreboard_content_type=sb_ct,
+        match_date=match_date,
+        stages=stage_defs,
+        shooter_moves=moves,
+    )
+
+
+def execute_merge(
+    plan: MergePlan,
+    *,
+    move: bool = False,
+) -> Match:
+    """Execute a :class:`MergePlan` on disk.
+
+    Creates ``<output_root>/match.json`` + ``shooters/<slug>/`` for each
+    shooter. Copies (default) or moves (``move=True``) the per-shooter
+    heavy data from each source project into the destination subdir, and
+    writes the resulting ``shooter.json`` with redundant match-level fields
+    stripped.
+
+    Returns the freshly-created :class:`Match`. Idempotent guard: if
+    ``output_root`` already contains a ``match.json``, raises
+    ``FileExistsError`` -- the caller should pick a fresh path or remove
+    the existing match folder manually.
+    """
+    import shutil
+
+    if (plan.output_root / MATCH_FILE).exists():
+        raise FileExistsError(
+            f"{plan.output_root} already contains {MATCH_FILE}; refusing to overwrite"
+        )
+
+    plan.output_root.mkdir(parents=True, exist_ok=True)
+    for sub in MATCH_SUBDIRS:
+        (plan.output_root / sub).mkdir(exist_ok=True)
+    (plan.output_root / SHOOTERS_DIR).mkdir(exist_ok=True)
+
+    # Materialize each shooter.
+    for mv in plan.shooter_moves:
+        src = mv.source_root
+        dst = mv.destination_root
+        if dst.exists():
+            raise FileExistsError(f"{dst} already exists; refusing to overwrite")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
+        op = shutil.move if move else _copytree
+        op(src, dst)
+
+        # Rename project.json -> shooter.json and strip match-level fields.
+        legacy_project = MatchProject.load(dst)
+        match_view, shooter_view = legacy_to_match_view(legacy_project)
+        shooter_view.slug = mv.slug
+        shooter_view.save(dst)
+        # The original project.json is now redundant; remove it.
+        legacy_path = dst / PROJECT_FILE
+        if legacy_path.exists():
+            legacy_path.unlink()
+
+        # Note: any pre-existing scoreboard cache stays under the shooter's
+        # scoreboard/ subdir. The match-level scoreboard/ at the top is
+        # reserved for future shared caches; today it stays empty.
+        logger.info(
+            "merge: %s -> %s (%s)", src, dst, "moved" if move else "copied"
+        )
+
+    # Write the match.json last, after every shooter dir is in place, so a
+    # crashed merge leaves either no match.json (nothing committed) or a
+    # valid match.json with every shooter ready (full commit). Either state
+    # is safe to retry against.
+    match = Match(
+        name=plan.name,
+        scoreboard_match_id=plan.scoreboard_match_id,
+        scoreboard_content_type=plan.scoreboard_content_type,
+        match_date=plan.match_date,
+        stages=plan.stages,
+        shooters=[mv.slug for mv in plan.shooter_moves],
+    )
+    match.save(plan.output_root)
+    return match
+
+
+def _copytree(src: Path, dst: Path) -> None:
+    """Copy a directory tree preserving symlinks (raw/ holds them).
+
+    Wraps :func:`shutil.copytree` with ``symlinks=True``. We keep the raw
+    symlinks intact rather than dereferencing them, otherwise a merge would
+    duplicate every gigabyte of source video into the destination.
+    """
+    import shutil
+
+    shutil.copytree(src, dst, symlinks=True)
+
+
+# ---------------------------------------------------------------------------
+# Convenience: anything-shooter loader for code that wants a uniform API.
+# ---------------------------------------------------------------------------
+
+
+def load_match_or_legacy(
+    path: Path,
+) -> tuple[Match, dict[str, Path]]:
+    """Load a path as a Match + mapping of shooter slug -> shooter_root.
+
+    Works for both layouts:
+      - Redesign-era match folder: reads ``match.json`` and the
+        ``shooters/<slug>/`` directory listing.
+      - Legacy single-shooter project: returns a one-shooter Match view
+        via :func:`legacy_to_match_view`; the shooter "root" is the
+        project path itself (where ``project.json`` and the heavy dirs
+        live), with the legacy ``project.json`` still authoritative for
+        the per-shooter data.
+
+    Callers that need the full ``Shooter`` model should use
+    :meth:`Match.load_shooter` (redesign-era) or
+    :func:`legacy_to_match_view` (legacy) directly.
+    """
+    kind, root = from_path(path)
+    if kind == "match":
+        match = Match.load(root)
+        roots: dict[str, Path] = {
+            slug: Match.shooter_root(root, slug) for slug in match.shooters
+        }
+        return match, roots
+    # legacy
+    project = MatchProject.load(root)
+    match, shooter = legacy_to_match_view(project)
+    return match, {shooter.slug: root}
+
+
+__all__ = [
+    "MATCH_FILE",
+    "MATCH_SCHEMA_VERSION",
+    "SHOOTERS_DIR",
+    "SHOOTER_FILE",
+    "Match",
+    "MatchStageDefinition",
+    "MergeConflictError",
+    "MergePlan",
+    "Shooter",
+    "ShooterMove",
+    "ShooterStageData",
+    "disambiguate_slug",
+    "execute_merge",
+    "from_path",
+    "is_legacy_project_folder",
+    "is_match_folder",
+    "legacy_to_match_view",
+    "load_match_or_legacy",
+    "plan_merge",
+    "slugify",
+]
+
+
+# Silence Pyright for module-level `Any` import we don't use; keep for forward refs.
+_ = Any

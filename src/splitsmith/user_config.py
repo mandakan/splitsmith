@@ -70,6 +70,12 @@ class RecentProject(BaseModel):
     path: str
     name: str
     last_opened_at: datetime
+    # Layout the path resolves to. ``"match"`` = redesign-era match folder
+    # (has ``match.json`` at the root, multi-shooter capable). ``"legacy"``
+    # = single-shooter project (has ``project.json``). ``None`` covers
+    # entries written before this field existed; the picker resolves them
+    # at open time. Issue #320.
+    kind: str | None = None
 
 
 class ProjectsIndex(BaseModel):
@@ -227,13 +233,18 @@ def _save_projects_index(index: ProjectsIndex) -> None:
         logger.warning("Could not write %s: %s", PROJECTS_FILENAME, exc)
 
 
-def record_project_open(path: Path, name: str) -> None:
+def record_project_open(path: Path, name: str, *, kind: str | None = None) -> None:
     """Append or refresh a project entry in ``projects.json``.
 
     Resolves ``path`` so two opens of the same project via different
     relative paths collapse to one entry. Moves the entry to the front
     of the list and trims to ``RECENT_PROJECTS_LIMIT``. No-op if the
     user-config directory is disabled or unwritable.
+
+    ``kind`` records the layout at write time: ``"match"`` for a
+    redesign-era match folder, ``"legacy"`` for a single-shooter
+    project, ``None`` to leave the field unset (the picker resolves
+    on open). Issue #320 -- new merges should pass ``kind="match"``.
     """
     if is_disabled():
         return
@@ -241,7 +252,10 @@ def record_project_open(path: Path, name: str) -> None:
     now = datetime.now(UTC)
     index = _load_projects_index()
     remaining = [p for p in index.projects if p.path != resolved]
-    updated = [RecentProject(path=resolved, name=name, last_opened_at=now), *remaining]
+    updated = [
+        RecentProject(path=resolved, name=name, last_opened_at=now, kind=kind),
+        *remaining,
+    ]
     if len(updated) > RECENT_PROJECTS_LIMIT:
         updated = updated[:RECENT_PROJECTS_LIMIT]
     index.projects = updated
