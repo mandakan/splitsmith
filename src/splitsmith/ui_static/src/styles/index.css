@@ -338,7 +338,11 @@
  *   - Small accent dots / 1-2px hairlines / focus rings (those keep #FF2D2D)
  *   - Hollow LED-border buttons (already high contrast)
  * ========================================================================== */
-@layer components {
+/* @layer utilities (NOT components) so these styles win over the base
+ * Button's `bg-primary` / `text-primary-foreground` / etc. utility classes.
+ * Originally placed in @layer components which lost the cascade and the
+ * filled CTAs kept rendering bright LED red + condensed black Antonio. */
+@layer utilities {
   .btn-led-fill {
     background: var(--color-led-fill);
     color: var(--color-ink);

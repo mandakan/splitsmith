@@ -21,7 +21,7 @@ interface ModeSwitchProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function ModeSwitch({ size = "md", className, ...props }: ModeSwitchProps) {
   const { mode, setMode } = useMode();
-  const padX = size === "sm" ? "px-3" : "px-4";
+  const padX = size === "sm" ? "px-3.5" : "px-4";
   const height = size === "sm" ? "h-7" : "h-9";
 
   return (
@@ -44,13 +44,32 @@ export function ModeSwitch({ size = "md", className, ...props }: ModeSwitchProps
             aria-checked={active}
             onClick={() => setMode(opt.value)}
             className={cn(
-              "inline-flex items-center justify-center rounded-full font-display text-xs font-semibold uppercase tracking-[0.14em] transition-colors",
+              // Geist medium uppercase (NOT condensed Antonio) at 12px
+              // for active + 11px for inactive. Pairs with the deeper
+              // accent fill below so cream text reaches readable
+              // contrast even under colorblindness simulation.
+              "inline-flex items-center justify-center rounded-full font-sans font-semibold uppercase tracking-[0.08em] transition-colors",
               height,
               padX,
               active
-                ? "bg-[color:var(--color-accent-mode)] text-bg shadow-[0_0_12px_var(--color-accent-mode-glow)]"
-                : "text-muted hover:text-ink",
+                ? "text-[0.75rem] text-ink shadow-[0_0_12px_var(--color-accent-mode-glow)]"
+                : "text-[0.6875rem] text-muted hover:text-ink",
             )}
+            style={
+              active
+                ? {
+                    // Deeper red (#DC2626) in match mode, deeper cyan
+                    // (#0891B2) in dev mode, so cream text pops. We
+                    // inline the per-mode value because there's no
+                    // --color-accent-mode-fill token yet -- if it
+                    // becomes a pattern we'll promote it.
+                    background:
+                      mode === "developer"
+                        ? "#0891B2"
+                        : "var(--color-led-fill)",
+                  }
+                : undefined
+            }
           >
             {opt.label}
           </button>
