@@ -201,6 +201,99 @@ IA work or a code audit should resolve them:
   ensemble development. The IA should not over-optimize for a frequency
   that will fall once the detector stabilizes.
 
+## Jobs surfaced during implementation (2026-05-15 addendum)
+
+These jobs were not in the original JTBD set but emerged as real during
+the redesign implementation (#319 -- #332). They are listed here so the
+catalog stays exhaustive; some are direct consequences of accepting the
+"match as the central object" architectural change, others surfaced when
+turning IA principles into shipped surfaces.
+
+### A. Legacy-to-match upgrade
+
+**When** I have one or more single-shooter projects from before the
+redesign, **I want to** consolidate them into one match folder without
+editing JSON or moving files by hand, **so I can** adopt the new layout
+without abandoning audited work.
+
+Implied by job #3 but never explicit. Addressed by `splitsmith match
+merge` (CLI) and the `/pick/merge` wizard. The wizard validates
+scoreboard + stage agreement before writing; conflicts abort with a
+specific message so the user reconciles at the source.
+
+Frequency: one-shot per pre-redesign project. Pain today: med (without
+this, "move to new layout" was an undocumented filesystem operation).
+
+### B. Add a shooter to an existing match
+
+**When** a squadmate filmed their run with their own camera and I want
+to incorporate it into my match, **I want to** add them to an existing
+match folder as a new shooter, **so I can** grow the match's coverage
+without recreating it.
+
+Was a hard implication of "one match, N shooters" but never written as
+a job. Addressed by the Shooters management page + `POST
+/api/match/shooters`.
+
+Frequency: per-match when multi-shooter coverage is the norm. Pain
+today: high without this; would force the user to merge again.
+
+### C. Cross-shooter beep verification queue
+
+**When** I have N shooters audited on the same match, **I want to** walk
+through every per-shooter per-stage beep in one queue with status dots
+and keyboard advance, **so I can** confirm sync across cameras and
+shooters without bouncing between stages.
+
+Surfaced from the data model: with one match holding many shooters, the
+per-shooter beep work is now a queue, not a stage step. Addressed by
+`/beep-review`.
+
+Frequency: per-match. Pain today: med (the per-stage flow still works,
+but doesn't show the user how much is left across the whole match).
+
+### D. Mode separation as a UX feature, not just a constraint
+
+**When** I am working on a match, **I want** developer-mode surfaces
+hidden from the chrome, **so I can** focus on shooter work without
+visual or accidental-click overlap. Conversely, when I am tuning the
+detector, **I want** match-mode surfaces hidden so the dev chrome
+(workflow stepper, model chip, cyan accent) is the only thing I see.
+
+Listed as an IA principle in the original doc; realized as a shipped
+feature in #319 + #331. The mode toggle is global, persistent, and
+flips the accent token from LED red to cyan.
+
+### E. Coach playhead auto-sync
+
+**When** I am reviewing a stage on the Coach page with the video
+playing, **I want** the active-shot panel, shot ruler, and per-shot
+list to advance with the playhead, **so I can** review without manually
+re-clicking the right shot on every transition.
+
+Was implied by job #6 but the auto-advance behavior is a job in its
+own right. Without it the per-stage Coach was a click-to-seek
+interface; with it the coach can simply let the stage play and watch
+the analysis follow.
+
+Frequency: per Coach session. Pain today: high before the fix (shipped
+2026-05-15).
+
+### Updates to existing jobs
+
+- **#3 Multi-shooter compare in UI** -- shipped (#328). Move from "high
+  pain, missing" to "shipped; iterate".
+- **#10 Review + tag fixtures** -- shipped under `/dev/review` (#331).
+  Inbox surfaces match-mode promotions. Move from "high pain, stitched
+  together" to "shipped; observe usage before iterating".
+- **#11 Validate shipped detector** -- shipped under `/dev/validate`
+  with per-shooter holdout as the centerpiece (#331). The holdout
+  pattern beats the older 5-fold-CV pattern -- holdout is the default.
+- **#12 Retrain ensemble** -- shipped under `/dev/retrain`. Promote /
+  rollback / save-as-candidate controls are present-but-disabled
+  pending multi-version artifact storage; this is documented in the
+  surface so it isn't faking state.
+
 ## Process notes
 
 - Job discovery was iterative: a seeded candidate list, refined into JTBD

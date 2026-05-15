@@ -63,20 +63,71 @@ If we add a second theme (light mode, high-contrast mode), the token
 --color-subtle:       #6B7079;
 --color-whisper:      #4B5058;
 
-/* Brand (chronograph LED) */
+/* Brand (chronograph LED).
+ *
+ * --color-led        identity/accent: dots, focus rings, brand mark,
+ *                    hairlines, glow halos. Saturated, instrument-grade.
+ * --color-led-soft   hover-up for accents.
+ * --color-led-deep   hover-down + heavy fills (rare).
+ * --color-led-fill   filled-button + active-tab background. Slightly
+ *                    darker than --color-led so cream text reaches
+ *                    readable contrast under colorblindness.
+ * --color-led-glow   30% red halo for glows + text shadows.
+ * --color-led-tint   10% red tint for subtle backgrounds.
+ */
 --color-led:          #FF2D2D;
 --color-led-soft:     #FF5555;
 --color-led-deep:     #B91C1C;
+--color-led-fill:     #DC2626;
 --color-led-glow:     rgba(255, 45, 45, 0.30);
 --color-led-tint:     rgba(255, 45, 45, 0.10);
 
 /* Status */
 --color-live:         #FBBF24;
 --color-live-glow:    rgba(251, 191, 36, 0.30);
+--color-live-tint:    rgba(251, 191, 36, 0.10);
 --color-done:         #4ADE80;
 --color-done-glow:    rgba(74, 222, 128, 0.30);
+--color-done-tint:    rgba(74, 222, 128, 0.10);
 --color-cold:         #6B7079;
+--color-beep:         #06B6D4;
+--color-beep-glow:    rgba(6, 182, 212, 0.30);
+--color-beep-tint:    rgba(6, 182, 212, 0.10);
+--color-manual:       #A78BFA;
+--color-manual-glow:  rgba(167, 139, 250, 0.30);
+--color-manual-tint:  rgba(167, 139, 250, 0.10);
+
+/* Aliases for status-tinted surfaces (FolderPicker, in-window cues). */
+--color-status-info:        #06B6D4;       /* beep cyan */
+--color-status-not-started: #6B7079;
+--color-status-in-progress: #FBBF24;
+--color-status-complete:    #4ADE80;
+--color-status-warning:     #FBBF24;
 ```
+
+### 1.2.2 Mode-aware accent
+
+The app has two modes (Match / Developer). Surfaces that want to follow
+the active mode read three resolved tokens whose values flip via a
+`data-mode` attribute on the document root:
+
+```
+:root {
+  --color-accent-mode:      var(--color-led);
+  --color-accent-mode-glow: var(--color-led-glow);
+  --color-accent-mode-tint: var(--color-led-tint);
+}
+[data-mode="developer"] {
+  --color-accent-mode:      var(--color-beep);
+  --color-accent-mode-glow: var(--color-beep-glow);
+  --color-accent-mode-tint: var(--color-beep-tint);
+}
+```
+
+The global focus ring + the small-caps Kicker label read
+`--color-accent-mode` so they switch tone automatically. Surfaces that
+should NOT follow the mode (the brand mark, primary CTAs in match mode)
+read `--color-led` directly.
 
 Every token here has been spot-checked for AA contrast against its
 intended background in `05-accessibility.md`. New tokens must clear
@@ -91,34 +142,39 @@ management). The user (Mathias / MA) always uses the LED-red family
 because they are "you". The other three intentionally overlap with
 the live/done semantic colors so the same scale renders consistently:
 
+Token names in production use the full `--color-shooter-*` prefix (the
+earlier `--c-*` shorthand was renamed when these landed in `theme.css`
+so they sit alongside the other `--color-*` tokens and Tailwind 4 can
+expose them as `bg-shooter-ma` etc):
+
 ```
 /* MA -- LED red (you / audio source) */
---c-ma:       #FF2D2D;            /* matches --led */
---c-ma-soft:  #FF5555;
---c-ma-deep:  #B91C1C;
---c-ma-glow:  rgba(255, 45, 45, 0.32);
---c-ma-tint:  rgba(255, 45, 45, 0.10);
+--color-shooter-ma:       #FF2D2D;            /* matches --color-led */
+--color-shooter-ma-soft:  #FF5555;
+--color-shooter-ma-deep:  #B91C1C;
+--color-shooter-ma-glow:  rgba(255, 45, 45, 0.32);
+--color-shooter-ma-tint:  rgba(255, 45, 45, 0.10);
 
 /* JL -- amber */
---c-jl:       #FBBF24;            /* matches --live */
---c-jl-soft:  #FCD34D;
---c-jl-deep:  #B45309;
---c-jl-glow:  rgba(251, 191, 36, 0.32);
---c-jl-tint:  rgba(251, 191, 36, 0.10);
+--color-shooter-jl:       #FBBF24;            /* matches --color-live */
+--color-shooter-jl-soft:  #FCD34D;
+--color-shooter-jl-deep:  #B45309;
+--color-shooter-jl-glow:  rgba(251, 191, 36, 0.32);
+--color-shooter-jl-tint:  rgba(251, 191, 36, 0.10);
 
 /* PE -- green (leader-coded) */
---c-pe:       #4ADE80;            /* matches --done */
---c-pe-soft:  #86EFAC;
---c-pe-deep:  #166534;
---c-pe-glow:  rgba(74, 222, 128, 0.32);
---c-pe-tint:  rgba(74, 222, 128, 0.10);
+--color-shooter-pe:       #4ADE80;            /* matches --color-done */
+--color-shooter-pe-soft:  #86EFAC;
+--color-shooter-pe-deep:  #166534;
+--color-shooter-pe-glow:  rgba(74, 222, 128, 0.32);
+--color-shooter-pe-tint:  rgba(74, 222, 128, 0.10);
 
 /* RJ -- blue (new addition for 4th-shooter slot) */
---c-rj:       #60A5FA;
---c-rj-soft:  #93C5FD;
---c-rj-deep:  #1E3A8A;
---c-rj-glow:  rgba(96, 165, 250, 0.32);
---c-rj-tint:  rgba(96, 165, 250, 0.10);
+--color-shooter-rj:       #60A5FA;
+--color-shooter-rj-soft:  #93C5FD;
+--color-shooter-rj-deep:  #1E3A8A;
+--color-shooter-rj-glow:  rgba(96, 165, 250, 0.32);
+--color-shooter-rj-tint:  rgba(96, 165, 250, 0.10);
 ```
 
 In production, shooter color assignment should be generated from a
@@ -310,6 +366,79 @@ defined when those surfaces are polished.
   format
 - **`Checkbox`**, **`Toggle`**
 
+### 2.6 Filled-LED surfaces (contrast recipe)
+
+A specific class of surface caused recurring contrast pain: saturated
+`#FF2D2D` red filled with condensed Antonio black text. The math
+(5.65:1) cleared AA, but the saturated red shimmer + condensed
+letterforms produced uncomfortable reading -- especially for
+deuteranopia and aging vision.
+
+The fixed pattern, captured as three utility classes in `theme.css`:
+
+```css
+@layer utilities {
+  .btn-led-fill {
+    background:     var(--color-led-fill);   /* #DC2626, not #FF2D2D */
+    color:          var(--color-ink);        /* cream, not near-black */
+    font-family:    var(--font-display);     /* Antonio preserved */
+    font-size:      0.875rem;                /* 14px, up from 11px */
+    font-weight:    700;                     /* bold, up from semibold */
+    letter-spacing: 0.06em;                  /* tighter than before */
+    text-transform: uppercase;
+    text-shadow:    0 0 6px rgba(0, 0, 0, 0.18);
+    box-shadow:
+      0 0 0 1px var(--color-led-fill),
+      0 0 18px var(--color-led-glow);
+  }
+  .tab-pill-led-fill { /* same recipe at 13px for tab pills */ }
+  .badge-led-fill    { /* same color pair for mono-numeral badges */ }
+  .link-led-fill {
+    /* Antonio red link on dark bg -- e.g. "Manage shooters ->".
+     * Bold + 14px + LED-red text-shadow halo so the strokes pick up
+     * optical bloom and read confidently. */
+    font-family:    var(--font-display);
+    font-size:      0.875rem;
+    font-weight:    700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color:          var(--color-led);
+    text-shadow:
+      0 0 8px rgba(255, 45, 45, 0.35),
+      0 0 1px rgba(255, 45, 45, 0.6);
+  }
+}
+```
+
+**The four dials that compound:**
+
+1. `--color-led-fill` (#DC2626) instead of `--color-led` (#FF2D2D) so
+   cream text reaches readable contrast.
+2. `--color-ink` cream instead of near-black text.
+3. Antonio **bold** 14px, not semibold 11px -- thicker verticals + more
+   colored pixel mass per glyph.
+4. A subtle text-shadow halo (dark on filled red, LED-red bloom on
+   red-on-dark links) that mimics the brand-mark glow already used on
+   the brand mark and focus rings.
+
+**Antonio stays.** The contrast win is in the dials, not in switching
+typeface. The Shot Timer aesthetic depends on Antonio.
+
+**Apply to:** filled primary CTAs (`+ NEW MATCH`, `SAVE & NEXT`,
+`PROMOTE TO SHIPPED`), active tab pills (Audit / Compare / Coach),
+"next-up" stage badge in the MatchShell sidebar, the ModeSwitch active
+toggle, P1-priority numeral tiles, and any inline red link on dark bg
+(`Manage shooters ->`).
+
+**Do NOT apply to:** small accent dots, 1-2px hairlines, focus rings,
+the brand mark -- those keep `#FF2D2D` because the saturation is what
+gives the instrument-panel feel at small sizes.
+
+A side-by-side ideation with deuteranopia + tritanopia + low-vision
+simulation toggles lives at
+`docs/ux-redesign/explorations/contrast-options.html` and
+`docs/ux-redesign/explorations/red-link-contrast.html`.
+
 ## 3. Tailwind 4 integration
 
 Tailwind 4 reads CSS variables in an `@theme` block and generates
@@ -446,6 +575,37 @@ doc as they land.
   React port and the polished file diverge, the polished file is the
   reviewer's reference -- the React must match it or the polished file
   is updated and re-reviewed.
+- **Cascade-layer hygiene.** Custom utility classes that need to
+  override Tailwind base utilities (e.g. `.btn-led-fill` overriding
+  `bg-primary` from the shadcn-style Button variants) MUST live in
+  `@layer utilities`, not `@layer components`. Tailwind v4 puts
+  `utilities` after `components` in the cascade, so a class declared
+  in components loses to any colliding utility (same single-class
+  specificity, source order wins). Verify by grepping the built CSS:
+  the custom selector should appear AFTER the conflicting utility in
+  `dist/assets/index-*.css`.
+- **Verify token references after renames.** Bare `var(--foo)` refs in
+  inline `style={}` or arbitrary-value classes (`bg-[color:var(--foo)]`)
+  do NOT fail loudly when the variable is missing -- the property
+  silently falls back to transparent / inherit / browser default, and
+  the surface renders "dim" or "wrong colour but plausible". After any
+  token rename, run:
+  ```bash
+  grep -rohE "var\(--[a-z][a-z0-9-]+\)" src/splitsmith/ui_static/src \
+    --include='*.ts' --include='*.tsx' --include='*.css' | sort -u | \
+    while read ref; do
+      name=$(echo "$ref" | sed -E 's/var\(([^)]+)\)/\1/')
+      grep -qE "^\s*${name}:" src/splitsmith/ui_static/src/styles/index.css \
+        || echo "MISSING: $name"
+    done
+  ```
+- **Visual verification is non-negotiable for aesthetic fixes.**
+  Typecheck + build + tests passing don't catch CSS cascade bugs.
+  Before declaring a contrast/colour change shipped, reload the app in
+  a browser and confirm the change is visible. Twice during this
+  redesign a cascade-layer + token-rename combo produced "fix doesn't
+  apply" regressions that landed on main because we only checked the
+  source change, not the rendered output.
 
 ## 6. Open questions
 

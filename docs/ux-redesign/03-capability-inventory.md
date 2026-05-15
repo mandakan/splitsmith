@@ -18,13 +18,33 @@ Markers:
 
 - List, filter, switch, and pick a project from a project picker
 - Bind / forget recent projects (kept as a history list)
-- Create a new project at a specified path with scaffolding
-- Open an existing project by path (auto-detects project.json)
-- Display project metadata: name, root path, schema version
+- Create a new match (replaces "create project") -- scaffolds the match
+  folder + a primary shooter under `shooters/<slug>/`
+- Open an existing match or legacy single-shooter project by path (auto-
+  detects `match.json` vs `project.json`, routes to first shooter when
+  pointed at a match folder)
+- Display project metadata: name, root path, schema version, kind
+  (`match` / `legacy` / `missing` / `unknown`)
 - Archive (export) a project as a `.tar.gz` backup, selectively including `trimmed/`, `exports/`, `raw/`, `audio/`
 - Restore a project from a `.tar.gz` archive, with optional overwrite
 - Forget a recent project from history
 - Cleanup orphaned directories (`trimmed/`, `exports/`) for deleted stages
+- **Merge N legacy single-shooter projects into one match folder** -- CLI
+  (`splitsmith match merge`) and SPA wizard (`/pick/merge`). Validates
+  scoreboard + stage agreement, surfaces conflicts before writing, binds
+  the first shooter on completion.
+
+## Match-as-object data model
+
+- Each match is a folder containing `match.json` + `shooters/<slug>/`
+  subdirs; the per-shooter dir holds a `project.json` (legacy shape
+  preserved for audit/ingest endpoints)
+- Add, remove, and switch the active shooter on a match
+- List shooters on the active match with per-shooter audit progress,
+  camera coverage, and HITL queue counts
+- Per-shooter video streaming for cross-shooter views (Compare)
+- Shooter slug stable across renames; per-shooter racing-color identity
+  used in Compare + Shooters management
 
 ## Footage ingest
 
@@ -48,6 +68,10 @@ Markers:
 - Re-run beep detection with fresh config
 - Suppress auto-detection (env var)
 - View beep waveform preview with confidence score
+- **Cross-shooter beep queue** -- two-pane review surface that groups
+  every shooter's per-stage beeps into one list with status dots
+  (confirmed / pending / current / missing), keyboard-driven advance,
+  alt-candidate panel, mini-waveform detail
 
 ## Stage metadata
 
@@ -91,11 +115,24 @@ Markers:
 - Per-stage and match-wide interval distributions (histograms)
 - Coaching notes / improvement flags per shot (stored in audit JSON)
 - Synchronized multi-camera playback at each shot
+- **Playhead-driven sync** -- the active shot, ruler dot, and shot list
+  row all advance automatically as the video plays; list auto-scrolls
+  the active row into view (smooth, block:'nearest'). Clicking a shot
+  still seeks; once playback resumes the auto-advance takes over.
+- Match-wide stat cards (match time, avg split, fastest, slowest)
+- Per-stage breakdown table with 4-color split-distribution mini-bars
+- CRT split histogram with median line + practice priorities (P1/P2/P3)
+- Annotations feed aggregated across all stages
 
 ## Multi-shooter compare
 
 - Export multi-shooter compare FCPXML from a manifest YAML `[CLI]`
 - Manifest specifies projects + shooter labels to include `[CLI]`
+- **Multi-shooter sync timeline (UI)** -- watch N shooters' runs played
+  in sync at the beep with master/slave video sync, layout toggle
+  (2x2 / 1x4 / Stack), per-shooter visibility chips, audio-source
+  LED ring, F1-style timeline with per-shooter tracks, beep marker,
+  shot dots, end-of-run total times, ranking table
 
 ## Export
 
@@ -149,6 +186,40 @@ Markers:
 - Acknowledge job failures and clear them from queue
 - Stream job progress in real time (status, eta, errors)
 - Queue multiple jobs (serial or parallel)
+- **Jobs drawer (universal)** -- bottom-right FAB that glows when work
+  is running or failed, opens a slide-out with Running / Needs attention
+  / Queued / Completed groups, worker pool chip, acknowledge-all action.
+  Mounted on every project-bound shell.
+
+## Mode separation (Match / Developer)
+
+- Global mode state persisted in localStorage; sets `data-mode` on the
+  document root; flips the accent token from LED red to cyan
+- Mode toggle in every shell header (segmented control)
+- **MatchShell** -- per-match sidebar + Shot Timer header for shooter-
+  facing surfaces (Overview / Audit / Coach / Shooters / Beep review /
+  Compare / Export)
+- **DeveloperShell** -- cyan-accented workflow stepper sidebar with
+  Corpus / Review queue / Validate / Retrain steps, plus a "Tools"
+  section that hosts legacy Lab + fixture review under "Legacy" pills
+- Active-ensemble model chip in the dev shell header (version, recall,
+  fixture count)
+- Mode-aware focus ring (red in match mode, cyan in dev mode)
+
+## Developer workflow surfaces
+
+- **Corpus** -- fixtures table with filters + tag taxonomy + recall
+  bars; promotion inbox card; workflow status banner across the 4 steps
+- **Review queue** -- three-column (sidebar + queue list + detail);
+  routes the user into `/review?fixture=...` for the actual edit;
+  promotion items from match mode land here automatically
+- **Validate** -- run-config bar (split strategy, corpus, consensus
+  slider, apriori toggle), headline metrics, per-shooter holdout panel
+  as centerpiece, per-venue breakdown, confusion matrix, voter
+  decomposition
+- **Retrain** -- compare strip (shipped vs candidate), 6-stage pipeline
+  with motherboard trace + running pulse, CRT log tail, before/after
+  metric rows, per-voter detail (A/B/C), build-history table
 
 ## Scoreboard integration
 
@@ -184,8 +255,8 @@ Markers:
 
 ## Coverage notes
 
-- **Multi-camera per shooter** is woven throughout the existing code -- secondary video sync, per-camera trim, secondary beep offsets, multi-angle coach views. The IA must explicitly support this; it is not optional and not new work.
+- **Multi-camera per shooter** is woven throughout the existing code -- secondary video sync, per-camera trim, secondary beep offsets, multi-angle coach views. The IA explicitly supports this; not optional.
 - **Export overlays** are infrastructure-present but UI-absent today. Confirms JTBD job #1a is a gap, not a missing connection.
-- **Multi-shooter compare** is CLI-only today. UI is the gap.
-- **Lab** is a fully featured ensemble-tuning interface, not a sandbox. Retiring it requires moving real functionality out, not just deleting a page.
-- **Design.tsx** appears to be a stub / spec page rather than user workflow.
+- **Multi-shooter compare in UI** -- delivered (#328). The legacy `[CLI]` lines for `compare export` remain as the export path; the UI surface is the new sync timeline.
+- **Lab** has been retired into Developer mode (#331). Review functionality lives under `/dev/review`; the Lab catalog is still reachable under `/dev/legacy/lab` with a "Legacy" pill, pending a removal milestone after parity is verified.
+- **Design.tsx** -- still a spec page, now under `/_design` only.
