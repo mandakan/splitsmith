@@ -2,455 +2,102 @@
 
 Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers.
 
-## Why this exists
+![audit view](docs/screenshots/audit.png)
 
 Shot timers like the CED7000 give you splits during practice, but at matches you can't carry one. Head-mounted cameras (Insta360 Go 3S in this case) capture audio that contains all the shot information -- this tool extracts it and turns it into actionable training data.
 
-Inputs:
-- Raw video files from a head-mounted camera (MP4)
-- Stage time data from match scoring system (JSON, format from SSI Scoreboard)
+**Inputs:** raw MP4s from a head-mounted cam, stage time data from SSI Scoreboard.
+**Outputs (per stage):** lossless trim around the start beep, splits CSV, FCPXML with frame-aligned markers, anomaly report.
 
-Outputs (per stage):
-- Trimmed video file (lossless cut around the start beep)
-- CSV of shot timestamps and splits
-- FCPXML file ready to open in Final Cut Pro, with frame-aligned markers per shot
-- Human-readable report flagging anomalies (likely missed/false-positive shots)
+## What it looks like
 
-## Requirements
+| | |
+|---|---|
+| ![ingest](docs/screenshots/ingest.png) | **Ingest.** Drop a folder of GoPro clips; the engine auto-matches them to stages by file timestamp. |
+| ![beep review](docs/screenshots/beep-review.png) | **Beep review.** Auto-snap to the start beep on each stage; low-confidence detections land in a HITL queue. |
+| ![audit](docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
+| ![compare](docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
+| ![export](docs/screenshots/export.png) | **Export.** Per-stage or whole-match FCPXML. Open in Final Cut Pro, M / Shift+M to navigate markers. |
 
-- macOS (primary target), Linux, or Windows. FCPXML is generated on every platform but Final Cut Pro itself is macOS-only -- on Linux/Windows you'll need to copy the `.fcpxml` to a Mac to open it (or just use the splits CSV directly).
-- Python 3.11+
-- `uv` for dependency management
-  - macOS: `brew install uv`
-  - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-  - Windows: `winget install --id=astral-sh.uv -e` (or `irm https://astral.sh/uv/install.ps1 | iex`)
-- `ffmpeg` and `ffprobe` on `PATH`
-  - macOS: `brew install ffmpeg`
-  - Linux: `apt install ffmpeg` (or your distro equivalent)
-  - Windows: `winget install --id=Gyan.FFmpeg -e` (or scoop/chocolatey)
-- Node.js 20+ + `pnpm` (needed to build the `ui` / `lab` / `review` SPA when running from source)
-  - macOS: `brew install node && npm install -g pnpm`
-  - Linux: `apt install nodejs npm && sudo npm install -g pnpm` (or use nvm for a current Node)
-  - Windows: `winget install -e --id OpenJS.NodeJS.LTS`, then **open a new PowerShell** so the PATH update takes effect and run `npm install -g pnpm`
+> Screenshots regenerate from a live `splitsmith ui` via `scripts/capture_screenshots.py`. See [issue tracking the local run](#regenerating-screenshots) below.
 
-## Install
+## Quickstart
+
+The repo ships a real Stage 3 audio sample (Tallmilan 2026, 14.74s, 14 audited shots) at `tests/fixtures/stage_sample.wav` plus its companion source MP4 (gitignored; bring your own video or use any IPSC head-cam clip). Full end-to-end run:
 
 ```bash
 git clone https://github.com/mandakan/splitsmith.git
 cd splitsmith
-uv sync                                                       # Python deps
-(cd src/splitsmith/ui_static && pnpm install && pnpm build)   # SPA assets, served by the UI subcommand
-```
+uv sync
+(cd src/splitsmith/ui_static && pnpm install && pnpm build)
 
-Verify install:
-
-```bash
-uv run splitsmith --help
-uv run pytest -q                # 67 unit tests
-uv run pytest -q -m integration # 2 ffmpeg/ffprobe-backed tests against the bundled sample
-```
-
-## Subcommands
-
-All commands are run via `uv run splitsmith <subcommand>`. Run `--help` on any of them for the full option list.
-
-### `detect` -- preview only, writes nothing
-
-Use this first when tuning thresholds or sanity-checking a video. It runs beep + shot detection and prints a table; no files are written.
-
-```bash
-uv run splitsmith detect \
-    --video tests/fixtures/stage_sample.mp4 \
-    --time 14.74
-```
-
-### `single` -- full pipeline for one video
-
-Process a single video with an explicit stage time. Writes the trimmed mp4, splits CSV, FCPXML, and report into `--output`.
-
-```bash
 uv run splitsmith single \
-    --video tests/fixtures/stage_sample.mp4 \
-    --time 14.74 \
-    --output ./analysis \
-    --stage-name "Per told me to do it" \
-    --stage-number 3
-```
-
-Skip individual outputs with `--no-trim`, `--no-csv`, `--no-fcpxml`.
-
-### `process` -- batch over a stage JSON
-
-Match a directory of videos to the stages in an SSI Scoreboard export by file timestamp, then run the `single` pipeline for each matched (stage, video) pair.
-
-```bash
-uv run splitsmith process \
-    --videos ~/match_raw/ \
-    --stages examples/tallmilan-2026.json \
-    --output ./analysis
-```
-
-If videos can't be matched cleanly (multiple candidates for one stage, no candidate, ambiguity across stages), the offending stages and videos are listed and the run aborts. Re-run with the videos renamed/separated, or use `single` for each stage explicitly.
-
-### `ui` -- production UI (issue #11/#12, in progress)
-
-The localhost SPA that orchestrates the full ingest -> audit -> export workflow. State lives on disk under `--project`; closing the browser and re-running resumes where you left off.
-
-```bash
-uv run splitsmith ui --project ~/matches/tallmilan-2026
-```
-
-Opens `http://127.0.0.1:5174/` in your default browser. Sub 1 (#12) ships the foundation: app shell, project model, three-screen navigation, design system at `/_design`. The actual ingest / audit / export screens land in #13, #15, #17.
-
-For active SPA development with hot reload (the install / build is already
-covered by the [Install](#install) section above):
-
-```bash
-cd src/splitsmith/ui_static
-pnpm dev             # Vite dev server on :5173, proxies /api to backend on :5174
-```
-
-### `lab` -- algorithm Lab (fixtures, eval, tuning)
-
-The Lab is the algorithm-development surface. Lives at `/lab` in the UI and is mirrored as `splitsmith lab <cmd>` on the CLI. Fixture catalog, batch ensemble eval with per-fixture P/R/F1, live tuning sliders (cached-universe rescore in <100 ms), and a per-fixture diff overlay on the waveform. Tuning configs export to committable YAML; runs persist as deterministic JSON under `build/lab/runs/`.
-
-See [`LAB.md`](LAB.md) for the full guide -- end-to-end walk-through, fixture promotion, parameter tuning, and how to drive the loop in parallel with Claude Code.
-
-```bash
-uv run splitsmith lab fixtures           # list audited fixtures
-uv run splitsmith lab eval --summary-only
-uv run splitsmith lab rescore --universe build/lab/runs/latest.json --consensus 4 --summary-only
-uv run splitsmith lab promote --audit-json <project>/audit/stage4.json --audit-wav <project>/audio/stage4_audit.wav --slug stage-shots-myclub-2026-stage4
-```
-
-### `compare` -- multi-shooter side-by-side FCPXML
-
-Render one FCPXML where each stage is a beep-aligned grid of N shooters' trims. Tile slots are alphabetical by label and stay fixed across every stage so a shooter who's missing a stage gets a black filler tile rather than reshuffling the grid. Audio comes from a single nominated shooter; everyone else is muted.
-
-Each shooter must already have per-stage lossless trims on disk (i.e., you've run the per-stage exporter for each project). The comparison emitter reads `<project>/exports/stage<N>_<slug>_trimmed.mp4` for every stage of every shooter.
-
-Manifest YAML:
-
-```yaml
-output: bromma-classifier-2026.fcpxml
-audio_from: Mathias        # must match a label below
-layout_2up: horizontal     # horizontal | vertical, only used when N == 2
-shooters:
-  - project: ~/splitsmith/projects/mathias-bromma-classifier-2026
-    label: Mathias
-  - project: ~/splitsmith/projects/anders-bromma-classifier-2026
-    label: Anders
-```
-
-Render:
-
-```bash
-uv run splitsmith compare export examples/compare-bromma-classifier-2026.yaml
-```
-
-Smallest-fits grid: 1 shooter -> 1up; 2 -> 2up (horizontal or vertical); 3-4 -> 2x2; 5-9 -> 3x3; 10-16 -> 4x4. Empty slots in the chosen grid become black filler tiles for the duration of that stage. Sequence frame rate / size come from the audio-source shooter's first stage; mismatched cam rates / sizes get their own `<format>` resource and ride on FCP's edit-time conform.
-
-### `review` -- audit a fixture in a local web UI
-
-Open a single-page browser UI for reviewing detected shots against the fixture's audio (and optional video). Marker pins on the waveform: click to toggle keep/reject, drag to fine-tune time, double-click empty waveform space to add a manual marker. Save (`Cmd+S`) writes back to the fixture JSON's `shots[]`.
-
-```bash
-uv run splitsmith review \
-    --fixture tests/fixtures/stage-shots-tallmilan-2026-stage2-s97dcec94.json \
-    --video   VID_20260426_162417_00_048.mp4
-```
-
-`--video` is optional. The video offset defaults to the fixture window's lower bound (so passing the original source video Just Works); override with `--video-offset-seconds` if you've pre-trimmed.
-
-Keyboard:
-
-| key | action |
-|---|---|
-| `Space` | play / pause |
-| `M` / `Shift+M` | next / previous marker |
-| `Cmd+1` / `Cmd+2` / `Cmd+3` | zoom in / fit / zoom out |
-| `Cmd+Z` | undo (toggle / drag / add / delete) |
-| `Cmd+S` | save |
-| right-click marker | delete (manual) or reject (detected) |
-
-Each save writes the previous fixture to `<fixture>.json.bak` first.
-
-### `audit-apply` -- merge a marked-up candidates CSV into a fixture JSON
-
-When you create a new test fixture from a video, the helper script writes a candidates CSV with an `audit_keep` column at the front. Mark the rows you want to keep (`Y`, `1`, `x`, `yes`, `keep`, or `true` -- case-insensitive), save, then merge into the fixture JSON:
-
-```bash
-uv run splitsmith audit-apply \
-    --candidates tests/fixtures/stage-shots-blacksmith-2026-stage7-s97dcec94-candidates.csv \
-    --fixture    tests/fixtures/stage-shots-blacksmith-2026-stage7-s97dcec94.json
-```
-
-The fixture's `shots[]` array is rewritten in place; the `_candidates_pending_audit` block is preserved so you can re-audit if you change your mind.
-
-### `fcpxml` -- regenerate timeline from a (possibly hand-edited) CSV
-
-After `single` or `process`, the splits CSV typically contains false positives (echoes, neighbouring bays). The recommended workflow is:
-
-1. Open the splits CSV in any editor (Numbers, Excel, vim).
-2. **Sort by `confidence` ascending or `peak_amplitude` ascending** -- false positives cluster at the low end.
-3. Delete rows that aren't real shots.
-4. Regenerate the FCPXML from the cleaned CSV:
-
-```bash
-uv run splitsmith fcpxml \
-    --csv analysis/stage3_per-told-me-to-do-it_splits.csv \
-    --video analysis/stage3_per-told-me-to-do-it_trimmed.mp4 \
-    --output analysis/stage3_per-told-me-to-do-it.fcpxml
-```
-
-The `--beep-offset` flag (default 5.0s) tells the regenerator where the beep is in the trimmed video. It must equal `output.trim_buffer_seconds` from the config used during the original trim (5s by default).
-
-### `mcp` -- Model Context Protocol server
-
-Exposes splitsmith's pipeline as agent-callable tools so MCP-aware
-clients (Claude Desktop, Claude Code, IDE plugins) can drive a match
-end-to-end. Implementation of issue #211.
-
-```bash
-splitsmith mcp                            # stdio transport
-splitsmith mcp --allowed-root /path/to    # sandbox: every path the
-                                          # agent passes must resolve
-                                          # under this directory
-```
-
-Wire into your client by pointing it at the binary. For Claude Code,
-add to `~/.claude/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "splitsmith": {
-      "command": "splitsmith",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-(For Claude Desktop, the equivalent file is
-`~/Library/Application Support/Claude/claude_desktop_config.json` on
-macOS, with the same shape.)
-
-Tools registered on the server (16 total):
-
-| category | tools |
-|---|---|
-| read-only | `probe_video`, `discover_videos`, `get_project`, `list_stages`, `get_hitl_queue` |
-| write | `assign_video`, `set_beep_manual`, `select_beep_candidate`, `mark_beep_reviewed` |
-| detect | `detect_beep`, `detect_shots`, `trim_audit_clip` |
-| export | `list_templates`, `export_stage`, `export_match` |
-
-All tools take `project_root` as a path string -- stateless, so
-multiple agents can collaborate on the same project. `set_beep_manual`
-+ `detect_beep` honour the auto-trust gate (#219): confidence >=
-threshold flips `beep_reviewed=True`, below it the beep lands in the
-HITL queue (`get_hitl_queue`).
-
-#### `/splitsmith-match` Claude Code skill
-
-The full agent flow is encoded as a Claude Code skill at
-`skills/splitsmith-match/`. Install once:
-
-```bash
-ln -s "$(pwd)/skills/splitsmith-match" ~/.claude/skills/splitsmith-match
-```
-
-Then `/splitsmith-match` (or just describing the task -- "run
-splitsmith on this folder", "build the match recap") triggers the
-runbook: discover videos -> match to stages -> beep + shot
-detection -> resolve HITL queue -> per-stage exports -> match-level
-FCPXML / MP4 / YouTube sidecar. HITL checkpoints fire only when the
-agent's confidence would otherwise force a guess.
-
-Skill details + the runbook's HITL prompt patterns live in
-`skills/splitsmith-match/README.md` + `SKILL.md`.
-
-## End-to-end demo on the bundled sample
-
-The repo ships with a real Stage 3 sample (Tallmilan 2026, "Per told me to do it!", 14.74s, 14 audited shots) at `tests/fixtures/stage_sample.mp4`. Anyone with the repo can do a full end-to-end run:
-
-```bash
-uv run splitsmith single \
-    --video tests/fixtures/stage_sample.mp4 \
+    --video path/to/your_stage.mp4 \
     --time 14.74 \
     --output ./demo_analysis \
     --stage-name "Per told me to do it" \
     --stage-number 3
 
-# Inspect what got produced
 ls -la ./demo_analysis/
 cat ./demo_analysis/stage3_per-told-me-to-do-it_report.txt
-
-# Open the FCPXML in Final Cut Pro:
-#   macOS:   open ./demo_analysis/stage3_per-told-me-to-do-it.fcpxml
-#   Linux:   xdg-open ./demo_analysis/stage3_per-told-me-to-do-it.fcpxml
-#   Windows: start .\demo_analysis\stage3_per-told-me-to-do-it.fcpxml
-# (FCP itself is macOS-only; on other platforms copy the .fcpxml to a Mac.)
 ```
 
-Expected output:
-- beep detected at ~19.87s in the source video
-- ~39 shot candidates detected (the audited ground truth is 14; the rest are echoes / neighbouring bays)
-- Anomaly report flags the high shot count and the 928 ms overshoot vs official stage time
+Expected on the bundled sample: beep at ~19.87s, ~39 shot candidates (audited ground truth is 14; the rest are echoes / neighbouring bays), anomaly report flags the high shot count and the 928 ms overshoot vs official stage time. See `docs/COMMANDS.md` for the cull workflow.
 
-To get a clean 14-shot timeline from the demo, see the cull workflow under [`fcpxml`](#fcpxml----regenerate-timeline-from-a-possibly-hand-edited-csv) above.
-
-## Reproducibility / what's in git
-
-Source MP4/MOV recordings are gitignored (multi-GB; not worth git-LFS for a personal tool). The committed inputs are:
-
-- `tests/fixtures/*.wav` -- pre-trimmed audio slices (~1-2 MB each), the canonical input for every detection / classification / eval script.
-- `tests/fixtures/*.json` -- audited shot times (ground truth) plus `_candidates_pending_audit` (raw detector output) and a `source` / `fixture_window_in_source` provenance pair naming the original video and time window.
-
-Anyone with the repo can run the full pipeline (beep / shot detection, PANN + CLAP feature extraction, ensemble eval) against the WAVs without touching the source videos. What you cannot reproduce without the original MP4 is the `audit-prep` step itself -- if you want a different trim window, padding, or beep override, you need the source video. That step is "input data preparation" rather than "pipeline reproduction"; the WAV is the canonical artefact downstream.
-
-## Output file layout
-
-```
-analysis/
-  stage3_per-told-me-to-do-it_trimmed.mp4   # lossless cut around the beep
-  stage3_per-told-me-to-do-it_splits.csv    # editable; the source of truth for fcpxml regen
-  stage3_per-told-me-to-do-it.fcpxml        # open in Final Cut Pro; M / shift+M to navigate markers
-  stage3_per-told-me-to-do-it_report.txt    # human-readable summary + anomalies
-```
-
-A `.wav` cache file is written next to each source video on first run -- this is intentional (re-running `detect` on the same video skips the audio extraction). Add `*.wav` to your match-videos directory's `.gitignore` if it's tracked.
-
-## Detection methodology
-
-Splitsmith treats *consistency across stages and matches* as more important than matching any other tool's exact timestamps. This section documents what the detector does, why, and how its output relates to a hardware shot timer like the CED7000.
-
-### Beep detection (`beep_detect.py`)
-
-1. Bandpass-filter the audio to `[freq_min_hz, freq_max_hz]` (default 2-5 kHz). Hilbert envelope, smoothed at 40 ms (broad enough to bridge the natural intra-beep dips IPSC tones produce). A separate 10 ms-smoothed envelope is held for rise-foot timing so the smoothing bias doesn't shift the leading edge.
-2. **Adaptive cutoff**: a candidate run must clear `max(min_amplitude * peak, noise_floor * noise_factor, min_abs_peak)`. The noise-floor leg recovers handheld / phone clips where the beep is faint in absolute terms but still well above the recording's median noise floor.
-3. **Composite scoring**: each candidate run is ranked by `silence_score * tonal_factor * duration_factor`:
-   - silence_score = run_peak / max-of-pre-window (preceded by quiet "Are you ready / Stand by" wins over preceded by recent shots)
-   - tonal_factor = energy concentration in the IPSC fundamental band (2.2-3.5 kHz) vs the wider search band; demotes broadband shots and steel rings
-   - duration_factor = squared ramp 150 -> 300 ms; demotes short transients without rejecting them outright
-4. **Adaptive rise-foot leading edge**: walk back from the run's peak while the envelope stays above `max(peak * 5%, noise_floor * 1.5x)`. The noise-floor floor stops the walk from sliding into pre-beep silence on faint beeps where 5 % of the peak is below the floor.
-5. **Calibrated confidence in [0, 1]** per candidate -- a weighted blend of tonal purity, duration plausibility, and saturating silence preference, tilted by the margin to the runner-up. Empirically validated against the labelled fixture set under `tests/fixtures/beep_calibration/`: confidence >= 0.7 is right ~95 % of the time. The production UI / MCP use this to gate the **auto-trust** chain (`automation.beep_low_confidence_threshold`, default 0.6); below the threshold the beep lands in the HITL queue.
-
-Calibration evidence + per-confidence-bin precision live under `tests/fixtures/beep_calibration/baseline.json`; rebuild via `scripts/build_beep_calibration.py` after adding new audited fixtures and re-run `scripts/eval_beep_detector.py` to refresh the table.
-
-#### Auto-trust + HITL queue (issue #219)
-
-A detected beep with `confidence >= automation.beep_low_confidence_threshold`
-(default 0.6) flips `beep_reviewed=True` automatically -- the downstream
-chain (auto-trim, auto-shot-detect-on-beep-verified) fires without a
-manual review click. Below the threshold the beep stays unreviewed and
-shows up in the **HITL queue**:
-
-- HTTP: `GET /api/hitl-queue` returns `{items: [...], threshold: float}`.
-- SPA: the **Needs review** card on the Ingest page polls the queue and
-  surfaces each item's `suggested_action` text + a one-click "Open"
-  button that scrolls to the relevant stage row.
-- MCP: `get_hitl_queue` exposes the same shape; an agent (or
-  `/splitsmith-match`) drives the picks via `select_beep_candidate` /
-  `set_beep_manual` / `mark_beep_reviewed`.
-
-Tune the threshold via `~/.splitsmith/config.yaml`:
-
-```yaml
-automation:
-  beep_low_confidence_threshold: 0.6   # auto-trust >= this; below is HITL
-  shot_detect_on_beep_verified: true   # the existing chain gate
-```
-
-Per-project overrides + the resolved provenance badge (CLI > project >
-global > default) ride on the same automation block.
-
-### Shot detection (`shot_detect.py`)
-
-1. **Skip the first 500 ms after the beep.** Beep tones are 200-400 ms and human reaction + draw is never under 500 ms on a head-mounted recording.
-2. **`librosa.onset.onset_detect`** with spectral flux (default `delta=0.07`, `pre_max=post_max=30 ms`) finds onset frames at ~10.7 ms resolution.
-3. **80 ms minimum-gap filter** (greedy): drop onsets within 80 ms of a previously-kept one. Catches close echoes from steel/walls.
-4. **150 ms echo refractory**: drop subsequent onsets within 150 ms of a kept onset whose peak amplitude is below 40% of the previous peak. Catches lower-amplitude intra-bay echoes.
-5. **Half-rise leading edge**: this is the per-shot time you see in outputs. For each kept onset, find the absolute peak `|audio|` in a 30 ms window around the librosa frame, then report the first sample whose `|audio|` reaches **half** that peak. This is the "leading edge" definition used everywhere downstream.
-
-#### Why half-rise?
-
-| target | property | why we don't use it |
-|---|---|---|
-| absolute amplitude threshold (CED7000-style) | simple, fast | sensitive to AGC, distance, gain. A quiet AGC-ducked shot crosses the threshold later in its rise than a loud unducked shot, biasing splits. |
-| noise-floor-relative threshold | adapts to recording conditions | depends on a tunable "K times noise" knob; biases earlier on slow-rise transients. |
-| **half of the local peak (half-rise)** | uses the burst's own peak as reference, so AGC ducking doesn't bias timing; matches what the eye picks when scrubbing a waveform | (the choice) |
-
-Half-rise is the standard "onset" definition in audio-engineering literature for sharp transients. It is **insensitive** to:
-- ambient noise levels (uses peak ratio, not absolute energy)
-- camera AGC ducking (a quieter shot still has a peak; half-rise lands at the same fractional point)
-- recording gain or distance (peak scales linearly; half scales the same way)
-
-It is **sensitive** to:
-- the burst's own profile (sharp transients have a sharp leading edge; gradual transients land later)
-- the 30 ms peak-search window (transients longer than 30 ms would have their peak underestimated; not a concern for gunshots)
-
-#### Comparing splitsmith times to a CED7000 / Pact / similar
-
-**Don't expect absolute timestamps to match.** A CED7000 typically uses an absolute amplitude threshold; splitsmith uses half-rise. On the same recording the two definitions can differ by 5-15 ms per shot.
-
-**Splits *do* match across recordings.** Because the half-rise definition is internally consistent, the *difference* between two consecutive shot times is comparable across stages, matches, and recording conditions. Any constant per-shot offset cancels in the subtraction. This is the metric that matters for training.
-
-If you ever need to compare absolute times to another timer, expect a small constant offset (typically splitsmith reports 5-15 ms earlier than amplitude-threshold timers because half-rise lands earlier in the rise than a fixed threshold).
-
-### Confidence ranking
-
-Each shot has a `confidence` score = geometric mean of normalized onset strength and normalized peak amplitude (each normalized to the max within the kept set). Sorting CSV rows by confidence ascending puts the most likely false positives (echoes, neighbouring bays) at the top — fast triage when culling.
-
-Real shots that come right after a long pause are AGC-ducked and rank lower in confidence, so don't blindly delete the bottom-N rows. Eyeball timestamps too.
-
-## Ensemble performance dashboard
-
-The 3-voter shot-detection ensemble is parameterised on a handful of
-knobs (consensus level, per-voter thresholds, apriori boost, Voter C
-slack, ...). Sweep them over the audited fixture set and render plots
-+ a detailed report:
+For the full ingest -> audit -> export workflow with persistent project state, use the UI:
 
 ```bash
-# 1. Build the per-candidate signal table (slow; redo after corpus or
-#    feature changes). Without --skip-voter-e it also pulls the CLIP
-#    visual probe scores for fixtures whose source video is reachable.
-uv run python scripts/build_sweep_signals.py --skip-voter-e
-
-# 2. Replay the voters over a parameter grid (fast; pure numpy).
-uv run python scripts/run_sweep.py \
-    --grid scripts/sweep_grids/consensus_x_apriori.yaml
-
-# 3. Render plots + a markdown report under build/sweeps/<run_id>/.
-uv run python scripts/plot_sweep.py
+uv run splitsmith ui --project ~/matches/your-match
 ```
 
-The latest sweep's overview PNG lands at
-`build/sweeps/latest_overview.png` and its detailed report at
-`build/sweeps/latest_report.md` (with per-fixture P/R/F1 tables and the
-full parameter dump). Pre-built grids live in `scripts/sweep_grids/`;
-the full key vocabulary is documented in `scripts/run_sweep.py`. Two
-parquet files back the dashboard:
+## The workflow
 
-- `build/sweeps/signals.parquet` -- one row per (fixture, candidate)
-  with every raw voter signal + ground-truth label. Invariant under
-  threshold sweeps.
-- `build/sweeps/runs.parquet` -- one row per (run_id, parameter combo,
-  fixture) with precision / recall / F1, per-voter solo-correct counts,
-  and effective thresholds.
+1. **Ingest** -- point at a folder of raw cam files; `splitsmith ui` auto-matches them to scoreboard stages by file timestamp.
+2. **Beep review** -- the detector finds the start beep on each stage; anything below the auto-trust threshold lands in a HITL queue.
+3. **Audit** -- the 3-voter ensemble (envelope onsets + CLAP prompts + GBDT over hand-crafted + PANN features) emits shot times; review the waveform and drag / drop markers to fix outliers.
+4. **Export** -- generate a per-stage FCPXML (markers per shot) or a multi-shooter Compare FCPXML (beep-aligned grid). Splits CSV ships alongside for the cull workflow.
 
-Latest snapshot:
+## Install
 
-![latest sweep overview](docs/ensemble_dashboard/latest_overview.png)
+- macOS (primary target), Linux, or Windows. FCPXML is generated everywhere but Final Cut Pro itself is macOS-only -- on Linux/Windows you'll need to copy the `.fcpxml` to a Mac to open it (or just use the splits CSV directly).
+- Python 3.11+ via `uv`
+  - macOS: `brew install uv`
+  - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - Windows: `winget install --id=astral-sh.uv -e`
+- `ffmpeg` and `ffprobe` on `PATH`
+  - macOS: `brew install ffmpeg` &nbsp;&middot;&nbsp; Linux: `apt install ffmpeg` &nbsp;&middot;&nbsp; Windows: `winget install --id=Gyan.FFmpeg -e`
+- Node.js 20+ and `pnpm` (needed to build the SPA when running from source)
+  - macOS: `brew install node && npm install -g pnpm`
+  - Linux: `apt install nodejs npm && sudo npm install -g pnpm`
+  - Windows: `winget install -e --id OpenJS.NodeJS.LTS`, open a new shell, then `npm install -g pnpm`
 
-(See [`docs/ensemble_dashboard/latest_report.md`](docs/ensemble_dashboard/latest_report.md)
-for the full per-fixture breakdown + parameter dump that produced it.)
+```bash
+git clone https://github.com/mandakan/splitsmith.git
+cd splitsmith
+uv sync
+(cd src/splitsmith/ui_static && pnpm install && pnpm build)
 
-The natural next step for a live dashboard is extending the existing
-**Algorithm Lab** page (`splitsmith ui --lab`) to read `runs.parquet`
-directly -- it already owns the fixture-eval + live-tuning surface.
-Standing up a separate Streamlit / marimo app would duplicate that
-infrastructure.
+uv run splitsmith --help
+uv run pytest -q                # unit tests
+uv run pytest -q -m integration # ffmpeg/ffprobe-backed tests
+```
+
+## Subcommands
+
+All commands run as `uv run splitsmith <subcommand>`. Pass `--help` for the full option list. See [`docs/COMMANDS.md`](docs/COMMANDS.md) for usage examples per command.
+
+| command | purpose |
+|---|---|
+| `ui` | Production SPA. Persistent project state on disk; the main entry point. |
+| `detect` | One-shot beep + shot detection preview. No files written. |
+| `single` | Full pipeline on one video with an explicit stage time. |
+| `process` | Batch over an SSI Scoreboard stage JSON, matching videos to stages by timestamp. |
+| `compare` | Render a multi-shooter beep-aligned grid FCPXML across N projects. |
+| `lab` | Algorithm Lab -- fixture eval, parameter sweeps, live tuning. |
+| `review` | Single-page UI for auditing detected shots against a fixture WAV. |
+| `audit-apply` | Merge an audited candidates CSV back into a fixture JSON. |
+| `fcpxml` | Regenerate a timeline from a hand-edited splits CSV. |
+| `mcp` | Model Context Protocol server; pairs with the `/splitsmith-match` Claude Code skill. |
 
 ## Configuration
 
@@ -504,11 +151,52 @@ output:
 `trim_mode` controls how `trim.py` cuts videos:
 
 - `lossless` (default): `ffmpeg -c copy`. Instant; archival quality; inherits the source GOP. Insta360 head-cam typically has keyframes every 1-4 seconds.
-- `audit`: re-encodes with a short GOP (default 0.5s) so browser `<video>` scrubbing in the production UI's audit screen (#15) lands within ~1 frame of the pointer. Encoding cost is roughly 1-2x realtime on Apple Silicon. Audio is stream-copied either way so the detector's input is bit-exact across modes.
+- `audit`: re-encodes with a short GOP (default 0.5s) so browser `<video>` scrubbing in the production UI's audit screen lands within ~1 frame of the pointer. Encoding cost is roughly 1-2x realtime on Apple Silicon. Audio is stream-copied either way so the detector's input is bit-exact across modes.
 
 Override per command via `--trim-mode lossless|audit` on `splitsmith single` and `splitsmith process`.
 
 Lower `shot_detect.onset_delta` if you're under-detecting shots from a heavily-comped open gun. Tighten `beep_detect.min_amplitude` if a louder ambient noise is being mistaken for the beep.
+
+## Output file layout
+
+```
+analysis/
+  stage3_per-told-me-to-do-it_trimmed.mp4   # lossless cut around the beep
+  stage3_per-told-me-to-do-it_splits.csv    # editable; the source of truth for fcpxml regen
+  stage3_per-told-me-to-do-it.fcpxml        # open in Final Cut Pro; M / Shift+M to navigate markers
+  stage3_per-told-me-to-do-it_report.txt    # human-readable summary + anomalies
+```
+
+A `.wav` cache file is written next to each source video on first run -- this is intentional (re-running `detect` on the same video skips the audio extraction). Add `*.wav` to your match-videos directory's `.gitignore` if it's tracked.
+
+## What's in git
+
+Source MP4/MOV recordings are gitignored (multi-GB; not worth git-LFS for a personal tool). The committed inputs are:
+
+- `tests/fixtures/*.wav` -- pre-trimmed audio slices (~1-2 MB each), the canonical input for every detection / classification / eval script.
+- `tests/fixtures/*.json` -- audited shot times (ground truth) plus `_candidates_pending_audit` (raw detector output) and a `source` / `fixture_window_in_source` provenance pair naming the original video and time window.
+
+Anyone with the repo can run the full pipeline (beep / shot detection, PANN + CLAP feature extraction, ensemble eval) against the WAVs without touching the source videos. What you can't reproduce without the original MP4 is the `audit-prep` step itself -- if you want a different trim window, padding, or beep override, you need the source video. That step is "input data preparation" rather than "pipeline reproduction"; the WAV is the canonical artefact downstream.
+
+## Detection methodology
+
+The detector is built around half-rise leading-edge timing (consistent across recordings; insensitive to AGC and gain) plus a 3-voter ensemble for shot classification. Full write-up in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md): beep detection, shot detection, the half-rise rationale, confidence ranking, and the ensemble performance dashboard.
+
+## Regenerating screenshots
+
+The README gallery comes from a live `splitsmith ui` driven through Playwright. To refresh after a UI redesign:
+
+```bash
+uv pip install --with playwright playwright
+playwright install chromium
+
+uv run python scripts/capture_screenshots.py \
+    --project ~/matches/your-real-match \
+    --stage 3 \
+    --output docs/screenshots/
+```
+
+Commit the resulting PNGs. The script needs a project that's already been through the workflow (videos ingested, beeps reviewed, shots detected); Compare requires multiple shooters' trims on disk and is skipped with a warning otherwise.
 
 ## Troubleshooting
 
@@ -520,4 +208,4 @@ Lower `shot_detect.onset_delta` if you're under-detecting shots from a heavily-c
 
 ## Project status
 
-Early development. Built for personal use by an IPSC competitor. PRs welcome but the design priorities reflect that use case.
+Personal tool, actively developed for the maintainer's own match-recap workflow. The pipeline structure is intentionally narrow (single-shooter or multi-shooter compare, IPSC-style start beep + shot timing, FCPXML output) and not aimed at being a general-purpose audio analysis library. PRs welcome where they fit the use case; see `SPEC.md` and `CLAUDE.md` for the design priorities.
