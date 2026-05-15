@@ -46,7 +46,11 @@ export function MatchShell() {
       setDidInitMode(true);
       return;
     }
-    if (mode === "developer") navigate("/dev/corpus");
+    // Replace, not push: see DeveloperShell. A mode flip is a side
+    // effect of clicking the toggle, not a forward navigation -- back
+    // should return to whatever was before the user opened the match,
+    // not bounce between modes.
+    if (mode === "developer") navigate("/dev/corpus", { replace: true });
   }, [mode, setMode, didInitMode, navigate]);
 
   const [health, setHealth] = useState<ServerHealth | null>(null);
@@ -106,7 +110,9 @@ export function MatchShell() {
     } catch {
       /* best-effort */
     }
-    navigate("/pick");
+    // Replace: project just unbound, so the page we came from would
+    // bounce us back to /pick anyway via the bound-check redirect.
+    navigate("/pick", { replace: true });
   }
 
   return (
@@ -182,7 +188,10 @@ export function MatchShell() {
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                navigate("/pick");
+                // Replace so that picking a different match in /pick
+                // and hitting back doesn't return to a stage URL whose
+                // data now belongs to a different project (confusing).
+                navigate("/pick", { replace: true });
               }}
               className="text-subtle hover:text-ink-2"
             >

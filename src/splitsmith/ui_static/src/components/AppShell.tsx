@@ -25,7 +25,11 @@ export function AppShell() {
   // the dev workspace rather than leaving them on a hidden-sidebar page
   // with no dev nav.
   useEffect(() => {
-    if (mode === "developer") navigate("/dev/corpus");
+    // Mode toggle uses replace, not push. Otherwise hitting browser
+    // back after a mode flip would "undo" the flip via a route change
+    // while the mode state stays put -- so the new shell mounts, sees
+    // the wrong mode, and forces it back. Replace keeps history clean.
+    if (mode === "developer") navigate("/dev/corpus", { replace: true });
   }, [mode, navigate]);
   // /review is fixture-only: no project context, the project tabs would
   // 404 against the throwaway tmp project ``splitsmith review`` boots.
@@ -185,7 +189,11 @@ function ProjectHeader({ health }: { health: ServerHealth | null }) {
       // Best-effort: even if unbind fails the picker can re-bind a
       // different project on top.
     }
-    navigate("/pick");
+    // Replace, not push: the project is now unbound, so a back-button
+    // would return to a bound-only URL (e.g. /audit/3) that immediately
+    // redirects back to /pick. That wastes a history slot and breaks
+    // the user's mental model of "back undoes my last action".
+    navigate("/pick", { replace: true });
   }
 
   if (!health || !health.bound) {

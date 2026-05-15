@@ -245,7 +245,9 @@ export function Lab() {
         catalog={catalog}
         run={run}
         activeSlug={slug ?? null}
-        onSelect={(s) => navigate(s ? `/lab/${s}` : "/lab")}
+        onSelect={(s) =>
+          navigate(s ? `/dev/legacy/lab/${s}` : "/dev/legacy/lab")
+        }
         onDeleted={(deletedSlug) =>
           setCatalog((prev) => prev.filter((r) => r.slug !== deletedSlug))
         }
@@ -254,7 +256,7 @@ export function Lab() {
       {focused ? (
         <FixtureDetail
           fixture={focused}
-          onClose={() => navigate("/lab")}
+          onClose={() => navigate("/dev/legacy/lab", { replace: true })}
           onLabelChanged={(updated) => {
             if (updated) setRun(updated);
             else runEval();
@@ -263,7 +265,7 @@ export function Lab() {
       ) : slug ? (
         <FixtureDetailLite
           record={catalog.find((r) => r.slug === slug) ?? null}
-          onClose={() => navigate("/lab")}
+          onClose={() => navigate("/dev/legacy/lab", { replace: true })}
           onRunEval={runEval}
           evalLoading={evalLoading}
         />

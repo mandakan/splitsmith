@@ -66,7 +66,10 @@ export function DeveloperShell() {
       setDidInitMode(true);
       return;
     }
-    if (mode === "match") navigate("/");
+    // Replace, not push: same reasoning as the match shell -- mode
+    // flips shouldn't leave a back-button breadcrumb to the dev URL
+    // because the mode state itself won't restore on back.
+    if (mode === "match") navigate("/", { replace: true });
   }, [mode, setMode, didInitMode, navigate]);
 
   const [model, setModel] = useState<DeveloperModelInfo | null>(null);
@@ -139,7 +142,11 @@ export function DeveloperShell() {
           <div className="flex items-center gap-3 px-7 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
             <button
               type="button"
-              onClick={() => navigate("/")}
+              // Replace: clicking the home breadcrumb also flips mode
+              // back to match (the shell remount triggers it). A push
+              // would leave /dev/corpus in history with the mode state
+              // already flipped, so back would land somewhere weird.
+              onClick={() => navigate("/", { replace: true })}
               className="text-subtle hover:text-ink-2"
             >
               Splitsmith

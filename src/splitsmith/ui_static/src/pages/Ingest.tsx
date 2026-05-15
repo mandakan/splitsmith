@@ -174,7 +174,11 @@ export function Ingest() {
           <div className="mx-auto flex max-w-[1240px] items-center gap-3 px-8 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
             <button
               type="button"
-              onClick={() => navigate("/pick")}
+              // Replace: same reasoning as MatchShell's breadcrumb --
+              // picking a different match would otherwise leave a
+              // stale stage URL in history pointing at the wrong
+              // project.
+              onClick={() => navigate("/pick", { replace: true })}
               className="inline-flex items-center gap-1.5 text-subtle transition-colors hover:text-ink-2"
             >
               <ArrowLeft className="size-3" />
@@ -251,7 +255,7 @@ export function Ingest() {
             onAddMore={() => setShowFolderPicker(true)}
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
-            onConfirm={() => navigate("/")}
+            onConfirm={() => navigate("/", { replace: true })}
             busy={busy}
             lastScannedDir={lastScannedDir}
           />
