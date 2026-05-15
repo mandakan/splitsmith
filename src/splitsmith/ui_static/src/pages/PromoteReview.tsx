@@ -740,12 +740,12 @@ export function PromoteReview() {
                       className="absolute top-0 bottom-0 w-0.5"
                       style={{
                         left: xPercent(anchorBeep, anchorBeep),
-                        backgroundColor: "var(--status-warning)",
+                        backgroundColor: "var(--color-status-warning)",
                       }}
                     >
                       <div
                         className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
-                        style={{ color: "var(--status-warning)" }}
+                        style={{ color: "var(--color-status-warning)" }}
                       >
                         BEEP
                       </div>
@@ -801,12 +801,12 @@ export function PromoteReview() {
                       className="absolute top-0 bottom-0 w-0.5"
                       style={{
                         left: xPercent(secondaryBeep, secondaryBeep),
-                        backgroundColor: "var(--status-warning)",
+                        backgroundColor: "var(--color-status-warning)",
                       }}
                     >
                       <div
                         className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
-                        style={{ color: "var(--status-warning)" }}
+                        style={{ color: "var(--color-status-warning)" }}
                       >
                         BEEP
                       </div>

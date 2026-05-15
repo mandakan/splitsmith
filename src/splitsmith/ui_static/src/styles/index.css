@@ -77,14 +77,17 @@
   /* Status */
   --color-live:         #FBBF24;
   --color-live-glow:    rgba(251, 191, 36, 0.30);
+  --color-live-tint:    rgba(251, 191, 36, 0.10);
   --color-done:         #4ADE80;
   --color-done-glow:    rgba(74, 222, 128, 0.30);
+  --color-done-tint:    rgba(74, 222, 128, 0.10);
   --color-cold:         #6B7079;
   --color-beep:         #06B6D4;
   --color-beep-glow:    rgba(6, 182, 212, 0.30);
   --color-beep-tint:    rgba(6, 182, 212, 0.10);
   --color-manual:       #A78BFA;
   --color-manual-glow:  rgba(167, 139, 250, 0.30);
+  --color-manual-tint:  rgba(167, 139, 250, 0.10);
 
   /* Per-shooter identity (see 06-design-system.md 1.2.1) */
   --color-shooter-ma:        #FF2D2D;
@@ -148,6 +151,7 @@
   --color-status-in-progress:       #FBBF24;       /* live */
   --color-status-complete:          #4ADE80;       /* done */
   --color-status-warning:           #FBBF24;       /* live (amber) */
+  --color-status-info:              #06B6D4;       /* beep cyan */
 
   --color-marker-detected:          #06B6D4;       /* beep */
   --color-marker-rejected:          #6B7079;       /* cold */
