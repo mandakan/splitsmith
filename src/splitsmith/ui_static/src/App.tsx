@@ -18,6 +18,7 @@ import { Export } from "@/pages/Export";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
 import { Lab } from "@/pages/Lab";
+import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
 import { Shooters } from "@/pages/Shooters";
 import { PromoteReview } from "@/pages/PromoteReview";
@@ -38,6 +39,7 @@ export function App() {
               here when it sees /api/health.bound === false. */}
           <Route path="pick" element={<Pick />} />
           <Route path="pick/new" element={<CreateMatch />} />
+          <Route path="pick/merge" element={<MergeMatches />} />
           {/* Match-mode surfaces ride under the Shot Timer shell as
               their redesign issues ship. Ingest stays self-shelled
               (focused-task page, no sidebar). */}

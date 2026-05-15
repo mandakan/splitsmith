@@ -6019,3 +6019,107 @@ def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
     for bucket in (body["pending"], body["flagged"], body["done"]):
         for item in bucket:
             assert {"slug", "audit_path", "source", "status", "n_shots"} <= set(item)
+
+
+def test_merge_plan_returns_reconciled_plan_for_legacy_inputs(tmp_path: Path) -> None:
+    """/api/match/merge/plan accepts N legacy single-shooter project
+    paths and returns the planned shooter slugs + reconciled stages
+    without touching the filesystem."""
+    sink = tmp_path / "sink"
+    MatchProject.init(sink, name="ignored").save(sink)
+    app = create_app(project_root=sink, project_name="ignored")
+    client = TestClient(app)
+
+    a = tmp_path / "proj-a"
+    b = tmp_path / "proj-b"
+    MatchProject.init(a, name="Bromma 2026").save(a)
+    MatchProject.init(b, name="Bromma 2026").save(b)
+
+    resp = client.post(
+        "/api/match/merge/plan",
+        json={"inputs": [str(a), str(b)]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Bromma 2026"
+    assert len(body["shooter_moves"]) == 2
+    assert {mv["slug"] for mv in body["shooter_moves"]} == {"proj-a", "proj-b"}
+    # Plan must not have written anything to disk.
+    assert not (tmp_path / "merged").exists()
+
+
+def test_merge_plan_returns_409_on_conflicting_names(tmp_path: Path) -> None:
+    """When inputs disagree on MatchProject.name and the caller omits an
+    explicit --name, /api/match/merge/plan returns 409 with the
+    MergeConflictError message so the SPA can surface it."""
+    sink = tmp_path / "sink"
+    MatchProject.init(sink, name="ignored").save(sink)
+    app = create_app(project_root=sink, project_name="ignored")
+    client = TestClient(app)
+
+    a = tmp_path / "proj-a"
+    b = tmp_path / "proj-b"
+    MatchProject.init(a, name="Bromma 2026").save(a)
+    MatchProject.init(b, name="Vasteras 2026").save(b)
+
+    resp = client.post(
+        "/api/match/merge/plan",
+        json={"inputs": [str(a), str(b)]},
+    )
+    assert resp.status_code == 409
+    assert "different names" in resp.json()["detail"]
+
+
+def test_merge_execute_writes_match_folder_and_binds_first_shooter(tmp_path: Path) -> None:
+    """/api/match/merge/execute writes the new match folder, registers
+    it in recent-projects, and binds the first shooter so the SPA can
+    navigate to / and resume work immediately."""
+    sink = tmp_path / "sink"
+    MatchProject.init(sink, name="ignored").save(sink)
+    app = create_app(project_root=sink, project_name="ignored")
+    client = TestClient(app)
+
+    a = tmp_path / "proj-a"
+    b = tmp_path / "proj-b"
+    MatchProject.init(a, name="Match X").save(a)
+    MatchProject.init(b, name="Match X").save(b)
+
+    out = tmp_path / "merged"
+    resp = client.post(
+        "/api/match/merge/execute",
+        json={"inputs": [str(a), str(b)], "output": str(out), "name": "Match X"},
+    )
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["bound"] is True
+    # Bound shooter root sits under the merged match's shooters dir.
+    assert str(out) in body["project_root"]
+    assert (out / "match.json").exists()
+    # Two shooter subdirs.
+    shooter_names = sorted(p.name for p in (out / "shooters").iterdir())
+    assert shooter_names == ["proj-a", "proj-b"]
+
+
+def test_merge_execute_refuses_destination_with_existing_match(tmp_path: Path) -> None:
+    """/api/match/merge/execute returns 409 when the destination already
+    contains a match.json so a stray click can't clobber an existing
+    merged match."""
+    sink = tmp_path / "sink"
+    MatchProject.init(sink, name="ignored").save(sink)
+    app = create_app(project_root=sink, project_name="ignored")
+    client = TestClient(app)
+
+    a = tmp_path / "proj-a"
+    b = tmp_path / "proj-b"
+    MatchProject.init(a, name="Match X").save(a)
+    MatchProject.init(b, name="Match X").save(b)
+
+    out = tmp_path / "merged"
+    out.mkdir()
+    (out / "match.json").write_text("{}")
+
+    resp = client.post(
+        "/api/match/merge/execute",
+        json={"inputs": [str(a), str(b)], "output": str(out), "name": "Match X"},
+    )
+    assert resp.status_code == 409

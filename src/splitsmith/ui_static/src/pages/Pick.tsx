@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Crosshair,
   FolderOpen,
+  GitMerge,
   Plus,
   Search,
   Trash2,
@@ -336,6 +337,20 @@ export function Pick() {
           >
             <Upload className="size-3.5" /> Import Backup
           </Button>
+          {/* Merge CTA only shows when there's something to merge -- 2+ legacy
+              single-shooter projects in recents. Hidden otherwise so the
+              picker stays uncluttered for users who started post-redesign. */}
+          {(recents?.filter((r) => r.kind === "legacy").length ?? 0) >= 2 && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate("/pick/merge")}
+              className="font-display uppercase tracking-[0.06em]"
+              title="Combine multiple single-shooter projects into one match folder"
+            >
+              <GitMerge className="size-3.5" /> Merge legacy
+            </Button>
+          )}
           <Button
             type="button"
             onClick={() => navigate("/pick/new")}

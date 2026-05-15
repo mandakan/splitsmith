@@ -1237,6 +1237,32 @@ export interface BeepQueueResponse {
   stages: BeepQueueStageGroup[];
 }
 
+/** Merge wizard types (#332). plan_merge dry-runs the merge; the SPA
+ *  shows the user the per-shooter slug assignments + reconciled stages +
+ *  detected conflicts before they commit. execute_merge actually writes
+ *  the new match folder and binds the first shooter as active. */
+export interface MergePlanStage {
+  stage_number: number;
+  stage_name: string;
+  expected_rounds: number | null;
+  placeholder: boolean;
+}
+export interface MergePlanShooterMove {
+  source_root: string;
+  slug: string;
+  destination_root: string;
+  competitor_name: string;
+}
+export interface MergePlanResponse {
+  output_root: string;
+  name: string;
+  scoreboard_match_id: string | null;
+  scoreboard_content_type: number | null;
+  match_date: string | null;
+  stages: MergePlanStage[];
+  shooter_moves: MergePlanShooterMove[];
+}
+
 /** Developer-mode model chip + workflow-stepper counts. Built once by the
  *  /api/dev/model endpoint from the shipped ensemble artifacts plus the
  *  review-queue tally on disk. */
@@ -2231,6 +2257,26 @@ export const api = {
 
   rebuildLabCalibration: (payload: { target_recall?: number; tolerance_ms?: number; fixtures?: string[] } = {}) =>
     request<Job>("/api/lab/rebuild-calibration", { method: "POST", json: payload }),
+
+  /** Plan a merge of N legacy single-shooter projects into one match
+   *  folder. Returns the reconciled stages + shooter assignments. The
+   *  server returns 409 with the conflict message when stage definitions
+   *  or names disagree -- catch ApiError and surface .detail to the user. */
+  planMatchMerge: (payload: {
+    inputs: string[];
+    output?: string;
+    name?: string;
+  }) => request<MergePlanResponse>("/api/match/merge/plan", { method: "POST", json: payload }),
+
+  /** Execute the merge. Writes the new match folder, registers it in
+   *  recent-projects, binds the first shooter as active. Returns a
+   *  ServerHealth pointing at the bound shooter. */
+  executeMatchMerge: (payload: {
+    inputs: string[];
+    output: string;
+    name?: string;
+    move?: boolean;
+  }) => request<ServerHealth>("/api/match/merge/execute", { method: "POST", json: payload }),
 
   /** Developer-mode model info: active version, recall, fixture count,
    *  + step-counter map used to colour the workflow stepper. */

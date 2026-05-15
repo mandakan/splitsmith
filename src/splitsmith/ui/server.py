@@ -902,6 +902,57 @@ class BeepQueueConfirmRequest(BaseModel):
     source: Literal["detected", "manual", "alt"] = "detected"
 
 
+class MergePlanShooterMove(BaseModel):
+    """One source legacy project routed into a shooter slot in the planned
+    merge. Mirrors :class:`match_model.ShooterMove` with paths as strings
+    for the JSON wire."""
+
+    source_root: str
+    slug: str
+    destination_root: str
+    competitor_name: str
+
+
+class MergePlanStage(BaseModel):
+    """One reconciled stage in the planned merge."""
+
+    stage_number: int
+    stage_name: str
+    expected_rounds: int | None = None
+    placeholder: bool = False
+
+
+class MergePlanRequest(BaseModel):
+    """POST /api/match/merge/plan body (#332)."""
+
+    inputs: list[str]
+    output: str | None = None
+    name: str | None = None
+
+
+class MergePlanResponse(BaseModel):
+    """Successful response from /api/match/merge/plan. Conflicts come back
+    as HTTP 409 with the conflict message in ``detail``; this model only
+    describes the *valid* outcome the user is being asked to confirm."""
+
+    output_root: str
+    name: str
+    scoreboard_match_id: str | None
+    scoreboard_content_type: int | None
+    match_date: str | None
+    stages: list[MergePlanStage]
+    shooter_moves: list[MergePlanShooterMove]
+
+
+class MergeExecuteRequest(BaseModel):
+    """POST /api/match/merge/execute body."""
+
+    inputs: list[str]
+    output: str
+    name: str | None = None
+    move: bool = False
+
+
 class DeveloperStepCounts(BaseModel):
     """Counts shown on each step of the dev-mode workflow stepper.
 
@@ -6145,6 +6196,130 @@ def create_app(
             stages_total=len(match.stages),
             video_count=total_videos,
             cameras=cameras,
+        )
+
+    # ----------------------------------------------------------------------
+    # Match merge (#332) -- consolidate N legacy single-shooter projects
+    # into one redesign-era match folder via the SPA. Wraps the existing
+    # match_model.plan_merge + execute_merge that the `splitsmith match
+    # merge` CLI uses.
+    # ----------------------------------------------------------------------
+
+    def _plan_response_from_model(plan: match_model.MergePlan) -> MergePlanResponse:
+        return MergePlanResponse(
+            output_root=str(plan.output_root),
+            name=plan.name,
+            scoreboard_match_id=plan.scoreboard_match_id,
+            scoreboard_content_type=plan.scoreboard_content_type,
+            match_date=plan.match_date.isoformat() if plan.match_date else None,
+            stages=[
+                MergePlanStage(
+                    stage_number=s.stage_number,
+                    stage_name=s.stage_name,
+                    expected_rounds=(
+                        s.stage_rounds.expected if s.stage_rounds is not None else None
+                    ),
+                    placeholder=s.placeholder,
+                )
+                for s in plan.stages
+            ],
+            shooter_moves=[
+                MergePlanShooterMove(
+                    source_root=str(mv.source_root),
+                    slug=mv.slug,
+                    destination_root=str(mv.destination_root),
+                    competitor_name=mv.competitor_name,
+                )
+                for mv in plan.shooter_moves
+            ],
+        )
+
+    @app.post("/api/match/merge/plan", response_model=MergePlanResponse)
+    def merge_plan(req: MergePlanRequest) -> MergePlanResponse:
+        """Dry-run a merge of N legacy single-shooter projects into one
+        match folder. Returns the reconciled stage definitions + per-shooter
+        slug assignments so the SPA can show the user what *would* happen
+        before they commit.
+
+        409 with the conflict message when stage definitions, scoreboard
+        ids, or names disagree across inputs. The user reconciles those at
+        the source before retrying.
+        """
+        if len(req.inputs) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="merge requires at least two input projects",
+            )
+        inputs = [Path(p).expanduser() for p in req.inputs]
+        for src in inputs:
+            if not src.exists():
+                raise HTTPException(status_code=400, detail=f"input not found: {src}")
+            if not match_model.is_legacy_project_folder(src):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"{src} is not a legacy single-shooter project " "(no project.json)"),
+                )
+        # output is optional for plan -- the user may not have picked a
+        # destination yet. Fall back to "(unset)" so the response still
+        # validates; the SPA prompts for a real path before execute.
+        output = Path(req.output).expanduser() if req.output else Path("(unset)")
+        try:
+            plan = match_model.plan_merge(inputs, output, name=req.name)
+        except match_model.MergeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _plan_response_from_model(plan)
+
+    @app.post("/api/match/merge/execute", response_model=HealthResponse)
+    def merge_execute(req: MergeExecuteRequest) -> HealthResponse:
+        """Execute a merge and bind the new match's first shooter as the
+        active project so the user lands on a working session immediately.
+
+        Refuses if the destination already contains ``match.json`` (the
+        plan validation does the same check, but the user could race
+        between plan + execute). Records the new match in the recent-
+        projects index so the picker picks it up.
+        """
+        if len(req.inputs) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="merge requires at least two input projects",
+            )
+        inputs = [Path(p).expanduser() for p in req.inputs]
+        output = Path(req.output).expanduser()
+        try:
+            plan = match_model.plan_merge(inputs, output, name=req.name)
+        except match_model.MergeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        try:
+            match = match_model.execute_merge(plan, move=req.move)
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        # Register the *match* path in recent-projects so the picker can
+        # find it next session.
+        user_config.record_project_open(output.resolve(), match.name, kind="match")
+
+        # Bind the first shooter so existing audit/ingest endpoints have a
+        # working project context immediately.
+        first_slug = match.shooters[0]
+        shooter_root = match_model.Match.shooter_root(output, first_slug)
+        try:
+            recorded = _bind_project_to_state(state, shooter_root, fallback_name=match.name)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        project = state.load()
+        return HealthResponse(
+            bound=True,
+            project_name=recorded,
+            project_root=str(state.project_root),
+            schema_version=project.schema_version,
         )
 
     @app.get("/api/match/shooters", response_model=ShooterListResponse)
