@@ -27,13 +27,18 @@ import {
   UploadCloud,
   Users,
 } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 
 import { Avatar, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import type { MatchProject, StageEntry } from "@/lib/api";
+import {
+  api,
+  type MatchProject,
+  type ShooterListEntry,
+  type StageEntry,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type StagePillTone = "done" | "partial" | "flagged" | "todo";
@@ -50,6 +55,22 @@ export function Home() {
   const navigate = useNavigate();
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => {
+        if (alive) setShooters(r.shooters);
+      })
+      .catch(() => {
+        // 409 no_match: bound project is a legacy single-shooter project.
+        // The active project itself is the shooter -- leave shooters empty
+        // and the variants will fall back to the legacy single-card view.
+        if (alive) setShooters([]);
+      });
+  }, [project?.name]);
 
   const stageViews = useMemo<StageView[]>(() => {
     if (!project) return [];
@@ -172,11 +193,16 @@ export function Home() {
 
       <div className="mx-auto max-w-[1280px] px-8 pb-20 pt-6">
         {isEmpty ? (
-          <EmptyVariant project={project} stageViews={stageViews} />
+          <EmptyVariant
+            project={project}
+            stageViews={stageViews}
+            shooters={shooters}
+          />
         ) : (
           <ActiveVariant
             project={project}
             stageViews={stageViews}
+            shooters={shooters}
             nextUp={nextUp ?? null}
             totalsByTone={totalsByTone}
             auditedPct={auditedPct}
@@ -194,12 +220,14 @@ export function Home() {
 function ActiveVariant({
   project,
   stageViews,
+  shooters,
   nextUp,
   totalsByTone,
   auditedPct,
 }: {
   project: MatchProject;
   stageViews: StageView[];
+  shooters: ShooterListEntry[];
   nextUp: StageView | null;
   totalsByTone: Record<StagePillTone, number>;
   auditedPct: number;
@@ -294,13 +322,14 @@ function ActiveVariant({
         title="Shooters"
         count={
           <>
-            <b className="font-bold text-ink-2">01</b> in this match
+            <b className="font-bold text-ink-2">{pad2(shooters.length || 1)}</b>{" "}
+            in this match
           </>
         }
         action={
           <button
             type="button"
-            onClick={() => navigate("/audit")}
+            onClick={() => navigate("/shooters")}
             className="link-led-fill inline-flex items-center gap-1.5"
           >
             Manage shooters
@@ -309,16 +338,30 @@ function ActiveVariant({
         }
       />
       <div className="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        <ShooterCard
-          you
-          name={project.competitor_name ?? "You"}
-          stats={`${stageViews.length} stages`}
-          progress={
-            stageViews.length > 0
-              ? totalsByTone.done / stageViews.length
-              : 0
-          }
-        />
+        {shooters.length > 0 ? (
+          shooters.map((s) => (
+            <ShooterCard
+              key={s.slug}
+              you={s.is_active}
+              name={s.name}
+              stats={`${s.stages_total} stages`}
+              progress={
+                s.stages_total > 0 ? s.stages_audited / s.stages_total : 0
+              }
+            />
+          ))
+        ) : (
+          // Legacy single-shooter project: no /api/match/shooters listing,
+          // fall back to the bound MatchProject's competitor.
+          <ShooterCard
+            you
+            name={project.competitor_name ?? "You"}
+            stats={`${stageViews.length} stages`}
+            progress={
+              stageViews.length > 0 ? totalsByTone.done / stageViews.length : 0
+            }
+          />
+        )}
         <AddShooterCard />
       </div>
 
@@ -357,9 +400,11 @@ function ActiveVariant({
 function EmptyVariant({
   project,
   stageViews,
+  shooters,
 }: {
   project: MatchProject;
   stageViews: StageView[];
+  shooters: ShooterListEntry[];
 }) {
   const navigate = useNavigate();
   return (
@@ -417,23 +462,56 @@ function EmptyVariant({
 
       <SectionHead
         title="Shooters"
-        count={<>0 added</>}
+        count={
+          <>
+            <b className="font-bold text-ink-2">
+              {pad2(shooters.length || 1)}
+            </b>{" "}
+            added
+          </>
+        }
         action={
-          <a className="link-led-fill cursor-pointer">Manage shooters &rarr;</a>
+          <button
+            type="button"
+            onClick={() => navigate("/shooters")}
+            className="link-led-fill inline-flex items-center gap-1.5"
+          >
+            Manage shooters
+            <ArrowRight className="size-3.5" />
+          </button>
         }
       />
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <ShooterCard
-          you
-          name={`${project.competitor_name ?? "You"} · you`}
-          stats="From the scoreboard squad"
-          addLink="Add your footage"
-          onAddLink={() => navigate("/ingest")}
-        />
+        {shooters.length > 0 ? (
+          shooters.map((s) => (
+            <ShooterCard
+              key={s.slug}
+              you={s.is_active}
+              name={s.name}
+              stats={
+                s.video_count > 0
+                  ? `${s.video_count} ${s.video_count === 1 ? "video" : "videos"}`
+                  : "No footage yet"
+              }
+              addLink={s.is_active && s.video_count === 0 ? "Add your footage" : undefined}
+              onAddLink={() => navigate("/ingest")}
+            />
+          ))
+        ) : (
+          // Legacy single-shooter fallback.
+          <ShooterCard
+            you
+            name={project.competitor_name ?? "You"}
+            stats="No footage yet"
+            addLink="Add your footage"
+            onAddLink={() => navigate("/ingest")}
+          />
+        )}
         <div
           className="flex items-center gap-3.5 rounded-xl border border-dashed border-rule-strong bg-transparent px-4 py-4 text-led"
           role="button"
           aria-label="Add a squadmate"
+          onClick={() => navigate("/shooters")}
         >
           <span className="inline-flex size-11 items-center justify-center rounded-full border border-dashed border-rule-strong bg-surface-3 text-led">
             <Plus className="size-5" />
