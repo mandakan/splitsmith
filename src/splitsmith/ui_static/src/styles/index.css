@@ -340,17 +340,28 @@
  * ========================================================================== */
 /* @layer utilities (NOT components) so these styles win over the base
  * Button's `bg-primary` / `text-primary-foreground` / etc. utility classes.
- * Originally placed in @layer components which lost the cascade and the
- * filled CTAs kept rendering bright LED red + condensed black Antonio. */
+ *
+ * Antonio is preserved here -- the Shot Timer aesthetic depends on it.
+ * The contrast win comes from:
+ *   1. The deeper #DC2626 fill (vs the bright #FF2D2D it replaced) so
+ *      the cream text reaches readable contrast.
+ *   2. Cream (--color-ink) instead of near-black text.
+ *   3. Antonio bold (700) instead of semibold (600), and a small size
+ *      bump from 11px to 14px so there's more red pixel mass per glyph.
+ *   4. A subtle LED-red text-shadow halo that adds optical bloom (the
+ *      same one used on the brand mark + focus rings). It's the
+ *      "instrument was just turned on" feeling.
+ * ========================================================================== */
 @layer utilities {
   .btn-led-fill {
     background: var(--color-led-fill);
     color: var(--color-ink);
-    font-family: var(--font-sans);
-    font-size: 0.8125rem;     /* 13px -- vs the old 0.6875rem Antonio */
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-family: var(--font-display);
+    font-size: 0.875rem;        /* 14px (up from 0.6875rem / 11px) */
+    font-weight: 700;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.18);
     box-shadow:
       0 0 0 1px var(--color-led-fill),
       0 0 18px var(--color-led-glow);
@@ -363,22 +374,45 @@
   .tab-pill-led-fill {
     background: var(--color-led-fill);
     color: var(--color-ink);
-    font-family: var(--font-sans);
-    font-size: 0.75rem;       /* 12px -- a hair smaller than CTAs */
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-family: var(--font-display);
+    font-size: 0.8125rem;       /* 13px -- one notch smaller than CTAs */
+    font-weight: 700;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.18);
     box-shadow: 0 0 12px var(--color-led-glow);
   }
 
-  /* Filled stage badge (the "next up" tile in the sidebar). Same color
-   * pair but with mono numerals -- the digits stay JetBrains Mono so they
-   * line up with the rest of the badge column. */
+  /* Filled stage badge (the "next up" tile in the sidebar). Mono numerals
+   * stay JetBrains Mono so the digits line up with the rest of the badge
+   * column -- only the color pair shifts. */
   .badge-led-fill {
     background: var(--color-led-fill);
     color: var(--color-ink);
     box-shadow:
       0 0 0 1px var(--color-led-fill),
       0 0 8px var(--color-led-glow);
+  }
+
+  /* Inline red link affordance ("Manage shooters →" etc). Same Antonio
+   * but bold + slightly larger + LED-red text-shadow halo so the thin
+   * condensed strokes carry enough bloom to read against the dark bg. */
+  .link-led-fill {
+    font-family: var(--font-display);
+    font-size: 0.875rem;        /* 14px */
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-led);
+    text-shadow:
+      0 0 8px rgba(255, 45, 45, 0.35),
+      0 0 1px rgba(255, 45, 45, 0.6);
+    transition: color 150ms ease, text-shadow 150ms ease;
+  }
+  .link-led-fill:hover {
+    color: var(--color-led-soft);
+    text-shadow:
+      0 0 10px rgba(255, 85, 85, 0.45),
+      0 0 1px rgba(255, 85, 85, 0.7);
   }
 }

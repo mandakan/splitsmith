@@ -301,10 +301,10 @@ function ActiveVariant({
           <button
             type="button"
             onClick={() => navigate("/audit")}
-            className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
+            className="link-led-fill inline-flex items-center gap-1.5"
           >
             Manage shooters
-            <ArrowRight className="size-3" />
+            <ArrowRight className="size-3.5" />
           </button>
         }
       />
@@ -419,9 +419,7 @@ function EmptyVariant({
         title="Shooters"
         count={<>0 added</>}
         action={
-          <a className="font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft">
-            Manage shooters &rarr;
-          </a>
+          <a className="link-led-fill cursor-pointer">Manage shooters &rarr;</a>
         }
       />
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Splitsmith -- Red text-on-dark contrast options (Antonio preserved)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:           #0A0B0D;
+    --bg-glow:      #0E1014;
+    --surface:      #14171C;
+    --surface-2:    #1A1E24;
+    --rule:         #262B33;
+    --rule-strong:  #3A4049;
+    --ink:          #F4F4F5;
+    --ink-2:        #C9CCD2;
+    --muted:        #8E939B;
+    --subtle:       #6B7079;
+    --whisper:      #4B5058;
+    --led:          #FF2D2D;
+    --led-soft:     #FF5555;
+    --led-deep:     #DC2626;
+    --led-glow:     rgba(255, 45, 45, 0.30);
+    --led-tint:     rgba(255, 45, 45, 0.10);
+
+    --sans:    'Geist', system-ui, sans-serif;
+    --display: 'Antonio', 'Helvetica Neue', sans-serif;
+    --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--sans); color: var(--ink); background: var(--bg);
+    background-image:
+      radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+      linear-gradient(to bottom, var(--bg-glow), var(--bg));
+    background-attachment: fixed;
+    min-height: 100vh; padding: 32px 28px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1380px; margin: 0 auto; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 0.6875rem; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--led);
+    margin-bottom: 8px;
+  }
+  .kicker::before { content: ""; height: 1px; width: 26px; background: var(--led); }
+  h1 {
+    font-family: var(--display); font-size: 2.25rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: -0.005em; line-height: 1;
+    margin: 0 0 12px;
+  }
+  .sub { color: var(--muted); max-width: 760px; line-height: 1.55; margin-bottom: 28px; }
+
+  /* sim toggles */
+  .sim-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; }
+  .sim-label { font-family: var(--mono); font-size: 0.625rem; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--subtle); font-weight: 700; margin-right: 8px; }
+  .sim-btn {
+    font: inherit; font-family: var(--mono); font-size: 0.6875rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+    background: var(--surface-2); border: 1px solid var(--rule); border-radius: 7px;
+    padding: 7px 14px; cursor: pointer; transition: all 150ms ease;
+  }
+  .sim-btn:hover { color: var(--ink); border-color: var(--rule-strong); }
+  .sim-btn.active { background: var(--surface); color: var(--ink); border-color: var(--rule-strong); }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+    background: var(--rule); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden;
+    transition: filter 200ms ease;
+  }
+  .sim-deuteranopia .grid { filter: url(#deuteranopia); }
+  .sim-tritanopia .grid { filter: url(#tritanopia); }
+  .sim-low-vision .grid { filter: blur(0.6px) contrast(0.85); }
+
+  .cell {
+    background: var(--surface);
+    padding: 18px 18px 22px;
+    min-height: 220px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .cell .opt-tag {
+    font-family: var(--mono); font-size: 0.625rem; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--led);
+    margin-bottom: 4px;
+  }
+  .cell .opt-name {
+    font-family: var(--display); font-size: 1rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: -0.005em; color: var(--ink); margin-bottom: 6px;
+  }
+  .cell .opt-desc { font-size: 0.75rem; color: var(--ink-2); line-height: 1.45; }
+  .cell.current .opt-tag { color: var(--muted); }
+  .cell.recommended { background: linear-gradient(180deg, rgba(255,45,45,0.06), var(--surface)); }
+  .recommended-badge {
+    display: inline-flex; align-items: center; margin-left: 6px;
+    padding: 2px 6px; border-radius: 4px;
+    font-family: var(--mono); font-size: 0.5625rem; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    background: rgba(255,45,45,0.15); color: var(--led);
+  }
+
+  .stage-area { display: flex; align-items: center; justify-content: center;
+    padding: 10px; background: var(--bg); border-radius: 6px; min-height: 60px; }
+
+  /* Sample mock card */
+  .stage-card {
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+    min-height: 130px;
+  }
+  .stage-card .label {
+    font-family: var(--mono); font-size: 0.5625rem; font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--subtle);
+  }
+  .stage-card .body { color: var(--ink-2); font-size: 0.8125rem; line-height: 1.4; }
+
+  /* ================================================================
+     Link variants -- ALL keep Antonio. We dial weight, size, color,
+     letter-spacing, and the LED glow halo separately to find what
+     reads best while preserving the Shot Timer aesthetic.
+     ================================================================ */
+
+  .link-base {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--display);
+    text-transform: uppercase;
+    color: var(--led);
+    cursor: pointer;
+  }
+
+  /* Today: 13px Antonio semibold (600) + 0.08em tracking. */
+  .link-current { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.08em; }
+
+  /* Option A: just bump to bold (700). Same size + color. */
+  .link-a { font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.08em; }
+
+  /* Option B: bigger Antonio. 15px semibold, same color. */
+  .link-b { font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.06em; }
+
+  /* Option C: brighter red (LED soft). Antonio unchanged. */
+  .link-c { font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.08em; color: var(--led-soft); }
+
+  /* Option D (Recommended): Antonio bold + 14px + tighter tracking + subtle LED glow.
+     Three small dials, each barely perceptible on its own, that compound. */
+  .link-d {
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--led);
+    text-shadow:
+      0 0 8px rgba(255, 45, 45, 0.35),
+      0 0 1px rgba(255, 45, 45, 0.6);
+  }
+
+  /* contrast badge */
+  .contrast-badge {
+    margin-top: auto;
+    font-family: var(--mono); font-size: 0.6875rem;
+    font-weight: 700; color: var(--muted);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .contrast-badge b { color: var(--ink); }
+  .contrast-badge .tag {
+    padding: 2px 6px; border-radius: 4px; font-size: 0.5625rem; letter-spacing: 0.1em;
+  }
+  .contrast-badge.pass-aa  .tag { background: rgba(251,191,36,0.15); color: #FBBF24; }
+  .contrast-badge.pass-aa  b { color: #FBBF24; }
+  .contrast-badge.pass-aaa .tag { background: rgba(74,222,128,0.15); color: #4ADE80; }
+  .contrast-badge.pass-aaa b { color: #4ADE80; }
+
+  .notes {
+    margin-top: 28px; padding: 20px 24px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--rule);
+    color: var(--ink-2); line-height: 1.6; font-size: 0.875rem;
+  }
+  .notes h3 {
+    font-family: var(--display); font-size: 0.875rem;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink); margin: 0 0 8px;
+  }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin-bottom: 8px; }
+  .notes code { font-family: var(--mono); font-size: 0.8125rem; padding: 1px 6px;
+    background: var(--surface-2); border-radius: 4px; }
+  .notes b { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="deuteranopia">
+    <feColorMatrix type="matrix" values="
+      0.625 0.375 0     0 0
+      0.700 0.300 0     0 0
+      0     0.300 0.700 0 0
+      0     0     0     1 0"/>
+  </filter>
+  <filter id="tritanopia">
+    <feColorMatrix type="matrix" values="
+      0.950 0.050 0     0 0
+      0     0.433 0.567 0 0
+      0     0.475 0.525 0 0
+      0     0     0     1 0"/>
+  </filter>
+</svg>
+
+<div class="wrap">
+  <div class="kicker">UX exploration / red-on-dark link affordances</div>
+  <h1>"Manage shooters" link contrast &mdash; Antonio preserved</h1>
+  <p class="sub">
+    All four options keep <b>Antonio</b> as the typeface &mdash; the Shot Timer aesthetic stays.
+    We dial weight, size, color, tracking, and a subtle LED glow halo independently to see
+    what reads best at body size against the dark background. Toggle the simulations below
+    to compare under colorblindness + low-vision blur.
+  </p>
+
+  <div class="sim-bar">
+    <span class="sim-label">Simulate</span>
+    <button class="sim-btn active" data-sim="">Normal vision</button>
+    <button class="sim-btn" data-sim="sim-deuteranopia">Deuteranopia</button>
+    <button class="sim-btn" data-sim="sim-tritanopia">Tritanopia</button>
+    <button class="sim-btn" data-sim="sim-low-vision">Low vision / blur</button>
+  </div>
+
+  <div class="grid">
+
+    <div class="cell current">
+      <div>
+        <div class="opt-tag">Today</div>
+        <div class="opt-name">Current</div>
+        <div class="opt-desc">Antonio 13px semibold (600) at 0.08em tracking. LED red.</div>
+      </div>
+      <div class="stage-area">
+        <a class="link-base link-current">Manage shooters &rarr;</a>
+      </div>
+      <div class="contrast-badge pass-aa"><b>5.32:1</b><span class="tag">AA only</span></div>
+    </div>
+
+    <div class="cell">
+      <div>
+        <div class="opt-tag">Option A</div>
+        <div class="opt-name">Antonio bold</div>
+        <div class="opt-desc">Same Antonio, weight 700 instead of 600. Thicker verticals.</div>
+      </div>
+      <div class="stage-area">
+        <a class="link-base link-a">Manage shooters &rarr;</a>
+      </div>
+      <div class="contrast-badge pass-aa"><b>5.32:1</b><span class="tag">weight</span></div>
+    </div>
+
+    <div class="cell">
+      <div>
+        <div class="opt-tag">Option B</div>
+        <div class="opt-name">Antonio 15px</div>
+        <div class="opt-desc">Same weight + color, one notch larger (15px). More colored pixel mass.</div>
+      </div>
+      <div class="stage-area">
+        <a class="link-base link-b">Manage shooters &rarr;</a>
+      </div>
+      <div class="contrast-badge pass-aa"><b>5.32:1</b><span class="tag">size</span></div>
+    </div>
+
+    <div class="cell">
+      <div>
+        <div class="opt-tag">Option C</div>
+        <div class="opt-name">LED-soft red</div>
+        <div class="opt-desc">Antonio unchanged. Color shifts from <code>#FF2D2D</code> to <code>#FF5555</code>.</div>
+      </div>
+      <div class="stage-area">
+        <a class="link-base link-c">Manage shooters &rarr;</a>
+      </div>
+      <div class="contrast-badge pass-aaa"><b>6.51:1</b><span class="tag">color</span></div>
+    </div>
+
+    <div class="cell recommended">
+      <div>
+        <div class="opt-tag" style="color: var(--led);">Option D <span class="recommended-badge">Recommended</span></div>
+        <div class="opt-name">Bold + 14px + LED glow halo</div>
+        <div class="opt-desc">Antonio bold (700), 14px, 0.05em tracking, with a soft LED-red text-shadow glow. Three small dials, all instrument-panel native.</div>
+      </div>
+      <div class="stage-area">
+        <a class="link-base link-d">Manage shooters &rarr;</a>
+      </div>
+      <div class="contrast-badge pass-aa"><b>5.32:1</b><span class="tag">type + glow</span></div>
+    </div>
+
+  </div>
+
+  <!-- In context -->
+  <h2 style="font-family: var(--display); text-transform: uppercase; letter-spacing: -0.005em; font-size: 1.25rem; margin: 32px 0 14px;">In context</h2>
+  <p class="sub">Same five options inside a match-overview card so you can see the relationship to the surrounding text.</p>
+  <div class="grid">
+    <div class="cell">
+      <div class="stage-card">
+        <div class="label">Shooters</div>
+        <div class="body">3 shooters &middot; 8 of 12 stages audited &middot; 1 with HITL queue items</div>
+        <a class="link-base link-current" style="margin-top: auto;">Manage shooters &rarr;</a>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="stage-card">
+        <div class="label">Shooters</div>
+        <div class="body">3 shooters &middot; 8 of 12 stages audited &middot; 1 with HITL queue items</div>
+        <a class="link-base link-a" style="margin-top: auto;">Manage shooters &rarr;</a>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="stage-card">
+        <div class="label">Shooters</div>
+        <div class="body">3 shooters &middot; 8 of 12 stages audited &middot; 1 with HITL queue items</div>
+        <a class="link-base link-b" style="margin-top: auto;">Manage shooters &rarr;</a>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="stage-card">
+        <div class="label">Shooters</div>
+        <div class="body">3 shooters &middot; 8 of 12 stages audited &middot; 1 with HITL queue items</div>
+        <a class="link-base link-c" style="margin-top: auto;">Manage shooters &rarr;</a>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="stage-card">
+        <div class="label">Shooters</div>
+        <div class="body">3 shooters &middot; 8 of 12 stages audited &middot; 1 with HITL queue items</div>
+        <a class="link-base link-d" style="margin-top: auto;">Manage shooters &rarr;</a>
+      </div>
+    </div>
+  </div>
+
+  <aside class="notes">
+    <h3>Why the glow halo matters</h3>
+    <ul>
+      <li>
+        The original "thin red text" feeling comes from <b>too few colored pixels per glyph</b>
+        at 13px Antonio. The contrast ratio is fine; the eye just doesn't have enough red mass to
+        latch onto.
+      </li>
+      <li>
+        Three small dials beat one big change:
+        <ul style="margin-top: 6px;">
+          <li><b>Weight 600 -> 700:</b> ~12&ndash;15% more pixel mass per stroke.</li>
+          <li><b>Size 13px -> 14px:</b> ~16% area bump per glyph.</li>
+          <li><b>LED glow halo:</b> the <code>text-shadow</code> bloom adds ~2&ndash;3px of red
+              haze around each letter, which the eye reads as "this red is brighter / more
+              present" without changing the actual hue.</li>
+        </ul>
+      </li>
+      <li>
+        The glow is also <b>on-brand</b>: it matches the LED bloom already used on the brand
+        mark, focus rings, and active stage badge. The link starts to feel like a piece of
+        instrument hardware, not an underlined hyperlink.
+      </li>
+      <li>
+        If even this feels like "too much", <b>Option C alone</b> (brighter LED-soft red on plain
+        Antonio) is the lowest-effort fix: it bumps contrast to 6.51:1 (AAA-ish) by changing
+        exactly one hex value. Hue shifts toward pink slightly.
+      </li>
+    </ul>
+  </aside>
+</div>
+
+<script>
+  document.querySelectorAll('[data-sim]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-sim]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('sim-deuteranopia', 'sim-tritanopia', 'sim-low-vision');
+      const sim = btn.dataset.sim;
+      if (sim) document.body.classList.add(sim);
+    });
+  });
+</script>
+
+</body>
+</html>

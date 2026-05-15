@@ -44,29 +44,29 @@ export function ModeSwitch({ size = "md", className, ...props }: ModeSwitchProps
             aria-checked={active}
             onClick={() => setMode(opt.value)}
             className={cn(
-              // Geist medium uppercase (NOT condensed Antonio) at 12px
-              // for active + 11px for inactive. Pairs with the deeper
-              // accent fill below so cream text reaches readable
-              // contrast even under colorblindness simulation.
-              "inline-flex items-center justify-center rounded-full font-sans font-semibold uppercase tracking-[0.08em] transition-colors",
+              // Antonio (display) uppercase stays -- it's the Shot Timer
+              // brand. Contrast comes from the deeper accent fill below
+              // and cream ink (not near-black) plus a small text-shadow
+              // halo on the active state for optical bloom.
+              "inline-flex items-center justify-center rounded-full font-display font-bold uppercase tracking-[0.08em] transition-colors",
               height,
               padX,
               active
-                ? "text-[0.75rem] text-ink shadow-[0_0_12px_var(--color-accent-mode-glow)]"
+                ? "text-[0.8125rem] text-ink shadow-[0_0_12px_var(--color-accent-mode-glow)]"
                 : "text-[0.6875rem] text-muted hover:text-ink",
             )}
             style={
               active
                 ? {
-                    // Deeper red (#DC2626) in match mode, deeper cyan
-                    // (#0891B2) in dev mode, so cream text pops. We
-                    // inline the per-mode value because there's no
-                    // --color-accent-mode-fill token yet -- if it
-                    // becomes a pattern we'll promote it.
+                    // Deeper accent fill: #DC2626 in match mode, #0891B2
+                    // in dev mode -- so cream text reaches readable
+                    // contrast. Subtle text-shadow pulls the strokes
+                    // visually thicker without changing the typeface.
                     background:
                       mode === "developer"
                         ? "#0891B2"
                         : "var(--color-led-fill)",
+                    textShadow: "0 0 6px rgba(0, 0, 0, 0.18)",
                   }
                 : undefined
             }
