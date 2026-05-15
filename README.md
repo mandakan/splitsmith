@@ -4,7 +4,7 @@ Extract per-shot split times from head-mounted camera footage of IPSC matches an
 
 ![audit view](docs/screenshots/audit.png)
 
-Shot timers like the CED7000 give you splits during practice, but at matches you can't carry one. Head-mounted cameras (Insta360 Go 3S in this case) capture audio that contains all the shot information -- this tool extracts it and turns it into actionable training data.
+Built to do two things from a single stage video: get per-shot splits for analysis and coaching, and prepare frame-marked clips for match-footage review. Your head-mounted cam (Insta360 Go 3S in this case) already captures audio of every shot; the RO's timer only records your total stage time, so the splits live in the video and nowhere else. Splitsmith extracts them and turns them into a CSV plus an FCPXML timeline with per-shot markers you can step through in Final Cut Pro.
 
 **Inputs:** raw MP4s from a head-mounted cam, stage time data from SSI Scoreboard.
 **Outputs (per stage):** lossless trim around the start beep, splits CSV, FCPXML with frame-aligned markers, anomaly report.
