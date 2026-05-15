@@ -12,22 +12,29 @@ UI — see `docs/ux-redesign/06-design-system.md`.
 
 ## Deploy on Cloudflare Pages
 
-Either via Git integration or direct upload:
+**Automated (default):** `.github/workflows/deploy-site.yml` publishes
+`site/` to the `splitsmith` Cloudflare Pages project on every push to
+`main` that touches `site/**`. It can also be triggered manually via
+**Actions → Deploy marketing site → Run workflow**.
 
-**Git integration (recommended):**
+The workflow needs two repo secrets:
 
-1. Cloudflare dashboard → Pages → Create a project → Connect to Git.
-2. Pick this repo.
-3. Build settings:
-   - Framework preset: **None**
-   - Build command: *(leave blank)*
-   - Build output directory: **`site`**
-4. Set the custom domain to `splitsmith.app`.
+- `CLOUDFLARE_API_TOKEN` — token scoped to `Account: Cloudflare Pages — Edit`
+- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID
 
-**Direct upload (Wrangler):**
+One-time Cloudflare setup (only needed before the first deploy):
+
+1. Cloudflare dashboard → Workers & Pages → Create → Pages → Direct
+   upload (or Connect to Git, if you prefer to skip the Action). Name
+   the project **`splitsmith`**.
+2. Assign the custom domain **`splitsmith.app`** to the project.
+
+After that, every push to `main` ships.
+
+**Manual upload (Wrangler):**
 
 ```bash
 npx wrangler pages deploy site --project-name splitsmith
 ```
 
-That's it — no build, no JS bundle, no server.
+No build, no JS bundle, no server.
