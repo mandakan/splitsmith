@@ -12,29 +12,25 @@ UI — see `docs/ux-redesign/06-design-system.md`.
 
 ## Deploy on Cloudflare Pages
 
-**Automated (default):** `.github/workflows/deploy-site.yml` publishes
-`site/` to the `splitsmith` Cloudflare Pages project on every push to
-`main` that touches `site/**`. It can also be triggered manually via
-**Actions → Deploy marketing site → Run workflow**.
+The Pages project `splitsmith` is already created and live at
+[splitsmith.pages.dev](https://splitsmith.pages.dev). It's wired to
+`splitsmith.app` as a custom domain; DNS for the apex + `www` resolves
+through Cloudflare in the same account.
 
-The workflow needs two repo secrets:
+**CI deploys** — `.github/workflows/deploy-marketing.yml` runs
+`wrangler pages deploy site` on every push to `main` that touches
+`site/**` or `wrangler.toml`. Needs repo secrets `CLOUDFLARE_API_TOKEN`
+(Pages:Edit + Workers:Edit) and `CLOUDFLARE_ACCOUNT_ID`.
 
-- `CLOUDFLARE_API_TOKEN` — token scoped to `Account: Cloudflare Pages — Edit`
-- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID
-
-One-time Cloudflare setup (only needed before the first deploy):
-
-1. Cloudflare dashboard → Workers & Pages → Create → Pages → Direct
-   upload (or Connect to Git, if you prefer to skip the Action). Name
-   the project **`splitsmith`**.
-2. Assign the custom domain **`splitsmith.app`** to the project.
-
-After that, every push to `main` ships.
-
-**Manual upload (Wrangler):**
+**Manual deploy:**
 
 ```bash
-npx wrangler pages deploy site --project-name splitsmith
+export CLOUDFLARE_API_TOKEN=…
+export CLOUDFLARE_ACCOUNT_ID=…
+npx wrangler pages deploy site --project-name splitsmith --branch main
 ```
 
-No build, no JS bundle, no server.
+`wrangler.toml` at the repo root pins `pages_build_output_dir = "./site"`
+so `wrangler pages deploy` (without args) works from anywhere in the tree.
+
+That's it — no build, no JS bundle, no server.
