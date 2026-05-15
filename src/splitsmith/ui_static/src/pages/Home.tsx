@@ -339,10 +339,13 @@ function ActiveVariant({
       />
       <div className="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
         {shooters.length > 0 ? (
+          // No `you` ring here yet: the "currently bound" shooter is a
+          // session detail, not the operator's identity. Coaching workflows
+          // mean the operator may not be a shooter in this match at all.
+          // See #350 for the real operator-vs-shooter split.
           shooters.map((s) => (
             <ShooterCard
               key={s.slug}
-              you={s.is_active}
               name={s.name}
               stats={`${s.stages_total} stages`}
               progress={
@@ -354,7 +357,6 @@ function ActiveVariant({
           // Legacy single-shooter project: no /api/match/shooters listing,
           // fall back to the bound MatchProject's competitor.
           <ShooterCard
-            you
             name={project.competitor_name ?? "You"}
             stats={`${stageViews.length} stages`}
             progress={
@@ -483,27 +485,26 @@ function EmptyVariant({
       />
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {shooters.length > 0 ? (
+          // No `you` ring yet -- see #350.
           shooters.map((s) => (
             <ShooterCard
               key={s.slug}
-              you={s.is_active}
               name={s.name}
               stats={
                 s.video_count > 0
                   ? `${s.video_count} ${s.video_count === 1 ? "video" : "videos"}`
                   : "No footage yet"
               }
-              addLink={s.is_active && s.video_count === 0 ? "Add your footage" : undefined}
+              addLink={s.video_count === 0 ? "Add footage" : undefined}
               onAddLink={() => navigate("/ingest")}
             />
           ))
         ) : (
           // Legacy single-shooter fallback.
           <ShooterCard
-            you
-            name={project.competitor_name ?? "You"}
+            name={project.competitor_name ?? "Shooter"}
             stats="No footage yet"
-            addLink="Add your footage"
+            addLink="Add footage"
             onAddLink={() => navigate("/ingest")}
           />
         )}
