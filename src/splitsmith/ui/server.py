@@ -799,6 +799,12 @@ class ShooterListEntry(BaseModel):
     stages_total: int
     video_count: int
     cameras: list[ShooterCameraInfo]
+    # Stages where the primary has a beep + stage time set but no audit-mode
+    # trim cache MP4 on disk. Drives the "Rebuild trim caches (N)" CTA on
+    # the Shooters page (#351). Counts only stages where rebuild is possible
+    # (primary + beep + stage_time + reachable source); stages missing those
+    # prerequisites are excluded from the count.
+    stages_missing_trim: int = 0
 
 
 class ShooterListResponse(BaseModel):
@@ -3294,6 +3300,51 @@ def create_app(
                     stage_number=stage_number,
                     fn=lambda h, n=stage_number: _run_shot_detect(h, n),
                 )
+        handle.update(progress=1.0, message="Done")
+
+    def _run_trim_at_root(
+        handle: JobHandle,
+        shooter_root: Path,
+        stage_number: int,
+        video_id: str,
+    ) -> None:
+        """Like :func:`_run_trim_for_video` but scoped to an explicit
+        ``shooter_root`` instead of the server's bound ``state``. Used by
+        the bulk-rebuild endpoint so the operator can regenerate trim
+        caches for a non-active shooter without rebinding (which would
+        force-reload their current Audit / Compare context).
+
+        Unlike the bound variant this never auto-chains shot detection --
+        the operator is doing a maintenance pass on derived data; the
+        original audit + shot results are kept as-is.
+        """
+        handle.update(progress=0.1, message="Preparing trim...")
+        proj = MatchProject.load(shooter_root)
+        stg = proj.stage(stage_number)
+        video = stg.find_video_by_id(video_id)
+        if video is None or video.beep_time is None:
+            raise RuntimeError("video or beep disappeared mid-flight")
+        source = proj.resolve_video_path(shooter_root, video.path)
+        handle.check_cancel()
+        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
+        handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
+        audio_helpers.ensure_video_audit_trim(
+            shooter_root,
+            stage_number,
+            video,
+            source,
+            video.beep_time,
+            stg.time_seconds,
+            project=proj,
+            runner=_cancellable_runner(handle),
+        )
+        handle.update(progress=0.85, message="Saving project...")
+        fresh = MatchProject.load(shooter_root)
+        stg_fresh = fresh.stage(stage_number)
+        v_fresh = stg_fresh.find_video_by_id(video_id)
+        if v_fresh is not None:
+            v_fresh.processed["trim"] = True
+            fresh.save(shooter_root)
         handle.update(progress=1.0, message="Done")
 
     def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:
@@ -6170,6 +6221,22 @@ def create_app(
         """Build a list entry for a single shooter directory."""
         legacy = MatchProject.load(shooter_root)
         stages_audited = sum(1 for s in legacy.stages if s.time_seconds > 0 or s.skipped)
+        stages_missing_trim = 0
+        for s in legacy.stages:
+            prim = next((v for v in s.videos if v.role == "primary"), None)
+            if prim is None or prim.beep_time is None or s.time_seconds <= 0:
+                continue
+            try:
+                source = legacy.resolve_video_path(shooter_root, prim.path)
+                if not source.exists():
+                    continue
+            except Exception:  # noqa: BLE001 -- defensive
+                continue
+            cache = audio_helpers.trimmed_video_path(
+                shooter_root, s.stage_number, prim, project=legacy
+            )
+            if not cache.exists():
+                stages_missing_trim += 1
         # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
         groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
         total_videos = 0
@@ -6216,6 +6283,7 @@ def create_app(
             stages_total=len(match.stages),
             video_count=total_videos,
             cameras=cameras,
+            stages_missing_trim=stages_missing_trim,
         )
 
     # ----------------------------------------------------------------------
@@ -6474,6 +6542,86 @@ def create_app(
         match.shooters = [s for s in match.shooters if s != slug]
         match.save(match_root)
         return list_match_shooters()
+
+    @app.post("/api/match/shooters/{slug}/build-trim-caches")
+    def build_shooter_trim_caches(slug: str) -> JSONResponse:
+        """Submit trim-cache jobs for every stage in ``slug``'s project
+        where the audit-mode short-GOP MP4 is missing (#351).
+
+        Operates against the shooter's project root directly rather than
+        the bound ``state``, so the user can regenerate Mathias's caches
+        while staying on Anton's audit screen. Each stage with a primary
+        + beep + stage_time + reachable source becomes one trim job in
+        the existing JobRegistry; the SPA's JobsPanel surfaces them.
+        Stages already cached are skipped silently (the underlying
+        ``ensure_video_audit_trim`` is idempotent, but skipping early
+        avoids the queue churn).
+        """
+        match_root, match, _ = _resolve_match_context()
+        if slug not in match.shooters:
+            raise HTTPException(status_code=404, detail="shooter not found")
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        try:
+            proj = MatchProject.load(shooter_root)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        jobs_submitted: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for stage in proj.stages:
+            primary = next((v for v in stage.videos if v.role == "primary"), None)
+            if primary is None:
+                skipped.append({"stage": stage.stage_number, "reason": "no_primary"})
+                continue
+            if primary.beep_time is None:
+                skipped.append({"stage": stage.stage_number, "reason": "no_beep"})
+                continue
+            if stage.time_seconds <= 0:
+                skipped.append({"stage": stage.stage_number, "reason": "no_stage_time"})
+                continue
+            try:
+                source = proj.resolve_video_path(shooter_root, primary.path)
+            except Exception:  # noqa: BLE001 -- defensive
+                skipped.append({"stage": stage.stage_number, "reason": "source_unreachable"})
+                continue
+            if not source.exists():
+                skipped.append({"stage": stage.stage_number, "reason": "source_missing"})
+                continue
+            cache = audio_helpers.trimmed_video_path(
+                shooter_root, stage.stage_number, primary, project=proj
+            )
+            if cache.exists():
+                skipped.append({"stage": stage.stage_number, "reason": "already_cached"})
+                continue
+            # video_id is a hash of the source path so it's unique across
+            # shooters -- the JobRegistry dedup key (kind, stage, video_id)
+            # won't collide with the same stage on a different shooter.
+            existing = state.jobs.find_active(
+                kind="trim",
+                stage_number=stage.stage_number,
+                video_id=primary.video_id,
+            )
+            if existing is not None:
+                jobs_submitted.append(existing.model_dump(mode="json"))
+                continue
+            job = state.jobs.submit(
+                kind="trim",
+                stage_number=stage.stage_number,
+                video_id=primary.video_id,
+                fn=lambda h, sr=shooter_root, n=stage.stage_number, vid=primary.video_id: (
+                    _run_trim_at_root(h, sr, n, vid)
+                ),
+            )
+            jobs_submitted.append(job.model_dump(mode="json"))
+
+        return JSONResponse(
+            {
+                "shooter_slug": slug,
+                "shooter_name": proj.competitor_name,
+                "jobs_submitted": jobs_submitted,
+                "skipped": skipped,
+            }
+        )
 
     # ----------------------------------------------------------------------
     # Stage compare (#328)

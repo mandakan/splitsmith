@@ -21,6 +21,7 @@ import {
   Camera,
   CheckCircle2,
   Plus,
+  RefreshCw,
   Star,
   Trash2,
   UserPlus,
@@ -163,6 +164,29 @@ export function Shooters() {
     }
   }
 
+  async function rebuildTrims(slug: string, name: string, count: number) {
+    setBusy(slug);
+    setError(null);
+    try {
+      const result = await api.buildShooterTrimCaches(slug);
+      // The JobsPanel already polls /api/jobs and surfaces the queued
+      // trim jobs; we just refresh the shooter list so the missing-trim
+      // count moves toward zero as jobs complete (the user re-loads the
+      // page or comes back here later; we don't long-poll here).
+      const submitted = result.jobs_submitted.length;
+      if (submitted === 0) {
+        setError(
+          `No trim jobs to run for ${name} -- ${count} stages were eligible by count but every one was already cached, missing prerequisites, or already queued.`,
+        );
+      }
+      await reload();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const active = data?.shooters ?? [];
   const stagesTotal = active[0]?.stages_total ?? 0;
 
@@ -203,6 +227,13 @@ export function Shooters() {
               onActivate={() => void activate(shooter.slug)}
               onRemove={() => void remove(shooter.slug, shooter.name)}
               onOpenAudit={() => navigate("/audit")}
+              onRebuildTrims={() =>
+                void rebuildTrims(
+                  shooter.slug,
+                  shooter.name,
+                  shooter.stages_missing_trim,
+                )
+              }
             />
           ))}
         </div>
@@ -282,6 +313,7 @@ function ShooterCard({
   onActivate,
   onRemove,
   onOpenAudit,
+  onRebuildTrims,
 }: {
   shooter: ShooterListEntry;
   stagesTotal: number;
@@ -289,6 +321,7 @@ function ShooterCard({
   onActivate: () => void;
   onRemove: () => void;
   onOpenAudit: () => void;
+  onRebuildTrims: () => void;
 }) {
   const palette = pickPalette(shooter.slug, shooter.is_active);
   const style = PALETTE_STYLE[palette];
@@ -367,6 +400,19 @@ function ShooterCard({
         </div>
         <StatusPill status={status} />
         <div className="flex items-center gap-1">
+          {shooter.stages_missing_trim > 0 && (
+            <button
+              type="button"
+              onClick={onRebuildTrims}
+              disabled={busy}
+              title={`Rebuild ${shooter.stages_missing_trim} missing trim cache${shooter.stages_missing_trim === 1 ? "" : "s"} for ${shooter.name}`}
+              aria-label={`Rebuild ${shooter.stages_missing_trim} missing trim caches for ${shooter.name}`}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-2.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led disabled:opacity-50"
+            >
+              <RefreshCw className="size-3.5" />
+              Rebuild ({shooter.stages_missing_trim})
+            </button>
+          )}
           {!shooter.is_active && (
             <button
               type="button"

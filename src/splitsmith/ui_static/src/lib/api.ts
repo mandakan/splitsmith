@@ -1180,6 +1180,18 @@ export interface ShooterListEntry {
   stages_total: number;
   video_count: number;
   cameras: ShooterCameraInfo[];
+  /** Stages where the audit-mode trim cache is missing and rebuildable
+   *  (primary + beep + stage_time + reachable source). Drives the
+   *  "Rebuild trim caches (N)" CTA on /shooters (#351). */
+  stages_missing_trim: number;
+}
+
+/** Response payload for POST /api/match/shooters/{slug}/build-trim-caches (#351). */
+export interface BuildTrimCachesResult {
+  shooter_slug: string;
+  shooter_name: string | null;
+  jobs_submitted: Job[];
+  skipped: { stage: number; reason: string }[];
 }
 
 export interface ShooterListResponse {
@@ -1825,6 +1837,16 @@ export const api = {
   selectActiveShooter: (slug: string) =>
     request<ServerHealth>(
       `/api/match/shooters/${encodeURIComponent(slug)}/select`,
+      { method: "POST" },
+    ),
+
+  /** Queue trim-cache rebuild jobs for every missing-but-rebuildable stage
+   *  in the named shooter's project. Works against the shooter's project
+   *  root directly, so it does not change which shooter the server is
+   *  currently bound to. (#351) */
+  buildShooterTrimCaches: (slug: string) =>
+    request<BuildTrimCachesResult>(
+      `/api/match/shooters/${encodeURIComponent(slug)}/build-trim-caches`,
       { method: "POST" },
     ),
 
