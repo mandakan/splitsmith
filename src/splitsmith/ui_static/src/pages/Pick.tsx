@@ -339,12 +339,10 @@ export function Pick() {
           <Button
             type="button"
             onClick={() => navigate("/pick/new")}
-            className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_24px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+            className="btn-led-fill"
           >
             <Plus className="size-3.5" />
-            <span className="font-display uppercase tracking-[0.06em]">
-              New Match
-            </span>
+            <span>New Match</span>
             <Kbd className="border-current/40">&#8984;N</Kbd>
           </Button>
         </div>
@@ -865,10 +863,7 @@ function EmptyState({ onNew }: { onNew: () => void }) {
         import a backup if you've worked on this machine before.
       </p>
       <div className="flex gap-3">
-        <Button
-          onClick={onNew}
-          className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
-        >
+        <Button onClick={onNew} className="btn-led-fill">
           <Plus className="size-3.5" /> New Match
         </Button>
       </div>

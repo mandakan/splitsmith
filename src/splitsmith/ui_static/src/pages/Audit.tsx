@@ -1297,7 +1297,7 @@ export function Audit() {
                 aria-label="Stage views"
                 className="inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
               >
-                <span className="inline-flex min-h-9 items-center rounded-md bg-led px-3.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-bg shadow-[0_0_12px_var(--color-led-glow)]">
+                <span className="tab-pill-led-fill inline-flex min-h-9 items-center rounded-md px-3.5">
                   Audit
                 </span>
                 <button
@@ -1305,7 +1305,7 @@ export function Audit() {
                   onClick={() =>
                     stageNumber != null && navigate(`/compare/${stageNumber}`)
                   }
-                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
+                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
                 >
                   Compare
                 </button>
@@ -1314,7 +1314,7 @@ export function Audit() {
                   onClick={() =>
                     stageNumber != null && navigate(`/coach/${stageNumber}`)
                   }
-                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
+                  className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
                 >
                   Coach
                 </button>
@@ -1330,7 +1330,7 @@ export function Audit() {
               disabled={saveStatus.kind === "saving"}
               aria-label="Save and go to next stage (Cmd+S)"
               title="Save and advance (Cmd+S)"
-              className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+              className="btn-led-fill"
             >
               {saveStatus.kind === "saving" ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -1339,9 +1339,7 @@ export function Audit() {
               ) : (
                 <Save className="size-3.5" />
               )}
-              <span className="font-display uppercase tracking-[0.08em]">
-                {saveStatus.kind === "saving" ? "Saving" : "Save & next"}
-              </span>
+              <span>{saveStatus.kind === "saving" ? "Saving" : "Save & next"}</span>
             </Button>
             <Button
               type="button"

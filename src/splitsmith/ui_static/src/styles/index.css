@@ -54,10 +54,23 @@
   --color-subtle:       #6B7079;
   --color-whisper:      #4B5058;
 
-  /* Brand -- LED chronograph red */
+  /* Brand -- LED chronograph red.
+   *
+   * --color-led            #FF2D2D  identity/accent: dots, focus rings, brand mark,
+   *                                  hairlines, glow halos. Saturated, instrument-grade.
+   * --color-led-soft       #FF5555  hover-up for accents.
+   * --color-led-deep       #B91C1C  hover-down + heavy fills (rare).
+   * --color-led-fill       #DC2626  filled-button + active-tab fill. Slightly darker
+   *                                  than --color-led so cream text reaches AA-large
+   *                                  + survives red-green colorblindness. Paired
+   *                                  with .btn-led-fill / .tab-pill-led-fill which
+   *                                  also switch the typography to 13px Geist
+   *                                  medium (vs 11px Antonio) to fix the perceptual
+   *                                  thinness Antonio has at small sizes. */
   --color-led:          #FF2D2D;
   --color-led-soft:     #FF5555;
   --color-led-deep:     #B91C1C;
+  --color-led-fill:     #DC2626;
   --color-led-glow:     rgba(255, 45, 45, 0.30);
   --color-led-tint:     rgba(255, 45, 45, 0.10);
 
@@ -293,5 +306,67 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+/* ============================================================================
+ * LED-filled surfaces (option D contrast fix).
+ *
+ * The Shot Timer aesthetic uses LED red as both an identity accent (dots,
+ * focus rings, hairlines) AND a primary-button background. The two roles
+ * have conflicting contrast requirements: a saturated #FF2D2D works as an
+ * accent but pairs poorly with the condensed Antonio typeface for button
+ * text. These component classes give filled-button surfaces a slightly
+ * deeper #DC2626 fill + cream text + Geist 13px medium (not Antonio 11px),
+ * which keeps the LED-red identity (glow halo stays #FF2D2D) while
+ * meaningfully improving readability for colorblindness + aging vision.
+ *
+ * Apply to:
+ *   - Primary filled CTAs (New match, Save & next, Promote to shipped)
+ *   - Active tab pills (Audit / Compare / Coach in the stage strip)
+ *   - "Next up" stage number badge in the MatchShell sidebar
+ *
+ * Do NOT apply to:
+ *   - Small accent dots / 1-2px hairlines / focus rings (those keep #FF2D2D)
+ *   - Hollow LED-border buttons (already high contrast)
+ * ========================================================================== */
+@layer components {
+  .btn-led-fill {
+    background: var(--color-led-fill);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;     /* 13px -- vs the old 0.6875rem Antonio */
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow:
+      0 0 0 1px var(--color-led-fill),
+      0 0 18px var(--color-led-glow);
+  }
+  .btn-led-fill:hover {
+    background: var(--color-led);
+    color: var(--color-ink);
+  }
+
+  .tab-pill-led-fill {
+    background: var(--color-led-fill);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.75rem;       /* 12px -- a hair smaller than CTAs */
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow: 0 0 12px var(--color-led-glow);
+  }
+
+  /* Filled stage badge (the "next up" tile in the sidebar). Same color
+   * pair but with mono numerals -- the digits stay JetBrains Mono so they
+   * line up with the rest of the badge column. */
+  .badge-led-fill {
+    background: var(--color-led-fill);
+    color: var(--color-ink);
+    box-shadow:
+      0 0 0 1px var(--color-led-fill),
+      0 0 8px var(--color-led-glow);
   }
 }

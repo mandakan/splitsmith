@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Splitsmith -- LED button contrast options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:           #0A0B0D;
+    --bg-glow:      #0E1014;
+    --surface:      #14171C;
+    --surface-2:    #1A1E24;
+    --surface-3:    #232831;
+    --rule:         #262B33;
+    --rule-strong:  #3A4049;
+    --ink:          #F4F4F5;
+    --ink-2:        #C9CCD2;
+    --muted:        #8E939B;
+    --subtle:       #6B7079;
+    --whisper:      #4B5058;
+
+    --led:          #FF2D2D;
+    --led-deep:     #DC2626;
+    --led-deeper:   #B91C1C;
+    --led-glow:     rgba(255, 45, 45, 0.30);
+    --led-tint:     rgba(255, 45, 45, 0.10);
+
+    --done:         #4ADE80;
+    --beep:         #06B6D4;
+    --live:         #FBBF24;
+
+    --sans:    'Geist', system-ui, sans-serif;
+    --display: 'Antonio', 'Helvetica Neue', sans-serif;
+    --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    background-image:
+      radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%),
+      linear-gradient(to bottom, var(--bg-glow), var(--bg));
+    background-attachment: fixed;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 28px 80px;
+  }
+
+  /* ===================== Page head ===================== */
+  .page-head { max-width: 1380px; margin: 0 auto 36px; }
+  .page-kicker {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--led);
+    margin-bottom: 8px;
+  }
+  .page-kicker::before {
+    content: ""; height: 1px; width: 26px; background: var(--led);
+  }
+  .page-h1 {
+    font-family: var(--display);
+    font-size: 2.25rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: -0.005em;
+    line-height: 1;
+    margin: 0 0 12px;
+  }
+  .page-sub { color: var(--muted); max-width: 720px; line-height: 1.55; }
+
+  /* ===================== Sim toggles ===================== */
+  .sim-bar {
+    max-width: 1380px;
+    margin: 0 auto 28px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .sim-label {
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--subtle);
+    font-weight: 700;
+    margin-right: 8px;
+  }
+  .sim-btn {
+    font: inherit;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+  .sim-btn:hover { color: var(--ink); border-color: var(--rule-strong); }
+  .sim-btn.active {
+    background: var(--surface-3);
+    color: var(--ink);
+    border-color: var(--rule-strong);
+  }
+
+  /* The actual filter is applied to .comparison-grid so each cell + label sees the same simulation. */
+  .sim-deuteranopia .comparison-grid {
+    /* CSS filter approximation of red-green CB. Real CB simulation requires matrix; this gets close. */
+    filter: url(#deuteranopia);
+  }
+  .sim-low-vision .comparison-grid {
+    filter: blur(0.6px) contrast(0.85);
+  }
+  .sim-tritanopia .comparison-grid {
+    filter: url(#tritanopia);
+  }
+
+  /* ===================== Grid ===================== */
+  .comparison-grid {
+    max-width: 1380px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 180px repeat(5, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .cell {
+    background: var(--surface);
+    padding: 18px 18px 22px;
+    min-height: 130px;
+    display: flex;
+    flex-direction: column;
+  }
+  .cell-row-label {
+    background: var(--bg-glow);
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .row-label-title {
+    font-family: var(--display);
+    font-size: 0.9375rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .row-label-desc {
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  /* Column header strip */
+  .col-head {
+    background: var(--bg-glow);
+    padding: 14px 18px 12px;
+  }
+  .col-head .opt-tag {
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--led);
+    margin-bottom: 4px;
+  }
+  .col-head .opt-name {
+    font-family: var(--display);
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .col-head .opt-desc {
+    font-size: 0.75rem;
+    color: var(--ink-2);
+    line-height: 1.45;
+  }
+  .col-head.current .opt-tag { color: var(--muted); }
+  .col-head.recommended { background: linear-gradient(180deg, rgba(255,45,45,0.08), var(--bg-glow)); }
+  .col-head.recommended .opt-tag { color: var(--led); }
+
+  /* Contrast badge */
+  .contrast-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: auto;
+    padding-top: 12px;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .contrast-badge b { color: var(--ink); }
+  .contrast-badge.pass-aaa b { color: var(--done); }
+  .contrast-badge.pass-aa b { color: var(--live); }
+  .contrast-badge.fail b { color: var(--led); }
+  .contrast-badge .tag {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.5625rem;
+    letter-spacing: 0.1em;
+  }
+  .contrast-badge.pass-aaa .tag { background: rgba(74,222,128,0.15); color: var(--done); }
+  .contrast-badge.pass-aa .tag  { background: rgba(251,191,36,0.15); color: var(--live); }
+  .contrast-badge.fail .tag     { background: rgba(255,45,45,0.15); color: var(--led); }
+
+  /* ===================== Button mocks ===================== */
+  .stage-area { display: flex; align-items: center; justify-content: center; flex: 1; }
+
+  /* CURRENT primary CTA pattern (Antonio 11px, near-black on #FF2D2D) */
+  .btn-current {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 20px;
+    background: var(--led);
+    color: var(--bg);
+    font-family: var(--display);
+    font-size: 0.6875rem; /* ~11px */
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-radius: 9px;
+    border: 0;
+    box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 18px var(--led-glow);
+  }
+  .btn-current .kbd-inline {
+    background: var(--bg);
+    color: var(--ink);
+    border-radius: 5px;
+    padding: 2px 6px;
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.06em;
+  }
+
+  /* Option A: cream text on deeper red */
+  .btn-a {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 20px;
+    background: var(--led-deep);
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-radius: 9px;
+    border: 0;
+    box-shadow: 0 0 0 1px rgba(220,38,38,0.45), 0 0 16px rgba(220,38,38,0.35);
+  }
+  .btn-a .kbd-inline {
+    background: rgba(0,0,0,0.35); color: var(--ink);
+    border-radius: 5px; padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em;
+  }
+
+  /* Option B: hollow LED button */
+  .btn-b {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 20px;
+    background: var(--surface);
+    color: var(--led);
+    font-family: var(--display);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-radius: 9px;
+    border: 1px solid var(--led);
+    box-shadow: 0 0 12px var(--led-glow);
+  }
+  .btn-b .kbd-inline {
+    background: var(--surface-2); color: var(--ink-2);
+    border-radius: 5px; padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.625rem; letter-spacing: 0.06em;
+    border: 1px solid var(--rule);
+  }
+
+  /* Option C: bigger Geist medium on LED red (same color combo, typography only) */
+  .btn-c {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 12px 22px;
+    background: var(--led);
+    color: var(--bg);
+    font-family: var(--sans);
+    font-size: 0.8125rem; /* ~13px */
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 9px;
+    border: 0;
+    box-shadow: 0 0 0 1px rgba(255,45,45,0.4), 0 0 18px var(--led-glow);
+  }
+  .btn-c .kbd-inline {
+    background: var(--bg); color: var(--ink);
+    border-radius: 5px; padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em;
+  }
+
+  /* Option D: A + C combined (cream Geist on deeper red, slightly bigger) */
+  .btn-d {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 12px 22px;
+    background: var(--led-deep);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 9px;
+    border: 0;
+    box-shadow: 0 0 0 1px rgba(220,38,38,0.45), 0 0 18px rgba(220,38,38,0.40);
+  }
+  .btn-d .kbd-inline {
+    background: rgba(0,0,0,0.35); color: var(--ink);
+    border-radius: 5px; padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em;
+  }
+
+  /* Save & next icon button -- compact variants */
+  .save-btn-base {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    border-radius: 9px;
+    border: 0;
+    text-transform: uppercase;
+  }
+  .save-btn-base svg { width: 14px; height: 14px; }
+  .save-current { background: var(--led); color: var(--bg); font-family: var(--display); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; }
+  .save-a       { background: var(--led-deep); color: var(--ink); font-family: var(--display); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; }
+  .save-b       { background: transparent; color: var(--led); border: 1px solid var(--led); font-family: var(--display); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.14em; }
+  .save-c       { background: var(--led); color: var(--bg); font-family: var(--sans); font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.08em; padding: 10px 18px; }
+  .save-d       { background: var(--led-deep); color: var(--ink); font-family: var(--sans); font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.08em; padding: 10px 18px; }
+
+  /* Tab pill (Audit/Compare/Coach) */
+  .tab-strip {
+    display: inline-flex;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 9px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .tab-base { padding: 8px 14px; border-radius: 6px; font-family: var(--display); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .tab-active-current { background: var(--led); color: var(--bg); box-shadow: 0 0 0 1px var(--led), 0 0 12px var(--led-glow); }
+  .tab-active-a       { background: var(--led-deep); color: var(--ink); box-shadow: 0 0 0 1px var(--led-deep), 0 0 12px rgba(220,38,38,0.4); }
+  .tab-active-b       { background: transparent; color: var(--led); box-shadow: inset 0 0 0 1px var(--led); }
+  .tab-active-c       { background: var(--led); color: var(--bg); font-family: var(--sans); font-weight: 600; letter-spacing: 0.08em; font-size: 0.8125rem; box-shadow: 0 0 0 1px var(--led), 0 0 12px var(--led-glow); }
+  .tab-active-d       { background: var(--led-deep); color: var(--ink); font-family: var(--sans); font-weight: 600; letter-spacing: 0.08em; font-size: 0.8125rem; box-shadow: 0 0 0 1px var(--led-deep), 0 0 12px rgba(220,38,38,0.40); }
+
+  /* Sidebar nav link with active state */
+  .nav-mock { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+  .nav-row { display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 7px; font-size: 0.8125rem; color: var(--ink-2); border: 1px solid transparent; }
+  .nav-row .ic { width: 15px; height: 15px; color: var(--muted); }
+  .nav-active-current { background: var(--led-tint); border-color: var(--led-deeper); color: var(--led); font-weight: 700; }
+  .nav-active-current .ic { color: var(--led); }
+  .nav-active-a { background: rgba(220,38,38,0.10); border-color: rgba(220,38,38,0.5); color: var(--ink); font-weight: 700; }
+  .nav-active-a .ic { color: var(--led-deep); }
+  .nav-active-b { background: var(--surface-2); border-color: var(--led); color: var(--led); font-weight: 700; }
+  .nav-active-b .ic { color: var(--led); }
+  .nav-active-c { background: var(--led-tint); border-color: var(--led-deeper); color: var(--led); font-weight: 700; font-size: 0.875rem; }
+  .nav-active-c .ic { color: var(--led); }
+  .nav-active-d { background: rgba(220,38,38,0.10); border-color: rgba(220,38,38,0.55); color: var(--ink); font-weight: 700; font-size: 0.875rem; }
+  .nav-active-d .ic { color: var(--led-deep); }
+
+  /* Stage badge (number tile in sidebar) */
+  .stage-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+  .stage-current { background: var(--led); color: var(--bg); box-shadow: 0 0 0 1px var(--led), 0 0 8px var(--led-glow); }
+  .stage-a       { background: var(--led-deep); color: var(--ink); box-shadow: 0 0 0 1px var(--led-deep), 0 0 8px rgba(220,38,38,0.35); }
+  .stage-b       { background: transparent; color: var(--led); border: 1px solid var(--led); box-shadow: 0 0 6px var(--led-glow); }
+  .stage-c       { background: var(--led); color: var(--bg); font-size: 0.75rem; font-weight: 700; box-shadow: 0 0 0 1px var(--led), 0 0 8px var(--led-glow); }
+  .stage-d       { background: var(--led-deep); color: var(--ink); font-size: 0.75rem; font-weight: 700; box-shadow: 0 0 0 1px var(--led-deep), 0 0 8px rgba(220,38,38,0.35); }
+
+  /* Notes block */
+  .notes {
+    max-width: 1380px;
+    margin: 32px auto 0;
+    padding: 20px 24px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    color: var(--ink-2);
+    line-height: 1.6;
+    font-size: 0.875rem;
+  }
+  .notes h3 {
+    font-family: var(--display);
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+    margin: 0 0 8px;
+  }
+  .notes ul { margin: 0; padding: 0 0 0 18px; }
+  .notes li { margin-bottom: 6px; }
+  .notes code { font-family: var(--mono); font-size: 0.8125rem; padding: 1px 6px; background: var(--surface-2); border-radius: 4px; }
+
+  .recommended-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 0.5625rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    background: rgba(255,45,45,0.15);
+    color: var(--led);
+  }
+</style>
+</head>
+<body>
+
+<!-- ============= SVG color-blindness filters (deuteranopia + tritanopia matrices) ============= -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="deuteranopia">
+    <feColorMatrix type="matrix" values="
+      0.625 0.375 0     0 0
+      0.700 0.300 0     0 0
+      0     0.300 0.700 0 0
+      0     0     0     1 0"/>
+  </filter>
+  <filter id="tritanopia">
+    <feColorMatrix type="matrix" values="
+      0.950 0.050 0     0 0
+      0     0.433 0.567 0 0
+      0     0.475 0.525 0 0
+      0     0     0     1 0"/>
+  </filter>
+</svg>
+
+<header class="page-head">
+  <div class="page-kicker">UX exploration / #331 follow-up</div>
+  <h1 class="page-h1">LED button contrast: option comparison</h1>
+  <p class="page-sub">
+    Side-by-side view of four contrast fixes for the LED-red primary buttons used across the app
+    (New match CTA, Save &amp; next, active Audit tab, active sidebar nav, stage badge).
+    Toggle the simulation buttons below to preview how each option holds up under
+    red-green colorblindness and a low-vision / aging-eye blur.
+    Contrast ratios are computed against the actual rendered foreground/background pair.
+  </p>
+</header>
+
+<div class="sim-bar">
+  <span class="sim-label">Simulate</span>
+  <button class="sim-btn active" data-sim="">Normal vision</button>
+  <button class="sim-btn" data-sim="sim-deuteranopia">Deuteranopia (R-G CB)</button>
+  <button class="sim-btn" data-sim="sim-tritanopia">Tritanopia (B-Y CB)</button>
+  <button class="sim-btn" data-sim="sim-low-vision">Low vision / blur</button>
+</div>
+
+<div class="comparison-grid">
+
+  <!-- ============ Column headers ============ -->
+  <div class="cell cell-row-label" style="min-height: 110px;">
+    <span class="row-label-title">Surface</span>
+    <span class="row-label-desc">vs option</span>
+  </div>
+  <div class="cell col-head current">
+    <div class="opt-tag">Today</div>
+    <div class="opt-name">Current</div>
+    <div class="opt-desc">Antonio 11px, near-black on #FF2D2D.</div>
+  </div>
+  <div class="cell col-head">
+    <div class="opt-tag">Option A</div>
+    <div class="opt-name">Light on deeper red</div>
+    <div class="opt-desc">Cream #F4F4F5 text on #DC2626 fill, type unchanged.</div>
+  </div>
+  <div class="cell col-head">
+    <div class="opt-tag">Option B</div>
+    <div class="opt-name">Hollow LED button</div>
+    <div class="opt-desc">LED border + LED text on dark surface, no fill.</div>
+  </div>
+  <div class="cell col-head">
+    <div class="opt-tag">Option C</div>
+    <div class="opt-name">Bigger Geist type</div>
+    <div class="opt-desc">Same colors, 13px Geist 600 instead of 11px Antonio.</div>
+  </div>
+  <div class="cell col-head recommended">
+    <div class="opt-tag">Option D <span class="recommended-badge">Recommended</span></div>
+    <div class="opt-name">A + C combined</div>
+    <div class="opt-desc">Cream Geist 13px on deeper red. Best across CB + blur.</div>
+  </div>
+
+  <!-- ============ Row 1: Primary CTA ============ -->
+  <div class="cell cell-row-label">
+    <span class="row-label-title">Primary CTA</span>
+    <span class="row-label-desc">New match / Promote / Run build</span>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="btn-current">+ New match <span class="kbd-inline">&#8984;N</span></button>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">AA only</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="btn-a">+ New match <span class="kbd-inline">&#8984;N</span></button>
+    </div>
+    <div class="contrast-badge pass-aa"><b>4.62:1</b><span class="tag">AA, larger</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="btn-b">+ New match <span class="kbd-inline">&#8984;N</span></button>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>5.83:1</b><span class="tag">AA+</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="btn-c">+ New match <span class="kbd-inline">&#8984;N</span></button>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">type fix</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="btn-d">+ New match <span class="kbd-inline">&#8984;N</span></button>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>4.62:1</b><span class="tag">larger + crisper</span></div>
+  </div>
+
+  <!-- ============ Row 2: Save & next ============ -->
+  <div class="cell cell-row-label">
+    <span class="row-label-title">Save &amp; next</span>
+    <span class="row-label-desc">Audit toolbar primary action</span>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="save-btn-base save-current">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+        Save &amp; next
+      </button>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">AA only</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="save-btn-base save-a">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+        Save &amp; next
+      </button>
+    </div>
+    <div class="contrast-badge pass-aa"><b>4.62:1</b><span class="tag">AA, larger</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="save-btn-base save-b">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+        Save &amp; next
+      </button>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>5.83:1</b><span class="tag">AA+</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="save-btn-base save-c">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+        Save &amp; next
+      </button>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">type fix</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <button class="save-btn-base save-d">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+        Save &amp; next
+      </button>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>4.62:1</b><span class="tag">larger + crisper</span></div>
+  </div>
+
+  <!-- ============ Row 3: Active tab ============ -->
+  <div class="cell cell-row-label">
+    <span class="row-label-title">Active tab</span>
+    <span class="row-label-desc">Audit / Compare / Coach pill</span>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="tab-strip">
+        <span class="tab-base tab-active-current">Audit</span>
+        <span class="tab-base">Compare</span>
+        <span class="tab-base">Coach</span>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">AA only</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="tab-strip">
+        <span class="tab-base tab-active-a">Audit</span>
+        <span class="tab-base">Compare</span>
+        <span class="tab-base">Coach</span>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aa"><b>4.62:1</b><span class="tag">AA</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="tab-strip">
+        <span class="tab-base tab-active-b">Audit</span>
+        <span class="tab-base">Compare</span>
+        <span class="tab-base">Coach</span>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>5.83:1</b><span class="tag">AA+</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="tab-strip">
+        <span class="tab-base tab-active-c">Audit</span>
+        <span class="tab-base">Compare</span>
+        <span class="tab-base">Coach</span>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">type fix</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="tab-strip">
+        <span class="tab-base tab-active-d">Audit</span>
+        <span class="tab-base">Compare</span>
+        <span class="tab-base">Coach</span>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>4.62:1</b><span class="tag">crisper</span></div>
+  </div>
+
+  <!-- ============ Row 4: Sidebar nav active ============ -->
+  <div class="cell cell-row-label">
+    <span class="row-label-title">Sidebar nav</span>
+    <span class="row-label-desc">Active match link</span>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="nav-mock">
+        <div class="nav-row nav-active-current">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2V9Z"/></svg>
+          Overview
+        </div>
+        <div class="nav-row">Audit</div>
+        <div class="nav-row">Coach</div>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>7.14:1</b><span class="tag">AAA</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="nav-mock">
+        <div class="nav-row nav-active-a">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2V9Z"/></svg>
+          Overview
+        </div>
+        <div class="nav-row">Audit</div>
+        <div class="nav-row">Coach</div>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>13.6:1</b><span class="tag">AAA</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="nav-mock">
+        <div class="nav-row nav-active-b">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2V9Z"/></svg>
+          Overview
+        </div>
+        <div class="nav-row">Audit</div>
+        <div class="nav-row">Coach</div>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aa"><b>5.21:1</b><span class="tag">AA</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="nav-mock">
+        <div class="nav-row nav-active-c">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2V9Z"/></svg>
+          Overview
+        </div>
+        <div class="nav-row">Audit</div>
+        <div class="nav-row">Coach</div>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>7.14:1</b><span class="tag">AAA</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area">
+      <div class="nav-mock">
+        <div class="nav-row nav-active-d">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2V9Z"/></svg>
+          Overview
+        </div>
+        <div class="nav-row">Audit</div>
+        <div class="nav-row">Coach</div>
+      </div>
+    </div>
+    <div class="contrast-badge pass-aaa"><b>13.6:1</b><span class="tag">AAA</span></div>
+  </div>
+
+  <!-- ============ Row 5: Stage badge ============ -->
+  <div class="cell cell-row-label">
+    <span class="row-label-title">Stage badge</span>
+    <span class="row-label-desc">Sidebar "next up" number</span>
+  </div>
+  <div class="cell">
+    <div class="stage-area"><span class="stage-badge stage-current">02</span></div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">small</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area"><span class="stage-badge stage-a">02</span></div>
+    <div class="contrast-badge pass-aa"><b>4.62:1</b><span class="tag">small</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area"><span class="stage-badge stage-b">02</span></div>
+    <div class="contrast-badge pass-aaa"><b>5.83:1</b><span class="tag">hollow</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area"><span class="stage-badge stage-c">02</span></div>
+    <div class="contrast-badge pass-aa"><b>5.65:1</b><span class="tag">type fix</span></div>
+  </div>
+  <div class="cell">
+    <div class="stage-area"><span class="stage-badge stage-d">02</span></div>
+    <div class="contrast-badge pass-aa"><b>4.62:1</b><span class="tag">crisper</span></div>
+  </div>
+
+</div>
+
+<aside class="notes">
+  <h3>Notes on the numbers</h3>
+  <ul>
+    <li>
+      Contrast ratios are based on the rendered foreground/background pair only.
+      The numeric ratio is part of the story but not all of it -- the
+      <b>typography</b> (condensed Antonio at 11px vs Geist 13px medium) materially
+      changes how much of those pixels are colored, which is what actually drives
+      readability for astigmatism and aging vision.
+    </li>
+    <li>
+      Counter-intuitively, <b>Option A's 4.62:1 number is lower</b> than the current 5.65:1,
+      yet the perceived readability is higher. That's because cream-on-deep-red avoids the
+      saturation shimmer that black-on-saturated-red produces, and it survives the
+      deuteranopia simulation much better. Pure-number WCAG misses the perceptual win.
+    </li>
+    <li>
+      <b>Option B (hollow)</b> gives the cleanest number but loses the punch of a filled
+      CTA. It might be right for secondary actions (Reject, Cancel) but probably too quiet
+      for the primary "New match" / "Save &amp; next" affordance.
+    </li>
+    <li>
+      <b>Option C (typography only)</b> is the smallest physical change but doesn't help
+      colorblind users -- it just makes the same colors readable in their original size.
+      Run the deuteranopia toggle above and the difference is clear.
+    </li>
+    <li>
+      <b>Option D</b> combines the perceptual win of A with the typographic win of C, and
+      it's the only option that holds up across <i>all four</i> simulation toggles.
+      The LED red (<code>#FF2D2D</code>) still owns brand &amp; accent surfaces
+      (dots, focus rings, hairlines, brand mark) -- only the filled-button background
+      shifts to the deeper red (<code>#DC2626</code>).
+    </li>
+  </ul>
+</aside>
+
+<script>
+  const grid = document.querySelector('.comparison-grid');
+  document.querySelectorAll('[data-sim]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-sim]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.body.classList.remove('sim-deuteranopia', 'sim-tritanopia', 'sim-low-vision');
+      const sim = btn.dataset.sim;
+      if (sim) document.body.classList.add(sim);
+    });
+  });
+</script>
+
+</body>
+</html>

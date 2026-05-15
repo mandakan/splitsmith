@@ -309,17 +309,17 @@ export function Compare() {
           <button
             type="button"
             onClick={() => navigate(`/audit/${stageNumber}`)}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink-2"
+            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Audit
           </button>
-          <span className="inline-flex min-h-9 items-center rounded-md bg-led px-3.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-bg shadow-[0_0_12px_var(--color-led-glow)]">
+          <span className="tab-pill-led-fill inline-flex min-h-9 items-center rounded-md px-3.5">
             Compare
           </span>
           <button
             type="button"
             onClick={() => navigate(`/coach/${stageNumber}`)}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
+            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
           >
             Coach
           </button>

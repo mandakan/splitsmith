@@ -164,7 +164,7 @@ export function MatchSidebar({
               className={cn(
                 "inline-flex size-[26px] items-center justify-center rounded-md border font-mono text-[0.6875rem] font-bold tabular-nums",
                 stage.next_up
-                  ? "border-led bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_8px_var(--color-led-glow)]"
+                  ? "badge-led-fill border-transparent"
                   : "border-transparent bg-surface-3 text-ink-2",
               )}
             >

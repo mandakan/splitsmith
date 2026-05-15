@@ -795,7 +795,7 @@ function RecommendationsCard({
               className={cn(
                 "inline-flex size-10 shrink-0 items-center justify-center rounded-md font-display text-base font-bold tabular-nums",
                 i === 0
-                  ? "bg-led text-bg shadow-[0_0_12px_var(--color-led-glow)]"
+                  ? "badge-led-fill"
                   : i === 1
                     ? "border border-live/40 bg-live/10 text-live"
                     : "border border-rule-strong bg-surface-3 text-ink-2",
@@ -1105,18 +1105,18 @@ function CoachStage({ stage }: { stage: number }) {
           <button
             type="button"
             onClick={() => navigate(`/audit/${stage}`)}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink-2"
+            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Audit
           </button>
           <button
             type="button"
             onClick={() => navigate(`/compare/${stage}`)}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink-2"
+            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Compare
           </button>
-          <span className="inline-flex min-h-9 items-center rounded-md bg-led px-3.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-bg shadow-[0_0_12px_var(--color-led-glow)]">
+          <span className="tab-pill-led-fill inline-flex min-h-9 items-center rounded-md px-3.5">
             Coach
           </span>
         </nav>
