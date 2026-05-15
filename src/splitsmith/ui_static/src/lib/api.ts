@@ -1237,6 +1237,45 @@ export interface BeepQueueResponse {
   stages: BeepQueueStageGroup[];
 }
 
+/** Developer-mode model chip + workflow-stepper counts. Built once by the
+ *  /api/dev/model endpoint from the shipped ensemble artifacts plus the
+ *  review-queue tally on disk. */
+export interface DeveloperModelInfo {
+  active_version: string;
+  recall: number;
+  precision: number | null;
+  f1: number | null;
+  fixture_count: number;
+  built_at: string | null;
+  step_counts: {
+    corpus: number;
+    review: number;
+    validate_runs: number;
+    retrain: number;
+  };
+}
+
+export interface DevReviewQueueItem {
+  slug: string;
+  audit_path: string;
+  source: "match" | "github" | "ad-hoc";
+  source_label: string;
+  status: "pending" | "flagged" | "done";
+  n_shots: number;
+  n_disagreements: number;
+  promoted_at: string | null;
+  venue: string | null;
+  stage_number: number | null;
+  shooter: string | null;
+  age_seconds: number | null;
+}
+
+export interface DevReviewQueueResponse {
+  pending: DevReviewQueueItem[];
+  flagged: DevReviewQueueItem[];
+  done: DevReviewQueueItem[];
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -2192,6 +2231,14 @@ export const api = {
 
   rebuildLabCalibration: (payload: { target_recall?: number; tolerance_ms?: number; fixtures?: string[] } = {}) =>
     request<Job>("/api/lab/rebuild-calibration", { method: "POST", json: payload }),
+
+  /** Developer-mode model info: active version, recall, fixture count,
+   *  + step-counter map used to colour the workflow stepper. */
+  getDeveloperModel: () => request<DeveloperModelInfo>("/api/dev/model"),
+
+  /** Review-queue rollup: promoted-from-match items, GitHub submissions,
+   *  ad-hoc fixture review tasks. Drives /dev/review. */
+  getDevReviewQueue: () => request<DevReviewQueueResponse>("/api/dev/review-queue"),
 
   promoteFromAnchor: (payload: {
     anchor_path: string;

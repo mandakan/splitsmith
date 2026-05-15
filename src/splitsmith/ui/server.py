@@ -902,6 +902,55 @@ class BeepQueueConfirmRequest(BaseModel):
     source: Literal["detected", "manual", "alt"] = "detected"
 
 
+class DeveloperStepCounts(BaseModel):
+    """Counts shown on each step of the dev-mode workflow stepper.
+
+    The ``validate_runs`` field is named to avoid shadowing
+    ``BaseModel.validate``; the SPA exposes it as ``step_counts.validate_runs``.
+    """
+
+    corpus: int
+    review: int
+    validate_runs: int
+    retrain: int
+
+
+class DeveloperModelInfo(BaseModel):
+    """Active ensemble + workflow status. Drives the dev-shell model chip
+    and the per-step counter badges on the sidebar."""
+
+    active_version: str
+    recall: float
+    precision: float | None
+    f1: float | None
+    fixture_count: int
+    built_at: str | None = None
+    step_counts: DeveloperStepCounts
+
+
+class DevReviewQueueItem(BaseModel):
+    """One queue row for the dev review surface."""
+
+    slug: str
+    audit_path: str
+    source: Literal["match", "github", "ad-hoc"]
+    source_label: str
+    status: Literal["pending", "flagged", "done"]
+    n_shots: int
+    n_disagreements: int
+    promoted_at: str | None = None
+    venue: str | None = None
+    stage_number: int | None = None
+    shooter: str | None = None
+    age_seconds: int | None = None
+
+
+class DevReviewQueueResponse(BaseModel):
+    pending: list[DevReviewQueueItem]
+    flagged: list[DevReviewQueueItem]
+    done: list[DevReviewQueueItem]
+
+
 class BindRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/bind.
 
@@ -7663,6 +7712,125 @@ def create_app(
 
     if lab_enabled:
         _setup_lab()
+
+    # ----------------------------------------------------------------------
+    # Developer mode -- read-only metadata for the dev-shell model chip and
+    # the review-queue rollup. Always available; lighter than the heavy
+    # /api/lab/* runtime endpoints so the dev SPA shell can mount without
+    # forcing ``--lab`` on the launcher.
+    # ----------------------------------------------------------------------
+    from .. import lab as _lab_for_dev  # local import to avoid module top
+    from ..ensemble import load_calibration as _load_dev_calibration
+
+    def _venue_from_slug(slug: str) -> str | None:
+        # Slugs look like ``stage-shots-<venue>-2026-stage<n>-s<hash>...``.
+        # The venue is the chunk between ``stage-shots-`` and the year.
+        parts = slug.split("-")
+        if len(parts) >= 4 and parts[0] == "stage" and parts[1] == "shots":
+            venue_bits: list[str] = []
+            for tok in parts[2:]:
+                if tok.isdigit() and len(tok) == 4:
+                    break
+                venue_bits.append(tok)
+            return "-".join(venue_bits) if venue_bits else None
+        return None
+
+    def _stage_from_slug(slug: str) -> int | None:
+        for tok in slug.split("-"):
+            if tok.startswith("stage") and tok[5:].isdigit():
+                return int(tok[5:])
+        return None
+
+    def _shooter_from_slug(slug: str) -> str | None:
+        # Shooter is encoded as ``s<8-hex-chars>`` (the slug hash).
+        for tok in slug.split("-"):
+            if (
+                len(tok) == 9
+                and tok.startswith("s")
+                and all(c in "0123456789abcdef" for c in tok[1:])
+            ):
+                return tok
+        return None
+
+    @app.get("/api/dev/model", response_model=DeveloperModelInfo)
+    def dev_model_info() -> DeveloperModelInfo:
+        """Return active ensemble metadata + workflow step counters.
+
+        Drives the dev shell's model chip and the workflow stepper
+        badges. ``recall`` is the GBDT target-recall picked at
+        calibration time; precision/f1 are not stored on the artifact
+        so they come back as ``None`` until a /dev/validate run writes
+        them. The version string is derived from ``built_at`` so users
+        can match it back to a calibration build.
+        """
+        cal = _load_dev_calibration()
+        fixtures = _lab_for_dev.list_fixtures()
+        # Version = vYYYY.MM.DD from built_at. Stable enough for the
+        # chip; the calibration JSON also carries the full ISO.
+        try:
+            built_dt = datetime.fromisoformat(cal.built_at.replace("Z", "+00:00"))
+            version = built_dt.strftime("v%Y.%m.%d")
+        except (ValueError, AttributeError):
+            version = "v0.0.0"
+        # "review" bucket counts fixtures that came in via promote-from-
+        # anchor (anchor_slug set) -- those need human confirmation
+        # before they're allowed into the calibration set.
+        review_count = sum(1 for f in fixtures if f.anchor_slug is not None)
+        return DeveloperModelInfo(
+            active_version=version,
+            recall=cal.voter_c_target_recall,
+            precision=None,
+            f1=None,
+            fixture_count=len(cal.calibration_fixtures),
+            built_at=cal.built_at,
+            step_counts=DeveloperStepCounts(
+                corpus=len(fixtures),
+                review=review_count,
+                validate_runs=0,
+                retrain=0,
+            ),
+        )
+
+    @app.get("/api/dev/review-queue", response_model=DevReviewQueueResponse)
+    def dev_review_queue() -> DevReviewQueueResponse:
+        """Bucket fixtures into pending / flagged / done for the review queue.
+
+        v1 heuristic: anchor_slug present = pending (came in via
+        promote-from-anchor and needs human confirmation); explicit
+        ``review_flagged`` field on the fixture JSON = flagged; all
+        else = done. The flagged bucket is rarely populated today but
+        the shape is here so the UI doesn't need a follow-up wire.
+        """
+        fixtures = _lab_for_dev.list_fixtures()
+        now = datetime.now(UTC).timestamp()
+        pending: list[DevReviewQueueItem] = []
+        flagged: list[DevReviewQueueItem] = []
+        done: list[DevReviewQueueItem] = []
+        for fx in fixtures:
+            age = int(now - fx.audit_mtime) if fx.audit_mtime else None
+            item = DevReviewQueueItem(
+                slug=fx.slug,
+                audit_path=fx.audit_path,
+                source="match" if fx.anchor_slug else "ad-hoc",
+                source_label="Promoted from match" if fx.anchor_slug else "Audited",
+                status="pending" if fx.anchor_slug else "done",
+                n_shots=fx.n_shots,
+                n_disagreements=0,
+                promoted_at=None,
+                venue=_venue_from_slug(fx.slug),
+                stage_number=_stage_from_slug(fx.slug),
+                shooter=_shooter_from_slug(fx.slug),
+                age_seconds=age,
+            )
+            if item.status == "pending":
+                pending.append(item)
+            else:
+                done.append(item)
+        # Sort pending by age (newest first); done alphabetically so the
+        # corpus is browsable.
+        pending.sort(key=lambda x: x.age_seconds or 0)
+        done.sort(key=lambda x: x.slug)
+        return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)

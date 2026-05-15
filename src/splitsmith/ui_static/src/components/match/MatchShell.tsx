@@ -27,6 +27,7 @@ import {
   type StageStatus,
 } from "@/components/match/MatchSidebar";
 import { api, type MatchProject, type ServerHealth } from "@/lib/api";
+import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
 export interface MatchShellOutletContext {
@@ -37,6 +38,17 @@ export interface MatchShellOutletContext {
 
 export function MatchShell() {
   const navigate = useNavigate();
+  const { mode, setMode } = useMode();
+  const [didInitMode, setDidInitMode] = useState(false);
+  useEffect(() => {
+    if (!didInitMode) {
+      if (mode !== "match") setMode("match");
+      setDidInitMode(true);
+      return;
+    }
+    if (mode === "developer") navigate("/dev/corpus");
+  }, [mode, setMode, didInitMode, navigate]);
+
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);

@@ -5978,3 +5978,44 @@ def test_post_settings_patches_automation_override(tmp_path: Path) -> None:
     auto = client.get("/api/automation").json()
     assert auto["settings"]["shot_detect_on_beep_verified"] is False
     assert auto["provenance"]["shot_detect_on_beep_verified"]["source"] == "project"
+
+
+def test_dev_model_endpoint_returns_calibration_metadata(tmp_path: Path) -> None:
+    """/api/dev/model reads the shipped ensemble_calibration.json and
+    formats it for the dev shell's model chip + workflow stepper. The
+    endpoint is always available (no --lab gate) because the shell
+    needs the model version on every page load."""
+    root = tmp_path / "match"
+    MatchProject.init(root, name="Dev Match").save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/dev/model")
+    assert resp.status_code == 200
+    body = resp.json()
+    # active_version derives from built_at as vYYYY.MM.DD.
+    assert body["active_version"].startswith("v")
+    # Recall is whatever voter_c_target_recall is in the shipped json.
+    assert 0.0 < body["recall"] <= 1.0
+    # Step counts always present, even when zero.
+    assert {"corpus", "review", "validate_runs", "retrain"} <= set(body["step_counts"])
+
+
+def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
+    """/api/dev/review-queue groups fixtures into pending/flagged/done
+    so the dev review page can render its three queue sections."""
+    root = tmp_path / "match"
+    MatchProject.init(root, name="Dev Match").save(root)
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+
+    resp = client.get("/api/dev/review-queue")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body["pending"], list)
+    assert isinstance(body["flagged"], list)
+    assert isinstance(body["done"], list)
+    # Every item must have a stable shape.
+    for bucket in (body["pending"], body["flagged"], body["done"]):
+        for item in bucket:
+            assert {"slug", "audit_path", "source", "status", "n_shots"} <= set(item)

@@ -1,10 +1,5 @@
 import {
-  ClipboardCheck,
   Crosshair,
-  FileBarChart,
-  FlaskConical,
-  FolderInput,
-  Home,
   PanelLeftClose,
   PanelLeftOpen,
   Palette,
@@ -16,28 +11,22 @@ import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-route
 import { JobsPanel } from "@/components/JobsPanel";
 import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { api, type ServerHealth } from "@/lib/api";
-import { useLabEnabled } from "@/lib/features";
+import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
-
-interface NavItem {
-  to: string;
-  label: string;
-  icon: typeof Home;
-  end?: boolean;
-}
-const BASE_NAV: NavItem[] = [
-  { to: "/", label: "Overview", icon: Home, end: true },
-  { to: "/ingest", label: "Ingest", icon: FolderInput },
-  { to: "/audit", label: "Audit", icon: Crosshair },
-  { to: "/coach", label: "Coach", icon: ClipboardCheck },
-  { to: "/export", label: "Export", icon: FileBarChart },
-];
-const LAB_NAV: NavItem = { to: "/lab", label: "Lab", icon: FlaskConical };
 
 const SIDEBAR_COLLAPSE_KEY = "splitsmith.appshell.sidebarCollapsed";
 
 export function AppShell() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { mode } = useMode();
+  // AppShell hosts the fixture editor + design system. Either one is
+  // mode-agnostic, but flipping to Developer should take the user to
+  // the dev workspace rather than leaving them on a hidden-sidebar page
+  // with no dev nav.
+  useEffect(() => {
+    if (mode === "developer") navigate("/dev/corpus");
+  }, [mode, navigate]);
   // /review is fixture-only: no project context, the project tabs would
   // 404 against the throwaway tmp project ``splitsmith review`` boots.
   // Hide the sidebar entirely so the screen reads as a single-purpose
@@ -68,14 +57,6 @@ export function AppShell() {
       return next;
     });
   }, []);
-
-  // Server-side feature flags. ``lab`` defaults off and is opt-in via
-  // ``splitsmith ui --lab``; if the fetch fails we hide the Lab nav,
-  // which is the correct behaviour for an end-user install. Shared
-  // across pages via the ``useLabEnabled`` hook so per-page fixture
-  // affordances stay in sync without separate fetches.
-  const labEnabled = useLabEnabled();
-  const nav = labEnabled ? [...BASE_NAV, LAB_NAV] : BASE_NAV;
 
   // Server bind-state. When the user launches ``splitsmith ui`` with no
   // ``--project`` the server boots unbound; we redirect to /pick so the
@@ -140,28 +121,11 @@ export function AppShell() {
               )}
             </button>
           </div>
-          <nav className="flex flex-1 flex-col gap-0.5 p-2">
-            {nav.map(({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                title={sidebarCollapsed ? label : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                    sidebarCollapsed && "justify-center px-0",
-                    isActive
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                  )
-                }
-              >
-                <Icon className="size-4 shrink-0" />
-                {sidebarCollapsed ? null : <span>{label}</span>}
-              </NavLink>
-            ))}
-          </nav>
+          {/* AppShell only renders the legacy single-purpose surfaces
+              (fixture editor, design system). Those screens self-shell;
+              the cross-surface nav lives on MatchShell / DeveloperShell. */}
+          <nav className="flex flex-1 flex-col gap-0.5 p-2" />
+
           <div className="border-t border-border p-2">
             <NavLink
               to="/_design"
