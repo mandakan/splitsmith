@@ -95,7 +95,13 @@ export function CreateMatch() {
           <div className="mx-auto flex max-w-[1100px] items-center gap-3 px-8 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
             <button
               type="button"
-              onClick={() => navigate("/pick")}
+              // Replace, not push: /pick/new is a transient form. If we
+              // pushed /pick here the back stack ends up [..., /pick,
+              // /pick/new, /pick] and a later open-match (which replaces
+              // top with /) leaves /pick/new lurking under /, so the
+              // browser back button lands on the form instead of the
+              // picker.
+              onClick={() => navigate("/pick", { replace: true })}
               className="inline-flex items-center gap-1.5 text-subtle transition-colors hover:text-ink-2"
             >
               <ArrowLeft className="size-3" />
@@ -428,7 +434,7 @@ function ScoreboardVariant({
           </Section>
 
           <FooterActions
-            onCancel={() => navigate("/pick")}
+            onCancel={() => navigate("/pick", { replace: true })}
             primary={
               <Button
                 type="button"
@@ -818,7 +824,7 @@ function ManualVariant({
       </Section>
 
       <FooterActions
-        onCancel={() => navigate("/pick")}
+        onCancel={() => navigate("/pick", { replace: true })}
         primary={
           <Button
             type="button"
