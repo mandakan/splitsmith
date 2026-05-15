@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splitsmith — Splits from your stage video</title>
+<meta name="description" content="Extract per-shot split times from head-mounted camera footage of IPSC matches. Open source. Built for athletes, not lawyers.">
+
+<meta property="og:title" content="Splitsmith">
+<meta property="og:description" content="Splits from your stage video. Open source IPSC tooling.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://splitsmith.app">
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   SPLITSMITH — splitsmith.app marketing
+   Direction: Shot Timer
+   Dark instrument panel. Mono numerals are heroes. Heavy
+   condensed display. Single LED-red accent. No flourish.
+   ============================================================ */
+
+:root {
+  --bg:           #0A0B0D;
+  --bg-glow:      #0E1014;
+  --surface:      #14171C;
+  --surface-2:    #1A1E24;
+  --surface-3:    #232831;
+  --rule:         #262B33;
+  --rule-strong:  #3A4049;
+
+  --ink:          #F4F4F5;
+  --ink-2:        #C9CCD2;
+  --muted:        #8E939B;
+  --subtle:       #6B7079;
+  --whisper:      #4B5058;
+
+  --led:          #FF2D2D;
+  --led-soft:     #FF5555;
+  --led-deep:     #B91C1C;
+  --led-fill:     #DC2626;
+  --led-glow:     rgba(255, 45, 45, 0.30);
+  --led-tint:     rgba(255, 45, 45, 0.10);
+
+  --live:         #FBBF24;
+  --live-glow:    rgba(251, 191, 36, 0.30);
+  --done:         #4ADE80;
+  --done-glow:    rgba(74, 222, 128, 0.30);
+  --beep:         #06B6D4;
+  --beep-glow:    rgba(6, 182, 212, 0.30);
+
+  --sans:    'Geist', system-ui, sans-serif;
+  --display: 'Antonio', 'Helvetica Neue', sans-serif;
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
+  --feat-num: 'tnum' 1, 'lnum' 1;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--bg);
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1200px 600px at 50% -100px, rgba(255,45,45,0.05), transparent 60%),
+    radial-gradient(800px 500px at 100% 200px, rgba(74,222,128,0.015), transparent 60%),
+    linear-gradient(to bottom, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+}
+
+a { color: inherit; text-decoration: none; }
+::selection { background: var(--led); color: var(--bg); }
+
+:focus { outline: 0; }
+:focus-visible {
+  outline: 2px solid var(--led);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   SHELL
+   ============================================================ */
+header.shell {
+  border-bottom: 1px solid var(--rule);
+  background: linear-gradient(180deg, rgba(20,23,28,0.6), rgba(10,11,13,0.0));
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.shell-top {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 36px; height: 36px; flex-shrink: 0; }
+.brand .name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--ink);
+}
+.brand .heartbeat {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow), 0 0 2px var(--led);
+  animation: heartbeat 2.4s ease-in-out infinite;
+}
+@keyframes heartbeat {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.85); }
+}
+
+.spacer { flex: 1; }
+
+.nav-link {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 14px;
+  border-radius: 8px;
+  transition: color 150ms var(--ease), background 150ms var(--ease);
+}
+.nav-link:hover { color: var(--ink); background: var(--surface-2); }
+
+.gh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: all 180ms var(--ease);
+}
+.gh-btn:hover {
+  border-color: var(--rule-strong);
+  background: var(--surface-3);
+}
+.gh-btn svg { width: 16px; height: 16px; }
+
+/* ============================================================
+   MAIN
+   ============================================================ */
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 80px 32px 64px;
+}
+
+/* --- Hero --- */
+.hero {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 64px;
+  align-items: end;
+  margin-bottom: 88px;
+}
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; gap: 40px; }
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin: 0 0 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.kicker .ed {
+  color: var(--subtle);
+  padding-left: 10px;
+  border-left: 1px solid var(--rule);
+}
+
+h1.title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(2.75rem, 8vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 28px;
+}
+h1.title .accent {
+  color: var(--led);
+  text-shadow: 0 0 24px var(--led-glow);
+}
+
+.lede {
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 36em;
+  margin: 0 0 36px;
+}
+.lede .term {
+  color: var(--led);
+  font-weight: 500;
+}
+.lede .num {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+}
+
+.cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: all 180ms var(--ease);
+}
+.cta-primary {
+  background: var(--led-fill);
+  color: var(--ink);
+  text-shadow: 0 0 6px rgba(0,0,0,0.18);
+  box-shadow:
+    0 0 0 1px var(--led-fill),
+    0 0 18px var(--led-glow);
+}
+.cta-primary:hover {
+  background: var(--led-soft);
+  box-shadow:
+    0 0 0 1px var(--led-soft),
+    0 0 28px var(--led-glow);
+}
+.cta-secondary {
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+}
+.cta-secondary:hover {
+  border-color: var(--rule-strong);
+  background: var(--surface-3);
+  color: var(--ink);
+}
+.cta svg { width: 18px; height: 18px; }
+
+/* --- Readout panel (hero-side telemetry) --- */
+.readout {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 28px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px 36px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.02) inset,
+    0 18px 40px -24px rgba(0,0,0,0.7);
+}
+.cell .k {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin-bottom: 8px;
+}
+.cell .v {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 2.5rem;
+  line-height: 1;
+  color: var(--ink);
+  font-feature-settings: var(--feat-num);
+  letter-spacing: -0.01em;
+}
+.cell .v.led   { color: var(--led);   text-shadow: 0 0 16px var(--led-glow); }
+.cell .v.live  { color: var(--live);  text-shadow: 0 0 12px var(--live-glow); }
+.cell .v.done  { color: var(--done);  text-shadow: 0 0 12px var(--done-glow); }
+.cell .v.beep  { color: var(--beep);  text-shadow: 0 0 12px var(--beep-glow); }
+.cell .u {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 6px;
+  letter-spacing: 0.04em;
+}
+
+/* --- Section block --- */
+.section {
+  margin-bottom: 96px;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.section-head h2 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  margin: 0;
+}
+.section-head .index {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+}
+.section-head .spacer-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--rule), transparent);
+}
+
+/* --- Pipeline grid --- */
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .pipeline { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 540px) {
+  .pipeline { grid-template-columns: 1fr; }
+}
+
+.step {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 22px 22px 26px;
+  position: relative;
+  transition: border-color 180ms var(--ease), transform 180ms var(--ease);
+}
+.step:hover {
+  border-color: var(--rule-strong);
+}
+.step .step-num {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--subtle);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.step .step-num .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led-glow);
+}
+.step h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  margin: 0 0 10px;
+}
+.step p {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* --- IO panel (inputs/outputs) --- */
+.io-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+@media (max-width: 720px) {
+  .io-grid { grid-template-columns: 1fr; }
+}
+.io-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 24px 26px 28px;
+}
+.io-card .io-label {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin-bottom: 16px;
+}
+.io-card h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 14px;
+}
+.io-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.io-list li {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.875rem;
+  color: var(--ink-2);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.io-list li:last-child { border-bottom: 0; }
+.io-list li code {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--led);
+  background: var(--led-tint);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0;
+}
+.io-list li .desc { color: var(--muted); font-size: 0.8125rem; }
+
+/* --- Quickstart code block --- */
+.quickstart {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 22px 24px;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  line-height: 1.7;
+  overflow-x: auto;
+  letter-spacing: 0;
+  font-feature-settings: var(--feat-num);
+}
+.quickstart .prompt { color: var(--led); user-select: none; padding-right: 8px; }
+.quickstart .comment { color: var(--subtle); }
+.quickstart .kw { color: var(--ink); font-weight: 600; }
+
+/* --- Colophon --- */
+footer.colophon {
+  border-top: 1px solid var(--rule);
+  margin-top: 32px;
+  padding: 32px;
+  background: linear-gradient(to top, rgba(20,23,28,0.6), transparent);
+}
+.colophon-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  font-feature-settings: var(--feat-num);
+}
+.colophon-inner b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.colophon-inner a:hover { color: var(--ink); }
+.colophon-inner .spacer { flex: 1; }
+.colophon-inner .sep { color: var(--whisper); }
+
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="shell-top">
+    <a href="/" class="brand" aria-label="Splitsmith home">
+      <svg class="mark" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="33" height="33" rx="7" fill="#14171C" stroke="#3A4049" stroke-width="1"/>
+        <rect x="10" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <rect x="23" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
+        <circle cx="18" cy="18" r="2.4" fill="#FF2D2D"/>
+        <circle cx="18" cy="18" r="3.8" fill="none" stroke="#FF2D2D" stroke-width="0.8" opacity="0.4"/>
+        <line x1="3" y1="32" x2="33" y2="32" stroke="#FF2D2D" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
+      </svg>
+      <span class="name">Splitsmith</span>
+      <span class="heartbeat" aria-hidden="true"></span>
+    </a>
+
+    <span class="spacer"></span>
+
+    <a class="nav-link" href="#pipeline">Pipeline</a>
+    <a class="nav-link" href="#quickstart">Quickstart</a>
+    <a class="gh-btn" href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.04 11.04 0 0 1 5.8 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.26 5.69.41.35.78 1.05.78 2.11v3.13c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12.02C23.5 5.65 18.35.5 12 .5Z"/>
+      </svg>
+      <span>GitHub</span>
+    </a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============================================================
+       HERO
+       ============================================================ -->
+  <section class="hero">
+    <div>
+      <span class="kicker">
+        Project Register
+        <span class="ed">Vol. 01 · Ed. 04</span>
+      </span>
+      <h1 class="title">Splits from your <span class="accent">stage video.</span></h1>
+      <p class="lede">
+        Shot timers like the CED7000 give you splits during practice — but at matches you can't carry one.
+        Head-mounted cameras capture audio that contains all the shot information.
+        <span class="term">Splitsmith</span> extracts it and turns it into actionable training data:
+        per-shot times, a <span class="num">CSV</span> of splits, and an FCPXML timeline with frame-aligned markers
+        you can pop open in Final Cut Pro and review on <span class="num">M</span> / <span class="num">Shift+M</span>.
+      </p>
+
+      <div class="cta-row">
+        <a class="cta cta-primary" href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.04 11.04 0 0 1 5.8 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.26 5.69.41.35.78 1.05.78 2.11v3.13c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12.02C23.5 5.65 18.35.5 12 .5Z"/>
+          </svg>
+          <span>View on GitHub</span>
+        </a>
+        <a class="cta cta-secondary" href="#quickstart">
+          <span>Quickstart</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14M13 6l6 6-6 6"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <aside class="readout" aria-label="Telemetry">
+      <div class="cell">
+        <div class="k">Voters</div>
+        <div class="v led">3</div>
+      </div>
+      <div class="cell">
+        <div class="k">Typical splits</div>
+        <div class="v live">0.18<span class="u">s</span></div>
+      </div>
+      <div class="cell">
+        <div class="k">Beep timing</div>
+        <div class="v beep">±15<span class="u">ms</span></div>
+      </div>
+      <div class="cell">
+        <div class="k">License</div>
+        <div class="v done">MIT</div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ============================================================
+       PIPELINE
+       ============================================================ -->
+  <section class="section" id="pipeline">
+    <div class="section-head">
+      <span class="index">01</span>
+      <h2>Pipeline</h2>
+      <span class="spacer-line"></span>
+    </div>
+
+    <div class="pipeline">
+      <div class="step">
+        <div class="step-num"><span class="dot"></span>Step 01</div>
+        <h3>Ingest</h3>
+        <p>Drop a folder of head-cam clips. The engine auto-matches them to stages by file timestamp.</p>
+      </div>
+      <div class="step">
+        <div class="step-num"><span class="dot"></span>Step 02</div>
+        <h3>Beep</h3>
+        <p>Auto-snap to the start beep on each stage. Low-confidence detections land in a review queue.</p>
+      </div>
+      <div class="step">
+        <div class="step-num"><span class="dot"></span>Step 03</div>
+        <h3>Audit</h3>
+        <p>Waveform + per-shot markers from a 3-voter ensemble. Click a marker to inspect votes. Drag to fine-tune.</p>
+      </div>
+      <div class="step">
+        <div class="step-num"><span class="dot"></span>Step 04</div>
+        <h3>Export</h3>
+        <p>Per-stage or whole-match FCPXML. Open in Final Cut Pro, navigate with M / Shift+M.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       INPUTS / OUTPUTS
+       ============================================================ -->
+  <section class="section">
+    <div class="section-head">
+      <span class="index">02</span>
+      <h2>What goes in. What comes out.</h2>
+      <span class="spacer-line"></span>
+    </div>
+
+    <div class="io-grid">
+      <div class="io-card">
+        <div class="io-label">Inputs</div>
+        <h3>Raw match material</h3>
+        <ul class="io-list">
+          <li><code>.MP4</code><span class="desc">Head-mounted cam footage (e.g. Insta360 Go 3S)</span></li>
+          <li><code>.JSON</code><span class="desc">Stage timing data from SSI Scoreboard</span></li>
+        </ul>
+      </div>
+      <div class="io-card">
+        <div class="io-label">Outputs · per stage</div>
+        <h3>Reviewable training data</h3>
+        <ul class="io-list">
+          <li><code>_trimmed.mp4</code><span class="desc">Lossless cut around the start beep</span></li>
+          <li><code>_splits.csv</code><span class="desc">Per-shot splits — the editable source of truth</span></li>
+          <li><code>.fcpxml</code><span class="desc">Final Cut Pro timeline with frame-aligned markers</span></li>
+          <li><code>_report.txt</code><span class="desc">Anomaly report — overshoots, echoes, low confidence</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       QUICKSTART
+       ============================================================ -->
+  <section class="section" id="quickstart">
+    <div class="section-head">
+      <span class="index">03</span>
+      <h2>Quickstart</h2>
+      <span class="spacer-line"></span>
+    </div>
+
+    <div class="quickstart">
+<span class="comment"># Clone, sync, build the UI</span>
+<span class="prompt">$</span> <span class="kw">git</span> clone https://github.com/mandakan/splitsmith.git
+<span class="prompt">$</span> <span class="kw">cd</span> splitsmith
+<span class="prompt">$</span> <span class="kw">uv</span> sync
+<span class="prompt">$</span> (<span class="kw">cd</span> src/splitsmith/ui_static &amp;&amp; pnpm install &amp;&amp; pnpm build)
+
+<span class="comment"># Run the full ingest → audit → export workflow</span>
+<span class="prompt">$</span> <span class="kw">uv</span> run splitsmith ui --project ~/matches/your-match
+    </div>
+  </section>
+
+</main>
+
+<footer class="colophon">
+  <div class="colophon-inner">
+    <span><b>Splitsmith</b></span>
+    <span class="sep">·</span>
+    <span>Open source · MIT licensed</span>
+    <span class="sep">·</span>
+    <span>Built for IPSC athletes</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener"><b>github.com/mandakan/splitsmith</b></a>
+  </div>
+</footer>
+
+</body>
+</html>
