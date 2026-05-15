@@ -517,22 +517,22 @@ export function PromoteReview() {
     return shots
       .filter((s) => s.time !== null)
       .map((s) => {
-        let color = "var(--split-ok)"; // yellow; pending
+        let color = "var(--color-split-ok)"; // yellow; pending
         let glyph = "";
         let dashed = false;
         let thick = false;
         if (s.status === "confirmed") {
-          color = "var(--split-good)"; // green
+          color = "var(--color-split-good)"; // green
           glyph = "✓ "; // check
           thick = true;
         } else if (s.status === "nudged") {
-          color = "var(--split-good)";
+          color = "var(--color-split-good)";
           glyph = "· "; // middle dot
           dashed = true;
           thick = true;
         } else if (s.status !== "pending") {
           // missed-detector / missed-anchor-wrong / missed-dropped
-          color = "var(--split-slow)"; // vermillion
+          color = "var(--color-split-slow)"; // vermillion
           glyph = "! ";
           dashed = s.status === "missed-anchor-wrong";
         } else {
@@ -687,11 +687,11 @@ export function PromoteReview() {
         <div
           className="px-4 py-2 border-b text-xs flex flex-col gap-1"
           style={{
-            backgroundColor: "color-mix(in oklch, var(--destructive) 8%, transparent)",
-            borderColor: "color-mix(in oklch, var(--destructive) 30%, transparent)",
+            backgroundColor: "color-mix(in oklch, var(--color-destructive) 8%, transparent)",
+            borderColor: "color-mix(in oklch, var(--color-destructive) 30%, transparent)",
           }}
         >
-          <div className="flex items-center gap-2 font-medium" style={{ color: "var(--destructive)" }}>
+          <div className="flex items-center gap-2 font-medium" style={{ color: "var(--color-destructive)" }}>
             <AlertCircle size={14} />
             <span>
               This fixture looks suspect -- the secondary may not actually
@@ -755,11 +755,11 @@ export function PromoteReview() {
                     <div
                       key={`anchor-${i}`}
                       className="absolute top-0 bottom-0 w-px opacity-70"
-                      style={{ left: m.left, backgroundColor: "var(--marker-detected)" }}
+                      style={{ left: m.left, backgroundColor: "var(--color-marker-detected)" }}
                     >
                       <div
                         className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
-                        style={{ color: "var(--marker-detected)" }}
+                        style={{ color: "var(--color-marker-detected)" }}
                       >
                         {m.label}
                       </div>

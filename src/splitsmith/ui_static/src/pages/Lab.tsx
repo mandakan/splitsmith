@@ -3067,13 +3067,13 @@ function VoterChips({
 // design tokens (defined in styles/index.css) so the same TP/FP/FN
 // colours are used everywhere and the palette stays color-blind safe.
 const LAB_PALETTE = {
-  tp: "var(--split-good)", // Okabe-Ito bluish green
-  fp: "var(--split-slow)", // Okabe-Ito vermillion
-  fn: "var(--destructive)", // shadcn destructive
-  rejected: "var(--marker-rejected)", // neutral gray
-  candidatePrimary: "var(--marker-detected)", // Okabe-Ito blue
-  playhead: "var(--waveform-playhead)", // Okabe-Ito vermillion
-  playWindow: "var(--primary)", // shadcn primary (theme-tracking)
+  tp: "var(--color-split-good)", // Okabe-Ito bluish green
+  fp: "var(--color-split-slow)", // Okabe-Ito vermillion
+  fn: "var(--color-destructive)", // shadcn destructive
+  rejected: "var(--color-marker-rejected)", // neutral gray
+  candidatePrimary: "var(--color-marker-detected)", // Okabe-Ito blue
+  playhead: "var(--color-waveform-playhead)", // Okabe-Ito vermillion
+  playWindow: "var(--color-primary)", // shadcn primary (theme-tracking)
 } as const;
 
 function candidateLineColor(c: LabEvalFixture["candidates"][number]): string {

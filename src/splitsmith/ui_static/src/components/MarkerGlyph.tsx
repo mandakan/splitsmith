@@ -26,7 +26,12 @@ interface MarkerGlyphProps {
 }
 
 export function MarkerGlyph({ kind, size = 16, className, label }: MarkerGlyphProps) {
-  const colorVar = `var(--marker-${kind})`;
+  // The Shot Timer tokens live under `--color-marker-*` (so Tailwind v4
+  // exposes them as `bg-marker-detected` / etc). The glyph used to read
+  // `--marker-*` directly which silently fell back to default fill, so
+  // every marker rendered as a gray shape and broke the connection
+  // between the legend chip color and the actual marker.
+  const colorVar = `var(--color-marker-${kind})`;
   const aria = label ?? kind;
   const half = size / 2;
 
