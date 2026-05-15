@@ -67,3 +67,6 @@ tests/fixtures/full/*
 # And audit-mode trim params sidecars from splitsmith.ui.audio.
 *_trimmed.params.json
 .claude/
+
+# Wrangler local state for Cloudflare Pages deploys.
+.wrangler/
