@@ -53,6 +53,7 @@ import {
   visibleKindsFromFilters,
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
+import { Avatar } from "@/components/ui";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
@@ -77,6 +78,7 @@ import {
   type Job,
   type MatchProject,
   type PeaksResult,
+  type ShooterListEntry,
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
@@ -97,6 +99,8 @@ export function Audit() {
 
   const [project, setProject] = useState<MatchProject | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  const [switchingShooter, setSwitchingShooter] = useState<string | null>(null);
 
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
@@ -211,6 +215,40 @@ export function Audit() {
     return () => {
       alive = false;
     };
+  }, []);
+
+  // Load shooters when the bound project is part of a multi-shooter match.
+  // Empty list means we're inside a legacy single-shooter project; the
+  // switcher hides itself in that case.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => {
+        if (alive) setShooters(r.shooters);
+      })
+      .catch(() => {
+        if (alive) setShooters([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Switching the active shooter rebinds the server's project context.
+  // Audit's local state (project, peaks, audit JSON, markers, video refs,
+  // undo stack...) is deeply tied to the previous shooter, so the safe
+  // move is a full reload after the rebind -- piecewise reset would have
+  // to touch a dozen effects and the wrong order leaves a torn UI.
+  const switchShooter = useCallback(async (slug: string) => {
+    setSwitchingShooter(slug);
+    try {
+      await api.selectActiveShooter(slug);
+      window.location.reload();
+    } catch (err) {
+      setSwitchingShooter(null);
+      setProjectError(err instanceof ApiError ? err.detail : String(err));
+    }
   }, []);
 
   const stagesWithPrimary = useMemo(() => {
@@ -1322,6 +1360,17 @@ export function Audit() {
             </div>
           </div>
 
+          {/* Shooter switcher: only renders for multi-shooter matches.
+              See #350 for the operator-vs-active-shooter discussion --
+              ``is_active`` here is "currently bound", not "this is you". */}
+          {shooters.length > 1 && (
+            <ShooterChipStrip
+              shooters={shooters}
+              switching={switchingShooter}
+              onSwitch={switchShooter}
+            />
+          )}
+
           {/* Toolbar: Save + Undo + status badges + filter chips + zoom */}
           <div className="flex flex-wrap items-center gap-2.5">
             <Button
@@ -1693,6 +1742,68 @@ function Readout({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   );
+}
+
+function ShooterChipStrip({
+  shooters,
+  switching,
+  onSwitch,
+}: {
+  shooters: ShooterListEntry[];
+  switching: string | null;
+  onSwitch: (slug: string) => void;
+}) {
+  return (
+    <div className="-mt-1 mb-3 inline-flex flex-wrap items-center gap-2">
+      <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-subtle">
+        Auditing
+      </span>
+      {shooters.map((s) => {
+        const isActive = s.is_active;
+        const isSwitching = switching === s.slug;
+        return (
+          <button
+            key={s.slug}
+            type="button"
+            onClick={() => !isActive && !switching && onSwitch(s.slug)}
+            disabled={isActive || switching != null}
+            title={
+              isActive
+                ? `${s.name} -- currently auditing`
+                : `Switch to ${s.name}`
+            }
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors",
+              isActive
+                ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
+                : "border-rule bg-surface-2 text-ink-2 hover:border-rule-strong hover:bg-surface-3",
+              isSwitching && "opacity-60",
+            )}
+          >
+            <Avatar
+              size="xs"
+              initials={chipInitials(s.name)}
+              seed={s.slug}
+              name={s.name}
+            />
+            <span className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em]">
+              {s.name}
+            </span>
+            <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+              {pad2(s.stages_audited)}/{pad2(s.stages_total)}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function chipInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function ShortcutsStrip() {
