@@ -153,9 +153,13 @@
   --color-marker-rejected:          #6B7079;       /* cold */
   --color-marker-manual:            #A78BFA;       /* manual */
 
-  --color-waveform-bar:             #8E939B;       /* muted */
-  --color-waveform-playhead:        #FF2D2D;       /* led */
-  --color-waveform-beep:            #06B6D4;       /* beep */
+  /* Oscilloscope colours. The bar fill is LED red at low alpha so the
+   * waveform reads as a red trace (matches polished/03 "scope" aesthetic
+   * without needing the SVG envelope rewrite). Playhead is bright LED
+   * red on top; beep marker stays cyan dashed. */
+  --color-waveform-bar:             rgba(255, 45, 45, 0.35);
+  --color-waveform-playhead:        #FF2D2D;
+  --color-waveform-beep:            #06B6D4;
 
   /* === Typography ======================================================= */
 

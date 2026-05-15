@@ -122,9 +122,13 @@ export function Waveform({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const barColor = cssVar("--waveform-bar", "#888");
-    const playheadColor = cssVar("--waveform-playhead", "#d55e00");
-    const beepColor = cssVar("--waveform-beep", "#0072b2");
+    // Read canonical --color-waveform-* tokens. These used to read the
+    // un-prefixed --waveform-* names which silently fell back to the
+    // pre-Shot-Timer Okabe-Ito palette (gray/orange/blue), giving the
+    // waveform a colorless look that broke the oscilloscope aesthetic.
+    const barColor = cssVar("--color-waveform-bar", "rgba(255,45,45,0.35)");
+    const playheadColor = cssVar("--color-waveform-playhead", "#FF2D2D");
+    const beepColor = cssVar("--color-waveform-beep", "#06B6D4");
 
     // Bars: one per peak, scaled to content width.
     const n = peaks.length;
@@ -155,12 +159,19 @@ export function Waveform({
 
     if (duration > 0) {
       const x = (Math.min(Math.max(currentTime, 0), duration) / duration) * cssWidth;
+      // Playhead picks up a subtle glow so it stays legible on top of
+      // the LED-tinted bars. shadowBlur is cheap here because we only
+      // draw one line per frame.
+      ctx.save();
+      ctx.shadowColor = playheadColor;
+      ctx.shadowBlur = 6;
       ctx.strokeStyle = playheadColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, cssHeight);
       ctx.stroke();
+      ctx.restore();
     }
   }, [peaks, duration, currentTime, beepTime, contentWidth, height, dpr, cssVar]);
 
