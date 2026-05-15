@@ -947,6 +947,7 @@ function CoachStage({ stage }: { stage: number }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const shotListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -990,6 +991,47 @@ function CoachStage({ stage }: { stage: number }) {
     const shot = coach.shots.find((s) => s.shot_number === activeShotNumber);
     setNoteDraft(shot?.coaching_note ?? "");
   }, [activeShotNumber, coach]);
+
+  // While the video is playing, advance the active shot to whichever
+  // one's time_absolute has just passed under the playhead. Without
+  // this the shot list + stepper stay frozen on whatever shot was last
+  // clicked, even as audio of subsequent shots plays.
+  //
+  // Gate on isPlaying so a user click + seek doesn't fight with the
+  // currentTime tick that follows (the seek would land at the clicked
+  // shot's time and the auto-sync would re-confirm the same shot; that
+  // path works, but isPlaying keeps the logic simple to reason about).
+  useEffect(() => {
+    if (!isPlaying || !coach) return;
+    // Last shot whose time_absolute <= currentTime is the one currently
+    // audible. Shots are sorted by shot_number; we sort by time here to
+    // be defensive against any out-of-order input.
+    const ordered = [...coach.shots].sort(
+      (a, b) => a.time_absolute - b.time_absolute,
+    );
+    let current: CoachShot | null = null;
+    for (const s of ordered) {
+      if (s.time_absolute <= currentTime) current = s;
+      else break;
+    }
+    if (current && current.shot_number !== activeShotNumber) {
+      setActiveShotNumber(current.shot_number);
+    }
+  }, [currentTime, isPlaying, coach, activeShotNumber]);
+
+  // Scroll the active shot row into view as it changes during playback.
+  // Without this the highlight moves correctly but a long list scrolls
+  // off-screen, so the user has to chase it manually. block:'nearest'
+  // avoids yanking the viewport when the row is already visible.
+  useEffect(() => {
+    if (activeShotNumber == null) return;
+    const container = shotListRef.current;
+    if (!container) return;
+    const row = container.querySelector<HTMLElement>(
+      `[data-shot-number="${activeShotNumber}"]`,
+    );
+    row?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [activeShotNumber]);
 
   const reclassify = useCallback(async () => {
     setReclassifying(true);
@@ -1285,7 +1327,10 @@ function CoachStage({ stage }: { stage: number }) {
             <span />
             <span />
           </div>
-          <div className="max-h-[520px] overflow-y-auto">
+          <div
+            ref={shotListRef}
+            className="max-h-[520px] overflow-y-auto"
+          >
             {coach.shots.map((shot) => (
               <ShotRow
                 key={shot.shot_number}
@@ -1437,6 +1482,7 @@ function ShotRow({
     <button
       type="button"
       onClick={onClick}
+      data-shot-number={shot.shot_number}
       className={cn(
         "grid w-full grid-cols-[40px_70px_70px_110px_30px_24px] items-center gap-3 border-b border-rule px-5 py-2 text-left transition-colors hover:bg-surface-2 last:border-b-0",
         active && "bg-led/[0.06]",
