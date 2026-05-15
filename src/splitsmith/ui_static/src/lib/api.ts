@@ -1092,6 +1092,16 @@ export interface ServerHealth {
   schema_version: number | null;
 }
 
+/** Saved SSI Scoreboard identity for the operator. Returned by
+ *  ``GET /api/user/scoreboard-identity``; null when nothing is pinned. */
+export interface ScoreboardIdentity {
+  shooter_id: number;
+  display_name: string | null;
+  division: string | null;
+  club: string | null;
+  base_url: string | null;
+}
+
 /** One entry from ``GET /api/user/recent-projects``. ``last_opened_at``
  *  is an ISO-8601 UTC timestamp the picker uses to sort. ``path`` is
  *  resolved server-side; we don't normalise it client-side. ``kind``
@@ -1118,6 +1128,7 @@ export interface RecentProjectDetail {
   last_modified_at: string | null;
   status: "in_progress" | "exported" | "archived" | "unknown";
   manual: boolean;
+  shooter_names: string[];
 }
 
 export interface CreateMatchStageDraft {
@@ -1773,6 +1784,17 @@ export const api = {
    *  to decide whether the user landed in unbound mode (boot with no
    *  ``--project``) or whether a project is already open. */
   getHealth: () => request<ServerHealth>("/api/health"),
+
+  /** Saved SSI Scoreboard identity for the operator running this install,
+   *  or null when nothing has been pinned yet. The header chrome uses
+   *  this to render the user badge; null hides it. */
+  getScoreboardIdentity: () =>
+    request<ScoreboardIdentity>("/api/user/scoreboard-identity").catch(
+      (err) => {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      },
+    ),
 
   /** Recent-projects list, most-recent first. Drives the picker. */
   getRecentProjects: () =>

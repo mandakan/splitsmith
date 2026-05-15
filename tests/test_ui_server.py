@@ -5117,12 +5117,11 @@ def test_create_match_manual_scaffolds_match_and_binds_shooter(
     assert legacy.competitor_name == "Mathias Axell"
     assert len(legacy.stages) == 2
 
-    # Recent-projects list got both the match folder and the legacy shooter
-    # path; detail listing exposes them as kinds "match" + "legacy".
+    # Recent-projects gets only the match folder; the shooter subdir
+    # inside it must not register as a standalone legacy project.
     detail = client.get("/api/user/recent-projects?detail=true").json()
     kinds = sorted(p["kind"] for p in detail["projects"])
-    assert "match" in kinds
-    assert "legacy" in kinds
+    assert kinds == ["match"]
 
 
 def test_create_match_manual_refuses_existing_match_folder(

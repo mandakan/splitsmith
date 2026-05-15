@@ -351,13 +351,20 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
     plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
     match = execute_merge(plan, move=False)
 
-    # match.json present, shooters subdirs populated, project.json renamed.
+    # match.json present, shooters subdirs populated. project.json is kept
+    # alongside shooter.json as a legacy compat shim (most server endpoints
+    # still speak the legacy MatchProject schema); match-level fields are
+    # stripped so match.json stays authoritative.
     assert (out / MATCH_FILE).is_file()
     for slug in ("anton-johansson", "martin-engstrom"):
         sroot = out / SHOOTERS_DIR / slug
         assert (sroot / SHOOTER_FILE).is_file(), slug
-        assert not (sroot / "project.json").exists(), slug
+        assert (sroot / "project.json").is_file(), slug
         assert (sroot / "raw").is_dir(), slug
+        legacy = json.loads((sroot / "project.json").read_text())
+        assert legacy["scoreboard_match_id"] is None
+        assert legacy["scoreboard_content_type"] is None
+        assert legacy["match_date"] is None
 
     # User data carried across.
     raw_file = out / SHOOTERS_DIR / "anton-johansson" / "raw" / "fake.mp4"

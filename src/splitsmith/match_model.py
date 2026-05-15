@@ -614,15 +614,21 @@ def execute_merge(
         op = shutil.move if move else _copytree
         op(src, dst)
 
-        # Rename project.json -> shooter.json and strip match-level fields.
+        # Write shooter.json (new match-aware form) AND keep project.json
+        # (legacy compat shim) in sync. The bulk of the server still speaks
+        # the legacy MatchProject schema -- if we deleted project.json the
+        # ingest/audit/beep endpoints would all fall over with FileNotFound
+        # the first time the SPA opened a shooter inside a merged match.
+        # Match-level fields are stripped from the legacy file so match.json
+        # stays authoritative.
         legacy_project = MatchProject.load(dst)
-        match_view, shooter_view = legacy_to_match_view(legacy_project)
+        _match_view, shooter_view = legacy_to_match_view(legacy_project)
         shooter_view.slug = mv.slug
         shooter_view.save(dst)
-        # The original project.json is now redundant; remove it.
-        legacy_path = dst / PROJECT_FILE
-        if legacy_path.exists():
-            legacy_path.unlink()
+        legacy_project.scoreboard_match_id = None
+        legacy_project.scoreboard_content_type = None
+        legacy_project.match_date = None
+        legacy_project.save(dst)
 
         # Note: any pre-existing scoreboard cache stays under the shooter's
         # scoreboard/ subdir. The match-level scoreboard/ at the top is

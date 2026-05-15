@@ -376,10 +376,17 @@ export function Compare() {
       {/* Video grid */}
       <div className={layoutClass(layout)}>
         {visibleShooters.length === 0 ? (
-          <div className="rounded-2xl border border-rule-strong bg-surface px-8 py-12 text-center text-sm text-muted">
-            No shooters have lossless trims for this stage yet. Run trim +
-            audit for each shooter on the audit page first.
-          </div>
+          <CompareEmptyState
+            unfinished={orderedShooters.filter((s) => !s.video_path)}
+            onOpenInAudit={async (slug) => {
+              try {
+                await api.selectActiveShooter(slug);
+              } catch {
+                /* navigation still useful even if the bind blips */
+              }
+              navigate(`/audit/${stageNumber}`);
+            }}
+          />
         ) : (
           visibleShooters.map((shooter) => (
             <VideoTile
@@ -413,6 +420,54 @@ export function Compare() {
 
       {/* Ranking */}
       <RankingTable shooters={playableShooters} />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Empty state -- no shooter has a usable trim for this stage yet             */
+/* -------------------------------------------------------------------------- */
+
+function CompareEmptyState({
+  unfinished,
+  onOpenInAudit,
+}: {
+  unfinished: CompareShooterRecord[];
+  onOpenInAudit: (slug: string) => void | Promise<void>;
+}) {
+  // Compare uses the lossless export if present, otherwise the audit-mode
+  // short-GOP cache; both come out of the per-shooter trim + audit pass.
+  // So a missing video_path means audit isn't finished for that shooter
+  // (no primary, no beep, or the trim cache hasn't been built).
+  return (
+    <div className="rounded-2xl border border-rule-strong bg-surface px-6 py-10 text-sm text-muted">
+      <p className="text-center text-ink-2">
+        Compare needs an audited primary cam from each shooter.
+      </p>
+      {unfinished.length > 0 && (
+        <>
+          <p className="mt-2 text-center">
+            Not ready yet:{" "}
+            <span className="font-semibold text-ink-2">
+              {unfinished.map((s) => s.name).join(", ")}
+            </span>
+            .
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+            {unfinished.map((s) => (
+              <button
+                key={s.slug}
+                type="button"
+                onClick={() => onOpenInAudit(s.slug)}
+                className="inline-flex items-center gap-2 rounded-lg border border-rule-strong bg-surface-2 px-3 py-2 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led"
+              >
+                <ArrowRight className="size-3.5" />
+                Audit {s.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

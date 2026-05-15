@@ -26,7 +26,12 @@ import {
   type MatchSidebarStage,
   type StageStatus,
 } from "@/components/match/MatchSidebar";
-import { api, type MatchProject, type ServerHealth } from "@/lib/api";
+import {
+  api,
+  type MatchProject,
+  type ScoreboardIdentity,
+  type ServerHealth,
+} from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +60,24 @@ export function MatchShell() {
 
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
+  const [shooterCount, setShooterCount] = useState<number | undefined>(undefined);
+  const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .getScoreboardIdentity()
+      .then((id) => {
+        if (alive) setIdentity(id);
+      })
+      .catch(() => {
+        if (alive) setIdentity(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -71,6 +93,16 @@ export function MatchShell() {
             })
             .catch(() => {
               if (alive) setProject(null);
+            });
+          api
+            .listMatchShooters()
+            .then((r) => {
+              if (alive) setShooterCount(r.shooters.length);
+            })
+            .catch(() => {
+              // 409 no_match when the bound project is a standalone legacy
+              // single-shooter project (not a Match). Fall back to 1.
+              if (alive) setShooterCount(1);
             });
         }
       })
@@ -166,19 +198,21 @@ export function MatchShell() {
             title="Switch project"
             className="inline-flex min-h-10 items-center gap-2.5 rounded-full border border-rule bg-surface-2 py-1 pl-1 pr-3.5 text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-3"
           >
-            <span
-              aria-hidden
-              className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-                boxShadow:
-                  "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
-              }}
-            >
-              MA
-            </span>
-            <span>Mathias Axell</span>
+            {identity?.display_name && (
+              <span
+                aria-hidden
+                className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
+                  boxShadow:
+                    "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
+                }}
+              >
+                {userInitials(identity.display_name)}
+              </span>
+            )}
+            <span>{identity?.display_name ?? "Switch project"}</span>
             <Repeat className="size-3.5 text-subtle" />
           </button>
         </div>
@@ -216,7 +250,7 @@ export function MatchShell() {
           matchName={project?.name ?? health?.project_name ?? "..."}
           matchSubtitle={renderMatchSubtitle(project)}
           stages={stages}
-          shooterCount={stages.length > 0 ? 1 : undefined}
+          shooterCount={shooterCount}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
@@ -257,6 +291,13 @@ function renderMatchSubtitle(project: MatchProject | null) {
     bits.push(formatDateShort(project.match_date));
   }
   return bits.length > 0 ? <span>{bits.join(" · ")}</span> : null;
+}
+
+function userInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function formatDateShort(iso: string): string {

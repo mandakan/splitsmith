@@ -714,6 +714,9 @@ class RecentProjectDetail(BaseModel):
     # ``True`` for matches the user created without scoreboard data --
     # surfaces the "manual" pill in the polished picker.
     manual: bool = False
+    # Human-readable shooter names in match order so the picker can
+    # render real initials in avatar stacks instead of stubs.
+    shooter_names: list[str] = []
 
 
 class CreateMatchStageDraft(BaseModel):
@@ -1589,7 +1592,10 @@ def _bind_project_to_state(
         shooter_root = match_model.Match.shooter_root(resolved, shooter_slug)
         user_config.record_project_open(resolved, match.name or fallback_name, kind="match")
         return _bind_legacy_root_to_state(
-            state, shooter_root, fallback_name=match.name or fallback_name
+            state,
+            shooter_root,
+            fallback_name=match.name or fallback_name,
+            register=False,
         )
     return _bind_legacy_root_to_state(state, resolved, fallback_name=fallback_name)
 
@@ -1598,8 +1604,15 @@ def _bind_legacy_root_to_state(
     state: AppState,
     root: Path,
     fallback_name: str,
+    *,
+    register: bool = True,
 ) -> str:
-    """Bind a legacy MatchProject directory (project.json layout)."""
+    """Bind a legacy MatchProject directory (project.json layout).
+
+    ``register=False`` is for shooter subdirs inside a match: the parent
+    match is already recorded in recent-projects, and the shooter dir
+    must not show up as a standalone "legacy" project in the picker.
+    """
     MatchProject.init(root, name=fallback_name)
     resolved = root.resolve()
     loaded_env = _load_env_files(resolved)
@@ -1610,7 +1623,8 @@ def _bind_legacy_root_to_state(
         recorded_name = loaded_project.name or fallback_name
     except Exception:  # pragma: no cover -- defensive: never block boot
         recorded_name = fallback_name
-    user_config.record_project_open(resolved, recorded_name, kind="legacy")
+    if register:
+        user_config.record_project_open(resolved, recorded_name, kind="legacy")
     state.bind(resolved, recorded_name)
     return recorded_name
 
@@ -1652,12 +1666,16 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.manual = match.scoreboard_match_id is None
             # Audited = sum of audited stages across shooters / shooter_count.
             audited_total = 0
+            shooter_names: list[str] = []
             for slug in match.shooters:
                 try:
                     shooter = match.load_shooter(path, slug)
                 except (FileNotFoundError, KeyError):
+                    shooter_names.append(slug)
                     continue
                 audited_total += sum(1 for s in shooter.stages if s.time_seconds > 0 or s.skipped)
+                shooter_names.append(shooter.name or slug)
+            detail.shooter_names = shooter_names
             detail.stages_audited = (
                 audited_total // max(len(match.shooters), 1) if match.shooters else 0
             )
@@ -1673,6 +1691,8 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.stages_audited = sum(
                 1 for s in project.stages if s.time_seconds > 0 or s.skipped
             )
+            if project.competitor_name:
+                detail.shooter_names = [project.competitor_name]
             metadata_path = path / "project.json"
 
         if metadata_path.exists():
@@ -6036,14 +6056,13 @@ def create_app(
                 )
         legacy.save(shooter_root)
 
+        # Bind via the match folder so _bind_project_to_state records it as
+        # kind="match" and binds the first shooter without registering the
+        # shooter subdir as a separate legacy project in recent-projects.
         try:
-            recorded = _bind_project_to_state(state, shooter_root, fallback_name=req.name)
+            recorded = _bind_project_to_state(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # Also record the *match* path in the recent-projects index so the
-        # picker can find it. Binding above recorded the shooter dir; the
-        # match folder is what the picker should reopen.
-        user_config.record_project_open(target.resolve(), match.name, kind="match")
         project = state.load()
         return HealthResponse(
             bound=True,
@@ -6103,11 +6122,12 @@ def create_app(
         legacy.scoreboard_content_type = req.content_type
         legacy.save(shooter_root)
 
+        # See create_match_manual: bind via the match folder, not the
+        # shooter dir, so recent-projects only gets a kind="match" entry.
         try:
-            recorded = _bind_project_to_state(state, shooter_root, fallback_name=req.name)
+            recorded = _bind_project_to_state(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        user_config.record_project_open(target.resolve(), match.name, kind="match")
         project = state.load()
         return HealthResponse(
             bound=True,
@@ -6302,16 +6322,14 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        # Register the *match* path in recent-projects so the picker can
-        # find it next session.
-        user_config.record_project_open(output.resolve(), match.name, kind="match")
-
-        # Bind the first shooter so existing audit/ingest endpoints have a
-        # working project context immediately.
-        first_slug = match.shooters[0]
-        shooter_root = match_model.Match.shooter_root(output, first_slug)
+        # Bind the new match. _bind_project_to_state's match branch
+        # records the match path in recent-projects (kind="match") and
+        # transparently binds the first shooter so existing audit/ingest
+        # endpoints have a working project context immediately. Passing
+        # the shooter path directly here would mis-register the shooter
+        # subdir as a standalone legacy project.
         try:
-            recorded = _bind_project_to_state(state, shooter_root, fallback_name=match.name)
+            recorded = _bind_project_to_state(state, output, fallback_name=match.name)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         project = state.load()
@@ -6372,7 +6390,9 @@ def create_app(
                     ),
                 },
             )
-        recorded = _bind_legacy_root_to_state(state, shooter_root, fallback_name=match.name)
+        recorded = _bind_legacy_root_to_state(
+            state, shooter_root, fallback_name=match.name, register=False
+        )
         project = state.load()
         return HealthResponse(
             bound=True,
@@ -6499,8 +6519,14 @@ def create_app(
             duration_seconds: float | None = None
             video_path: str | None = None
             if stage is not None and primary is not None and primary.beep_time is not None:
-                # Build the same trim path the FCPXML emitter uses; that
-                # file holds beep_offset_in_clip seconds of head padding.
+                # Prefer the lossless export (same file FCPXML references);
+                # fall back to the audit-mode short-GOP cache produced
+                # during trim+audit. Both are cuts of the same source at
+                # ``beep_time - pre_buffer``, so beep alignment is identical;
+                # the audit cache is the H.264 version the browser already
+                # streams during scrubbing. Either is fine for sync playback,
+                # and the fallback lets compare just work after audit
+                # without requiring a separate lossless export pass.
                 stage_name = stage_def.stage_name
                 base = f"stage{stage_number}_{match_export_helpers._slugify(stage_name)}"
                 exports = (
@@ -6510,9 +6536,20 @@ def create_app(
                 )
                 if not exports.is_absolute():
                     exports = shooter_root / exports
-                trim = exports / f"{base}_trimmed.mp4"
-                if trim.exists():
-                    video_path = str(trim)
+                trimmed = (
+                    Path(legacy.trimmed_dir).expanduser()
+                    if legacy.trimmed_dir
+                    else shooter_root / "trimmed"
+                )
+                if not trimmed.is_absolute():
+                    trimmed = shooter_root / trimmed
+                lossless = exports / f"{base}_trimmed.mp4"
+                audit_cache = trimmed / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
+                resolved_trim = (
+                    lossless if lossless.exists() else (audit_cache if audit_cache.exists() else None)
+                )
+                if resolved_trim is not None:
+                    video_path = str(resolved_trim)
                     beep_offset = min(legacy.trim_pre_buffer_seconds, primary.beep_time)
 
             # Shots come from audit; convert each shot.time to time-after-beep.
@@ -6587,32 +6624,43 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"shooter project missing: {exc}") from exc
 
         target = Path(path)
-        # Allow either a registered raw/source path OR the lossless trim
-        # the compare emitter writes (which lives under exports/ and is
-        # not on the registry).
+        # Allow either a registered raw/source path OR a trim file we wrote
+        # ourselves: the lossless export under exports/ (FCPXML-grade) or
+        # the audit-mode short-GOP cache under trimmed/ (compare's fallback
+        # when no lossless export exists yet).
         located = shooter_project.find_video(target)
         served_path: Path | None = None
         if located is not None:
             stage, video = located
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
         else:
-            # Fall back to allowing exports/ trims explicitly.
             resolved = target.expanduser().resolve()
             exports_dir = (
                 Path(shooter_project.exports_dir).expanduser().resolve()
                 if shooter_project.exports_dir
                 else (shooter_root / "exports").resolve()
             )
-            try:
-                resolved.relative_to(exports_dir)
-            except ValueError as exc:
+            trimmed_dir = (
+                Path(shooter_project.trimmed_dir).expanduser().resolve()
+                if shooter_project.trimmed_dir
+                else (shooter_root / "trimmed").resolve()
+            )
+            in_allowed_dir = False
+            for allowed in (exports_dir, trimmed_dir):
+                try:
+                    resolved.relative_to(allowed)
+                    in_allowed_dir = True
+                    break
+                except ValueError:
+                    continue
+            if not in_allowed_dir:
                 raise HTTPException(
                     status_code=403,
                     detail=(
                         f"path {path} is neither a registered video nor inside "
-                        f"the shooter's exports dir"
+                        f"the shooter's exports/ or trimmed/ dirs"
                     ),
-                ) from exc
+                )
             if not resolved.exists():
                 raise HTTPException(status_code=404, detail=f"file not found: {resolved}")
             served_path = resolved
@@ -8026,6 +8074,14 @@ def create_app(
 
         # SPA fallback: any non-API route returns index.html so the React
         # router can handle it client-side.
+        #
+        # index.html must NOT be browser-cached: a fresh build emits a new
+        # content-hashed bundle filename (e.g. index-DBM1MaSD.js), and only
+        # the freshly-served index.html knows about it. A cached index.html
+        # points at the old bundle, so a plain refresh after a rebuild
+        # would keep serving stale React code until the user hard-reloads.
+        # The /assets/* mount stays freely cacheable because those URLs
+        # are content-addressed -- a new build emits new filenames.
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa_fallback(full_path: str) -> FileResponse:
             if full_path.startswith("api/"):
@@ -8039,7 +8095,7 @@ def create_app(
                         "src/splitsmith/ui_static/ or use `npm run dev`."
                     ),
                 )
-            return FileResponse(index)
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     return app
 

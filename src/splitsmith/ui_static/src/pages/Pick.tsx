@@ -38,6 +38,7 @@ import {
   ApiError,
   api,
   type RecentProjectDetail,
+  type ScoreboardIdentity,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +57,23 @@ export function Pick() {
   const [importArchive, setImportArchive] = useState<File | null>(null);
   const [importOverwrite, setImportOverwrite] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .getScoreboardIdentity()
+      .then((id) => {
+        if (alive) setIdentity(id);
+      })
+      .catch(() => {
+        if (alive) setIdentity(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -232,22 +249,24 @@ export function Pick() {
               </>
             }
           />
-          <span className="ml-auto inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1.5 pl-1.5 pr-4">
-            <span
-              className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-                boxShadow:
-                  "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
-              }}
-            >
-              MA
+          {identity?.display_name && (
+            <span className="ml-auto inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1.5 pl-1.5 pr-4">
+              <span
+                className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
+                  boxShadow:
+                    "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
+                }}
+              >
+                {shooterInitials(identity.display_name).toUpperCase()}
+              </span>
+              <span className="text-[0.8125rem] font-medium text-ink-2">
+                {identity.display_name}
+              </span>
             </span>
-            <span className="text-[0.8125rem] font-medium text-ink-2">
-              Mathias Axell
-            </span>
-          </span>
+          )}
         </div>
         <div className="border-t border-rule bg-bg">
           <div className="mx-auto flex max-w-[1440px] items-center gap-4 px-8 py-2.5 text-xs text-muted">
@@ -262,8 +281,8 @@ export function Pick() {
               &middot; No match in session -- pick one or begin a new record
             </span>
             <span className="ml-auto font-mono text-[0.625rem] uppercase tracking-[0.16em] text-subtle">
-              <b className="font-semibold text-ink-2">00</b> &middot; matches
-              register
+              <b className="font-semibold text-ink-2">{pad2(counts.all)}</b>{" "}
+              &middot; matches register
             </span>
           </div>
         </div>
@@ -767,13 +786,13 @@ function MatchRow({
         </div>
         <AvatarStack
           size="sm"
-          avatars={Array.from({
-            length: Math.min(4, project.shooter_count),
-          }).map((_, i) => ({
-            initials: i === 0 ? "MA" : `S${i + 1}`,
-            tone: i === 0 ? "you" : undefined,
-            seed: `${project.path}-${i}`,
-          }))}
+          avatars={project.shooter_names
+            .slice(0, 4)
+            .map((shooterName) => ({
+              initials: shooterInitials(shooterName),
+              name: shooterName,
+              seed: `${project.path}-${shooterName}`,
+            }))}
           overflow={
             project.shooter_count > 4 ? project.shooter_count - 4 : undefined
           }
@@ -902,6 +921,16 @@ function Heartbeat() {
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
+}
+
+function shooterInitials(name: string): string {
+  // First letter of the first two whitespace-separated parts; falls back
+  // to the first two letters of a single-word name. Diacritics are kept
+  // (Avatar uppercases for display).
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2);
+  return parts[0][0] + parts[1][0];
 }
 
 function formatDate(iso: string): string {
