@@ -6694,7 +6694,9 @@ def create_app(
                 lossless = exports / f"{base}_trimmed.mp4"
                 audit_cache = trimmed / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
                 resolved_trim = (
-                    lossless if lossless.exists() else (audit_cache if audit_cache.exists() else None)
+                    lossless
+                    if lossless.exists()
+                    else (audit_cache if audit_cache.exists() else None)
                 )
                 if resolved_trim is not None:
                     video_path = str(resolved_trim)
