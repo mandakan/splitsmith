@@ -210,7 +210,7 @@ export function JobsPanel() {
       {open && (
         <div
           aria-hidden
-          className="fixed inset-0 z-30 bg-bg/40"
+          className="fixed inset-0 z-[55] bg-bg/40"
           onClick={() => setOpen(false)}
         />
       )}
@@ -221,7 +221,7 @@ export function JobsPanel() {
         aria-label="Background jobs"
         aria-hidden={!open}
         className={cn(
-          "fixed bottom-0 right-0 top-0 z-40 flex w-[400px] max-w-[100vw] flex-col border-l border-rule bg-bg-glow transition-transform",
+          "fixed bottom-0 right-0 top-0 z-[60] flex w-[400px] max-w-[100vw] flex-col border-l border-rule bg-bg-glow transition-transform",
           open ? "translate-x-0" : "pointer-events-none translate-x-full",
         )}
         style={{
