@@ -53,6 +53,7 @@ import {
   visibleKindsFromFilters,
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
+import { BeepWaveformPicker } from "@/components/BeepSection";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
@@ -141,6 +142,15 @@ export function Audit() {
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
   const [gridMode, setGridMode] = useState(true);
+  // Inline beep re-pick (opens via the Re-pick beep button in the audit
+  // toolbar). Draft is in *source* time -- the picker emits source-time
+  // values via onPick. Apply: overrideBeepForVideo on the primary, which
+  // clears shots[] server-side and chains a fresh trim + shot-detect.
+  // Fire-and-forget: we leave the user in audit; the JobsPanel surfaces
+  // progress and they reload audit data once the chain completes.
+  const [showRepickBeep, setShowRepickBeep] = useState(false);
+  const [repickDraft, setRepickDraft] = useState<number | null>(null);
+  const [repickBusy, setRepickBusy] = useState(false);
   // Stable refs used by grid-mode callbacks to avoid stale closures without
   // adding them to useCallback / useEffect dep arrays.
   const isPlayingRef = useRef(false);
@@ -1508,6 +1518,23 @@ export function Audit() {
                 no beep yet
               </span>
             )}
+            {/* Re-pick beep affordance. Stays out of the way until the
+             *  user notices the shots are mis-aligned in audit -- then a
+             *  single click opens an inline waveform picker so they
+             *  don't have to leave the page. Applying the new beep
+             *  clears shots[] and re-chains trim + shot-detect; we
+             *  confirm before doing that if there's work to discard. */}
+            {primary.beep_time != null && stageNumber != null ? (
+              <button
+                type="button"
+                onClick={() => setShowRepickBeep((v) => !v)}
+                aria-expanded={showRepickBeep}
+                aria-controls="audit-repick-beep-picker"
+                className="inline-flex items-center gap-1.5 rounded border border-rule bg-surface-2 px-2 py-0.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-led-deep hover:bg-led-tint hover:text-led"
+              >
+                {showRepickBeep ? "Cancel re-pick" : "Re-pick beep"}
+              </button>
+            ) : null}
             {videos.length > 1 ? (
               <span className="rounded border border-rule-strong bg-surface-2 px-2 py-0.5 font-bold tabular-nums text-ink-2">
                 {videos.length} cams
@@ -1533,6 +1560,102 @@ export function Audit() {
               />
             ) : null}
           </div>
+
+          {/* Inline beep re-pick. Mounts under the toolbar so the user
+           *  who notices a mis-aligned beep mid-audit doesn't have to
+           *  leave the page. Fire-and-forget: Apply queues a trim +
+           *  shot-detect chain via the existing override endpoint; the
+           *  JobsPanel surfaces the progress. */}
+          {showRepickBeep && stageNumber != null && primary.beep_time != null ? (
+            <div
+              id="audit-repick-beep-picker"
+              className="rounded-2xl border border-led-deep/60 bg-surface p-4"
+            >
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted">
+                  Re-pick beep
+                  <span className="ml-2 text-ink-2">
+                    current: <b className="tabular-nums">{primary.beep_time.toFixed(3)}s</b>
+                  </span>
+                  {repickDraft != null ? (
+                    <span className="ml-2 text-led">
+                      draft: <b className="tabular-nums">{repickDraft.toFixed(3)}s</b>
+                    </span>
+                  ) : null}
+                </div>
+                <div className="inline-flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowRepickBeep(false);
+                      setRepickDraft(null);
+                    }}
+                    disabled={repickBusy}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-led-fill text-ink hover:bg-led hover:text-ink"
+                    disabled={
+                      repickBusy ||
+                      repickDraft == null ||
+                      Math.abs(repickDraft - (primary.beep_time ?? 0)) < 1e-3
+                    }
+                    onClick={async () => {
+                      if (repickDraft == null || stageNumber == null) return;
+                      const keptShots = audit?.shots.length ?? 0;
+                      if (keptShots > 0) {
+                        const ok = window.confirm(
+                          `Re-picking the beep will discard the ${keptShots} kept shot${
+                            keptShots === 1 ? "" : "s"
+                          } on this stage and re-run trim + shot detection. Continue?`,
+                        );
+                        if (!ok) return;
+                      }
+                      setRepickBusy(true);
+                      try {
+                        const updated = await api.overrideBeepForVideo(
+                          slug,
+                          stageNumber,
+                          primary.video_id,
+                          repickDraft,
+                        );
+                        setProject(updated);
+                        setShowRepickBeep(false);
+                        setRepickDraft(null);
+                        // Audit data will be stale until shot-detect
+                        // re-runs. The JobsPanel surfaces progress; the
+                        // user reloads when they see it land.
+                      } catch (e) {
+                        setProjectError(
+                          e instanceof ApiError ? e.detail : String(e),
+                        );
+                      } finally {
+                        setRepickBusy(false);
+                      }
+                    }}
+                  >
+                    Apply & re-process
+                  </Button>
+                </div>
+              </div>
+              <BeepWaveformPicker
+                slug={slug}
+                stageNumber={stageNumber}
+                videoId={primary.video_id}
+                videoBeepTime={primary.beep_time}
+                draftSourceTime={repickDraft}
+                onPick={(sourceTime) => setRepickDraft(sourceTime)}
+                setError={setProjectError}
+                instructions="Click on the waveform to mark the buzzer's rise. Apply to re-run trim + shot detection on the new beep."
+                ariaLabel={`Re-pick beep for stage ${stageNumber}`}
+              />
+            </div>
+          ) : null}
 
           {/* Video panel wrapped in instrument-panel frame */}
           <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
