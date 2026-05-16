@@ -5108,9 +5108,12 @@ def test_create_match_manual_scaffolds_match_and_binds_shooter(
     match = match_model.Match.load(target)
     assert len(match.stages) == 2
     assert match.match_date.isoformat() == "2026-05-14"
-    assert match.shooters == ["mathias-axell"]
+    # Slugs are opaque (PII-free): no name leakage on disk or in URLs.
+    assert len(match.shooters) == 1
+    only_slug = match.shooters[0]
+    assert only_slug.startswith("s_") and len(only_slug) == 10
 
-    shooter_root = match_model.Match.shooter_root(target, "mathias-axell")
+    shooter_root = match_model.Match.shooter_root(target, only_slug)
     assert (shooter_root / "shooter.json").exists()
     assert (shooter_root / "project.json").exists()
     legacy = MatchProject.load(shooter_root)
@@ -5230,8 +5233,10 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
     assert resp.status_code == 200
     body = resp.json()
     slugs = [s["slug"] for s in body["shooters"]]
-    assert "johan-larsson" in slugs
-    new_root = match_model.Match.shooter_root(target, "johan-larsson")
+    assert len(slugs) == 2  # original "ma" + the new opaque slug
+    new_slug = next(s for s in slugs if s != "ma")
+    assert new_slug.startswith("s_") and len(new_slug) == 10
+    new_root = match_model.Match.shooter_root(target, new_slug)
     assert (new_root / "project.json").exists()
     assert (new_root / "shooter.json").exists()
 
@@ -6016,7 +6021,8 @@ def test_merge_plan_returns_reconciled_plan_for_legacy_inputs(tmp_path: Path) ->
     body = resp.json()
     assert body["name"] == "Bromma 2026"
     assert len(body["shooter_moves"]) == 2
-    assert {mv["slug"] for mv in body["shooter_moves"]} == {"proj-a", "proj-b"}
+    slugs = {mv["slug"] for mv in body["shooter_moves"]}
+    assert all(s.startswith("s_") and len(s) == 10 for s in slugs), slugs
     # Plan must not have written anything to disk.
     assert not (tmp_path / "merged").exists()
 
@@ -6068,9 +6074,10 @@ def test_merge_execute_writes_match_folder_and_binds_first_shooter(tmp_path: Pat
     # Bound shooter root sits under the merged match's shooters dir.
     assert str(out) in body["project_root"]
     assert (out / "match.json").exists()
-    # Two shooter subdirs.
+    # Two shooter subdirs, named with opaque ids (no PII on disk).
     shooter_names = sorted(p.name for p in (out / "shooters").iterdir())
-    assert shooter_names == ["proj-a", "proj-b"]
+    assert len(shooter_names) == 2
+    assert all(n.startswith("s_") and len(n) == 10 for n in shooter_names), shooter_names
 
 
 def test_merge_execute_refuses_destination_with_existing_match(tmp_path: Path) -> None:

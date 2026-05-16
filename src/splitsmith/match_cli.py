@@ -196,6 +196,87 @@ def info(
     console.print(table)
 
 
+@match_app.command("rename-shooter-slugs")
+def rename_shooter_slugs(
+    path: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help="Match folder (with match.json) whose shooter slugs should be replaced with opaque ids.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the rename plan without touching disk.",
+    ),
+) -> None:
+    """Rename every shooter under PATH from a human-readable slug to an
+    opaque random id (``s_<hex>``).
+
+    Use this once after upgrading to drop PII from on-disk paths and
+    URLs. Renames the ``shooters/<old>/`` directory, rewrites
+    ``match.json`` with the new slug, and refreshes the shooter list in
+    place. Safe to re-run; shooters that already have an opaque slug
+    (``s_*``) are skipped.
+    """
+    if not is_match_folder(path):
+        console.print(
+            f"[red]Not a match folder:[/] {path}\n"
+            f"Expected {MATCH_FILE} alongside a shooters/ subdir."
+        )
+        raise typer.Exit(code=2)
+
+    match = Match.load(path)
+    shooters_dir = path / match_model.SHOOTERS_DIR
+    plan: list[tuple[str, str]] = []  # (old_slug, new_slug)
+    taken: set[str] = set()
+    for old in match.shooters:
+        if old.startswith("s_") and len(old) == 10:
+            taken.add(old)
+            continue
+        new = match_model.mint_shooter_slug(taken)
+        taken.add(new)
+        plan.append((old, new))
+
+    if not plan:
+        console.print("[green]Nothing to rename.[/] Every shooter slug is already opaque.")
+        return
+
+    console.print(f"[bold cyan]Slug rename plan ({len(plan)} shooter(s))[/]")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("From")
+    table.add_column("To")
+    for old, new in plan:
+        table.add_row(old, new)
+    console.print(table)
+
+    if dry_run:
+        console.print("[dim]Dry run -- no changes written.[/]")
+        return
+
+    # Apply: rename dirs first, then rewrite match.json. If any rename
+    # fails halfway we leave the disk in a known-bad state; the user
+    # can re-run after fixing permissions / collisions.
+    new_shooters: list[str] = []
+    rename_map = dict(plan)
+    for old in match.shooters:
+        new = rename_map.get(old, old)
+        if new != old:
+            src = shooters_dir / old
+            dst = shooters_dir / new
+            if dst.exists():
+                console.print(f"[red]Refusing to rename {old} -> {new}: target dir exists[/]")
+                raise typer.Exit(code=1)
+            src.rename(dst)
+        new_shooters.append(new)
+
+    match.shooters = new_shooters
+    match.save(path)
+    console.print(f"[green]Renamed {len(plan)} shooter(s).[/]")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

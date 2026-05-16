@@ -613,10 +613,12 @@ def legacy_slug(project: MatchProject) -> str:
     Legacy projects predate the Match -> Shooter split; their on-disk
     layout has no ``shooters/<slug>/`` subdir. To keep every shooter-
     scoped URL slug-bearing (no second URL family for legacy projects),
-    we mint a deterministic slug from the project's ``competitor_name``.
-    The SPA reads it via /api/health.bound_shooter_slug after binding.
+    we mint a deterministic *opaque* slug from the project's metadata
+    (name + scoreboard ids) so the URL is stable across reloads but
+    doesn't carry the competitor name. The SPA reads it via
+    ``/api/health.default_shooter_slug`` after binding.
     """
-    return match_model.slugify(project.competitor_name or "shooter")
+    return match_model._legacy_view_slug(project)
 
 
 def _any_active_job(state: AppState) -> Job | None:
@@ -6195,7 +6197,7 @@ def create_app(
         ]
         match.save(target)
 
-        shooter_slug = match_model.slugify(req.primary_shooter.name)
+        shooter_slug = match_model.mint_shooter_slug()
         shooter = match_model.Shooter(
             slug=shooter_slug,
             name=req.primary_shooter.name,
@@ -6277,7 +6279,7 @@ def create_app(
         match.scoreboard_content_type = req.content_type
         match.save(target)
 
-        shooter_slug = match_model.slugify(req.primary_shooter_name)
+        shooter_slug = match_model.mint_shooter_slug()
         shooter = match_model.Shooter(
             slug=shooter_slug,
             name=req.primary_shooter_name,
@@ -6520,13 +6522,14 @@ def create_app(
 
         Creates the ``<match>/shooters/<slug>/`` tree, mirrors the match's
         stage definitions into the shooter's ``project.json``, and saves a
-        ``shooter.json`` next to it. Returns the refreshed list. Slug is
-        derived from ``name`` and disambiguated if it collides.
+        ``shooter.json`` next to it. Returns the refreshed list. Slugs are
+        opaque random ids (``s_<hex>``) so URLs / disk paths don't leak
+        competitor names.
         """
         match_root, match = _resolve_match_context()
         if not req.name.strip():
             raise HTTPException(status_code=400, detail="name is required")
-        slug = match_model.disambiguate_slug(match_model.slugify(req.name), set(match.shooters))
+        slug = match_model.mint_shooter_slug(set(match.shooters))
         shooter = match_model.Shooter(
             slug=slug,
             name=req.name,

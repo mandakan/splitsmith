@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from ..match_model import Match, is_match_folder, slugify
+from ..match_model import Match, is_match_folder
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import project_loader
@@ -135,22 +135,19 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
 def _resolve_audio_slug(match: Match, match_root: Path, audio_from: str) -> str | None:
     """Match ``audio_from`` to a shooter slug.
 
-    Accepts an exact slug match (``"anton-johansson"``) or a display name
-    that slugifies to a registered slug (``"Anton Johansson"``,
-    ``"anton johansson"``). Returns the canonical slug or ``None`` when no
-    match is found.
+    Accepts an exact slug (``"s_a4f12d8e"``) or a display name
+    (``"Anton Johansson"``, case-insensitive). Slugs are opaque random
+    ids now, so the old "slugify the display name to guess a slug"
+    fallback no longer applies; we look up by display name instead.
     """
     if audio_from in match.shooters:
         return audio_from
-    target = slugify(audio_from)
-    if target in match.shooters:
-        return target
-    # Fall back to matching against display names.
+    needle = audio_from.casefold().strip()
     for slug in match.shooters:
         try:
             shooter = match.load_shooter(match_root, slug)
         except FileNotFoundError:
             continue
-        if shooter.name == audio_from or slugify(shooter.name) == target:
+        if shooter.name.casefold().strip() == needle:
             return slug
     return None

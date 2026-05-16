@@ -325,7 +325,11 @@ def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
       - the FastAPI endpoint refactor (#321) when it lands, so the SPA can
         speak the new URL space even against legacy projects on disk
     """
-    slug = slugify(project.competitor_name or "unknown")
+    # legacy_to_match_view: synthesise a Match view for a legacy single-
+    # shooter project. The slug is opaque (no PII leak) but deterministic
+    # for a given project root so callers that build URLs against the
+    # same project across reloads see a stable id.
+    slug = _legacy_view_slug(project)
     match = Match(
         name=project.name,
         created_at=project.created_at,
@@ -383,11 +387,53 @@ def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
 # ---------------------------------------------------------------------------
 
 
-def slugify(name: str) -> str:
-    """Kebab-case a name for use as a shooter slug.
+def _legacy_view_slug(project: "MatchProject") -> str:
+    """Deterministic opaque slug for the synthetic view over a legacy
+    single-shooter project. The legacy disk layout has no
+    ``shooters/<slug>/`` dir so the slug is purely a routing token; we
+    hash the project name + scoreboard ids so the same project gets the
+    same slug across reloads without leaking the competitor name.
+    """
+    import hashlib
 
-    Strips accents, keeps ``[a-z0-9]``, collapses runs of separators to a
-    single dash. Falls back to ``"shooter"`` for empty/garbage input.
+    seed = "|".join(
+        str(x or "")
+        for x in (
+            project.name,
+            project.scoreboard_content_type,
+            project.scoreboard_match_id,
+            project.selected_shooter_id,
+        )
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    return f"s_{digest}"
+
+
+def mint_shooter_slug(taken: set[str] | None = None) -> str:
+    """Mint a fresh opaque shooter slug.
+
+    Shape: ``s_<8 lowercase hex>``. Random, never derived from the
+    shooter's name, so URLs / on-disk paths / server logs don't leak
+    competitor PII. ``taken`` is consulted to avoid the 1-in-4-billion
+    chance of collision within a match (and to keep tests deterministic
+    when they mock the RNG).
+    """
+    import secrets
+
+    while True:
+        candidate = f"s_{secrets.token_hex(4)}"
+        if not taken or candidate not in taken:
+            return candidate
+
+
+def slugify_filename(name: str) -> str:
+    """Kebab-case a string for filesystem-safe filenames.
+
+    Used for stage / match filenames where readability matters and the
+    name is not PII. ``slugify`` (the old shooter-slug helper) used to
+    do this with the same impl; it now mints opaque shooter slugs, so
+    callers that want the old kebab-case behavior must use this helper
+    explicitly.
     """
     import re
     import unicodedata
@@ -396,17 +442,7 @@ def slugify(name: str) -> str:
     ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
     lower = ascii_only.lower()
     slugged = re.sub(r"[^a-z0-9]+", "-", lower).strip("-")
-    return slugged or "shooter"
-
-
-def disambiguate_slug(slug: str, taken: set[str]) -> str:
-    """Append a numeric suffix to ``slug`` until it doesn't collide with ``taken``."""
-    if slug not in taken:
-        return slug
-    n = 2
-    while f"{slug}-{n}" in taken:
-        n += 1
-    return f"{slug}-{n}"
+    return slugged or "name"
 
 
 # ---------------------------------------------------------------------------
@@ -546,12 +582,11 @@ def plan_merge(
 
     stage_defs = [stages_by_number[k] for k in sorted(stages_by_number)]
 
-    # Assign slugs (kebab-cased competitor names, disambiguated on collision).
+    # Assign opaque slugs so on-disk paths / URLs / logs don't leak names.
     taken: set[str] = set()
     moves: list[ShooterMove] = []
     for src, proj in projects:
-        base = slugify(proj.competitor_name or src.name)
-        slug = disambiguate_slug(base, taken)
+        slug = mint_shooter_slug(taken)
         taken.add(slug)
         moves.append(
             ShooterMove(
@@ -709,15 +744,15 @@ __all__ = [
     "Shooter",
     "ShooterMove",
     "ShooterStageData",
-    "disambiguate_slug",
     "execute_merge",
     "from_path",
     "is_legacy_project_folder",
     "is_match_folder",
     "legacy_to_match_view",
     "load_match_or_legacy",
+    "mint_shooter_slug",
     "plan_merge",
-    "slugify",
+    "slugify_filename",
 ]
 
 

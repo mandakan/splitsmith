@@ -314,7 +314,13 @@ export function Compare() {
         >
           <button
             type="button"
-            onClick={() => navigate(`/audit/${stageNumber}`)}
+            onClick={() => {
+              // Compare is multi-shooter; pick the audio source (the
+              // primary shown in this view) as the target shooter so
+              // the user lands on the same camera they were watching.
+              const target = audioSlug ?? orderedShooters[0]?.slug;
+              if (target) navigate(`/audit/${target}/${stageNumber}`);
+            }}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Audit
@@ -324,7 +330,10 @@ export function Compare() {
           </span>
           <button
             type="button"
-            onClick={() => navigate(`/coach/${stageNumber}`)}
+            onClick={() => {
+              const target = audioSlug ?? orderedShooters[0]?.slug;
+              if (target) navigate(`/coach/${target}/${stageNumber}`);
+            }}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
           >
             Coach
@@ -379,6 +388,21 @@ export function Compare() {
         </Button>
       </div>
 
+      {/* Unfinished banner: when at least one shooter is playable, the
+       *  grid renders the playable subset. Shooters without a cached
+       *  trim are surfaced here so the user can rebuild the cache (when
+       *  audit is done) or jump into audit (when nothing has run yet)
+       *  without having to leave the page. */}
+      {visibleShooters.length > 0 &&
+      orderedShooters.some((s) => !s.video_path) ? (
+        <UnfinishedShootersBanner
+          unfinished={orderedShooters.filter((s) => !s.video_path)}
+          onOpenInAudit={(slug) =>
+            navigate(`/audit/${slug}/${stageNumber}`)
+          }
+        />
+      ) : null}
+
       {/* Video grid */}
       <div className={layoutClass(layout)}>
         {visibleShooters.length === 0 ? (
@@ -428,6 +452,104 @@ export function Compare() {
 /* -------------------------------------------------------------------------- */
 /* Empty state -- no shooter has a usable trim for this stage yet             */
 /* -------------------------------------------------------------------------- */
+
+function UnfinishedShootersBanner({
+  unfinished,
+  onOpenInAudit,
+}: {
+  unfinished: CompareShooterRecord[];
+  onOpenInAudit: (slug: string) => void | Promise<void>;
+}) {
+  const [busySlug, setBusySlug] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [doneSlugs, setDoneSlugs] = useState<Set<string>>(() => new Set());
+
+  // A shooter with shots[] but no video_path has finished audit; just
+  // the trim cache is missing. Offer to rebuild it in-place. A shooter
+  // with neither needs to be audited first.
+  const rebuild = async (slug: string) => {
+    setErrorMsg(null);
+    setBusySlug(slug);
+    try {
+      const res = await api.buildShooterTrimCaches(slug);
+      // The server queues jobs but the bundle won't see the new trim
+      // until the worker finishes. Tell the user to refresh once jobs
+      // settle rather than polling the bundle here (Compare's polling
+      // story is "reload the page"; the JobsPanel surfaces progress).
+      if (res.jobs_submitted.length === 0) {
+        setErrorMsg(
+          `${slug}: nothing to rebuild -- either no stage qualifies or every cache is already on disk. Open the shooter in audit to see why.`,
+        );
+        return;
+      }
+      setDoneSlugs((prev) => new Set(prev).add(slug));
+    } catch (e) {
+      setErrorMsg(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusySlug(null);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-rule bg-surface px-5 py-3 text-sm text-muted">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2">
+          Missing footage
+        </span>
+        <span className="text-ink-2">{unfinished.length}</span>
+        <span>
+          {unfinished.length === 1 ? "shooter has" : "shooters have"} no
+          cached trim for this stage.
+        </span>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {unfinished.map((s) => {
+          const auditedButUncached = s.shots.length > 0;
+          const queued = doneSlugs.has(s.slug);
+          return (
+            <div
+              key={s.slug}
+              className="inline-flex items-center gap-2 rounded-lg border border-rule-strong bg-surface-2 px-3 py-1.5 text-xs"
+            >
+              <span className="font-semibold text-ink-2">{s.name}</span>
+              {auditedButUncached ? (
+                queued ? (
+                  <span className="text-[0.6875rem] uppercase tracking-[0.08em] text-done">
+                    Build queued -- check Jobs
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => rebuild(s.slug)}
+                    disabled={busySlug === s.slug}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 py-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led disabled:opacity-50"
+                  >
+                    {busySlug === s.slug ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : null}
+                    Build trim cache
+                  </button>
+                )
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenInAudit(s.slug)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 py-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led"
+                >
+                  <ArrowRight className="size-3" />
+                  Open in audit
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {errorMsg ? (
+        <div className="mt-2 text-xs text-led">{errorMsg}</div>
+      ) : null}
+    </div>
+  );
+}
 
 function CompareEmptyState({
   unfinished,
