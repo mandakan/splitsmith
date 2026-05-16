@@ -186,21 +186,31 @@ function ExportInner({ slug }: { slug: string }) {
 
   // Stage eligibility
   const stages: StageExportStatus[] = overview?.stages ?? [];
+  const auditedStages = useMemo(
+    () => stages.filter((s) => !s.skipped && s.ready_to_export),
+    [stages],
+  );
   const eligibleNumbers = useMemo(
     () =>
-      stages
-        .filter(
-          (s) =>
-            !s.skipped &&
-            s.ready_to_export &&
-            s.source_reachable !== false,
-        )
+      auditedStages
+        .filter((s) => s.source_reachable !== false)
         .map((s) => s.stage_number),
-    [stages],
+    [auditedStages],
   );
   const eligibleSet = useMemo(
     () => new Set(eligibleNumbers),
     [eligibleNumbers],
+  );
+  const sourceMissingNumbers = useMemo(
+    () =>
+      auditedStages
+        .filter((s) => s.source_reachable === false)
+        .map((s) => s.stage_number),
+    [auditedStages],
+  );
+  const sourceMissingSet = useMemo(
+    () => new Set(sourceMissingNumbers),
+    [sourceMissingNumbers],
   );
 
   // Pre-select all eligible stages on first load.
@@ -391,12 +401,32 @@ function ExportInner({ slug }: { slug: string }) {
           <Section
             number={2}
             title="Stages"
-            help={
-              eligibleNumbers.length === 0
-                ? "No stage is exportable yet. Finish auditing a stage first."
-                : `${eligibleNumbers.length} of ${stages.length} stages exportable.`
-            }
+            help={stageSectionHelp(
+              eligibleNumbers.length,
+              sourceMissingNumbers.length,
+              auditedStages.length,
+              stages.length,
+            )}
           >
+            {sourceMissingNumbers.length > 0 && (
+              <div className="mb-3 flex items-start gap-2.5 rounded-md border border-live/40 bg-live/10 px-3 py-2 text-[0.8125rem] text-ink-2">
+                <span
+                  aria-hidden
+                  className="mt-1 inline-block size-2 shrink-0 rounded-full bg-live shadow-[0_0_8px_var(--color-live-glow)]"
+                />
+                <div className="min-w-0">
+                  <div className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-live">
+                    Source offline
+                  </div>
+                  <div className="mt-0.5 text-muted">
+                    {sourceMissingNumbers.length} audited{" "}
+                    {sourceMissingNumbers.length === 1 ? "stage" : "stages"} can't
+                    export -- the original video files aren't reachable. Mount
+                    the source drive (or use Relink) and reload the page.
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {stages.map((s) => (
                 <StageChip
@@ -404,6 +434,7 @@ function ExportInner({ slug }: { slug: string }) {
                   stage={s}
                   selected={selection.has(s.stage_number)}
                   eligible={eligibleSet.has(s.stage_number)}
+                  sourceMissing={sourceMissingSet.has(s.stage_number)}
                   onToggle={() => toggleStage(s.stage_number)}
                 />
               ))}
@@ -832,7 +863,7 @@ function ModeOption({
       <div className="min-w-0 flex-1">
         <div className="mb-1 inline-flex items-center gap-2 font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
           {icon}
-          <span className={selected ? "text-led" : ""}>{title}</span>
+          <span>{title}</span>
           {badge && (
             <span className="rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-muted">
               {badge}
@@ -874,16 +905,16 @@ function PresetCard({
           className="absolute inset-y-0 left-0 w-[2px] bg-led shadow-[0_0_10px_var(--color-led-glow)]"
         />
       )}
-      <div
-        className={cn(
-          "font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em]",
-          selected ? "text-led" : "text-ink",
-        )}
-      >
+      <div className="font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
         {title}
       </div>
       {body && (
-        <div className="font-mono text-[0.6875rem] tabular-nums text-muted">
+        <div
+          className={cn(
+            "font-mono text-[0.6875rem] tabular-nums",
+            selected ? "text-ink-2" : "text-muted",
+          )}
+        >
           {body}
         </div>
       )}
@@ -895,31 +926,43 @@ function StageChip({
   stage,
   selected,
   eligible,
+  sourceMissing,
   onToggle,
 }: {
   stage: StageExportStatus;
   selected: boolean;
   eligible: boolean;
+  sourceMissing: boolean;
   onToggle: () => void;
 }) {
+  let title: string;
+  if (eligible) {
+    title = `Stage ${stage.stage_number} -- ${stage.stage_name}`;
+  } else if (sourceMissing) {
+    title = "Source video offline -- reconnect the drive and reload.";
+  } else if (stage.skipped) {
+    title = "Stage skipped.";
+  } else {
+    title = "Stage not audited yet.";
+  }
   return (
     <button
       type="button"
       onClick={onToggle}
       disabled={!eligible}
       aria-pressed={selected}
-      title={
-        eligible
-          ? `Stage ${stage.stage_number} -- ${stage.stage_name}`
-          : "Not exportable yet -- finish auditing first."
-      }
+      title={title}
       className={cn(
         "inline-flex min-h-9 items-center gap-2 rounded-md border px-3 py-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em] transition-all",
         !eligible &&
+          !sourceMissing &&
           "cursor-not-allowed border-rule bg-surface-2 text-subtle opacity-50",
+        !eligible &&
+          sourceMissing &&
+          "cursor-not-allowed border-live/40 bg-live/10 text-live",
         eligible &&
           selected &&
-          "border-led bg-led/10 text-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_10px_var(--color-led-glow)]",
+          "border-led bg-led/10 text-ink shadow-[0_0_0_1px_var(--color-led-deep),0_0_10px_var(--color-led-glow)]",
         eligible &&
           !selected &&
           "border-rule-strong bg-surface-3 text-muted hover:bg-surface-4 hover:text-ink",
@@ -929,8 +972,32 @@ function StageChip({
         {pad2(stage.stage_number)}
       </span>
       <span>{stage.stage_name}</span>
+      {sourceMissing && (
+        <span
+          aria-hidden
+          className="ml-1 inline-block size-1.5 rounded-full bg-live shadow-[0_0_6px_var(--color-live-glow)]"
+        />
+      )}
     </button>
   );
+}
+
+function stageSectionHelp(
+  eligibleCount: number,
+  sourceMissingCount: number,
+  auditedCount: number,
+  totalCount: number,
+): string {
+  if (eligibleCount > 0) {
+    return `${eligibleCount} of ${totalCount} stages exportable.`;
+  }
+  if (sourceMissingCount > 0 && auditedCount === sourceMissingCount) {
+    return "Audited, but every source video is offline. Mount the source drive and reload.";
+  }
+  if (auditedCount === 0) {
+    return "No stage is exportable yet. Finish auditing a stage first.";
+  }
+  return "No stage is exportable. Finish auditing or reconnect missing sources.";
 }
 
 function NumInput({
@@ -1053,12 +1120,7 @@ function FormatRow({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
-            <span
-              className={cn(
-                "font-display text-sm font-bold uppercase tracking-[0.04em]",
-                selected ? "text-led" : "text-ink",
-              )}
-            >
+            <span className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
               {name}
             </span>
             <span className="font-mono text-[0.625rem] tabular-nums text-muted">
