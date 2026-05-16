@@ -24,6 +24,7 @@ gate on that before invoking :func:`render_overlay`.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import platform
@@ -32,6 +33,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from fractions import Fraction
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Literal
 
@@ -184,6 +186,12 @@ class DefaultTemplate(Template):
         self.split_hold_seconds = split_hold_seconds
         self.split_fade_seconds = split_fade_seconds
         self.theme = theme if theme is not None else load_theme("splitsmith")
+        # When the caller didn't pin a font and the theme is splitsmith,
+        # use the bundled JetBrains Mono Bold so the overlay matches the
+        # web UI's tabular numerals on every host instead of falling back
+        # to whatever system mono happens to be installed.
+        if font_path is None and font_name is None and self.theme.name == "splitsmith":
+            font_name = "splitsmith-mono"
         big = max(48, height // 14)
         try:
             self.font_big = _load_font(font_path, big, font_name=font_name)
@@ -276,6 +284,25 @@ def _format_running_total(seconds: float) -> str:
     return f"{m:d}:{s:05.2f}"
 
 
+# Bundled fonts shipped under ``splitsmith/data/fonts/``. The
+# ``splitsmith-*`` presets here resolve to real TTFs in the wheel
+# (Antonio + JetBrains Mono, SIL OFL 1.1), so the design-system overlay
+# theme renders the same typography across every machine -- no system
+# font dependency. ``variation`` is the named instance for variable
+# fonts (Antonio ships as a variable wght axis); ``None`` means a static
+# font where setting an axis is a no-op.
+@dataclass(frozen=True)
+class _BundledFont:
+    filename: str
+    variation: str | None = None
+
+
+_BUNDLED_FONTS: dict[str, _BundledFont] = {
+    "splitsmith-mono": _BundledFont("JetBrainsMono-Bold.ttf"),
+    "splitsmith-display": _BundledFont("Antonio-VariableFont.ttf", variation="Bold"),
+}
+
+
 # Named font presets the user can select without hunting for a path.
 # Order inside each tuple is preferred-first (bold variants beat regular for
 # legibility against busy backgrounds). Unknown / missing files fall through
@@ -324,7 +351,34 @@ _FONT_FALLBACKS: tuple[str, ...] = (
 def available_font_names() -> tuple[str, ...]:
     """Preset font names accepted by :func:`_load_font` / template kwargs.
     Exposed so a future template config UI can offer a real picker."""
-    return tuple(_FONT_PRESETS.keys())
+    return tuple(_BUNDLED_FONTS.keys()) + tuple(_FONT_PRESETS.keys())
+
+
+def _load_bundled_font(name: str, size: int) -> ImageFont.FreeTypeFont | None:
+    """Resolve a ``splitsmith-*`` preset to a PIL font. Returns ``None`` if
+    the name isn't bundled or the file is missing (shouldn't happen for an
+    installed wheel; defensive for source-tree edits).
+
+    Variable fonts get their named instance (e.g. ``Bold``) applied after
+    load so callers don't have to think about wght axes. The
+    ``as_file`` context exits before this function returns, but PIL has
+    already mmap'd the file by then -- safe for static layouts; the
+    Pillow team treats this as supported.
+    """
+    spec = _BUNDLED_FONTS.get(name)
+    if spec is None:
+        return None
+    resource = files("splitsmith.data").joinpath("fonts", spec.filename)
+    if not resource.is_file():
+        return None
+    with as_file(resource) as p:
+        font = ImageFont.truetype(str(p), size=size)
+    if spec.variation is not None:
+        # Variable-font axes; quietly accept static fallback if the named
+        # instance isn't present (older Pillow / hand-substituted TTF).
+        with contextlib.suppress(Exception):
+            font.set_variation_by_name(spec.variation.encode())
+    return font
 
 
 def _load_font(
@@ -337,12 +391,20 @@ def _load_font(
         return ImageFont.truetype(str(font_path), size=size)
     if font_name is not None:
         key = font_name.lower()
-        if key not in _FONT_PRESETS:
+        bundled = _load_bundled_font(key, size)
+        if bundled is not None:
+            return bundled
+        if key in _BUNDLED_FONTS:
+            # Bundled name resolved but the file is missing -- fall through
+            # to generic discovery rather than fail; surface a clear error
+            # only if the system fallback also can't load.
+            pass
+        elif key not in _FONT_PRESETS:
             raise OverlayRenderError(
                 f"unknown font_name {font_name!r}; "
                 f"available: {', '.join(available_font_names())}"
             )
-        for candidate in _FONT_PRESETS[key]:
+        for candidate in _FONT_PRESETS.get(key, ()):
             p = Path(candidate)
             if p.exists():
                 return ImageFont.truetype(str(p), size=size)

@@ -136,6 +136,40 @@ def test_default_template_defaults_to_splitsmith() -> None:
     assert tmpl.theme.name == "splitsmith"
 
 
+def test_splitsmith_theme_picks_bundled_mono_font_by_default() -> None:
+    """When the caller doesn't pin a font and the theme is splitsmith,
+    DefaultTemplate must resolve the bundled JetBrains Mono Bold so the
+    overlay matches the web UI's tabular numerals on every host."""
+    tmpl = overlay_render.DefaultTemplate(width=320, height=180)
+    # PIL exposes the family/style via getname().
+    family, style = tmpl.font_big.getname()
+    assert family == "JetBrains Mono"
+    assert "Bold" in style
+
+
+def test_clean_theme_leaves_font_resolution_to_system_fallback() -> None:
+    """The clean preset must NOT pin the bundled font, so callers picking
+    the neutral palette still get whatever system mono they had before.
+    The bundled JetBrains Mono is only auto-wired for splitsmith; clean
+    theme falls through to the OS-specific fallback list, which doesn't
+    include the bundled file."""
+    clean = overlay_theme.load_theme("clean")
+    tmpl = overlay_render.DefaultTemplate(width=320, height=180, theme=clean)
+    family, _ = tmpl.font_big.getname()
+    assert (
+        family != "JetBrains Mono"
+    ), f"clean theme should not auto-wire bundled font; got family={family!r}"
+
+
+def test_available_font_names_includes_bundled_presets() -> None:
+    """The bundled splitsmith-* presets must be discoverable via the
+    public preset listing -- they're how a future UI picker offers brand
+    fonts without filesystem path knowledge."""
+    names = overlay_render.available_font_names()
+    assert "splitsmith-mono" in names
+    assert "splitsmith-display" in names
+
+
 def test_overlay_theme_json_is_in_sync_with_css() -> None:
     """Re-running scripts/build_overlay_theme.py against the current
     index.css must produce byte-identical output. Catches drift between

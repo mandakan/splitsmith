@@ -16,10 +16,18 @@ The JSON mirror is intentional: parsing CSS at runtime would mean a CSS
 parser as a runtime dep, and the overlay only needs a handful of tokens.
 Re-run the build script after touching ``index.css``.
 
-Down the line, swapping PIL for a Skia-based renderer (proper HarfBuzz
-text shaping, variable-font axes) lets the ``splitsmith`` theme actually
-render Antonio condensed instead of falling back to the system mono. The
-font names are already in the JSON so that swap doesn't need new tokens.
+Bundled fonts (Antonio + JetBrains Mono, SIL OFL 1.1) live under
+``src/splitsmith/data/fonts/`` so the ``splitsmith`` theme renders
+deterministic typography without depending on whatever the host machine
+happens to have installed. The numeric readouts use JetBrains Mono Bold
+today; Antonio is bundled for future templates that mix in display
+labels.
+
+Down the line, swapping PIL for a Skia-based renderer would buy proper
+HarfBuzz shaping (kerning, ligatures, condensed-face width control)
+which only starts to matter once the template grows real label content.
+The font names already live in the JSON so that swap doesn't need new
+tokens.
 """
 
 from __future__ import annotations
