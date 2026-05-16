@@ -1374,6 +1374,23 @@ async function request<T>(
     } catch {
       /* ignore */
     }
+    // Server-state drift recovery: a 409 with ``code: "no_project"`` means
+    // the SPA's view of the world is stale -- the server has no bound
+    // project (dev-server restart, explicit unbind, etc.). Fire a custom
+    // event so the match shell can force a health refresh and redirect
+    // to /pick. Without this, the page just shows broken-everything with
+    // no explanation and the JobsPanel quietly disappears. ``not_a_match``
+    // doesn't trigger the redirect; that's a per-route concern (the
+    // bound project is fine, just legacy).
+    if (
+      resp.status === 409 &&
+      rawDetail &&
+      typeof rawDetail === "object" &&
+      (rawDetail as { code?: unknown }).code === "no_project" &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new CustomEvent("splitsmith:no-project"));
+    }
     throw new ApiError(resp.status, detail, rawDetail);
   }
   if (resp.status === 204) return undefined as T;

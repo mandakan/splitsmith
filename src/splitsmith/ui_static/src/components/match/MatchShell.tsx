@@ -85,6 +85,19 @@ export function MatchShell() {
     };
   }, []);
 
+  // Server-state drift recovery: when ANY request returns 409 ``no_project``
+  // (typical cause: dev server restart wiped the in-memory bind state),
+  // ``api.ts`` fires this custom event. We bump ``refreshKey`` so the
+  // health-load effect re-runs, sees ``bound: false``, and the redirect
+  // below sends the user to /pick. Without this, the page sits with
+  // every endpoint failing and the JobsPanel silently empty.
+  useEffect(() => {
+    const onNoProject = () => setRefreshKey((k) => k + 1);
+    window.addEventListener("splitsmith:no-project", onNoProject);
+    return () =>
+      window.removeEventListener("splitsmith:no-project", onNoProject);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     api
