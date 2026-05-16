@@ -31,7 +31,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { FolderPicker } from "@/components/FolderPicker";
 import { Brand, Kicker } from "@/components/ui";
@@ -51,6 +51,12 @@ import { cn } from "@/lib/utils";
 type StorageMode = "symlink" | "copy";
 
 export function Ingest() {
+  const { slug } = useParams<{ slug: string }>();
+  if (!slug) return <Navigate to="/shooters" replace />;
+  return <IngestInner slug={slug} />;
+}
+
+function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
@@ -65,7 +71,7 @@ export function Ingest() {
     setError(null);
     try {
       const [p, h] = await Promise.all([
-        api.getProject(),
+        api.getProject(slug),
         api.getHealth(),
       ]);
       setProject(p);
@@ -91,7 +97,7 @@ export function Ingest() {
     setScanning(true);
     setError(null);
     try {
-      await api.scanVideos(path, true, storage);
+      await api.scanVideos(slug, path, true, storage);
       setLastScannedDir(path);
       await reload();
     } catch (e: unknown) {
@@ -106,7 +112,7 @@ export function Ingest() {
     setScanning(true);
     setError(null);
     try {
-      await api.scanFiles(files.map((f) => f.path), true, storage);
+      await api.scanFiles(slug, files.map((f) => f.path), true, storage);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -123,7 +129,7 @@ export function Ingest() {
     setBusy(true);
     setError(null);
     try {
-      await api.moveAssignment(videoPath, toStage, role);
+      await api.moveAssignment(slug, videoPath, toStage, role);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -136,7 +142,7 @@ export function Ingest() {
     setBusy(true);
     setError(null);
     try {
-      await api.removeVideo(videoPath, false);
+      await api.removeVideo(slug, videoPath, false);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -220,6 +226,7 @@ export function Ingest() {
         {showFolderPicker && (
           <div className="mb-5 rounded-2xl border border-rule-strong bg-surface p-4">
             <FolderPicker
+              slug={slug}
               initialPath={lastScannedDir ?? undefined}
               onSelect={(path) => void scanFolder(path)}
               onSelectFiles={(files) => void scanFiles(files)}

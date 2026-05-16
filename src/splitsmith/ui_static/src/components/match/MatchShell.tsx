@@ -13,7 +13,7 @@
 
 import { Bell, HelpCircle, Repeat, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, Outlet, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useNavigate, useParams } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
 import {
@@ -43,6 +43,12 @@ export interface MatchShellOutletContext {
 
 export function MatchShell() {
   const navigate = useNavigate();
+  // The shell mounts above shooter-scoped routes (/audit/:slug, /coach/:slug,
+  // /export/:slug) and slug-less routes (/, /shooters, /beep-review,
+  // /compare/:stage). When a slug is in the URL we load that shooter's
+  // project so the sidebar reflects their progress; otherwise the sidebar
+  // shows match-level info without per-stage status.
+  const { slug } = useParams<{ slug?: string }>();
   const { mode, setMode } = useMode();
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
@@ -86,14 +92,18 @@ export function MatchShell() {
       .then((h) => {
         if (alive) setHealth(h);
         if (h?.bound) {
-          api
-            .getProject()
-            .then((p) => {
-              if (alive) setProject(p);
-            })
-            .catch(() => {
-              if (alive) setProject(null);
-            });
+          if (slug) {
+            api
+              .getProject(slug)
+              .then((p) => {
+                if (alive) setProject(p);
+              })
+              .catch(() => {
+                if (alive) setProject(null);
+              });
+          } else {
+            setProject(null);
+          }
           api
             .listMatchShooters()
             .then((r) => {
@@ -112,7 +122,7 @@ export function MatchShell() {
     return () => {
       alive = false;
     };
-  }, [refreshKey]);
+  }, [refreshKey, slug]);
 
   const stages: MatchSidebarStage[] = useMemo(() => {
     if (!project) return [];
@@ -254,7 +264,9 @@ export function MatchShell() {
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
-          onStageClick={(n) => navigate(`/audit/${n}`)}
+          onStageClick={(n) =>
+            navigate(slug ? `/audit/${slug}/${n}` : "/shooters")
+          }
         />
         <div className={cn("min-w-0 flex-1")}>
           <Outlet

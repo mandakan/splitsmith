@@ -78,15 +78,22 @@ export function Compare() {
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const rafRef = useRef<number | null>(null);
 
-  // Load project + compare data.
+  // Load project + compare data. Stage definitions are identical across
+  // every shooter in a match, so we lift them from whichever shooter is
+  // alphabetically first. Compare itself is slug-less (multi-shooter view).
   useEffect(() => {
     let alive = true;
-    api
-      .getProject()
-      .then((p) => {
+    (async () => {
+      try {
+        const shooters = await api.listMatchShooters();
+        const first = shooters.shooters[0]?.slug;
+        if (!first) return;
+        const p = await api.getProject(first);
         if (alive) setProject(p);
-      })
-      .catch(() => {});
+      } catch {
+        /* compare bundle below covers the no-shooter case */
+      }
+    })();
     return () => {
       alive = false;
     };

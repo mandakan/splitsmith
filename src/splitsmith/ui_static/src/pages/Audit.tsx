@@ -203,6 +203,10 @@ export function Audit() {
   }, []);
   const rafRef = useRef<number | null>(null);
 
+  // ShooterScopedRoute redirects to /shooters when slug is missing, so by
+  // the time this renders ``slugParam`` is always a non-empty string.
+  const slug = slugParam!;
+
   const stageNumber = useMemo(() => {
     if (stageParam == null) return null;
     const n = Number.parseInt(stageParam, 10);
@@ -213,7 +217,7 @@ export function Audit() {
   useEffect(() => {
     let alive = true;
     api
-      .getProject()
+      .getProject(slug)
       .then((p) => {
         if (alive) setProject(p);
       })
@@ -412,7 +416,7 @@ export function Audit() {
     setPeaksLoading(true);
     setPeaksError(null);
     api
-      .getStagePeaks(stageNumber, PEAK_BINS)
+      .getStagePeaks(slug, stageNumber, PEAK_BINS)
       .then((p) => {
         if (alive) setPeaks(p);
       })
@@ -428,7 +432,7 @@ export function Audit() {
     return () => {
       alive = false;
     };
-  }, [stageNumber, primary]);
+  }, [slug, stageNumber, primary]);
 
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
@@ -440,7 +444,7 @@ export function Audit() {
     let alive = true;
     setAuditLoaded(false);
     api
-      .getStageAudit(stageNumber)
+      .getStageAudit(slug, stageNumber)
       .then((a) => {
         if (!alive) return;
         setAudit(a);
@@ -456,7 +460,7 @@ export function Audit() {
     return () => {
       alive = false;
     };
-  }, [stageNumber]);
+  }, [slug, stageNumber]);
 
   // Tab change: re-seek the new <video> to the audit-timeline position.
   useEffect(() => {
@@ -959,7 +963,7 @@ export function Audit() {
       }
       setSaveStatus({ kind: "saving" });
       try {
-        const saved = await api.saveStageAudit(stageNumber, payload);
+        const saved = await api.saveStageAudit(slug, stageNumber, payload);
         setAudit(saved);
         sessionEventsRef.current = [];
         isDirtyRef.current = false;
@@ -1231,9 +1235,9 @@ export function Audit() {
   // thing because the trim can't exist without a beep.
   const videoSrc = activeVideo
     ? peaks
-      ? api.videoStreamUrl(activeVideo.path, peaks.trimmed ? "trim" : "source")
+      ? api.videoStreamUrl(slug, activeVideo.path, peaks.trimmed ? "trim" : "source")
       : peaksError != null
-        ? api.videoStreamUrl(activeVideo.path)
+        ? api.videoStreamUrl(slug, activeVideo.path)
         : ""
     : "";
 
@@ -1415,6 +1419,7 @@ export function Audit() {
             </Button>
             {peaks && !peaks.trimmed ? (
               <TrimNowBadge
+                slug={slug}
                 stageNumber={stage.stage_number}
                 hasBeep={primary.beep_time != null}
                 hasStageTime={stage.time_seconds > 0}
@@ -1422,7 +1427,7 @@ export function Audit() {
                   setProject(p);
                   if (stageNumber != null) {
                     api
-                      .getStagePeaks(stageNumber, PEAK_BINS)
+                      .getStagePeaks(slug, stageNumber, PEAK_BINS)
                       .then((np) => setPeaks(np))
                       .catch(() => {});
                   }
@@ -1431,13 +1436,14 @@ export function Audit() {
             ) : null}
             {peaks && peaks.trimmed ? (
               <DetectShotsBadge
+                slug={slug}
                 stageNumber={stage.stage_number}
                 hasBeep={primary.beep_time != null}
                 hasStageTime={stage.time_seconds > 0}
                 hasCandidates={markers.length > 0}
                 onComplete={async () => {
                   if (stageNumber == null) return;
-                  const a = await api.getStageAudit(stageNumber);
+                  const a = await api.getStageAudit(slug, stageNumber);
                   setAudit(a);
                   setMarkers(deriveMarkers(a));
                 }}
@@ -1518,6 +1524,7 @@ export function Audit() {
             ) : null}
             {activeVideo && stageNumber != null ? (
               <MountSelect
+                slug={slug}
                 video={activeVideo}
                 stageNumber={stageNumber}
                 label="Mount"
@@ -2104,6 +2111,7 @@ const StageSelector = memo(function StageSelector({
 });
 
 interface DetectShotsBadgeProps {
+  slug: string;
   stageNumber: number;
   hasBeep: boolean;
   hasStageTime: boolean;
@@ -2112,6 +2120,7 @@ interface DetectShotsBadgeProps {
 }
 
 function DetectShotsBadge({
+  slug,
   stageNumber,
   hasBeep,
   hasStageTime,
@@ -2171,7 +2180,7 @@ function DetectShotsBadge({
     async (reset: boolean) => {
       setError(null);
       try {
-        const initial = await api.detectShots(stageNumber, { reset });
+        const initial = await api.detectShots(slug, stageNumber, { reset });
         setJob(initial);
         const final = await api.pollJob(initial.id, setJob);
         if (final.status === "failed") {
@@ -2185,7 +2194,7 @@ function DetectShotsBadge({
         setJob(null);
       }
     },
-    [stageNumber, onComplete],
+    [slug, stageNumber, onComplete],
   );
 
   const onClick = useCallback(() => void runDetect(false), [runDetect]);
@@ -2250,6 +2259,7 @@ function DetectShotsBadge({
 }
 
 interface TrimNowBadgeProps {
+  slug: string;
   stageNumber: number;
   hasBeep: boolean;
   hasStageTime: boolean;
@@ -2257,6 +2267,7 @@ interface TrimNowBadgeProps {
 }
 
 function TrimNowBadge({
+  slug,
   stageNumber,
   hasBeep,
   hasStageTime,
@@ -2300,7 +2311,7 @@ function TrimNowBadge({
         try {
           const final = await api.pollJob(active.id, setJob);
           if (cancelled) return;
-          if (final.status === "succeeded") onProjectUpdate(await api.getProject());
+          if (final.status === "succeeded") onProjectUpdate(await api.getProject(slug));
           else if (final.status === "failed") setError(final.error ?? "Trim failed");
         } finally {
           if (!cancelled) setJob(null);
@@ -2319,14 +2330,14 @@ function TrimNowBadge({
     try {
       // The server returns the existing active job if one is in flight,
       // so two clicks (or a click after reload) don't spawn parallels.
-      const initial = await api.trimStage(stageNumber);
+      const initial = await api.trimStage(slug, stageNumber);
       setJob(initial);
       const final = await api.pollJob(initial.id, setJob);
       if (final.status === "failed") {
         setError(final.error ?? "Trim failed");
         return;
       }
-      const fresh = await api.getProject();
+      const fresh = await api.getProject(slug);
       onProjectUpdate(fresh);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : String(err));

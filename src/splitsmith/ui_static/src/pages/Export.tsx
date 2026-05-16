@@ -39,6 +39,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { Navigate, useParams } from "react-router-dom";
+
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
@@ -111,6 +113,12 @@ const TITLE_STYLES: {
 ];
 
 export function Export() {
+  const { slug } = useParams<{ slug: string }>();
+  if (!slug) return <Navigate to="/shooters" replace />;
+  return <ExportInner slug={slug} />;
+}
+
+function ExportInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -120,8 +128,8 @@ export function Export() {
   const reload = useCallback(async () => {
     try {
       const [proj, ov] = await Promise.all([
-        api.getProject(),
-        api.getExportOverview(),
+        api.getProject(slug),
+        api.getExportOverview(slug),
       ]);
       setProject(proj);
       setOverview(ov);
@@ -129,7 +137,7 @@ export function Export() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
     void reload();
@@ -266,7 +274,7 @@ export function Export() {
     setError(null);
     setResult(null);
     try {
-      const submitted = await api.exportMatch({
+      const submitted = await api.exportMatch(slug, {
         stage_numbers: orderedSelection,
         head_pad_seconds: headPad,
         tail_pad_seconds: tailPad,

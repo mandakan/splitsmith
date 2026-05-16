@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { api, type MatchProject, type StageEntry, type StageVideo } from "@/lib/api";
 
 interface Props {
+  slug: string;
   stageNumber: number;
   stage: StageEntry;
   primary: StageVideo;
@@ -43,6 +44,7 @@ interface Props {
 }
 
 export function StageTimeSection({
+  slug,
   stageNumber,
   stage,
   primary,
@@ -86,7 +88,7 @@ export function StageTimeSection({
     setBusy(true);
     setError(null);
     try {
-      const updated = await api.setStageTime(stageNumber, draftDuration);
+      const updated = await api.setStageTime(slug, stageNumber, draftDuration);
       onProjectUpdate(updated);
       setEditing(false);
     } catch (e) {
@@ -100,7 +102,7 @@ export function StageTimeSection({
     setBusy(true);
     setError(null);
     try {
-      const updated = await api.setStageTime(stageNumber, null);
+      const updated = await api.setStageTime(slug, stageNumber, null);
       onProjectUpdate(updated);
       setEditing(false);
       setEndSourceTime(null);
@@ -184,6 +186,7 @@ export function StageTimeSection({
         {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
       </div>
       <BeepWaveformPicker
+        slug={slug}
         stageNumber={stageNumber}
         videoId={primary.video_id}
         videoBeepTime={beepTime}

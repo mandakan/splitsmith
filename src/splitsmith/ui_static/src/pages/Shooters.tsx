@@ -18,6 +18,7 @@
 
 import {
   ArrowRight,
+  Camera,
   CheckCircle2,
   Plus,
   RefreshCw,

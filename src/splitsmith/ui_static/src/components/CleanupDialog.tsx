@@ -86,6 +86,7 @@ function formatBytes(bytes: number): string {
 }
 
 interface CleanupDialogProps {
+  slug: string;
   onClose: () => void;
 }
 
@@ -95,7 +96,7 @@ type ApplyOutcome = {
   failed: number;
 } | null;
 
-export function CleanupDialog({ onClose }: CleanupDialogProps) {
+export function CleanupDialog({ slug, onClose }: CleanupDialogProps) {
   const [selected, setSelected] = useState<Set<CleanupCategory>>(new Set());
   const [plan, setPlan] = useState<CleanupPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
@@ -113,7 +114,7 @@ export function CleanupDialog({ onClose }: CleanupDialogProps) {
     const handle = window.setTimeout(async () => {
       setPlanLoading(true);
       try {
-        const fresh = await api.getCleanupPlan(Array.from(selected));
+        const fresh = await api.getCleanupPlan(slug, Array.from(selected));
         if (!cancelled) setPlan(fresh);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -147,7 +148,7 @@ export function CleanupDialog({ onClose }: CleanupDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      const resp = await api.applyCleanup(Array.from(selected));
+      const resp = await api.applyCleanup(slug, Array.from(selected));
       setOutcome({
         bytesFreed: resp.result.bytes_freed,
         deleted: resp.result.deleted.length,
