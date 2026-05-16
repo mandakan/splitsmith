@@ -429,6 +429,84 @@ h1.title .accent {
   margin: 0;
 }
 
+/* --- Two ways (coach vs. export) ---
+   Paired-card layout: same surface/border as .io-card so it sits in
+   the same family, but the body is prose + a feature list (no chip
+   column) so it does not visually echo the IO grid that follows. */
+.ways-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+@media (max-width: 720px) {
+  .ways-grid { grid-template-columns: 1fr; }
+}
+.way-card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 24px 26px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.way-card .way-label {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin: 0;
+}
+.way-card h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0;
+}
+.way-card .way-body {
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  margin: 0;
+}
+.way-card .way-points {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.way-card .way-points li {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding-left: 18px;
+  position: relative;
+}
+.way-card .way-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 8px;
+  height: 1px;
+  background: var(--led);
+}
+.way-card .way-foot {
+  margin: auto 0 0;
+  padding-top: 4px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
 /* --- IO panel (inputs/outputs) --- */
 .io-grid {
   display: grid;
@@ -487,12 +565,19 @@ h1.title .accent {
 }
 .io-list li .desc { color: var(--muted); font-size: 0.8125rem; }
 
-/* --- Quickstart code block --- */
-.quickstart {
+/* --- Quickstart code block ---
+   Each snippet is a <pre> (preserves newlines) wrapped in .snippet so
+   the copy button can absolute-position over it. Avoid setting a
+   margin on the snippet container -- gaps come from .snippet + .snippet. */
+.snippet { position: relative; }
+.snippet + .snippet { margin-top: 14px; }
+pre.quickstart {
+  margin: 0;
   background: var(--surface);
   border: 1px solid var(--rule);
   border-radius: 12px;
   padding: 22px 24px;
+  padding-right: 96px; /* clear the copy button */
   font-family: var(--mono);
   font-size: 0.8125rem;
   color: var(--ink-2);
@@ -500,10 +585,40 @@ h1.title .accent {
   overflow-x: auto;
   letter-spacing: 0;
   font-feature-settings: var(--feat-num);
+  white-space: pre;
 }
-.quickstart .prompt { color: var(--led); user-select: none; padding-right: 8px; }
-.quickstart .comment { color: var(--subtle); }
-.quickstart .kw { color: var(--ink); font-weight: 600; }
+pre.quickstart .prompt { color: var(--led); user-select: none; padding-right: 8px; }
+pre.quickstart .comment { color: var(--subtle); }
+pre.quickstart .kw { color: var(--ink); font-weight: 600; }
+
+.copy-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  background: rgba(20, 23, 28, 0.7);
+  color: var(--ink-2);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-feature-settings: var(--feat-num);
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.copy-btn:hover { color: var(--ink); border-color: var(--led); }
+.copy-btn:focus-visible {
+  outline: none;
+  color: var(--ink);
+  border-color: var(--led);
+  box-shadow: 0 0 0 2px rgba(255, 92, 70, 0.25);
+}
+.copy-btn.copied { color: var(--led); border-color: var(--led); }
 
 /* --- Colophon --- */
 footer.colophon {
@@ -576,10 +691,16 @@ footer.colophon {
 
   .io-card { padding: 20px 20px 22px; }
 
-  .quickstart {
+  pre.quickstart {
     padding: 18px 16px;
+    padding-right: 76px;
     font-size: 0.75rem;
     border-radius: 10px;
+  }
+  .copy-btn {
+    top: 10px;
+    right: 10px;
+    padding: 5px 8px;
   }
 
   footer.colophon { padding: 24px 18px; }
@@ -637,12 +758,12 @@ footer.colophon {
         Project Register
         <span class="ed">Vol. 01 · Ed. 04</span>
       </span>
-      <h1 class="title">Splits from your <span class="accent">stage video.</span></h1>
+      <h1 class="title">Coach your splits. <span class="accent">Or cut your tape.</span></h1>
       <p class="lede">
-        Per-shot splits for analysis and coaching, and frame-marked clips ready for match-footage review.
-        Your head-mounted cam already captures audio of every shot; <span class="term">Splitsmith</span> turns it into
-        per-shot times, a <span class="num">CSV</span> of splits, and an FCPXML timeline with frame-aligned markers
-        you can pop open in Final Cut Pro and step through on <span class="num">M</span> / <span class="num">Shift+M</span>.
+        Your head-mounted cam already captures audio of every shot. <span class="term">Splitsmith</span> turns it into
+        per-shot splits you can review and coach inside the app — shot-by-shot playback, multi-shooter compare,
+        per-shot notes — or export an FCPXML timeline with frame-aligned markers you can pop open in
+        Final Cut Pro and step through on <span class="num">M</span> / <span class="num">Shift+M</span>.
         The RO's timer only records your total stage time — the splits live in your video, and this is how you get them out.
       </p>
 
@@ -717,11 +838,54 @@ footer.colophon {
   </section>
 
   <!-- ============================================================
+       TWO WAYS TO USE SPLITSMITH
+       ============================================================ -->
+  <section class="section" id="ways">
+    <div class="section-head">
+      <span class="index">02</span>
+      <h2>Two ways to use Splitsmith</h2>
+      <span class="spacer-line"></span>
+    </div>
+
+    <div class="ways-grid">
+      <article class="way-card">
+        <p class="way-label">Path A · In the app</p>
+        <h3>Coach in-app</h3>
+        <p class="way-body">
+          Review every stage shot-by-shot without leaving Splitsmith. The video timeline,
+          shot ruler, and per-shot list stay in sync as the playhead moves.
+        </p>
+        <ul class="way-points">
+          <li>Shot-by-shot playback with playhead-synced video</li>
+          <li>Multi-shooter compare — squadmates side-by-side, aligned to the beep</li>
+          <li>Per-shot coaching notes and improvement flags</li>
+        </ul>
+        <p class="way-foot">No Final Cut Pro required</p>
+      </article>
+
+      <article class="way-card">
+        <p class="way-label">Path B · Take it out</p>
+        <h3>Export to Final Cut Pro</h3>
+        <p class="way-body">
+          When you'd rather edit in your NLE, export an FCPXML timeline with a frame-aligned
+          marker on every shot. Open it in Final Cut Pro and step through marker-to-marker.
+        </p>
+        <ul class="way-points">
+          <li>Per-stage or whole-match FCPXML</li>
+          <li>Frame-aligned markers, one per detected shot</li>
+          <li>Navigate marker-to-marker on M / Shift+M</li>
+        </ul>
+        <p class="way-foot">More NLE formats coming</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================================================
        INPUTS / OUTPUTS
        ============================================================ -->
   <section class="section">
     <div class="section-head">
-      <span class="index">02</span>
+      <span class="index">03</span>
       <h2>What goes in. What comes out.</h2>
       <span class="spacer-line"></span>
     </div>
@@ -729,20 +893,19 @@ footer.colophon {
     <div class="io-grid">
       <div class="io-card">
         <div class="io-label">Inputs</div>
-        <h3>Raw match material</h3>
+        <h3>Just drop in video</h3>
         <ul class="io-list">
-          <li><code>.MP4</code><span class="desc">Head-mounted cam footage (e.g. Insta360 Go 3S)</span></li>
-          <li><code>.JSON</code><span class="desc">Stage timing data from SSI Scoreboard</span></li>
+          <li><code>VIDEO</code><span class="desc">Footage from head, chest, gimbal, or handheld cameras — MP4, MOV, MKV, .360, and more</span></li>
         </ul>
       </div>
       <div class="io-card">
         <div class="io-label">Outputs · per stage</div>
         <h3>Reviewable training data</h3>
         <ul class="io-list">
-          <li><code>_trimmed.mp4</code><span class="desc">Lossless cut around the start beep</span></li>
-          <li><code>_splits.csv</code><span class="desc">Per-shot splits — the editable source of truth</span></li>
-          <li><code>.fcpxml</code><span class="desc">Final Cut Pro timeline with frame-aligned markers</span></li>
-          <li><code>_report.txt</code><span class="desc">Anomaly report — overshoots, echoes, low confidence</span></li>
+          <li><code>CLIP</code><span class="desc">Lossless trim around the start beep</span></li>
+          <li><code>SPLITS</code><span class="desc">Per-shot times — the editable source of truth</span></li>
+          <li><code>TIMELINE</code><span class="desc">Final Cut Pro markers, frame-aligned</span></li>
+          <li><code>REVIEW</code><span class="desc">Anomalies flagged — echoes, overshoots, low confidence</span></li>
         </ul>
       </div>
     </div>
@@ -753,20 +916,31 @@ footer.colophon {
        ============================================================ -->
   <section class="section" id="quickstart">
     <div class="section-head">
-      <span class="index">03</span>
+      <span class="index">04</span>
       <h2>Quickstart</h2>
       <span class="spacer-line"></span>
     </div>
 
-    <div class="quickstart">
-<span class="comment"># Clone, sync, build the UI</span>
+    <div class="snippet">
+<pre class="quickstart" data-copy="git clone https://github.com/mandakan/splitsmith.git
+cd splitsmith
+uv sync
+(cd src/splitsmith/ui_static && pnpm install && pnpm build)"><span class="comment"># Clone, sync, build the UI</span>
 <span class="prompt">$</span> <span class="kw">git</span> clone https://github.com/mandakan/splitsmith.git
 <span class="prompt">$</span> <span class="kw">cd</span> splitsmith
 <span class="prompt">$</span> <span class="kw">uv</span> sync
-<span class="prompt">$</span> (<span class="kw">cd</span> src/splitsmith/ui_static &amp;&amp; pnpm install &amp;&amp; pnpm build)
+<span class="prompt">$</span> (<span class="kw">cd</span> src/splitsmith/ui_static &amp;&amp; pnpm install &amp;&amp; pnpm build)</pre>
+      <button class="copy-btn" type="button" aria-label="Copy commands">
+        <span class="copy-label">Copy</span>
+      </button>
+    </div>
 
-<span class="comment"># Run the full ingest → audit → export workflow</span>
-<span class="prompt">$</span> <span class="kw">uv</span> run splitsmith ui --project ~/matches/your-match
+    <div class="snippet">
+<pre class="quickstart" data-copy="uv run splitsmith ui"><span class="comment"># Launch the UI and create your first match from the picker</span>
+<span class="prompt">$</span> <span class="kw">uv</span> run splitsmith ui</pre>
+      <button class="copy-btn" type="button" aria-label="Copy command">
+        <span class="copy-label">Copy</span>
+      </button>
     </div>
   </section>
 
@@ -783,6 +957,31 @@ footer.colophon {
     <a href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener"><b>github.com/mandakan/splitsmith</b></a>
   </div>
 </footer>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const snippet = btn.closest('.snippet');
+      const target = snippet && snippet.querySelector('[data-copy]');
+      if (!target) return;
+      const text = target.getAttribute('data-copy') || '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (err) {
+        console.error('Copy failed', err);
+        return;
+      }
+      const label = btn.querySelector('.copy-label');
+      const original = label.textContent;
+      btn.classList.add('copied');
+      label.textContent = 'Copied';
+      window.setTimeout(() => {
+        btn.classList.remove('copied');
+        label.textContent = original;
+      }, 1500);
+    });
+  });
+</script>
 
 </body>
 </html>
