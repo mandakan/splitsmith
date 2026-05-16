@@ -346,6 +346,24 @@ dependency).
 - **`AppShell`** -- top bar with brand + mode switch + utility +
   profile + heartbeat indicator. Layout primitive that wraps every
   page.
+- **`MatchShell`** -- shooter-mode chrome (header + per-match sidebar
+  + JobsPanel). The sidebar's nav rows: Overview, Audit, Coach,
+  Shooters, Videos, Export. Audit / Coach / Videos / Export rows are
+  *shooter-scoped* -- they take the current URL slug (or
+  `default_shooter_slug` from `/api/health` when there's no URL slug)
+  and land on `/<route>/<slug>`. Slug-less Shooters / Beep-review
+  routes stay slug-less.
+- **`DeveloperShell`** -- developer-mode chrome (cyan accent,
+  workflow stepper sidebar).
+- **`ShooterScopedRoute`** -- route wrapper for every shooter-bearing
+  URL. Keys on `slug` so the page remounts cleanly when the user
+  switches shooters; redirects to `/shooters` when slug is missing.
+- **`ShooterChipStrip`** -- shared shooter switcher. Mounted on every
+  shooter-scoped page (Audit, Videos, Coach, Export). Props: `shooters`,
+  `activeSlug`, `urlBase` ("audit" | "ingest" | "coach" | "export"),
+  optional `stage`, `label` (the verb in front of the chips:
+  "Auditing", "Adding footage for", "Coaching", "Exporting"), optional
+  per-chip `count` formatter. Hides itself in single-shooter matches.
 - **`ContextBar`** -- thin bar under the shell with pulse and
   breadcrumb. Hosts ambient state for the active page.
 - **`MatchCard`** -- a single match row. Slots: index, primary
@@ -433,6 +451,18 @@ toggle, P1-priority numeral tiles, and any inline red link on dark bg
 **Do NOT apply to:** small accent dots, 1-2px hairlines, focus rings,
 the brand mark -- those keep `#FF2D2D` because the saturation is what
 gives the instrument-panel feel at small sizes.
+
+**Sweep history.** Commit `888933c` introduced the three utility
+classes and applied them to five surfaces. Every other red CTA / badge
+in the SPA continued using the legacy `bg-led + text-bg` pair
+(cream-on-saturated-#FF2D2D), and new pages added since then
+reproduced the legacy pattern. Commit `6ed90bc` propagated the fix
+across the rest of the SPA via a scoped find/replace: every
+`bg-led text-bg` became `bg-led-fill text-ink`, and every
+`hover:bg-led-soft hover:text-bg` became `hover:bg-led hover:text-ink`
+(matching `.btn-led-fill:hover`). Other status colors (`bg-done`,
+`bg-beep`, `bg-live`) paired with `text-bg` were left alone -- they
+have enough luminance against dark text to pass AA easily.
 
 A side-by-side ideation with deuteranopia + tritanopia + low-vision
 simulation toggles lives at

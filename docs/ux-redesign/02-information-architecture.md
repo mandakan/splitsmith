@@ -68,17 +68,32 @@ later.
 |
 +-- <Match X>
     +-- Overview             (meta + shooters + stages grid; entry view)
-    +-- Coach                (match-wide: cross-stage analysis, annotations)
-    +-- Stages
-    |   +-- Stage 1
-    |   |   +-- Audit            (per-shooter timing review)
-    |   |   +-- Compare          (multi-shooter sync preview)
-    |   |   +-- Coach            (per-stage deep dive: shot-by-shot)
-    |   +-- Stage 2 ...
-    +-- Shooters                 (list of contributors and their footage)
-    +-- Export                   (overlays, transitions, scope: stage / match)
-    +-- Settings                 (rename, archive, delete, backup, source links)
+    +-- <shooter S>
+    |   +-- Audit            (per-stage timing review for S)
+    |   +-- Coach            (per-shooter analysis for S)
+    |   +-- Videos           (ingest + manage S's footage)
+    |   +-- Export           (final-cut bundle for S)
+    +-- Compare              (multi-shooter sync preview, per stage)
+    +-- Beep review          (cross-shooter beep queue)
+    +-- Shooters             (list of contributors and their footage)
+    +-- Settings             (rename, archive, delete, backup, source links)
 ```
+
+**Shipped URL shape** (#353): every shooter-scoped page is path-scoped
+on the shooter slug. `/audit/<slug>`, `/audit/<slug>/<stage>`,
+`/coach/<slug>`, `/coach/<slug>/<stage>`, `/ingest/<slug>` (the
+"Videos" sidebar row), `/export/<slug>`, `/export/<slug>/<stage>`.
+Slugless visits redirect to `/shooters`. `Compare`, `Shooters`, and
+`Beep review` stay slug-less (multi-shooter / shooter-management).
+Two browser tabs can hold two shooters' Audit views simultaneously
+with no cross-contamination. Slug values are opaque (`s_<8 hex>`) so
+URLs / disk paths / server logs don't leak competitor names.
+
+**Persistent sidebar nav rows** on `MatchShell`: Overview, Audit,
+Coach, Shooters, **Videos**, Export. The shooter-scoped rows
+(Audit / Coach / Videos / Export) target the URL's current `slug` or
+fall back to `/api/health.default_shooter_slug` so the rows always
+land somewhere sensible; with no shooters they route to `/shooters`.
 
 Coach exists at **two levels**:
 
