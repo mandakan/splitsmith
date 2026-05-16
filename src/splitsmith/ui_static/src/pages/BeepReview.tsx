@@ -535,7 +535,7 @@ function ActiveDetail({
               type="button"
               onClick={onConfirm}
               disabled={busy || item.beep_time == null}
-              className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+              className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
             >
               <Check className="size-3.5" strokeWidth={3} />
               <span className="font-display uppercase tracking-[0.08em]">

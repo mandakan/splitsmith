@@ -857,8 +857,8 @@ function MatchRow({
           className={cn(
             "inline-flex min-h-[40px] items-center gap-2 rounded-lg border px-4 py-2.5 font-display text-xs font-bold uppercase tracking-[0.1em] leading-none transition-all",
             archived
-              ? "border-rule-strong bg-transparent text-ink hover:border-led hover:bg-led hover:text-bg"
-              : "border-ink bg-ink text-bg hover:border-led hover:bg-led",
+              ? "border-rule-strong bg-transparent text-ink hover:border-led hover:bg-led-fill hover:text-ink"
+              : "border-ink bg-ink text-bg hover:border-led-deep hover:bg-led-fill hover:text-ink",
           )}
           onClick={(e) => {
             e.stopPropagation();

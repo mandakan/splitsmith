@@ -646,7 +646,7 @@ function ShooterChip({
         className={cn(
           "inline-flex size-6 items-center justify-center rounded-full transition-colors",
           isAudio
-            ? "bg-led text-bg shadow-[0_0_10px_var(--color-led-glow)]"
+            ? "bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
             : "bg-surface-3 text-subtle hover:text-ink",
         )}
       >
@@ -731,7 +731,7 @@ function VideoTile({
           {shooter.name}
         </span>
         {isAudio && (
-          <span className="ml-auto inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
+          <span className="ml-auto inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
             <Volume2 className="size-2.5" />
             Audio
           </span>
@@ -810,7 +810,7 @@ function Transport({
         type="button"
         onClick={onTogglePlay}
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="inline-flex size-11 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+        className="inline-flex size-11 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
       >
         {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
       </button>
@@ -1119,7 +1119,7 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
 function RankPill({ rank }: { rank: number }) {
   const tone =
     rank === 1
-      ? "border-led bg-led text-bg shadow-[0_0_10px_var(--color-led-glow)]"
+      ? "border-led bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
       : rank === 2
         ? "border-ink-2 bg-surface-3 text-ink"
         : "border-rule bg-surface-3 text-muted";

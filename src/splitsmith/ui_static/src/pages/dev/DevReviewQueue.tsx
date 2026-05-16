@@ -255,7 +255,7 @@ function QueueItem({
         {item.status === "done" ? (
           <CheckCircle2 className="size-4 text-done" />
         ) : item.status === "flagged" ? (
-          <span className="inline-flex size-5 items-center justify-center rounded-full bg-led text-bg font-mono text-[0.625rem] font-bold">
+          <span className="inline-flex size-5 items-center justify-center rounded-full bg-led-fill text-ink font-mono text-[0.625rem] font-bold">
             !
           </span>
         ) : (

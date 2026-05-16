@@ -1561,7 +1561,7 @@ export function Audit() {
                   onClick={togglePlay}
                   aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
                   title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-                  className="inline-flex size-11 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+                  className="inline-flex size-11 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
                 >
                   {isPlaying ? (
                     <Pause className="size-5" />

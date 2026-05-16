@@ -317,7 +317,7 @@ function ActiveVariant({
             <button
               type="button"
               onClick={() => navigate(stageHref(nextUp.stage.stage_number))}
-              className="inline-flex min-h-[60px] items-center gap-3.5 rounded-[11px] border border-led bg-led px-6 py-4 font-display text-base font-bold uppercase tracking-[0.06em] text-bg shadow-[0_0_0_1px_var(--color-led),0_0_32px_var(--color-led-glow),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all hover:bg-led-soft hover:-translate-y-0.5"
+              className="inline-flex min-h-[60px] items-center gap-3.5 rounded-[11px] border border-led-deep bg-led-fill px-6 py-4 font-display text-base font-bold uppercase tracking-[0.06em] text-ink shadow-[0_0_0_1px_var(--color-led),0_0_32px_var(--color-led-glow),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all hover:bg-led hover:-translate-y-0.5"
             >
               <div className="flex flex-col items-start gap-1">
                 <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] opacity-70">
@@ -464,7 +464,7 @@ function EmptyVariant({
         <div className="inline-flex gap-2.5">
           <Button
             onClick={() => navigate(ingestHref)}
-            className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+            className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
           >
             <ArrowDownToLine className="size-3.5" />
             <span className="font-display uppercase tracking-[0.1em]">
@@ -772,7 +772,7 @@ function StageTile({
             className={cn(
               "inline-flex size-7 items-center justify-center rounded-md font-mono text-xs font-bold tabular-nums",
               isNextUp
-                ? "bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_8px_var(--color-led-glow)]"
+                ? "bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_8px_var(--color-led-glow)]"
                 : "bg-surface-3 text-ink-2",
             )}
           >

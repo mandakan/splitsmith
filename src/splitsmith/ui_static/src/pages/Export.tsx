@@ -668,7 +668,7 @@ function ExportInner({ slug }: { slug: string }) {
                 type="button"
                 onClick={() => void submitExport()}
                 disabled={!canExport}
-                className="w-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+                className="w-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
               >
                 {busy ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -1037,7 +1037,7 @@ function FormatRow({
           className={cn(
             "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded border-[1.5px]",
             selected
-              ? "border-led bg-led text-bg"
+              ? "border-led bg-led-fill text-ink"
               : "border-rule-strong bg-surface",
           )}
         >

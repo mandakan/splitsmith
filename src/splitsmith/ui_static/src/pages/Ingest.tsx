@@ -419,7 +419,7 @@ function DropZone({ onPickFolder }: { onPickFolder: () => void }) {
       <div className="inline-flex gap-2.5">
         <Button
           onClick={onPickFolder}
-          className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+          className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
         >
           <Folder className="size-3.5" />
           <span className="font-display uppercase tracking-[0.1em]">
@@ -667,7 +667,7 @@ function StorageOption({
         className={cn(
           "relative mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px]",
           selected
-            ? "border-led bg-led shadow-[0_0_10px_var(--color-led-glow)]"
+            ? "border-led-deep bg-led-fill shadow-[0_0_10px_var(--color-led-glow)]"
             : "border-rule-strong bg-surface",
         )}
       >
@@ -682,7 +682,7 @@ function StorageOption({
         >
           {title}
           {badge && (
-            <span className="rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
+            <span className="rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
               {badge}
             </span>
           )}
@@ -784,7 +784,7 @@ function ReviewState({
             aria-hidden
             className="absolute inset-y-0 left-0 w-0.5 bg-led shadow-[0_0_12px_var(--color-led-glow)]"
           />
-          <span className="inline-flex size-11 items-center justify-center rounded-[10px] bg-led text-bg shadow-[0_0_16px_var(--color-led-glow)]">
+          <span className="inline-flex size-11 items-center justify-center rounded-[10px] bg-led-fill text-ink shadow-[0_0_16px_var(--color-led-glow)]">
             <Package className="size-5" strokeWidth={2.2} />
           </span>
           <div className="flex-1">
@@ -894,7 +894,7 @@ function ReviewState({
             type="button"
             onClick={onConfirm}
             disabled={busy || willProcess === 0}
-            className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+            className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
           >
             <span className="font-display uppercase tracking-[0.08em]">
               Confirm &amp; start processing

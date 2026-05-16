@@ -300,7 +300,7 @@ function SelectStep({
                     className={cn(
                       "inline-flex size-5 items-center justify-center rounded border",
                       checked
-                        ? "border-led bg-led text-bg"
+                        ? "border-led bg-led-fill text-ink"
                         : "border-rule-strong bg-surface-2",
                     )}
                   >

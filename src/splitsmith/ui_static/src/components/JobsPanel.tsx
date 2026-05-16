@@ -196,7 +196,7 @@ export function JobsPanel() {
           <span
             className={cn(
               "inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 font-mono text-[0.625rem] font-bold tabular-nums",
-              unackedFailures > 0 ? "bg-led text-bg" : "bg-beep text-bg",
+              unackedFailures > 0 ? "bg-led-fill text-ink" : "bg-beep text-bg",
             )}
           >
             {unackedFailures > 0
@@ -408,7 +408,7 @@ function Group({
           className={cn(
             "inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[0.625rem] font-bold tabular-nums",
             tone === "running" && "bg-beep text-bg",
-            tone === "failed" && "bg-led text-bg",
+            tone === "failed" && "bg-led-fill text-ink",
             tone === "done" && "bg-done text-bg",
             !tone && "bg-surface-3 text-ink-2",
           )}
