@@ -85,7 +85,7 @@ function FilterChip({ label, glyph, active, count, onToggle }: FilterChipProps) 
 
 export interface FilterBarProps {
   filters: MarkerFilters;
-  counts: { detected: number; rejected: number; manual: number };
+  counts: { detected: number; rejected: number; manual: number; beep: number };
   onChange: (next: MarkerFilters) => void;
 }
 
@@ -118,7 +118,7 @@ export function FilterBar({ filters, counts, onChange }: FilterBarProps) {
         label="beep"
         glyph="beep"
         active={filters.beep}
-        count={1}
+        count={counts.beep}
         onToggle={() => onChange({ ...filters, beep: !filters.beep })}
       />
     </div>

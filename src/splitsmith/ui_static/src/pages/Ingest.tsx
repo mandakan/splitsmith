@@ -335,6 +335,7 @@ function IngestInner({ slug }: { slug: string }) {
             onConfirm={() => navigate("/", { replace: true })}
             busy={busy}
             lastScannedDir={lastScannedDir}
+            onError={setError}
           />
         ) : null}
       </main>
@@ -738,6 +739,7 @@ function ReviewState({
   onConfirm,
   busy,
   lastScannedDir,
+  onError,
 }: {
   slug: string;
   project: MatchProject;
@@ -753,6 +755,7 @@ function ReviewState({
   onConfirm: () => void;
   busy: boolean;
   lastScannedDir: string | null;
+  onError: (msg: string | null) => void;
 }) {
   const assignedVideos: { video: StageVideo; stage: StageEntry }[] = useMemo(
     () =>
@@ -855,6 +858,7 @@ function ReviewState({
             return (
               <StageBlock
                 key={stage.stage_number}
+                slug={slug}
                 stage={stage}
                 allStages={project.stages}
                 videos={videos}
@@ -862,18 +866,21 @@ function ReviewState({
                 onMove={onMoveAssignment}
                 onRemove={onRemoveVideo}
                 busy={busy}
+                onError={onError}
               />
             );
           })}
 
           {unassignedVideos.length > 0 && (
             <UnassignedBlock
+              slug={slug}
               videos={unassignedVideos}
               allStages={project.stages}
               cameras={cameras}
               onMove={onMoveAssignment}
               onRemove={onRemoveVideo}
               busy={busy}
+              onError={onError}
             />
           )}
         </div>
@@ -962,6 +969,7 @@ function groupByCamera(
 }
 
 function StageBlock({
+  slug,
   stage,
   allStages,
   videos,
@@ -969,7 +977,9 @@ function StageBlock({
   onMove,
   onRemove,
   busy,
+  onError,
 }: {
+  slug: string;
   stage: StageEntry;
   allStages: StageEntry[];
   videos: StageVideo[];
@@ -981,6 +991,7 @@ function StageBlock({
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
+  onError: (msg: string | null) => void;
 }) {
   const primaryCount = videos.filter((v) => v.role === "primary").length;
   const status: "ok" | "warn" =
@@ -1020,6 +1031,7 @@ function StageBlock({
       {videos.map((v) => (
         <VideoRow
           key={v.video_id}
+          slug={slug}
           video={v}
           camera={cameras.find((c) => c.videoPaths.has(v.path))}
           currentStage={stage.stage_number}
@@ -1027,6 +1039,7 @@ function StageBlock({
           onMove={onMove}
           onRemove={onRemove}
           busy={busy}
+          onError={onError}
         />
       ))}
     </div>
@@ -1034,13 +1047,16 @@ function StageBlock({
 }
 
 function UnassignedBlock({
+  slug,
   videos,
   allStages,
   cameras,
   onMove,
   onRemove,
   busy,
+  onError,
 }: {
+  slug: string;
   videos: StageVideo[];
   allStages: StageEntry[];
   cameras: CameraGroup[];
@@ -1051,6 +1067,7 @@ function UnassignedBlock({
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
+  onError: (msg: string | null) => void;
 }) {
   return (
     <div className="border-y border-live/30 bg-gradient-to-r from-live/[0.06] to-transparent">
@@ -1071,6 +1088,7 @@ function UnassignedBlock({
       {videos.map((v) => (
         <VideoRow
           key={v.video_id}
+          slug={slug}
           video={v}
           camera={cameras.find((c) => c.videoPaths.has(v.path))}
           currentStage={null}
@@ -1078,6 +1096,7 @@ function UnassignedBlock({
           onMove={onMove}
           onRemove={onRemove}
           busy={busy}
+          onError={onError}
         />
       ))}
     </div>
@@ -1085,6 +1104,7 @@ function UnassignedBlock({
 }
 
 function VideoRow({
+  slug,
   video,
   camera,
   currentStage,
@@ -1092,7 +1112,9 @@ function VideoRow({
   onMove,
   onRemove,
   busy,
+  onError,
 }: {
+  slug: string;
   video: StageVideo;
   camera?: CameraGroup;
   currentStage: number | null;
@@ -1104,7 +1126,30 @@ function VideoRow({
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
+  onError: (msg: string | null) => void;
 }) {
+  const [detecting, setDetecting] = useState(false);
+  const needsBeep =
+    video.role !== "ignored" &&
+    video.beep_time == null &&
+    currentStage != null;
+
+  async function detectBeep() {
+    if (currentStage == null) return;
+    setDetecting(true);
+    onError(null);
+    try {
+      // Server-side dedupe: if a detect_beep job is already in flight for
+      // this video, ``_submit_detect_beep`` returns the existing job
+      // without spawning a parallel one. JobsPanel surfaces progress;
+      // we leave the user here.
+      await api.detectBeepForVideo(slug, currentStage, video.video_id);
+    } catch (e) {
+      onError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setDetecting(false);
+    }
+  }
   const filename = video.path.split("/").pop() ?? video.path;
   const cameraLabel = camera?.label ?? "Camera";
   const cameraDetail = [
@@ -1135,7 +1180,7 @@ function VideoRow({
 
   return (
     <div
-      className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_36px] items-center gap-3.5 border-b border-rule px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
+      className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px] items-center gap-3.5 border-b border-rule px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
     >
       <span
         aria-hidden
@@ -1176,6 +1221,34 @@ function VideoRow({
         ))}
       </select>
       <RoleToggles value={video.role} onChange={(r) => void setRole(r)} disabled={busy} />
+      {/* Beep status + manual retry. Auto-queue fires at scan / move /
+       *  swap-primary time; if a job never ran or failed silently, the
+       *  user needs an explicit affordance to kick detection. Clicking
+       *  hits ``detectBeepForVideo``; the server dedupes against an
+       *  in-flight job so double-clicks are safe. JobsPanel surfaces
+       *  progress; on success the row re-renders via project reload. */}
+      <div className="flex items-center justify-end gap-2">
+        {video.beep_time != null ? (
+          <span className="inline-flex items-center gap-1.5 rounded border border-beep/40 bg-beep-tint px-2 py-0.5 font-mono text-[0.625rem] font-bold tabular-nums text-beep">
+            beep {video.beep_time.toFixed(2)}s
+          </span>
+        ) : video.role === "ignored" ? (
+          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+            ignored
+          </span>
+        ) : null}
+        {needsBeep ? (
+          <button
+            type="button"
+            onClick={() => void detectBeep()}
+            disabled={busy || detecting}
+            title="Detect beep on this video"
+            className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-ink-2 transition-colors hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+          >
+            {detecting ? "Queuing..." : "Detect beep"}
+          </button>
+        ) : null}
+      </div>
       <button
         type="button"
         onClick={() => void onRemove(video.path)}

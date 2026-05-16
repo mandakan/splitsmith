@@ -1505,6 +1505,11 @@ export function Audit() {
                   detected: detectedCount,
                   rejected: rejectedCount,
                   manual: manualCount,
+                  // The audit waveform anchors on the primary; the beep
+                  // marker reflects ``auditBeep`` (= peaks.beep_time
+                  // falling back to primary.beep_time). 0 when the
+                  // primary has no beep yet.
+                  beep: auditBeep != null ? 1 : 0,
                 }}
                 onChange={setFilters}
               />
