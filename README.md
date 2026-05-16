@@ -182,6 +182,20 @@ Anyone with the repo can run the full pipeline (beep / shot detection, PANN + CL
 
 The detector is built around half-rise leading-edge timing (consistent across recordings; insensitive to AGC and gain) plus a 3-voter ensemble for shot classification. Full write-up in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md): beep detection, shot detection, the half-rise rationale, confidence ranking, and the ensemble performance dashboard.
 
+## The audited corpus
+
+Shot detection is driven by a 3-voter ensemble (envelope onsets, CLAP audio embeddings, and a per-camera-class GBDT) calibrated against the audited fixtures under `tests/fixtures/`. Each fixture is a real beep-to-last-shot audio slice with hand-labeled shot times plus a `camera` / `shooter` / `stage_rounds` provenance block.
+
+The corpus grows over time -- right now I curate it by hand from my own matches and a few squadmates'. After dropping new audited fixtures into `tests/fixtures/`, rebuild the shipped calibration artifacts (`src/splitsmith/data/ensemble_calibration.json` and `src/splitsmith/data/voter_c_gbdt.joblib`) with:
+
+```bash
+uv run python scripts/build_ensemble_artifacts.py
+```
+
+### Contributing audited stages (planned)
+
+Soon I want to open the corpus to opt-in contributions from anyone running Splitsmith -- a per-stage "share this audited stage to improve detection" prompt at promotion time, so contributors grow the corpus without ever sharing a stage they didn't actively audit. Default will be off; nothing leaves your machine without explicit consent.
+
 ## Regenerating screenshots
 
 The README gallery comes from a live `splitsmith ui` driven through Playwright. To refresh after a UI redesign:

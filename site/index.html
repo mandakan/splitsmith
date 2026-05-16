@@ -825,6 +825,27 @@ pre.quickstart .kw { color: var(--ink); font-weight: 600; }
 }
 .copy-btn.copied { color: var(--led); border-color: var(--led); }
 
+/* --- Corpus prose block ---
+   Borderless prose section so the page rhythm breaks out of the
+   chip / card grid pattern once before the colophon. */
+.corpus {
+  max-width: 720px;
+}
+.corpus p {
+  color: var(--ink-2);
+  font-size: 1rem;
+  line-height: 1.7;
+  margin: 0 0 18px;
+}
+.corpus .corpus-foot {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin: 0;
+}
+
 /* --- Colophon --- */
 footer.colophon {
   border-top: 1px solid var(--rule);
@@ -1160,6 +1181,32 @@ uv sync
       <button class="copy-btn" type="button" aria-label="Copy command">
         <span class="copy-label">Copy</span>
       </button>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       THE CORPUS
+       ============================================================ -->
+  <section class="section" id="corpus">
+    <div class="section-head">
+      <span class="index">05</span>
+      <h2>Detection is good. It gets better.</h2>
+      <span class="spacer-line"></span>
+    </div>
+    <div class="corpus">
+      <p>
+        Every release retrains the shot-detection ensemble against a growing
+        corpus of audited stages — real beep-to-last-shot audio with
+        hand-labeled shot times across head, chest, gimbal, and handheld
+        setups. The fixtures shipping today are from me and a handful of
+        squadmates; each one sharpens the next release on every camera.
+      </p>
+      <p>
+        Soon, anyone running Splitsmith will be able to opt in and share
+        their own audited stages so the corpus — and everyone's detection
+        — keeps growing.
+      </p>
+      <p class="corpus-foot">Contributor uploads coming soon</p>
     </div>
   </section>
 
