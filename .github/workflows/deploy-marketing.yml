@@ -27,9 +27,9 @@ jobs:
       # wrangler dev dep used by the waitlist backend), wrangler-action
       # auto-detects pnpm as the package manager and shells out to it.
       # Install pnpm + Node first so that resolution finds them.
+      # pnpm version comes from packageManager in package.json. Setting
+      # `version:` here too is a hard error in action-setup@v4.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
