@@ -305,9 +305,7 @@ class JobRegistry:
     def list(self) -> list[Job]:
         """Snapshot of all retained jobs in submission order."""
         with self._lock:
-            return [
-                self._jobs[jid].model_copy(deep=True) for jid in self._order if jid in self._jobs
-            ]
+            return [self._jobs[jid].model_copy(deep=True) for jid in self._order if jid in self._jobs]
 
     def cancel(self, job_id: str) -> Job | None:
         """Mark a job for cooperative cancellation.
@@ -570,8 +568,7 @@ class JobRegistry:
         finished = [
             jid
             for jid in self._order
-            if jid in self._jobs
-            and self._jobs[jid].status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
+            if jid in self._jobs and self._jobs[jid].status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
         ]
         excess = len(finished) - self._retain
         if excess <= 0:

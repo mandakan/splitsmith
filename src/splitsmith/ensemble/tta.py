@@ -69,9 +69,7 @@ def compute_tta_agreement(
     # Amplitude perturbations: scale, redetect, no time-axis remapping.
     for db in (-db_perturb, +db_perturb):
         scaled = audio_f32 * np.float32(10.0 ** (db / 20.0))
-        perturbations.append(
-            _detect_times(scaled, sample_rate, beep_time, stage_time, detector_cfg)
-        )
+        perturbations.append(_detect_times(scaled, sample_rate, beep_time, stage_time, detector_cfg))
 
     # Time perturbations via np.roll. Positive roll = content moved later
     # in the array by ``shift_n`` samples. A candidate at time ``t`` in the

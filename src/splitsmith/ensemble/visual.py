@@ -106,9 +106,7 @@ def _frame_path(cache_dir: Path, fingerprint: str, time_s: float, offset_s: floa
     return cache_dir / fingerprint / f"t{time_ms:09d}_o{offset_ms:+05d}.jpg"
 
 
-def _extract_frame(
-    video_path: Path, source_time: float, dest: Path, *, ffmpeg: str = "ffmpeg"
-) -> bool:
+def _extract_frame(video_path: Path, source_time: float, dest: Path, *, ffmpeg: str = "ffmpeg") -> bool:
     """Extract a single frame at ``source_time`` (seconds in source video).
 
     Two-step seek: fast pre-seek to ``source_time - 2.0``, then accurate

@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 const OTHER_VALUE = "__other__";
 
 interface Props {
+  slug: string;
   video: StageVideo;
   stageNumber: number;
   disabled?: boolean;
@@ -38,6 +39,7 @@ interface Props {
 }
 
 export function CameraModelSelect({
+  slug,
   video,
   stageNumber,
   disabled = false,
@@ -104,6 +106,7 @@ export function CameraModelSelect({
           setError?.(null);
           try {
             const updated = await api.setCameraModel(
+              slug,
               stageNumber,
               video.video_id,
               picked.make,

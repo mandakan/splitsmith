@@ -51,8 +51,7 @@ def read_splits_csv(path: Path) -> list[CsvShot]:
         reader = csv.DictReader(f)
         if reader.fieldnames != CSV_HEADER:
             raise ValueError(
-                f"unexpected CSV header in {path}: got {reader.fieldnames}, "
-                f"expected {CSV_HEADER}"
+                f"unexpected CSV header in {path}: got {reader.fieldnames}, " f"expected {CSV_HEADER}"
             )
         return [
             CsvShot(

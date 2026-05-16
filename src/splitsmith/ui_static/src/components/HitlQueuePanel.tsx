@@ -49,6 +49,7 @@ const KIND_VARIANTS: Record<HitlItemKind, "outline" | "destructive"> = {
 };
 
 export interface HitlQueuePanelProps {
+  slug: string;
   /** Optional: external trigger to refetch. Bumping the value forces
    *  a queue reload; useful when the Ingest page just promoted a
    *  candidate and wants the list to refresh without waiting for the
@@ -65,6 +66,7 @@ export interface HitlQueuePanelProps {
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 export function HitlQueuePanel({
+  slug,
   refreshKey = 0,
   onJumpToStage,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
@@ -75,7 +77,7 @@ export function HitlQueuePanel({
 
   const reload = useCallback(async () => {
     try {
-      const next = await api.getHitlQueue();
+      const next = await api.getHitlQueue(slug);
       setQueue(next);
       setError(null);
     } catch (e) {
@@ -83,7 +85,7 @@ export function HitlQueuePanel({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
     void reload();

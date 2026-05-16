@@ -16,6 +16,7 @@ import {
   ArrowDownToLine,
   ClipboardCheck,
   Crosshair,
+  Film,
   LayoutGrid,
   Users,
 } from "lucide-react";
@@ -46,6 +47,13 @@ interface MatchSidebarProps {
   /** Per-stage click handler. Receives the stage number; the surface that
    *  owns the sidebar decides where to route (audit, compare, ...). */
   onStageClick?: (stage_number: number) => void;
+  /** Slug for the shooter currently in focus (when a shooter-scoped route
+   *  is active). Drives the per-shooter nav links so clicking Audit /
+   *  Coach / Export keeps the user on the same shooter instead of
+   *  bouncing to the shooter picker. ``undefined`` when no shooter is in
+   *  focus (e.g. /shooters, /); in that case the per-shooter nav rows
+   *  point at /shooters so the user picks one. */
+  shooterSlug?: string;
   className?: string;
 }
 
@@ -57,6 +65,7 @@ export function MatchSidebar({
   shooterCount,
   awaiting = false,
   onStageClick,
+  shooterSlug,
   className,
 }: MatchSidebarProps) {
   const audited = stages.filter((s) => s.status === "done").length;
@@ -84,19 +93,21 @@ export function MatchSidebar({
         )}
       </div>
 
-      {/* Cross-match nav */}
+      {/* Cross-match nav. Per-shooter rows include the in-focus slug
+       *  so navigation stays on the same shooter when one is active;
+       *  without a slug they point to /shooters so the user picks. */}
       <div className="mb-1 flex flex-col gap-px">
         <SidebarLink to="/" icon={<LayoutGrid className="size-[15px]" />} end>
           Overview
         </SidebarLink>
         <SidebarLink
-          to="/audit"
+          to={shooterSlug ? `/audit/${shooterSlug}` : "/shooters"}
           icon={<Crosshair className="size-[15px]" />}
         >
           Audit
         </SidebarLink>
         <SidebarLink
-          to="/coach"
+          to={shooterSlug ? `/coach/${shooterSlug}` : "/shooters"}
           icon={<ClipboardCheck className="size-[15px]" />}
         >
           Coach
@@ -109,7 +120,13 @@ export function MatchSidebar({
           Shooters
         </SidebarLink>
         <SidebarLink
-          to="/export"
+          to={shooterSlug ? `/ingest/${shooterSlug}` : "/shooters"}
+          icon={<Film className="size-[15px]" />}
+        >
+          Videos
+        </SidebarLink>
+        <SidebarLink
+          to={shooterSlug ? `/export/${shooterSlug}` : "/shooters"}
           icon={<ArrowDownToLine className="size-[15px]" />}
         >
           Export

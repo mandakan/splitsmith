@@ -121,9 +121,7 @@ def test_set_beep_manual_pins_time_and_clamps_confidence(tmp_path: Path) -> None
     primary_id = MatchProject.load(root).stages[0].videos[0].video_id
 
     with patch("splitsmith.mcp.write_tools.audio_helpers.invalidate_video_audit_trim"):
-        result = write_tools.set_beep_manual(
-            str(root), stage_number=1, video_id=primary_id, time_seconds=4.5
-        )
+        result = write_tools.set_beep_manual(str(root), stage_number=1, video_id=primary_id, time_seconds=4.5)
     after = MatchProject.load(root)
     primary = after.stages[0].videos[0]
     assert primary.beep_time == 4.5
@@ -152,9 +150,7 @@ def test_set_beep_manual_clear_resets_state(tmp_path: Path) -> None:
     primary_id = MatchProject.load(root).stages[0].videos[0].video_id
 
     with patch("splitsmith.mcp.write_tools.audio_helpers.invalidate_video_audit_trim"):
-        write_tools.set_beep_manual(
-            str(root), stage_number=1, video_id=primary_id, time_seconds=None
-        )
+        write_tools.set_beep_manual(str(root), stage_number=1, video_id=primary_id, time_seconds=None)
     primary = MatchProject.load(root).stages[0].videos[0]
     assert primary.beep_time is None
     assert primary.beep_source is None
@@ -169,12 +165,8 @@ def test_set_beep_manual_invalidates_audit_trim(tmp_path: Path) -> None:
     _build_project(root, stages=[_stage_with_primary()])
     primary_id = MatchProject.load(root).stages[0].videos[0].video_id
 
-    with patch(
-        "splitsmith.mcp.write_tools.audio_helpers.invalidate_video_audit_trim"
-    ) as mock_invalidate:
-        write_tools.set_beep_manual(
-            str(root), stage_number=1, video_id=primary_id, time_seconds=4.5
-        )
+    with patch("splitsmith.mcp.write_tools.audio_helpers.invalidate_video_audit_trim") as mock_invalidate:
+        write_tools.set_beep_manual(str(root), stage_number=1, video_id=primary_id, time_seconds=4.5)
     assert mock_invalidate.call_count == 1
 
 
@@ -183,9 +175,7 @@ def test_set_beep_manual_rejects_negative_time(tmp_path: Path) -> None:
     _build_project(root, stages=[_stage_with_primary()])
     primary_id = MatchProject.load(root).stages[0].videos[0].video_id
     with pytest.raises(ValueError, match=">= 0"):
-        write_tools.set_beep_manual(
-            str(root), stage_number=1, video_id=primary_id, time_seconds=-0.5
-        )
+        write_tools.set_beep_manual(str(root), stage_number=1, video_id=primary_id, time_seconds=-0.5)
 
 
 def test_set_beep_manual_unknown_stage_raises(tmp_path: Path) -> None:
@@ -323,9 +313,7 @@ def test_mark_beep_reviewed_flips_flag(tmp_path: Path) -> None:
     )
     primary_id = MatchProject.load(root).stages[0].videos[0].video_id
 
-    result = write_tools.mark_beep_reviewed(
-        str(root), stage_number=1, video_id=primary_id, reviewed=True
-    )
+    result = write_tools.mark_beep_reviewed(str(root), stage_number=1, video_id=primary_id, reviewed=True)
     after = MatchProject.load(root).stages[0].videos[0]
     assert after.beep_reviewed is True
     assert result["beep_reviewed"] is True
@@ -336,9 +324,7 @@ def test_mark_beep_reviewed_rejects_when_no_beep_yet(tmp_path: Path) -> None:
     _build_project(root, stages=[_stage_with_primary()])
     primary_id = MatchProject.load(root).stages[0].videos[0].video_id
     with pytest.raises(ValueError, match="before one has been detected"):
-        write_tools.mark_beep_reviewed(
-            str(root), stage_number=1, video_id=primary_id, reviewed=True
-        )
+        write_tools.mark_beep_reviewed(str(root), stage_number=1, video_id=primary_id, reviewed=True)
 
 
 def test_mark_beep_reviewed_unmark_allowed_without_beep(tmp_path: Path) -> None:

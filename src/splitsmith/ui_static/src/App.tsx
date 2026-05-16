@@ -45,67 +45,55 @@ export function App() {
               their redesign issues ship. Ingest stays self-shelled
               (focused-task page, no sidebar).
 
-              Shooter-scoped routes (#353 phase 1): /audit /export /ingest
-              /coach take an explicit /:slug so the URL alone identifies
-              which shooter is in focus. Legacy slug-less forms remain
-              live as backwards-compat shims; ShooterScopedRoute redirects
-              them to the canonical /<page>/<bound-slug>/[:stage] form.
-              The /:slug routes use the slug as the React Router key so a
-              switch (chip-strip click -> Link -> URL change) remounts the
-              page cleanly instead of forcing a window.location.reload.
+              Shooter-scoped routes (#353): /audit /export /ingest /coach
+              take an explicit /:slug so the URL alone identifies which
+              shooter is in focus. Slugless visits redirect to /shooters.
+              ShooterScopedRoute keys on slug so the page remounts cleanly
+              when the chip strip switches shooters.
 
               /compare /shooters /beep-review stay slug-less: compare is
               inherently multi-shooter, /shooters is the shooter manager
               itself, beep-review is a cross-shooter queue. */}
           <Route
-            path="ingest"
-            element={<ShooterScopedRoute page="ingest" element={<Ingest />} />}
+            path="ingest/:slug"
+            element={<ShooterScopedRoute element={<Ingest />} />}
           />
           <Route
-            path="ingest/:slugOrStage"
-            element={<ShooterScopedRoute page="ingest" element={<Ingest />} />}
+            path="ingest"
+            element={<Navigate to="/shooters" replace />}
           />
           <Route element={<MatchShell />}>
             <Route index element={<Home />} />
             <Route
-              path="audit"
-              element={<ShooterScopedRoute page="audit" element={<Audit />} />}
-            />
-            <Route
-              path="audit/:slugOrStage"
-              element={<ShooterScopedRoute page="audit" element={<Audit />} />}
+              path="audit/:slug"
+              element={<ShooterScopedRoute element={<Audit />} />}
             />
             <Route
               path="audit/:slug/:stage"
-              element={<ShooterScopedRoute page="audit" element={<Audit />} />}
+              element={<ShooterScopedRoute element={<Audit />} />}
             />
+            <Route path="audit" element={<Navigate to="/shooters" replace />} />
             <Route path="compare/:stage" element={<Compare />} />
             <Route
-              path="coach"
-              element={<ShooterScopedRoute page="coach" element={<Coach />} />}
-            />
-            <Route
-              path="coach/:slugOrStage"
-              element={<ShooterScopedRoute page="coach" element={<Coach />} />}
+              path="coach/:slug"
+              element={<ShooterScopedRoute element={<Coach />} />}
             />
             <Route
               path="coach/:slug/:stage"
-              element={<ShooterScopedRoute page="coach" element={<Coach />} />}
+              element={<ShooterScopedRoute element={<Coach />} />}
             />
+            <Route path="coach" element={<Navigate to="/shooters" replace />} />
             <Route path="shooters" element={<Shooters />} />
             <Route path="beep-review" element={<BeepReview />} />
             <Route
-              path="export"
-              element={<ShooterScopedRoute page="export" element={<Export />} />}
-            />
-            <Route
-              path="export/:slugOrStage"
-              element={<ShooterScopedRoute page="export" element={<Export />} />}
+              path="export/:slug"
+              element={<ShooterScopedRoute element={<Export />} />}
             />
             <Route
               path="export/:slug/:stage"
-              element={<ShooterScopedRoute page="export" element={<Export />} />}
+              element={<ShooterScopedRoute element={<Export />} />}
             />
+            <Route path="export" element={<Navigate to="/shooters" replace />} />
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
               retired Lab + fixture-editor surfaces sit under the

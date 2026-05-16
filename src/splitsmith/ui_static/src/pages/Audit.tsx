@@ -28,7 +28,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -53,11 +53,12 @@ import {
   visibleKindsFromFilters,
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
-import { Avatar } from "@/components/ui";
+import { BeepWaveformPicker } from "@/components/BeepSection";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { MountSelect } from "@/components/MountSelect";
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { ShotStepper } from "@/components/ShotStepper";
 import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
@@ -141,6 +142,15 @@ export function Audit() {
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
   const [gridMode, setGridMode] = useState(true);
+  // Inline beep re-pick (opens via the Re-pick beep button in the audit
+  // toolbar). Draft is in *source* time -- the picker emits source-time
+  // values via onPick. Apply: overrideBeepForVideo on the primary, which
+  // clears shots[] server-side and chains a fresh trim + shot-detect.
+  // Fire-and-forget: we leave the user in audit; the JobsPanel surfaces
+  // progress and they reload audit data once the chain completes.
+  const [showRepickBeep, setShowRepickBeep] = useState(false);
+  const [repickDraft, setRepickDraft] = useState<number | null>(null);
+  const [repickBusy, setRepickBusy] = useState(false);
   // Stable refs used by grid-mode callbacks to avoid stale closures without
   // adding them to useCallback / useEffect dep arrays.
   const isPlayingRef = useRef(false);
@@ -203,6 +213,10 @@ export function Audit() {
   }, []);
   const rafRef = useRef<number | null>(null);
 
+  // ShooterScopedRoute redirects to /shooters when slug is missing, so by
+  // the time this renders ``slugParam`` is always a non-empty string.
+  const slug = slugParam!;
+
   const stageNumber = useMemo(() => {
     if (stageParam == null) return null;
     const n = Number.parseInt(stageParam, 10);
@@ -213,7 +227,7 @@ export function Audit() {
   useEffect(() => {
     let alive = true;
     api
-      .getProject()
+      .getProject(slug)
       .then((p) => {
         if (alive) setProject(p);
       })
@@ -412,7 +426,7 @@ export function Audit() {
     setPeaksLoading(true);
     setPeaksError(null);
     api
-      .getStagePeaks(stageNumber, PEAK_BINS)
+      .getStagePeaks(slug, stageNumber, PEAK_BINS)
       .then((p) => {
         if (alive) setPeaks(p);
       })
@@ -428,7 +442,7 @@ export function Audit() {
     return () => {
       alive = false;
     };
-  }, [stageNumber, primary]);
+  }, [slug, stageNumber, primary]);
 
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
@@ -440,7 +454,7 @@ export function Audit() {
     let alive = true;
     setAuditLoaded(false);
     api
-      .getStageAudit(stageNumber)
+      .getStageAudit(slug, stageNumber)
       .then((a) => {
         if (!alive) return;
         setAudit(a);
@@ -456,7 +470,7 @@ export function Audit() {
     return () => {
       alive = false;
     };
-  }, [stageNumber]);
+  }, [slug, stageNumber]);
 
   // Tab change: re-seek the new <video> to the audit-timeline position.
   useEffect(() => {
@@ -818,6 +832,45 @@ export function Audit() {
     [markers],
   );
 
+  // "Beep looks wrong" heuristic. Fires when the post-detection state
+  // has signals that strongly suggest the beep was placed on the wrong
+  // sound rather than e.g. the user missing shots. Surfacing this as a
+  // banner is the proactive counterpart to the always-visible 'Re-pick
+  // beep' button: catches the mistake even before the user manually
+  // compares shot count vs expected.
+  //
+  // Heuristic, conservative to avoid false alarms:
+  //   - "draw too long": first detected shot lands > 2.5s after beep
+  //     (typical IPSC draw is < 2s; > 2.5s means the beep is probably
+  //     before the actual buzzer).
+  //   - "stage time overshoot": the last detected shot lands more than
+  //     1s AFTER the official stage time. Stage time is the call from
+  //     beep to last shot; if our beep is too early, last shot's time-
+  //     from-beep exceeds stage_time.
+  //
+  // Only fires when there are enough shots to draw a conclusion (>= 3).
+  const beepDiagnostic = useMemo<{ reason: string } | null>(() => {
+    if (!stage || stage.time_seconds <= 0 || auditBeep == null) return null;
+    if (keptShots.length < 3) return null;
+    const sorted = keptShots.slice().sort((a, b) => a.time - b.time);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const firstFromBeep = first.time - auditBeep;
+    const lastFromBeep = last.time - auditBeep;
+    const overshoot = lastFromBeep - stage.time_seconds;
+    if (firstFromBeep > 2.5) {
+      return {
+        reason: `First shot lands ${firstFromBeep.toFixed(2)}s after the beep -- typical draws are well under 2 s, so the beep is likely placed before the actual buzzer.`,
+      };
+    }
+    if (overshoot > 1.0) {
+      return {
+        reason: `Last shot lands ${overshoot.toFixed(2)}s after the official stage time (${stage.time_seconds.toFixed(2)}s) -- the beep may have been picked up too early.`,
+      };
+    }
+    return null;
+  }, [keptShots, auditBeep, stage]);
+
   // Whenever the kept-shot list shrinks (reject / delete), keep the index
   // in range. Don't change otherwise -- the user's position is sticky.
   useEffect(() => {
@@ -959,7 +1012,7 @@ export function Audit() {
       }
       setSaveStatus({ kind: "saving" });
       try {
-        const saved = await api.saveStageAudit(stageNumber, payload);
+        const saved = await api.saveStageAudit(slug, stageNumber, payload);
         setAudit(saved);
         sessionEventsRef.current = [];
         isDirtyRef.current = false;
@@ -1231,9 +1284,9 @@ export function Audit() {
   // thing because the trim can't exist without a beep.
   const videoSrc = activeVideo
     ? peaks
-      ? api.videoStreamUrl(activeVideo.path, peaks.trimmed ? "trim" : "source")
+      ? api.videoStreamUrl(slug, activeVideo.path, peaks.trimmed ? "trim" : "source")
       : peaksError != null
-        ? api.videoStreamUrl(activeVideo.path)
+        ? api.videoStreamUrl(slug, activeVideo.path)
         : ""
     : "";
 
@@ -1371,13 +1424,15 @@ export function Audit() {
           </div>
 
           {/* Shooter switcher: only renders for multi-shooter matches.
-              See #350 for the operator-vs-active-shooter discussion --
-              ``is_active`` here is "currently bound", not "this is you".
               Chip is a Link to /audit/:newSlug/:stage; ShooterScopedRoute
-              handles the rebind + remount (#353 phase 1). */}
-          {shooters.length > 1 && (
-            <ShooterChipStrip shooters={shooters} stage={stageNumber} />
-          )}
+              keys the page on slug so the switch remounts cleanly (#353). */}
+          <ShooterChipStrip
+            shooters={shooters}
+            stage={stageNumber}
+            activeSlug={slugParam}
+            urlBase="audit"
+            label="Auditing"
+          />
 
           {/* Toolbar: Save + Undo + status badges + filter chips + zoom */}
           <div className="flex flex-wrap items-center gap-2.5">
@@ -1413,6 +1468,7 @@ export function Audit() {
             </Button>
             {peaks && !peaks.trimmed ? (
               <TrimNowBadge
+                slug={slug}
                 stageNumber={stage.stage_number}
                 hasBeep={primary.beep_time != null}
                 hasStageTime={stage.time_seconds > 0}
@@ -1420,7 +1476,7 @@ export function Audit() {
                   setProject(p);
                   if (stageNumber != null) {
                     api
-                      .getStagePeaks(stageNumber, PEAK_BINS)
+                      .getStagePeaks(slug, stageNumber, PEAK_BINS)
                       .then((np) => setPeaks(np))
                       .catch(() => {});
                   }
@@ -1429,13 +1485,14 @@ export function Audit() {
             ) : null}
             {peaks && peaks.trimmed ? (
               <DetectShotsBadge
+                slug={slug}
                 stageNumber={stage.stage_number}
                 hasBeep={primary.beep_time != null}
                 hasStageTime={stage.time_seconds > 0}
                 hasCandidates={markers.length > 0}
                 onComplete={async () => {
                   if (stageNumber == null) return;
-                  const a = await api.getStageAudit(stageNumber);
+                  const a = await api.getStageAudit(slug, stageNumber);
                   setAudit(a);
                   setMarkers(deriveMarkers(a));
                 }}
@@ -1448,6 +1505,11 @@ export function Audit() {
                   detected: detectedCount,
                   rejected: rejectedCount,
                   manual: manualCount,
+                  // The audit waveform anchors on the primary; the beep
+                  // marker reflects ``auditBeep`` (= peaks.beep_time
+                  // falling back to primary.beep_time). 0 when the
+                  // primary has no beep yet.
+                  beep: auditBeep != null ? 1 : 0,
                 }}
                 onChange={setFilters}
               />
@@ -1500,6 +1562,23 @@ export function Audit() {
                 no beep yet
               </span>
             )}
+            {/* Re-pick beep affordance. Stays out of the way until the
+             *  user notices the shots are mis-aligned in audit -- then a
+             *  single click opens an inline waveform picker so they
+             *  don't have to leave the page. Applying the new beep
+             *  clears shots[] and re-chains trim + shot-detect; we
+             *  confirm before doing that if there's work to discard. */}
+            {primary.beep_time != null && stageNumber != null ? (
+              <button
+                type="button"
+                onClick={() => setShowRepickBeep((v) => !v)}
+                aria-expanded={showRepickBeep}
+                aria-controls="audit-repick-beep-picker"
+                className="inline-flex items-center gap-1.5 rounded border border-rule bg-surface-2 px-2 py-0.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-led-deep hover:bg-led-tint hover:text-led"
+              >
+                {showRepickBeep ? "Cancel re-pick" : "Re-pick beep"}
+              </button>
+            ) : null}
             {videos.length > 1 ? (
               <span className="rounded border border-rule-strong bg-surface-2 px-2 py-0.5 font-bold tabular-nums text-ink-2">
                 {videos.length} cams
@@ -1516,6 +1595,7 @@ export function Audit() {
             ) : null}
             {activeVideo && stageNumber != null ? (
               <MountSelect
+                slug={slug}
                 video={activeVideo}
                 stageNumber={stageNumber}
                 label="Mount"
@@ -1524,6 +1604,141 @@ export function Audit() {
               />
             ) : null}
           </div>
+
+          {/* Proactive nudge: when the post-detection state has signals
+           *  the beep was wrong (draw too long, overshoot the official
+           *  stage time, etc.), surface a banner that opens the re-pick
+           *  picker in one click. Suppressed once the picker is open --
+           *  the user has clearly seen the affordance and doesn't need
+           *  another reminder underneath it. */}
+          {beepDiagnostic && !showRepickBeep ? (
+            <div
+              role="status"
+              className="flex flex-wrap items-start gap-3 rounded-2xl border border-live/40 bg-live/10 px-4 py-3 text-sm"
+            >
+              <span
+                aria-hidden
+                className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-live/60 bg-live-tint font-mono text-[0.625rem] font-bold text-live"
+              >
+                !
+              </span>
+              <div className="flex-1">
+                <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.08em] text-live">
+                  Looks like the beep is wrong
+                </div>
+                <p className="mt-1 text-[0.8125rem] leading-snug text-ink-2">
+                  {beepDiagnostic.reason}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-led-fill text-ink hover:bg-led hover:text-ink"
+                onClick={() => {
+                  setShowRepickBeep(true);
+                  setRepickDraft(null);
+                }}
+              >
+                Re-pick beep
+              </Button>
+            </div>
+          ) : null}
+
+          {/* Inline beep re-pick. Mounts under the toolbar so the user
+           *  who notices a mis-aligned beep mid-audit doesn't have to
+           *  leave the page. Fire-and-forget: Apply queues a trim +
+           *  shot-detect chain via the existing override endpoint; the
+           *  JobsPanel surfaces the progress. */}
+          {showRepickBeep && stageNumber != null && primary.beep_time != null ? (
+            <div
+              id="audit-repick-beep-picker"
+              className="rounded-2xl border border-led-deep/60 bg-surface p-4"
+            >
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted">
+                  Re-pick beep
+                  <span className="ml-2 text-ink-2">
+                    current: <b className="tabular-nums">{primary.beep_time.toFixed(3)}s</b>
+                  </span>
+                  {repickDraft != null ? (
+                    <span className="ml-2 text-led">
+                      draft: <b className="tabular-nums">{repickDraft.toFixed(3)}s</b>
+                    </span>
+                  ) : null}
+                </div>
+                <div className="inline-flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowRepickBeep(false);
+                      setRepickDraft(null);
+                    }}
+                    disabled={repickBusy}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="bg-led-fill text-ink hover:bg-led hover:text-ink"
+                    disabled={
+                      repickBusy ||
+                      repickDraft == null ||
+                      Math.abs(repickDraft - (primary.beep_time ?? 0)) < 1e-3
+                    }
+                    onClick={async () => {
+                      if (repickDraft == null || stageNumber == null) return;
+                      const keptShots = audit?.shots.length ?? 0;
+                      if (keptShots > 0) {
+                        const ok = window.confirm(
+                          `Re-picking the beep will discard the ${keptShots} kept shot${
+                            keptShots === 1 ? "" : "s"
+                          } on this stage and re-run trim + shot detection. Continue?`,
+                        );
+                        if (!ok) return;
+                      }
+                      setRepickBusy(true);
+                      try {
+                        const updated = await api.overrideBeepForVideo(
+                          slug,
+                          stageNumber,
+                          primary.video_id,
+                          repickDraft,
+                        );
+                        setProject(updated);
+                        setShowRepickBeep(false);
+                        setRepickDraft(null);
+                        // Audit data will be stale until shot-detect
+                        // re-runs. The JobsPanel surfaces progress; the
+                        // user reloads when they see it land.
+                      } catch (e) {
+                        setProjectError(
+                          e instanceof ApiError ? e.detail : String(e),
+                        );
+                      } finally {
+                        setRepickBusy(false);
+                      }
+                    }}
+                  >
+                    Apply & re-process
+                  </Button>
+                </div>
+              </div>
+              <BeepWaveformPicker
+                slug={slug}
+                stageNumber={stageNumber}
+                videoId={primary.video_id}
+                videoBeepTime={primary.beep_time}
+                draftSourceTime={repickDraft}
+                onPick={(sourceTime) => setRepickDraft(sourceTime)}
+                setError={setProjectError}
+                instructions="Click on the waveform to mark the buzzer's rise. Apply to re-run trim + shot detection on the new beep."
+                ariaLabel={`Re-pick beep for stage ${stageNumber}`}
+              />
+            </div>
+          ) : null}
 
           {/* Video panel wrapped in instrument-panel frame */}
           <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
@@ -1552,7 +1767,7 @@ export function Audit() {
                   onClick={togglePlay}
                   aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
                   title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-                  className="inline-flex size-11 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+                  className="inline-flex size-11 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
                 >
                   {isPlaying ? (
                     <Pause className="size-5" />
@@ -1750,66 +1965,6 @@ function Readout({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   );
-}
-
-function ShooterChipStrip({
-  shooters,
-  stage,
-}: {
-  shooters: ShooterListEntry[];
-  stage: number | null;
-}) {
-  return (
-    <div className="-mt-1 mb-3 inline-flex flex-wrap items-center gap-2">
-      <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-subtle">
-        Auditing
-      </span>
-      {shooters.map((s) => {
-        const isActive = s.is_active;
-        const target = stage != null ? `/audit/${s.slug}/${stage}` : `/audit/${s.slug}`;
-        return (
-          <Link
-            key={s.slug}
-            to={target}
-            replace
-            aria-current={isActive ? "page" : undefined}
-            title={
-              isActive
-                ? `${s.name} -- currently auditing`
-                : `Switch to ${s.name}`
-            }
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors no-underline",
-              isActive
-                ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
-                : "border-rule bg-surface-2 text-ink-2 hover:border-rule-strong hover:bg-surface-3",
-              isActive && "pointer-events-none",
-            )}
-          >
-            <Avatar
-              size="xs"
-              initials={chipInitials(s.name)}
-              seed={s.slug}
-              name={s.name}
-            />
-            <span className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em]">
-              {s.name}
-            </span>
-            <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-              {pad2(s.stages_audited)}/{pad2(s.stages_total)}
-            </span>
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-function chipInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function ShortcutsStrip() {
@@ -2100,6 +2255,7 @@ const StageSelector = memo(function StageSelector({
 });
 
 interface DetectShotsBadgeProps {
+  slug: string;
   stageNumber: number;
   hasBeep: boolean;
   hasStageTime: boolean;
@@ -2108,6 +2264,7 @@ interface DetectShotsBadgeProps {
 }
 
 function DetectShotsBadge({
+  slug,
   stageNumber,
   hasBeep,
   hasStageTime,
@@ -2167,7 +2324,7 @@ function DetectShotsBadge({
     async (reset: boolean) => {
       setError(null);
       try {
-        const initial = await api.detectShots(stageNumber, { reset });
+        const initial = await api.detectShots(slug, stageNumber, { reset });
         setJob(initial);
         const final = await api.pollJob(initial.id, setJob);
         if (final.status === "failed") {
@@ -2181,7 +2338,7 @@ function DetectShotsBadge({
         setJob(null);
       }
     },
-    [stageNumber, onComplete],
+    [slug, stageNumber, onComplete],
   );
 
   const onClick = useCallback(() => void runDetect(false), [runDetect]);
@@ -2246,6 +2403,7 @@ function DetectShotsBadge({
 }
 
 interface TrimNowBadgeProps {
+  slug: string;
   stageNumber: number;
   hasBeep: boolean;
   hasStageTime: boolean;
@@ -2253,6 +2411,7 @@ interface TrimNowBadgeProps {
 }
 
 function TrimNowBadge({
+  slug,
   stageNumber,
   hasBeep,
   hasStageTime,
@@ -2296,7 +2455,7 @@ function TrimNowBadge({
         try {
           const final = await api.pollJob(active.id, setJob);
           if (cancelled) return;
-          if (final.status === "succeeded") onProjectUpdate(await api.getProject());
+          if (final.status === "succeeded") onProjectUpdate(await api.getProject(slug));
           else if (final.status === "failed") setError(final.error ?? "Trim failed");
         } finally {
           if (!cancelled) setJob(null);
@@ -2315,14 +2474,14 @@ function TrimNowBadge({
     try {
       // The server returns the existing active job if one is in flight,
       // so two clicks (or a click after reload) don't spawn parallels.
-      const initial = await api.trimStage(stageNumber);
+      const initial = await api.trimStage(slug, stageNumber);
       setJob(initial);
       const final = await api.pollJob(initial.id, setJob);
       if (final.status === "failed") {
         setError(final.error ?? "Trim failed");
         return;
       }
-      const fresh = await api.getProject();
+      const fresh = await api.getProject(slug);
       onProjectUpdate(fresh);
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : String(err));

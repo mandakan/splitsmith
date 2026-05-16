@@ -37,12 +37,8 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
     beep = 5.000
     shots = [
         _make_shot(1, beep + 1.420, beep_time=beep, peak=0.55, confidence=0.92, notes="draw"),
-        _make_shot(
-            2, beep + 1.630, beep_time=beep, prev_t=beep + 1.420, peak=0.48, confidence=0.81
-        ),
-        _make_shot(
-            3, beep + 1.820, beep_time=beep, prev_t=beep + 1.630, peak=0.42, confidence=0.74
-        ),
+        _make_shot(2, beep + 1.630, beep_time=beep, prev_t=beep + 1.420, peak=0.48, confidence=0.81),
+        _make_shot(3, beep + 1.820, beep_time=beep, prev_t=beep + 1.630, peak=0.42, confidence=0.74),
     ]
     out = tmp_path / "splits.csv"
     write_splits_csv(shots, out)

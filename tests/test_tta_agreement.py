@@ -39,9 +39,7 @@ def test_tta_agreement_empty_input_returns_empty() -> None:
 def test_tta_agreement_in_expected_range_and_length() -> None:
     audio = _synthesise_shot_audio()
     base = np.array([1.5])
-    out = compute_tta_agreement(
-        audio, 48000, beep_time=0.0, stage_time=2.0, base_candidate_times=base
-    )
+    out = compute_tta_agreement(audio, 48000, beep_time=0.0, stage_time=2.0, base_candidate_times=base)
     assert out.shape == (1,)
     # Original always counts (1.0 floor); 4 perturbations cap us at 5.0.
     assert 1.0 <= float(out[0]) <= 5.0
@@ -53,7 +51,5 @@ def test_tta_agreement_unmatched_candidate_stays_at_floor() -> None:
     # Pick a time far away from the synthesised impulse so no perturbation
     # reproduces a candidate within the 15 ms tolerance.
     base = np.array([0.5])
-    out = compute_tta_agreement(
-        audio, 48000, beep_time=0.0, stage_time=2.0, base_candidate_times=base
-    )
+    out = compute_tta_agreement(audio, 48000, beep_time=0.0, stage_time=2.0, base_candidate_times=base)
     assert float(out[0]) == 1.0

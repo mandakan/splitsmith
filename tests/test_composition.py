@@ -276,9 +276,7 @@ def test_render_fcpxml_match_path_matches_generate_match_fcpxml(tmp_path: Path) 
             tail_pad_seconds=2.0,
         ),
     ]
-    generate_match_fcpxml(
-        stages=stages, output_path=legacy_out, project_name="match", config=OutputConfig()
-    )
+    generate_match_fcpxml(stages=stages, output_path=legacy_out, project_name="match", config=OutputConfig())
 
     comp = composition.from_stage_compositions(stages, project_name="match")
     composition.render_fcpxml(comp, output_path=ir_out, config=OutputConfig())
@@ -334,9 +332,7 @@ def test_render_fcpxml_match_with_pip_secondaries_matches(tmp_path: Path) -> Non
             ),
         ),
     ]
-    generate_match_fcpxml(
-        stages=stages, output_path=legacy_out, project_name="match", config=OutputConfig()
-    )
+    generate_match_fcpxml(stages=stages, output_path=legacy_out, project_name="match", config=OutputConfig())
 
     comp = composition.from_stage_compositions(stages, project_name="match")
     composition.render_fcpxml(comp, output_path=ir_out, config=OutputConfig())
@@ -372,9 +368,7 @@ def test_render_fcpxml_match_with_overlay_matches(tmp_path: Path) -> None:
             tail_pad_seconds=5.0,
         ),
     ]
-    generate_match_fcpxml(
-        stages=stages, output_path=legacy_out, project_name="match", config=OutputConfig()
-    )
+    generate_match_fcpxml(stages=stages, output_path=legacy_out, project_name="match", config=OutputConfig())
 
     comp = composition.from_stage_compositions(stages, project_name="match")
     composition.render_fcpxml(comp, output_path=ir_out, config=OutputConfig())

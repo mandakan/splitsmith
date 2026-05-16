@@ -203,12 +203,8 @@ def test_classify_video_against_stages_in_window() -> None:
     from splitsmith.video_match import classify_video_against_stages
 
     sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
-    stages = [
-        StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)
-    ]
-    cls, hits = classify_video_against_stages(
-        sc - timedelta(minutes=5), stages, tolerance_minutes=15
-    )
+    stages = [StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)]
+    cls, hits = classify_video_against_stages(sc - timedelta(minutes=5), stages, tolerance_minutes=15)
     assert cls == "in_window"
     assert hits == [1]
 
@@ -225,9 +221,7 @@ def test_classify_video_against_stages_contested() -> None:
         StageData(stage_number=2, stage_name="S2", time_seconds=10.0, scorecard_updated_at=sc2),
     ]
     # Timestamp inside both [sc1-15, sc1] and [sc2-15, sc2].
-    cls, hits = classify_video_against_stages(
-        sc1 - timedelta(minutes=2), stages, tolerance_minutes=15
-    )
+    cls, hits = classify_video_against_stages(sc1 - timedelta(minutes=2), stages, tolerance_minutes=15)
     assert cls == "contested"
     assert sorted(hits) == [1, 2]
 
@@ -237,9 +231,7 @@ def test_classify_video_against_stages_orphan() -> None:
     from splitsmith.video_match import classify_video_against_stages
 
     sc = datetime(2026, 5, 2, 14, 30, 0, tzinfo=UTC)
-    stages = [
-        StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)
-    ]
+    stages = [StageData(stage_number=1, stage_name="S1", time_seconds=10.0, scorecard_updated_at=sc)]
     # Way before any window.
     cls, hits = classify_video_against_stages(sc - timedelta(hours=3), stages, tolerance_minutes=15)
     assert cls == "orphan"

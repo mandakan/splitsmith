@@ -130,9 +130,7 @@ def test_ensure_clip_extracts_and_caches(tmp_path: Path) -> None:
     ):
         first = thumbnail.ensure_clip(source, cache_dir=cache_dir, center_time=12.5, duration_s=1.0)
         # Same key -> cache hit, ffmpeg not invoked again.
-        second = thumbnail.ensure_clip(
-            source, cache_dir=cache_dir, center_time=12.5, duration_s=1.0
-        )
+        second = thumbnail.ensure_clip(source, cache_dir=cache_dir, center_time=12.5, duration_s=1.0)
 
     assert first.exists()
     assert first.suffix == ".mp4"
@@ -202,6 +200,4 @@ def test_ensure_clip_raises_on_timeout(tmp_path: Path) -> None:
 def test_cached_clip_returns_none_on_miss(tmp_path: Path) -> None:
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"fake")
-    assert (
-        thumbnail.cached_clip(source, tmp_path / "thumbs", center_time=5.0, duration_s=1.0) is None
-    )
+    assert thumbnail.cached_clip(source, tmp_path / "thumbs", center_time=5.0, duration_s=1.0) is None

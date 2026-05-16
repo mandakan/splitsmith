@@ -125,8 +125,7 @@ def export_stage_tool(
         raise ValueError(f"stage {stage_number} has no primary video")
     if primary.beep_time is None:
         raise ValueError(
-            f"stage {stage_number} primary has no beep_time yet; "
-            "run detect_beep or set_beep_manual first"
+            f"stage {stage_number} primary has no beep_time yet; " "run detect_beep or set_beep_manual first"
         )
     source = project.resolve_video_path(root, primary.path)
     if not source.exists():
@@ -192,9 +191,7 @@ def export_stage_tool(
         "overlay_path": _path_or_none(result.overlay_path),
         "shots_written": result.shots_written,
         "anomalies": list(result.anomalies),
-        "secondary_trimmed_paths": {
-            vid: str(p) for vid, p in result.secondary_trimmed_paths.items()
-        },
+        "secondary_trimmed_paths": {vid: str(p) for vid, p in result.secondary_trimmed_paths.items()},
     }
 
 

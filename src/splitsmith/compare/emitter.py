@@ -47,9 +47,7 @@ class _AssetEntry:
     metadata: VideoMetadata
 
 
-def _grid_transform_attrs(
-    slot: GridSlot, *, sequence_width: int, sequence_height: int
-) -> dict[str, str]:
+def _grid_transform_attrs(slot: GridSlot, *, sequence_width: int, sequence_height: int) -> dict[str, str]:
     """``<adjust-transform>`` attrs for a grid slot.
 
     Mirrors :func:`splitsmith.fcpxml_gen._pip_transform_attrs`'s normalised
@@ -283,9 +281,7 @@ def emit_compare_fcpxml(
         if stage_number in audio_bundle.stages_by_number:
             stage_name = audio_bundle.stages_by_number[stage_number].stage_name
         else:
-            stage_name = (
-                bundles_by_label[ordered_present[0]].stages_by_number[stage_number].stage_name
-            )
+            stage_name = bundles_by_label[ordered_present[0]].stages_by_number[stage_number].stage_name
 
         # Layout uses native pixel dims of the first present shooter for
         # the letterbox scale. All tiles get the same scale per slot --
@@ -329,8 +325,7 @@ def emit_compare_fcpxml(
 
         # Compound duration: longest tile-end across present labels.
         compound_frames = max(
-            tile_offsets_frames[lab] + tile_durations_in_parent_frames[lab]
-            for lab in present_labels
+            tile_offsets_frames[lab] + tile_durations_in_parent_frames[lab] for lab in present_labels
         )
 
         media_id = _next_id()
@@ -367,9 +362,7 @@ def emit_compare_fcpxml(
                     tile_starts_frames[lab] * fd_seconds,
                     asset.metadata,
                 ),
-                "duration": _frame_aligned_str(
-                    tile_durations_in_parent_frames[lab], fd_num, fd_den
-                ),
+                "duration": _frame_aligned_str(tile_durations_in_parent_frames[lab], fd_num, fd_den),
                 "format": asset.format_id,
             }
             if lab != spine_label:
@@ -457,7 +450,5 @@ def emit_compare_fcpxml(
     ET.indent(fcpxml, space="    ")
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
     decl_end = tree_bytes.index(b"?>") + 2
-    output_path.write_bytes(
-        tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :]
-    )
+    output_path.write_bytes(tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :])
     _tag_source_application(output_path)

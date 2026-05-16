@@ -108,9 +108,7 @@ def probe(
     except subprocess.TimeoutExpired as exc:
         raise ProbeError(f"ffprobe timed out on {path}") from exc
     except subprocess.CalledProcessError as exc:
-        raise ProbeError(
-            f"ffprobe failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
+        raise ProbeError(f"ffprobe failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
 
     try:
         payload = json.loads(completed.stdout)
@@ -121,9 +119,7 @@ def probe(
     key = source_cache_key(path)
     if key:
         cache_dir.mkdir(parents=True, exist_ok=True)
-        (cache_dir / f"{key}.json").write_text(
-            result.model_dump_json(indent=2) + "\n", encoding="utf-8"
-        )
+        (cache_dir / f"{key}.json").write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return result
 
 

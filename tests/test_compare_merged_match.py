@@ -142,9 +142,7 @@ def test_compare_via_manifest_and_via_merged_match_produce_same_structure(
             CompareShooter(project=martin_root, label="Martin"),
         ],
     )
-    bundles_via_manifest = [
-        load_shooter(s.project, s.label, probe=_stub_probe) for s in manifest.shooters
-    ]
+    bundles_via_manifest = [load_shooter(s.project, s.label, probe=_stub_probe) for s in manifest.shooters]
     emit_compare_fcpxml(
         manifest=manifest,
         shooters=bundles_via_manifest,
@@ -201,12 +199,10 @@ def test_compare_via_manifest_and_via_merged_match_produce_same_structure(
         return len(list(root.iter("asset")))
 
     assert _count_assets(via_manifest) == _count_assets(via_match), (
-        "merged-match render should reference the same number of source assets "
-        "as the manifest render"
+        "merged-match render should reference the same number of source assets " "as the manifest render"
     )
     assert _count_asset_refs(via_manifest) == _count_asset_refs(via_match), (
-        "merged-match render should place the same number of clips on tiles "
-        "as the manifest render"
+        "merged-match render should place the same number of clips on tiles " "as the manifest render"
     )
 
 
@@ -221,11 +217,14 @@ def test_load_shooter_from_match_skips_stages_with_missing_trims(tmp_path: Path)
     plan = plan_merge([anton_root, martin_root], merged_root)
     execute_merge(plan, move=False)
 
+    # Resolve the opaque slug Anton was assigned in the merge plan.
+    anton_slug = next(m.slug for m in plan.shooter_moves if m.source_root == anton_root)
+
     # Delete one shooter's stage-1 trim post-merge.
-    victim = merged_root / "shooters" / "anton" / "exports" / "stage1_egg-grab_trimmed.mp4"
+    victim = merged_root / "shooters" / anton_slug / "exports" / "stage1_egg-grab_trimmed.mp4"
     assert victim.exists()
     victim.unlink()
 
-    bundle = load_shooter_from_match(merged_root, "anton", label="Anton", probe=_stub_probe)
+    bundle = load_shooter_from_match(merged_root, anton_slug, label="Anton", probe=_stub_probe)
     assert 1 not in bundle.stages_by_number
     assert 2 in bundle.stages_by_number

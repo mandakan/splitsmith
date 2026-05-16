@@ -94,9 +94,7 @@ def test_stage_window_handles_offset_full_extraction() -> None:
     assert stage_end_in_full == pytest.approx(70.5)
 
 
-def _write_wav_with_transients(
-    path: Path, sr: int, duration_s: float, peak_times_s: list[float]
-) -> None:
+def _write_wav_with_transients(path: Path, sr: int, duration_s: float, peak_times_s: list[float]) -> None:
     """Synthesize a near-silent mono WAV with sharp Hann-shaped clicks at given times."""
     n = int(round(sr * duration_s))
     audio = np.zeros(n, dtype=np.float32)
@@ -120,9 +118,7 @@ def _write_wav_with_transients(
         w.writeframes(pcm.tobytes())
 
 
-def test_mine_one_excludes_in_stage_and_tags_outside(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mine_one_excludes_in_stage_and_tags_outside(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fixtures_dir = tmp_path / "fixtures"
     full_dir = fixtures_dir / "full"
     cache_dir = fixtures_dir / ".cache"

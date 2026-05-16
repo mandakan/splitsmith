@@ -59,9 +59,7 @@ class MatchExportTemplate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = Field(
-        ..., description="Template schema version; must equal SCHEMA_VERSION."
-    )
+    schema_version: int = Field(..., description="Template schema version; must equal SCHEMA_VERSION.")
     name: str | None = Field(
         None,
         description=("Display name in the dropdown; falls back to the file stem."),
@@ -132,9 +130,7 @@ def load_template(path: Path) -> MatchExportTemplate:
     if not isinstance(raw, dict):
         raise TemplateError(f"{path}: top-level YAML must be a mapping, got {type(raw).__name__}")
     if "schema_version" not in raw:
-        raise TemplateError(
-            f"{path}: missing required ``schema_version`` (expected {SCHEMA_VERSION})"
-        )
+        raise TemplateError(f"{path}: missing required ``schema_version`` (expected {SCHEMA_VERSION})")
     try:
         version = int(raw["schema_version"])
     except (TypeError, ValueError) as exc:

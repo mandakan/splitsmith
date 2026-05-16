@@ -1674,9 +1674,19 @@ function PromoteAllStagesButton({
     setLoading(true);
     setLoadError(null);
     try {
+      // Lab is process-scoped (legacy dev tool). Pull stage definitions
+      // off whichever shooter is alphabetically first; in match mode they
+      // share the same stage list, and in single-shooter mode there's
+      // only one shooter to pick.
+      const shooters = await api.listMatchShooters();
+      const first = shooters.shooters[0]?.slug;
+      if (!first) {
+        setRows([]);
+        return;
+      }
       const [proj, ov] = await Promise.all([
-        api.getProject(),
-        api.getExportOverview(),
+        api.getProject(first),
+        api.getExportOverview(first),
       ]);
       setProject(proj);
       setRows(buildBatchRows(proj, ov.stages, catalog));

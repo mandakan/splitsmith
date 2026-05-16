@@ -203,9 +203,7 @@ class DefaultTemplate(Template):
         # turning the glyphs into blobs; shadow blur slightly larger than
         # offset gives a soft halo rather than a hard duplicate.
         self.stroke_width_px = stroke_width_px if stroke_width_px is not None else max(2, big // 18)
-        self.shadow_offset_px = (
-            shadow_offset_px if shadow_offset_px is not None else max(2, big // 24)
-        )
+        self.shadow_offset_px = shadow_offset_px if shadow_offset_px is not None else max(2, big // 24)
         self.shadow_blur_px = shadow_blur_px if shadow_blur_px is not None else max(3, big // 12)
 
     def draw_frame(self, canvas: Image.Image, state: FrameState) -> None:
@@ -403,8 +401,7 @@ def _load_font(
             pass
         elif key not in _FONT_PRESETS:
             raise OverlayRenderError(
-                f"unknown font_name {font_name!r}; "
-                f"available: {', '.join(available_font_names())}"
+                f"unknown font_name {font_name!r}; " f"available: {', '.join(available_font_names())}"
             )
         for candidate in _FONT_PRESETS.get(key, ()):
             p = Path(candidate)
@@ -531,12 +528,8 @@ def _resolve_codec(codec: OverlayCodec, ffmpeg_binary: str) -> Literal["hevc-alp
     if codec == "hevc-alpha" or codec == "prores-4444":
         return codec
     if codec != "auto":
-        raise OverlayRenderError(
-            f"unknown overlay codec {codec!r}; expected one of {OVERLAY_CODECS}"
-        )
-    if platform.system() == "Darwin" and _ffmpeg_supports_encoder(
-        ffmpeg_binary, "hevc_videotoolbox"
-    ):
+        raise OverlayRenderError(f"unknown overlay codec {codec!r}; expected one of {OVERLAY_CODECS}")
+    if platform.system() == "Darwin" and _ffmpeg_supports_encoder(ffmpeg_binary, "hevc_videotoolbox"):
         return "hevc-alpha"
     return "prores-4444"
 

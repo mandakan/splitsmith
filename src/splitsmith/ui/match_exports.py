@@ -177,8 +177,7 @@ def export_match(
             )
         if not stage_input.audit_path.exists():
             raise MatchExportError(
-                f"stage {stage_input.stage_number}: audit JSON missing at "
-                f"{stage_input.audit_path}"
+                f"stage {stage_input.stage_number}: audit JSON missing at " f"{stage_input.audit_path}"
             )
         try:
             audit_data = json.loads(stage_input.audit_path.read_text(encoding="utf-8"))
@@ -205,8 +204,7 @@ def export_match(
             primary_meta = probe(stage_input.trimmed_path)  # type: ignore[operator]
         except fcpxml_gen.FFprobeError as exc:
             raise MatchExportError(
-                f"stage {stage_input.stage_number}: ffprobe failed on "
-                f"{stage_input.trimmed_path}: {exc}"
+                f"stage {stage_input.stage_number}: ffprobe failed on " f"{stage_input.trimmed_path}: {exc}"
             ) from exc
 
         secondaries: list[fcpxml_gen.SecondaryClip] = []
@@ -221,9 +219,7 @@ def export_match(
                 try:
                     sec_meta = probe(sec.trimmed_path)  # type: ignore[operator]
                 except fcpxml_gen.FFprobeError as exc:
-                    anomalies.append(
-                        f"stage {stage_input.stage_number}: cam {sec.video_id} dropped: {exc}"
-                    )
+                    anomalies.append(f"stage {stage_input.stage_number}: cam {sec.video_id} dropped: {exc}")
                     continue
                 secondaries.append(
                     fcpxml_gen.SecondaryClip(
@@ -262,9 +258,7 @@ def export_match(
                 )
 
         if request.pip_layout == "pip-corners" and secondaries:
-            laid_out = fcpxml_gen.apply_pip_corner_cycle(
-                secondaries, default=fcpxml_gen.PipPlacement()
-            )
+            laid_out = fcpxml_gen.apply_pip_corner_cycle(secondaries, default=fcpxml_gen.PipPlacement())
         else:
             laid_out = tuple(secondaries)
 
@@ -468,8 +462,7 @@ def _resolve_segment(
         return None
     if renderer != "fcpxml":
         anomalies.append(
-            f"{label} ignored: not yet supported by the "
-            f"{renderer} renderer (issue #173 follow-ups)"
+            f"{label} ignored: not yet supported by the " f"{renderer} renderer (issue #173 follow-ups)"
         )
         return None
     if not path.exists():

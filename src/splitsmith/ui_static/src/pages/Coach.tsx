@@ -39,8 +39,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +52,7 @@ import {
   type CoachShot,
   type CoachStageResponse,
   type MatchProject,
+  type ShooterListEntry,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -121,9 +123,16 @@ interface PerStageAggregate {
 
 function CoachMatch({ slug }: { slug?: string }) {
   const navigate = useNavigate();
-  const stagePrefix = slug ? `/coach/${slug}` : "/coach";
-  const auditPrefix = slug ? `/audit/${slug}` : "/audit";
+  if (!slug) {
+    // ShooterScopedRoute should keep this from rendering, but the
+    // Coach() wrapper still passes slugParam through when undefined;
+    // bounce back to the picker rather than 500ing on the API call.
+    return <Navigate to="/shooters" replace />;
+  }
+  const stagePrefix = `/coach/${slug}`;
+  const auditPrefix = `/audit/${slug}`;
   const [project, setProject] = useState<MatchProject | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [perStage, setPerStage] = useState<PerStageAggregate[]>([]);
   const [distributions, setDistributions] =
     useState<CoachMatchDistributions | null>(null);
@@ -143,11 +152,22 @@ function CoachMatch({ slug }: { slug?: string }) {
 
   useEffect(() => {
     let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => alive && setShooters(r.shooters))
+      .catch(() => alive && setShooters([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
     setLoading(true);
     setError(null);
     (async () => {
       try {
-        const proj = await api.getProject();
+        const proj = await api.getProject(slug);
         if (!alive) return;
         setProject(proj);
         const auditedStages = proj.stages.filter(
@@ -157,11 +177,11 @@ function CoachMatch({ slug }: { slug?: string }) {
           Promise.all(
             auditedStages.map((s) =>
               api
-                .getStageCoach(s.stage_number)
+                .getStageCoach(slug, s.stage_number)
                 .catch(() => null as CoachStageResponse | null),
             ),
           ),
-          api.getMatchCoachDistributions().catch(() => null),
+          api.getMatchCoachDistributions(slug).catch(() => null),
         ]);
         if (!alive) return;
         setDistributions(dist);
@@ -243,7 +263,7 @@ function CoachMatch({ slug }: { slug?: string }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [slug]);
 
   const auditedAggs = perStage.filter((s) => s.audited);
   const headline = useMemo(() => computeHeadline(auditedAggs), [auditedAggs]);
@@ -283,6 +303,12 @@ function CoachMatch({ slug }: { slug?: string }) {
 
   return (
     <div className="flex flex-col gap-5 px-7 py-5">
+      <ShooterChipStrip
+        shooters={shooters}
+        activeSlug={slug}
+        urlBase="coach"
+        label="Coaching"
+      />
       <div>
         <Kicker className="mb-2">Match analysis</Kicker>
         <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
@@ -948,9 +974,13 @@ function AnnotationsCard({
 
 function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const navigate = useNavigate();
-  const coachPrefix = slug ? `/coach/${slug}` : "/coach";
-  const auditPrefix = slug ? `/audit/${slug}` : "/audit";
+  if (!slug) {
+    return <Navigate to="/shooters" replace />;
+  }
+  const coachPrefix = `/coach/${slug}`;
+  const auditPrefix = `/audit/${slug}`;
   const [project, setProject] = useState<MatchProject | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
@@ -963,11 +993,22 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
 
   useEffect(() => {
     let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => alive && setShooters(r.shooters))
+      .catch(() => alive && setShooters([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
     (async () => {
       try {
         const [p, c] = await Promise.all([
-          api.getProject(),
-          api.getStageCoach(stage),
+          api.getProject(slug),
+          api.getStageCoach(slug, stage),
         ]);
         if (!alive) return;
         setProject(p);
@@ -982,7 +1023,7 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
     return () => {
       alive = false;
     };
-  }, [stage]);
+  }, [slug, stage]);
 
   useEffect(() => {
     if (!coach) return;
@@ -990,7 +1031,7 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
     if (anyUnclassified && !reclassifying) {
       setReclassifying(true);
       api
-        .reclassifyStageCoach(stage)
+        .reclassifyStageCoach(slug, stage)
         .then((c) => setCoach(c))
         .catch(() => {})
         .finally(() => setReclassifying(false));
@@ -1048,28 +1089,28 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const reclassify = useCallback(async () => {
     setReclassifying(true);
     try {
-      const c = await api.reclassifyStageCoach(stage);
+      const c = await api.reclassifyStageCoach(slug, stage);
       setCoach(c);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
       setReclassifying(false);
     }
-  }, [stage]);
+  }, [slug, stage]);
 
   const patchShot = useCallback(
     async (
       shotNumber: number,
-      patch: Parameters<typeof api.patchStageShotCoach>[2],
+      patch: Parameters<typeof api.patchStageShotCoach>[3],
     ) => {
       try {
-        const c = await api.patchStageShotCoach(stage, shotNumber, patch);
+        const c = await api.patchStageShotCoach(slug, stage, shotNumber, patch);
         setCoach(c);
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : String(e));
       }
     },
-    [stage],
+    [slug, stage],
   );
 
   const seekToShot = useCallback((shot: CoachShot) => {
@@ -1112,7 +1153,7 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const activeShot =
     coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null;
   const primary = coach.videos.find((v) => v.role === "primary");
-  const streamUrl = primary ? api.videoStreamUrl(primary.path) : null;
+  const streamUrl = primary ? api.videoStreamUrl(slug, primary.path) : null;
   const maxAbs =
     coach.shots.length > 0
       ? Math.max(...coach.shots.map((s) => s.time_absolute))
@@ -1125,6 +1166,13 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
 
   return (
     <div className="flex flex-col gap-4 px-7 py-5">
+      <ShooterChipStrip
+        shooters={shooters}
+        activeSlug={slug}
+        urlBase="coach"
+        stage={stage}
+        label="Coaching"
+      />
       {/* Compact stage header */}
       <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
         <div className="flex items-center gap-1.5">
@@ -1279,7 +1327,7 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
                 type="button"
                 onClick={togglePlay}
                 aria-label={isPlaying ? "Pause" : "Play"}
-                className="inline-flex size-10 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+                className="inline-flex size-10 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
               >
                 {isPlaying ? (
                   <Pause className="size-4" />

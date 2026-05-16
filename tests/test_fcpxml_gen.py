@@ -35,9 +35,7 @@ from splitsmith.fcpxml_gen import (
 )
 
 
-def _shot(
-    n: int, time_from_beep: float, split: float, peak: float = 0.5, conf: float = 0.8
-) -> Shot:
+def _shot(n: int, time_from_beep: float, split: float, peak: float = 0.5, conf: float = 0.8) -> Shot:
     return Shot(
         shot_number=n,
         time_absolute=10.0 + time_from_beep,
@@ -1627,9 +1625,7 @@ def test_secondary_with_pip_emits_corner_transform(corner: str, tmp_path: Path) 
     transform = cam_clip.find("adjust-transform")
     assert transform is not None
     assert list(cam_clip)[0] is transform  # transform must precede markers / nested clips
-    expected = _expected_pip_attrs(
-        seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner=corner
-    )
+    expected = _expected_pip_attrs(seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner=corner)
     assert transform.attrib == expected
 
 
@@ -1661,13 +1657,9 @@ def test_pip_position_is_resolution_independent(tmp_path: Path) -> None:
             )
         ],
     )
-    transform = ET.fromstring(out.read_bytes()).find(
-        ".//spine/asset-clip/asset-clip/adjust-transform"
-    )
+    transform = ET.fromstring(out.read_bytes()).find(".//spine/asset-clip/asset-clip/adjust-transform")
     assert transform is not None
-    expected = _expected_pip_attrs(
-        seq_w=3840, seq_h=2160, scale=0.30, margin_pct=2.0, corner="top-right"
-    )
+    expected = _expected_pip_attrs(seq_w=3840, seq_h=2160, scale=0.30, margin_pct=2.0, corner="top-right")
     assert transform.attrib == expected
     # Resolution-independent: the same PiP at 1080p emits the same
     # normalized position string.
@@ -1719,9 +1711,7 @@ def test_apply_pip_corner_cycle_preserves_explicit() -> None:
         beep_offset_seconds=5.0,
         label="Aux cam",
     )
-    laid_out = fcpxml_mod.apply_pip_corner_cycle(
-        (explicit, auto), default=fcpxml_mod.PipPlacement()
-    )
+    laid_out = fcpxml_mod.apply_pip_corner_cycle((explicit, auto), default=fcpxml_mod.PipPlacement())
     assert laid_out[0] is explicit  # untouched
     assert laid_out[1].pip is not None
     assert laid_out[1].pip.corner == "bottom-left"  # cycle starts at BL
@@ -1772,13 +1762,9 @@ def test_match_fcpxml_secondary_pip_uses_sequence_dims(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
     )
-    transform = ET.fromstring(out.read_bytes()).find(
-        ".//spine/asset-clip/asset-clip/adjust-transform"
-    )
+    transform = ET.fromstring(out.read_bytes()).find(".//spine/asset-clip/asset-clip/adjust-transform")
     assert transform is not None
-    expected = _expected_pip_attrs(
-        seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner="top-right"
-    )
+    expected = _expected_pip_attrs(seq_w=1920, seq_h=1080, scale=0.30, margin_pct=2.0, corner="top-right")
     assert transform.attrib == expected
 
 
@@ -1823,9 +1809,7 @@ def test_match_with_transition_emits_effect_resource(tmp_path: Path) -> None:
         output_path=out,
         project_name="match",
         config=OutputConfig(),
-        transitions=[
-            fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom", duration_seconds=0.5)
-        ],
+        transitions=[fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom", duration_seconds=0.5)],
     )
     root = ET.fromstring(out.read_bytes())
     effects = root.findall("./resources/effect")
@@ -1850,9 +1834,7 @@ def test_transition_offset_centred_on_boundary(tmp_path: Path) -> None:
         output_path=out,
         project_name="match",
         config=OutputConfig(),
-        transitions=[
-            fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom", duration_seconds=0.5)
-        ],
+        transitions=[fcpxml_mod.StageTransition(after_stage_index=0, kind="zoom", duration_seconds=0.5)],
     )
     root = ET.fromstring(out.read_bytes())
     # 20s clip, beep=5, last shot at +1.0s -> tail_avail=14s, tail_pad=5
@@ -1991,9 +1973,7 @@ def test_no_transitions_emits_unchanged_spine(tmp_path: Path) -> None:
     before -- absence of transitions must not change the output."""
     primary_a, primary_b, out = _two_stage_match(tmp_path)
     stages = _basic_match_stages(primary_a, primary_b)
-    generate_match_fcpxml(
-        stages=stages, output_path=out, project_name="match", config=OutputConfig()
-    )
+    generate_match_fcpxml(stages=stages, output_path=out, project_name="match", config=OutputConfig())
     root = ET.fromstring(out.read_bytes())
     assert root.find(".//spine/transition") is None
     assert root.find("./resources/effect") is None
@@ -2198,11 +2178,7 @@ def test_match_with_slate_title_emits_basic_title_effect(tmp_path: Path) -> None
         output_path=out,
         project_name="match",
         config=OutputConfig(),
-        titles=[
-            fcpxml_mod.StageTitle(
-                stage_index=0, text="Stage A", style="slate", duration_seconds=1.5
-            )
-        ],
+        titles=[fcpxml_mod.StageTitle(stage_index=0, text="Stage A", style="slate", duration_seconds=1.5)],
     )
     root = ET.fromstring(out.read_bytes())
     effects = root.findall("./resources/effect")
@@ -2222,11 +2198,7 @@ def test_slate_title_lands_on_spine_before_primary(tmp_path: Path) -> None:
         output_path=out,
         project_name="match",
         config=OutputConfig(),
-        titles=[
-            fcpxml_mod.StageTitle(
-                stage_index=0, text="Stage A", style="slate", duration_seconds=1.0
-            )
-        ],
+        titles=[fcpxml_mod.StageTitle(stage_index=0, text="Stage A", style="slate", duration_seconds=1.0)],
     )
     root = ET.fromstring(out.read_bytes())
     spine = root.find(".//spine")
@@ -2345,9 +2317,7 @@ def test_slate_with_transitions_raises(tmp_path: Path) -> None:
             project_name="match",
             config=OutputConfig(),
             transitions=[fcpxml_mod.StageTransition(after_stage_index=0)],
-            titles=[
-                fcpxml_mod.StageTitle(stage_index=0, text="A", style="slate", duration_seconds=1.0)
-            ],
+            titles=[fcpxml_mod.StageTitle(stage_index=0, text="A", style="slate", duration_seconds=1.0)],
         )
 
 
@@ -2362,11 +2332,7 @@ def test_lower_third_with_transitions_is_allowed(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
         transitions=[fcpxml_mod.StageTransition(after_stage_index=0)],
-        titles=[
-            fcpxml_mod.StageTitle(
-                stage_index=0, text="A", style="lower-third", duration_seconds=2.0
-            )
-        ],
+        titles=[fcpxml_mod.StageTitle(stage_index=0, text="A", style="lower-third", duration_seconds=2.0)],
     )
     root = ET.fromstring(out.read_bytes())
     assert root.find(".//spine/transition") is not None

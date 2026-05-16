@@ -13,7 +13,7 @@
 
 import { Bell, HelpCircle, Repeat, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, Outlet, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useNavigate, useParams } from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
 import {
@@ -43,6 +43,12 @@ export interface MatchShellOutletContext {
 
 export function MatchShell() {
   const navigate = useNavigate();
+  // The shell mounts above shooter-scoped routes (/audit/:slug, /coach/:slug,
+  // /export/:slug) and slug-less routes (/, /shooters, /beep-review,
+  // /compare/:stage). When a slug is in the URL we load that shooter's
+  // project so the sidebar reflects their progress; otherwise the sidebar
+  // shows match-level info without per-stage status.
+  const { slug } = useParams<{ slug?: string }>();
   const { mode, setMode } = useMode();
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
@@ -79,6 +85,19 @@ export function MatchShell() {
     };
   }, []);
 
+  // Server-state drift recovery: when ANY request returns 409 ``no_project``
+  // (typical cause: dev server restart wiped the in-memory bind state),
+  // ``api.ts`` fires this custom event. We bump ``refreshKey`` so the
+  // health-load effect re-runs, sees ``bound: false``, and the redirect
+  // below sends the user to /pick. Without this, the page sits with
+  // every endpoint failing and the JobsPanel silently empty.
+  useEffect(() => {
+    const onNoProject = () => setRefreshKey((k) => k + 1);
+    window.addEventListener("splitsmith:no-project", onNoProject);
+    return () =>
+      window.removeEventListener("splitsmith:no-project", onNoProject);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     api
@@ -86,14 +105,23 @@ export function MatchShell() {
       .then((h) => {
         if (alive) setHealth(h);
         if (h?.bound) {
-          api
-            .getProject()
-            .then((p) => {
-              if (alive) setProject(p);
-            })
-            .catch(() => {
-              if (alive) setProject(null);
-            });
+          // Sidebar stage list needs *some* shooter's project to render
+          // status. URL slug wins; otherwise fall back to the server's
+          // default shooter (alphabetically-first match shooter, or the
+          // legacy slug for single-shooter projects).
+          const fetchSlug = slug ?? h.default_shooter_slug ?? null;
+          if (fetchSlug) {
+            api
+              .getProject(fetchSlug)
+              .then((p) => {
+                if (alive) setProject(p);
+              })
+              .catch(() => {
+                if (alive) setProject(null);
+              });
+          } else {
+            setProject(null);
+          }
           api
             .listMatchShooters()
             .then((r) => {
@@ -112,7 +140,7 @@ export function MatchShell() {
     return () => {
       alive = false;
     };
-  }, [refreshKey]);
+  }, [refreshKey, slug]);
 
   const stages: MatchSidebarStage[] = useMemo(() => {
     if (!project) return [];
@@ -254,7 +282,11 @@ export function MatchShell() {
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
-          onStageClick={(n) => navigate(`/audit/${n}`)}
+          onStageClick={(n) => {
+            const target = slug ?? health?.default_shooter_slug;
+            navigate(target ? `/audit/${target}/${n}` : "/shooters");
+          }}
+          shooterSlug={slug ?? health?.default_shooter_slug ?? undefined}
         />
         <div className={cn("min-w-0 flex-1")}>
           <Outlet

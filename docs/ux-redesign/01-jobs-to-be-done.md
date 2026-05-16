@@ -294,6 +294,133 @@ Frequency: per Coach session. Pain today: high before the fix (shipped
   pending multi-version artifact storage; this is documented in the
   surface so it isn't faking state.
 
+## Jobs surfaced during path-scoped refactor (2026-05-16 addendum)
+
+These jobs were not in the original JTBD set; they surfaced when the
+shooter slug moved into the URL (#353) and the multi-shooter shell was
+exercised on real data. They are listed here so the catalog stays
+exhaustive.
+
+### F. Hold two shooters' contexts open in parallel
+
+**When** I am comparing how two shooters approached the same stage,
+**I want to** keep each shooter's Audit (or Coach) page open in its own
+tab with no cross-contamination, **so I can** flip between them
+without re-binding or losing one's local state every time the other
+loads.
+
+The single in-memory "active shooter" model from before #353 made this
+impossible: the second tab's request would mutate the active slug and
+break the first tab. Addressed by path-scoped URLs
+(`/audit/<slug>/...`, `/ingest/<slug>`, etc.) and a per-page
+``ShooterScopedRoute`` that keys the page on slug.
+
+Frequency: per-multi-shooter match. Pain today: solved.
+
+### G. Manage videos after initial ingest
+
+**When** I have already confirmed footage and started auditing, **I
+want to** keep adding cameras, removing wrong assignments, swapping
+primary, and finding moved source files for the rest of the match,
+**so I can** treat video management as an ongoing workspace, not a
+one-time wizard.
+
+The redesigned shell treated `/ingest` as a setup wizard with no
+persistent nav, so any of those operations after the initial confirm
+required deep-linking or browser-back. Addressed by a persistent
+**Videos** nav row on `MatchShell`'s sidebar (renamed from "Ingest").
+
+Frequency: every multi-camera or messy match. Pain today: solved.
+
+### H. Fix a wrong beep without leaving the audit page
+
+**When** I notice during audit that shots are mis-aligned with the
+beep (clustered too far after t=0, last shot overshoots the official
+stage time, fewer shots than expected), **I want to** re-pick the beep
+on the same screen and have trim + shot-detect re-run, **so I can**
+recover without three context switches into Ingest and back.
+
+Surfaced when the audit page actually got real footage with a wrong
+auto-detected beep. Addressed by an always-visible "Re-pick beep"
+button next to the beep readout, plus a proactive anomaly banner that
+surfaces when the heuristic detects a probably-wrong beep (draw > 2.5s
+or stage-time overshoot > 1s). Both paths open the same inline
+`BeepWaveformPicker`; Apply queues trim + shot-detect via the existing
+override endpoint.
+
+Frequency: per-match (any time auto-detect lands on a non-buzzer
+transient). Pain today: solved.
+
+### I. Find moved source videos from the UI
+
+**When** I move my source footage between drives (NAS, USB, archive),
+**I want to** find the new locations and rewrite the project's broken
+symlinks from the UI, **so I can** keep auditing and exporting without
+re-ingesting from scratch.
+
+The relink dialog (`RelinkDialog` + `/api/shooters/<slug>/videos/relink/*`)
+existed in code but was never mounted after the redesign; JobsPanel
+even carried a stub comment "Inline relink lands with the
+match-settings redesign". Addressed by a "Find moved videos" button on
+Ingest/Videos that opens the existing dialog.
+
+Frequency: ad-hoc, but inevitable across multiple matches. Pain
+today: solved.
+
+### J. Manually retry beep detection when auto-queue never fired
+
+**When** a primary's beep is missing because the auto-queue never
+fired (re-ingest path bug, worker crash, etc.) and the HITL queue
+doesn't surface it (it only emits ``beep_missing`` when
+``beep_auto_detect_failed`` is True), **I want to** click "Detect
+beep" on the video row, **so I can** kick the chain without dropping
+to the CLI.
+
+Surfaced from the May-15 re-ingest bug on the blacksmith project where
+the Pixel headcam was promoted to primary without auto-queueing
+detect_beep. Addressed by a per-video "Detect beep" button on the
+Videos page, visible whenever a non-ignored video lacks a
+``beep_time``. Companion fix: the audit's "beep" filter chip was
+hardcoded to count=1; now reflects whether the primary actually has
+one.
+
+Frequency: rare (depends on auto-queue reliability), but the workflow
+is dead in the water without it. Pain today: solved.
+
+### K. Survive a server bind-state loss without a confusing dead UI
+
+**When** the dev server restarts (uvicorn `--reload` after a code
+change) the in-memory bind is wiped; every request 409s with code
+``no_project``. **I want** the shell to redirect me to `/pick`
+automatically, **so I can** rebind in one click instead of staring at
+a JobsPanel that silently emptied.
+
+Surfaced during the redesign push when reload-driven restarts kept
+catching the user off-guard. Addressed by a `splitsmith:no-project`
+window event fired from the shared `request()` helper on 409
+``no_project``; `MatchShell` listens, bumps its refresh key, the
+existing bound-check `<Navigate to=/pick>` fires.
+
+Frequency: dev-only today; rare in production. Pain today: solved
+short-term, but the underlying architectural question (the backend is
+stateful) is a noted SaaS-readiness follow-up.
+
+### L. URL / on-disk paths must not leak competitor names
+
+**When** I share a screen recording, a log snippet, or an exported
+project archive, **I want** competitor names absent from URL slugs and
+shooter folder names, **so I can** share without PII leaks. (Match
+names and stage names stay readable since they're public match
+metadata.)
+
+Surfaced after #353 propagated the slug into URLs. Addressed by
+opaque shooter slugs of the shape ``s_<8 hex>`` minted with
+``secrets.token_hex``. Display names remain in ``shooter.json``.
+Migration command: ``splitsmith match rename-shooter-slugs <path>``.
+
+Frequency: structural (every multi-shooter match). Pain today:
+solved.
+
 ## Process notes
 
 - Job discovery was iterative: a seeded candidate list, refined into JTBD

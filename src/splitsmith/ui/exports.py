@@ -437,9 +437,7 @@ def export_stage(
                     try:
                         sec_meta = fcpxml_gen.probe_video(sec_path)
                     except fcpxml_gen.FFprobeError as exc:
-                        skip_reasons.append(
-                            f"secondary cam {sec.video_id} dropped from FCPXML: {exc}"
-                        )
+                        skip_reasons.append(f"secondary cam {sec.video_id} dropped from FCPXML: {exc}")
                         continue
                     # Each cam was trimmed with the same pre-buffer as the
                     # primary, so its clip-local beep is at
@@ -514,9 +512,7 @@ def export_stage(
     secondary_paths_present = {vid: p for vid, p in secondary_trimmed.items() if p.exists()}
     return StageExportResult(
         stage_number=stage_data.stage_number,
-        trimmed_video_path=(
-            trimmed_path if trimmed_path is not None and trimmed_path.exists() else None
-        ),
+        trimmed_video_path=(trimmed_path if trimmed_path is not None and trimmed_path.exists() else None),
         csv_path=csv_path,
         fcpxml_path=fcpxml_path,
         report_path=report_path,

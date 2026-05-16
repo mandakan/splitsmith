@@ -273,9 +273,7 @@ def test_fcpxml_match_with_titles_validates(tmp_path: Path) -> None:
         project_name="match",
         config=OutputConfig(),
         titles=[
-            fcpxml_gen.StageTitle(
-                stage_index=0, text="Stage A", style="slate", duration_seconds=1.0
-            ),
+            fcpxml_gen.StageTitle(stage_index=0, text="Stage A", style="slate", duration_seconds=1.0),
             fcpxml_gen.StageTitle(
                 stage_index=1,
                 text="Stage B",
@@ -315,12 +313,8 @@ def test_fcpxml_match_with_intro_outro_validates(tmp_path: Path) -> None:
         output_path=out,
         project_name="match",
         config=OutputConfig(),
-        intro=fcpxml_gen.IntroOutroSegment(
-            video_path=intro_path, video=_meta_30fps(), name="Intro"
-        ),
-        outro=fcpxml_gen.IntroOutroSegment(
-            video_path=outro_path, video=_meta_30fps(), name="Outro"
-        ),
+        intro=fcpxml_gen.IntroOutroSegment(video_path=intro_path, video=_meta_30fps(), name="Intro"),
+        outro=fcpxml_gen.IntroOutroSegment(video_path=outro_path, video=_meta_30fps(), name="Outro"),
     )
     validate_against_dtd(out, dtd=fcpxml_dtd_path())
 
@@ -351,9 +345,7 @@ def test_fcpxml_match_with_chapter_markers_validates(tmp_path: Path) -> None:
         output_path=out,
         project_name="match",
         config=OutputConfig(),
-        intro=fcpxml_gen.IntroOutroSegment(
-            video_path=intro_path, video=_meta_30fps(), name="Intro"
-        ),
+        intro=fcpxml_gen.IntroOutroSegment(video_path=intro_path, video=_meta_30fps(), name="Intro"),
         chapter_markers=True,
     )
     validate_against_dtd(out, dtd=fcpxml_dtd_path())
@@ -406,8 +398,7 @@ def test_invalid_fcpxml_fails_validation(tmp_path: Path) -> None:
     ignored)."""
     out = tmp_path / "bad.fcpxml"
     out.write_bytes(
-        b'<?xml version="1.0"?>\n<!DOCTYPE fcpxml>\n'
-        b'<fcpxml version="1.10"><nonsense/></fcpxml>\n'
+        b'<?xml version="1.0"?>\n<!DOCTYPE fcpxml>\n' b'<fcpxml version="1.10"><nonsense/></fcpxml>\n'
     )
     with pytest.raises(AssertionError, match="DTD validation failed"):
         validate_against_dtd(out, dtd=fcpxml_dtd_path())

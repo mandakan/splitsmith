@@ -78,15 +78,22 @@ export function Compare() {
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const rafRef = useRef<number | null>(null);
 
-  // Load project + compare data.
+  // Load project + compare data. Stage definitions are identical across
+  // every shooter in a match, so we lift them from whichever shooter is
+  // alphabetically first. Compare itself is slug-less (multi-shooter view).
   useEffect(() => {
     let alive = true;
-    api
-      .getProject()
-      .then((p) => {
+    (async () => {
+      try {
+        const shooters = await api.listMatchShooters();
+        const first = shooters.shooters[0]?.slug;
+        if (!first) return;
+        const p = await api.getProject(first);
         if (alive) setProject(p);
-      })
-      .catch(() => {});
+      } catch {
+        /* compare bundle below covers the no-shooter case */
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -103,8 +110,7 @@ export function Compare() {
         if (!alive) return;
         setBundle(b);
         if (b.shooters.length > 0) {
-          const active = b.shooters.find((s) => s.is_active) ?? b.shooters[0];
-          setAudioSlug(active.slug);
+          setAudioSlug(b.shooters[0].slug);
           setVisibleSlugs(
             new Set(b.shooters.filter((s) => s.video_path).map((s) => s.slug)),
           );
@@ -308,7 +314,13 @@ export function Compare() {
         >
           <button
             type="button"
-            onClick={() => navigate(`/audit/${stageNumber}`)}
+            onClick={() => {
+              // Compare is multi-shooter; pick the audio source (the
+              // primary shown in this view) as the target shooter so
+              // the user lands on the same camera they were watching.
+              const target = audioSlug ?? orderedShooters[0]?.slug;
+              if (target) navigate(`/audit/${target}/${stageNumber}`);
+            }}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Audit
@@ -318,7 +330,10 @@ export function Compare() {
           </span>
           <button
             type="button"
-            onClick={() => navigate(`/coach/${stageNumber}`)}
+            onClick={() => {
+              const target = audioSlug ?? orderedShooters[0]?.slug;
+              if (target) navigate(`/coach/${target}/${stageNumber}`);
+            }}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
           >
             Coach
@@ -373,15 +388,27 @@ export function Compare() {
         </Button>
       </div>
 
+      {/* Unfinished banner: when at least one shooter is playable, the
+       *  grid renders the playable subset. Shooters without a cached
+       *  trim are surfaced here so the user can rebuild the cache (when
+       *  audit is done) or jump into audit (when nothing has run yet)
+       *  without having to leave the page. */}
+      {visibleShooters.length > 0 &&
+      orderedShooters.some((s) => !s.video_path) ? (
+        <UnfinishedShootersBanner
+          unfinished={orderedShooters.filter((s) => !s.video_path)}
+          onOpenInAudit={(slug) =>
+            navigate(`/audit/${slug}/${stageNumber}`)
+          }
+        />
+      ) : null}
+
       {/* Video grid */}
       <div className={layoutClass(layout)}>
         {visibleShooters.length === 0 ? (
           <CompareEmptyState
             unfinished={orderedShooters.filter((s) => !s.video_path)}
             onOpenInAudit={(slug) => {
-              // #353 phase 1: target the slug-scoped audit URL directly.
-              // ShooterScopedRoute handles the rebind before mounting
-              // the page, so we don't need to await it here.
               navigate(`/audit/${slug}/${stageNumber}`);
             }}
           />
@@ -425,6 +452,104 @@ export function Compare() {
 /* -------------------------------------------------------------------------- */
 /* Empty state -- no shooter has a usable trim for this stage yet             */
 /* -------------------------------------------------------------------------- */
+
+function UnfinishedShootersBanner({
+  unfinished,
+  onOpenInAudit,
+}: {
+  unfinished: CompareShooterRecord[];
+  onOpenInAudit: (slug: string) => void | Promise<void>;
+}) {
+  const [busySlug, setBusySlug] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [doneSlugs, setDoneSlugs] = useState<Set<string>>(() => new Set());
+
+  // A shooter with shots[] but no video_path has finished audit; just
+  // the trim cache is missing. Offer to rebuild it in-place. A shooter
+  // with neither needs to be audited first.
+  const rebuild = async (slug: string) => {
+    setErrorMsg(null);
+    setBusySlug(slug);
+    try {
+      const res = await api.buildShooterTrimCaches(slug);
+      // The server queues jobs but the bundle won't see the new trim
+      // until the worker finishes. Tell the user to refresh once jobs
+      // settle rather than polling the bundle here (Compare's polling
+      // story is "reload the page"; the JobsPanel surfaces progress).
+      if (res.jobs_submitted.length === 0) {
+        setErrorMsg(
+          `${slug}: nothing to rebuild -- either no stage qualifies or every cache is already on disk. Open the shooter in audit to see why.`,
+        );
+        return;
+      }
+      setDoneSlugs((prev) => new Set(prev).add(slug));
+    } catch (e) {
+      setErrorMsg(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusySlug(null);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-rule bg-surface px-5 py-3 text-sm text-muted">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2">
+          Missing footage
+        </span>
+        <span className="text-ink-2">{unfinished.length}</span>
+        <span>
+          {unfinished.length === 1 ? "shooter has" : "shooters have"} no
+          cached trim for this stage.
+        </span>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {unfinished.map((s) => {
+          const auditedButUncached = s.shots.length > 0;
+          const queued = doneSlugs.has(s.slug);
+          return (
+            <div
+              key={s.slug}
+              className="inline-flex items-center gap-2 rounded-lg border border-rule-strong bg-surface-2 px-3 py-1.5 text-xs"
+            >
+              <span className="font-semibold text-ink-2">{s.name}</span>
+              {auditedButUncached ? (
+                queued ? (
+                  <span className="text-[0.6875rem] uppercase tracking-[0.08em] text-done">
+                    Build queued -- check Jobs
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => rebuild(s.slug)}
+                    disabled={busySlug === s.slug}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 py-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led disabled:opacity-50"
+                  >
+                    {busySlug === s.slug ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : null}
+                    Build trim cache
+                  </button>
+                )
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenInAudit(s.slug)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 py-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led"
+                >
+                  <ArrowRight className="size-3" />
+                  Open in audit
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {errorMsg ? (
+        <div className="mt-2 text-xs text-led">{errorMsg}</div>
+      ) : null}
+    </div>
+  );
+}
 
 function CompareEmptyState({
   unfinished,
@@ -501,7 +626,7 @@ function ShooterChip({
       <Avatar
         size="xs"
         initials={initials(shooter.name)}
-        tone={shooter.is_active ? "you" : undefined}
+        tone={undefined}
         seed={shooter.slug}
         name={shooter.name}
       />
@@ -521,7 +646,7 @@ function ShooterChip({
         className={cn(
           "inline-flex size-6 items-center justify-center rounded-full transition-colors",
           isAudio
-            ? "bg-led text-bg shadow-[0_0_10px_var(--color-led-glow)]"
+            ? "bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
             : "bg-surface-3 text-subtle hover:text-ink",
         )}
       >
@@ -598,20 +723,15 @@ function VideoTile({
         <Avatar
           size="xs"
           initials={initials(shooter.name)}
-          tone={shooter.is_active ? "you" : undefined}
+          tone={undefined}
           seed={shooter.slug}
           name={shooter.name}
         />
         <span className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em] text-ink">
           {shooter.name}
         </span>
-        {shooter.is_active && (
-          <span className="rounded border border-led-deep bg-led/10 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-led">
-            You
-          </span>
-        )}
         {isAudio && (
-          <span className="ml-auto inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
+          <span className="ml-auto inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
             <Volume2 className="size-2.5" />
             Audio
           </span>
@@ -690,7 +810,7 @@ function Transport({
         type="button"
         onClick={onTogglePlay}
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="inline-flex size-11 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+        className="inline-flex size-11 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
       >
         {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
       </button>
@@ -959,27 +1079,19 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
       {rows.map((row) => (
         <div
           key={row.shooter.slug}
-          className={cn(
-            "grid grid-cols-[48px_1fr_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0",
-            row.shooter.is_active && "bg-led/[0.05]",
-          )}
+          className="grid grid-cols-[48px_1fr_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0"
         >
           <RankPill rank={row.rank} />
           <div className="inline-flex items-center gap-2.5">
             <Avatar
               size="sm"
               initials={initials(row.shooter.name)}
-              tone={row.shooter.is_active ? "you" : undefined}
+              tone={undefined}
               seed={row.shooter.slug}
             />
             <span className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
               {row.shooter.name}
             </span>
-            {row.shooter.is_active && (
-              <span className="rounded border border-led-deep bg-led/10 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-led">
-                You
-              </span>
-            )}
           </div>
           <span
             className={cn(
@@ -1007,7 +1119,7 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
 function RankPill({ rank }: { rank: number }) {
   const tone =
     rank === 1
-      ? "border-led bg-led text-bg shadow-[0_0_10px_var(--color-led-glow)]"
+      ? "border-led bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
       : rank === 2
         ? "border-ink-2 bg-surface-3 text-ink"
         : "border-rule bg-surface-3 text-muted";

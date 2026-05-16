@@ -26,11 +26,7 @@ def test_clean_preset_matches_legacy_hardcoded_values() -> None:
 def test_splitsmith_preset_loads_from_packaged_json() -> None:
     """The ``splitsmith`` preset must round-trip through the JSON mirror so
     a regenerate step actually flows into runtime."""
-    with (
-        resources.files("splitsmith.data")
-        .joinpath("overlay_theme.json")
-        .open("r", encoding="utf-8") as fh
-    ):
+    with resources.files("splitsmith.data").joinpath("overlay_theme.json").open("r", encoding="utf-8") as fh:
         data = json.load(fh)
 
     t = overlay_theme.load_theme("splitsmith")
@@ -156,9 +152,7 @@ def test_clean_theme_leaves_font_resolution_to_system_fallback() -> None:
     clean = overlay_theme.load_theme("clean")
     tmpl = overlay_render.DefaultTemplate(width=320, height=180, theme=clean)
     family, _ = tmpl.font_big.getname()
-    assert (
-        family != "JetBrains Mono"
-    ), f"clean theme should not auto-wire bundled font; got family={family!r}"
+    assert family != "JetBrains Mono", f"clean theme should not auto-wire bundled font; got family={family!r}"
 
 
 def test_available_font_names_includes_bundled_presets() -> None:

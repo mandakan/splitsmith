@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 
 interface MountSelectProps {
+  slug: string;
   video: StageVideo;
   stageNumber: number;
   disabled?: boolean;
@@ -35,6 +36,7 @@ interface MountSelectProps {
 }
 
 export function MountSelect({
+  slug,
   video,
   stageNumber,
   disabled = false,
@@ -67,6 +69,7 @@ export function MountSelect({
           setError?.(null);
           try {
             const updated = await api.setCameraMount(
+              slug,
               stageNumber,
               video.video_id,
               next,

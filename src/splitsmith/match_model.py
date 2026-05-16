@@ -257,9 +257,7 @@ class Match(BaseModel):
         collides with an existing slug.
         """
         if shooter.slug in self.shooters:
-            raise ValueError(
-                f"shooter slug {shooter.slug!r} already registered on match {self.name!r}"
-            )
+            raise ValueError(f"shooter slug {shooter.slug!r} already registered on match {self.name!r}")
         shooter_root = self.shooter_root(match_root, shooter.slug)
         shooter_root.mkdir(parents=True, exist_ok=True)
         for sub in SHOOTER_SUBDIRS:
@@ -306,9 +304,7 @@ def from_path(path: Path) -> tuple[str, Path]:
         return "match", path
     if is_legacy_project_folder(path):
         return "legacy", path
-    raise FileNotFoundError(
-        f"{path} has neither {MATCH_FILE} nor {PROJECT_FILE}; not a splitsmith project"
-    )
+    raise FileNotFoundError(f"{path} has neither {MATCH_FILE} nor {PROJECT_FILE}; not a splitsmith project")
 
 
 def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
@@ -325,7 +321,11 @@ def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
       - the FastAPI endpoint refactor (#321) when it lands, so the SPA can
         speak the new URL space even against legacy projects on disk
     """
-    slug = slugify(project.competitor_name or "unknown")
+    # legacy_to_match_view: synthesise a Match view for a legacy single-
+    # shooter project. The slug is opaque (no PII leak) but deterministic
+    # for a given project root so callers that build URLs against the
+    # same project across reloads see a stable id.
+    slug = _legacy_view_slug(project)
     match = Match(
         name=project.name,
         created_at=project.created_at,
@@ -383,11 +383,53 @@ def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
 # ---------------------------------------------------------------------------
 
 
-def slugify(name: str) -> str:
-    """Kebab-case a name for use as a shooter slug.
+def _legacy_view_slug(project: MatchProject) -> str:
+    """Deterministic opaque slug for the synthetic view over a legacy
+    single-shooter project. The legacy disk layout has no
+    ``shooters/<slug>/`` dir so the slug is purely a routing token; we
+    hash the project name + scoreboard ids so the same project gets the
+    same slug across reloads without leaking the competitor name.
+    """
+    import hashlib
 
-    Strips accents, keeps ``[a-z0-9]``, collapses runs of separators to a
-    single dash. Falls back to ``"shooter"`` for empty/garbage input.
+    seed = "|".join(
+        str(x or "")
+        for x in (
+            project.name,
+            project.scoreboard_content_type,
+            project.scoreboard_match_id,
+            project.selected_shooter_id,
+        )
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    return f"s_{digest}"
+
+
+def mint_shooter_slug(taken: set[str] | None = None) -> str:
+    """Mint a fresh opaque shooter slug.
+
+    Shape: ``s_<8 lowercase hex>``. Random, never derived from the
+    shooter's name, so URLs / on-disk paths / server logs don't leak
+    competitor PII. ``taken`` is consulted to avoid the 1-in-4-billion
+    chance of collision within a match (and to keep tests deterministic
+    when they mock the RNG).
+    """
+    import secrets
+
+    while True:
+        candidate = f"s_{secrets.token_hex(4)}"
+        if not taken or candidate not in taken:
+            return candidate
+
+
+def slugify_filename(name: str) -> str:
+    """Kebab-case a string for filesystem-safe filenames.
+
+    Used for stage / match filenames where readability matters and the
+    name is not PII. ``slugify`` (the old shooter-slug helper) used to
+    do this with the same impl; it now mints opaque shooter slugs, so
+    callers that want the old kebab-case behavior must use this helper
+    explicitly.
     """
     import re
     import unicodedata
@@ -396,17 +438,7 @@ def slugify(name: str) -> str:
     ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
     lower = ascii_only.lower()
     slugged = re.sub(r"[^a-z0-9]+", "-", lower).strip("-")
-    return slugged or "shooter"
-
-
-def disambiguate_slug(slug: str, taken: set[str]) -> str:
-    """Append a numeric suffix to ``slug`` until it doesn't collide with ``taken``."""
-    if slug not in taken:
-        return slug
-    n = 2
-    while f"{slug}-{n}" in taken:
-        n += 1
-    return f"{slug}-{n}"
+    return slugged or "name"
 
 
 # ---------------------------------------------------------------------------
@@ -471,34 +503,24 @@ def plan_merge(
     projects: list[tuple[Path, MatchProject]] = []
     for src in inputs:
         if not is_legacy_project_folder(src):
-            raise MergeConflictError(
-                f"{src} is not a legacy single-shooter project (no {PROJECT_FILE})"
-            )
+            raise MergeConflictError(f"{src} is not a legacy single-shooter project (no {PROJECT_FILE})")
         projects.append((src, MatchProject.load(src)))
 
     # Validate identity.
     scoreboard_ids = {p.scoreboard_match_id for _, p in projects if p.scoreboard_match_id}
     if len(scoreboard_ids) > 1:
-        raise MergeConflictError(
-            f"inputs disagree on scoreboard_match_id: {sorted(scoreboard_ids)}"
-        )
+        raise MergeConflictError(f"inputs disagree on scoreboard_match_id: {sorted(scoreboard_ids)}")
     sb_id = next(iter(scoreboard_ids), None)
 
-    content_types = {
-        p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None
-    }
+    content_types = {p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None}
     if len(content_types) > 1:
-        raise MergeConflictError(
-            f"inputs disagree on scoreboard_content_type: {sorted(content_types)}"
-        )
+        raise MergeConflictError(f"inputs disagree on scoreboard_content_type: {sorted(content_types)}")
     sb_ct = next(iter(content_types), None)
 
     names = {p.name for _, p in projects}
     if name is None:
         if len(names) > 1:
-            raise MergeConflictError(
-                f"inputs have different names {sorted(names)}; pass --name explicitly"
-            )
+            raise MergeConflictError(f"inputs have different names {sorted(names)}; pass --name explicitly")
         name = next(iter(names))
 
     dates = {p.match_date for _, p in projects if p.match_date}
@@ -537,21 +559,18 @@ def plan_merge(
                 and candidate.stage_rounds is not None
                 and existing.stage_rounds != candidate.stage_rounds
             ):
-                raise MergeConflictError(
-                    f"stage {s.stage_number}: stage_rounds disagreement (in {src})"
-                )
+                raise MergeConflictError(f"stage {s.stage_number}: stage_rounds disagreement (in {src})")
             # Prefer the one that has stage_rounds populated.
             if existing.stage_rounds is None and candidate.stage_rounds is not None:
                 stages_by_number[s.stage_number] = candidate
 
     stage_defs = [stages_by_number[k] for k in sorted(stages_by_number)]
 
-    # Assign slugs (kebab-cased competitor names, disambiguated on collision).
+    # Assign opaque slugs so on-disk paths / URLs / logs don't leak names.
     taken: set[str] = set()
     moves: list[ShooterMove] = []
     for src, proj in projects:
-        base = slugify(proj.competitor_name or src.name)
-        slug = disambiguate_slug(base, taken)
+        slug = mint_shooter_slug(taken)
         taken.add(slug)
         moves.append(
             ShooterMove(
@@ -594,9 +613,7 @@ def execute_merge(
     import shutil
 
     if (plan.output_root / MATCH_FILE).exists():
-        raise FileExistsError(
-            f"{plan.output_root} already contains {MATCH_FILE}; refusing to overwrite"
-        )
+        raise FileExistsError(f"{plan.output_root} already contains {MATCH_FILE}; refusing to overwrite")
 
     plan.output_root.mkdir(parents=True, exist_ok=True)
     for sub in MATCH_SUBDIRS:
@@ -709,15 +726,15 @@ __all__ = [
     "Shooter",
     "ShooterMove",
     "ShooterStageData",
-    "disambiguate_slug",
     "execute_merge",
     "from_path",
     "is_legacy_project_folder",
     "is_match_folder",
     "legacy_to_match_view",
     "load_match_or_legacy",
+    "mint_shooter_slug",
     "plan_merge",
-    "slugify",
+    "slugify_filename",
 ]
 
 

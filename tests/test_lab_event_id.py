@@ -64,8 +64,7 @@ def test_match_stage_from_slug_returns_none_for_non_matching() -> None:
 def test_event_id_from_payload_combines_match_stage_and_shooter() -> None:
     payload = {"shooter": {"id": "ssi-12345", "ssi_shooter_id": 12345}}
     assert (
-        event_id_from_payload("stage-shots-blacksmith-2026-stage6", payload)
-        == "blacksmith-2026:6:ssi-12345"
+        event_id_from_payload("stage-shots-blacksmith-2026-stage6", payload) == "blacksmith-2026:6:ssi-12345"
     )
 
 
@@ -119,8 +118,7 @@ def test_list_fixtures_groups_multi_cam_siblings_by_event_id(tmp_path: Path) -> 
     by_slug = {r.slug: r for r in records}
     assert by_slug["stage-shots-blacksmith-2026-stage6"].event_id == "blacksmith-2026:6:ssi-42"
     assert (
-        by_slug["stage-shots-blacksmith-2026-stage6-apple-iphone17pro"].event_id
-        == "blacksmith-2026:6:ssi-42"
+        by_slug["stage-shots-blacksmith-2026-stage6-apple-iphone17pro"].event_id == "blacksmith-2026:6:ssi-42"
     )
 
 
@@ -138,9 +136,7 @@ def test_list_fixtures_distinct_shooters_get_distinct_events(tmp_path: Path) -> 
     records = list_fixtures(fixtures)
     by_slug = {r.slug: r for r in records}
     assert by_slug["stage-shots-blacksmith-2026-stage6"].event_id == "blacksmith-2026:6:ssi-1"
-    assert (
-        by_slug["stage-shots-blacksmith-2026-stage6-friend"].event_id == "blacksmith-2026:6:ssi-2"
-    )
+    assert by_slug["stage-shots-blacksmith-2026-stage6-friend"].event_id == "blacksmith-2026:6:ssi-2"
     assert (
         by_slug["stage-shots-blacksmith-2026-stage6"].event_id
         != by_slug["stage-shots-blacksmith-2026-stage6-friend"].event_id

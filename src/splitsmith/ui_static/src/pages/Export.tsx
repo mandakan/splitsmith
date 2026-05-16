@@ -39,6 +39,9 @@ import {
   type ReactNode,
 } from "react";
 
+import { Navigate, useParams } from "react-router-dom";
+
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
@@ -48,6 +51,7 @@ import {
   type MatchExportResult,
   type MatchProject,
   type OverlayCodec,
+  type ShooterListEntry,
   type StageExportStatus,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -111,8 +115,15 @@ const TITLE_STYLES: {
 ];
 
 export function Export() {
+  const { slug } = useParams<{ slug: string }>();
+  if (!slug) return <Navigate to="/shooters" replace />;
+  return <ExportInner slug={slug} />;
+}
+
+function ExportInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
@@ -120,8 +131,8 @@ export function Export() {
   const reload = useCallback(async () => {
     try {
       const [proj, ov] = await Promise.all([
-        api.getProject(),
-        api.getExportOverview(),
+        api.getProject(slug),
+        api.getExportOverview(slug),
       ]);
       setProject(proj);
       setOverview(ov);
@@ -129,11 +140,22 @@ export function Export() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => alive && setShooters(r.shooters))
+      .catch(() => alive && setShooters([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // === Form state ===
   const [mode, setMode] = useState<OutputMode>("single");
@@ -266,7 +288,7 @@ export function Export() {
     setError(null);
     setResult(null);
     try {
-      const submitted = await api.exportMatch({
+      const submitted = await api.exportMatch(slug, {
         stage_numbers: orderedSelection,
         head_pad_seconds: headPad,
         tail_pad_seconds: tailPad,
@@ -315,6 +337,12 @@ export function Export() {
 
   return (
     <div className="px-7 py-5">
+      <ShooterChipStrip
+        shooters={shooters}
+        activeSlug={slug}
+        urlBase="export"
+        label="Exporting"
+      />
       <div className="mb-5">
         <Kicker className="mb-2">Final cut &middot; bundle</Kicker>
         <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
@@ -640,7 +668,7 @@ export function Export() {
                 type="button"
                 onClick={() => void submitExport()}
                 disabled={!canExport}
-                className="w-full bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+                className="w-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
               >
                 {busy ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -1009,7 +1037,7 @@ function FormatRow({
           className={cn(
             "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded border-[1.5px]",
             selected
-              ? "border-led bg-led text-bg"
+              ? "border-led bg-led-fill text-ink"
               : "border-rule-strong bg-surface",
           )}
         >

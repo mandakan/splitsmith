@@ -204,9 +204,7 @@ def test_backfill_adds_camera_venue_gun_and_history(tmp_path: Path) -> None:
 
 def test_backfill_idempotent(tmp_path: Path) -> None:
     f = tmp_path / "fixture.json"
-    _write_fixture(
-        f, {"shots": [], "camera": {"id": "go3s"}, "venue": {}, "gun": {}, "history": []}
-    )
+    _write_fixture(f, {"shots": [], "camera": {"id": "go3s"}, "venue": {}, "gun": {}, "history": []})
     changed = backfill_fixture(f, GO3S)
     assert not changed
 

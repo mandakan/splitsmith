@@ -31,9 +31,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { FolderPicker } from "@/components/FolderPicker";
+import { RelinkDialog } from "@/components/RelinkDialog";
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +44,7 @@ import {
   type CameraMount,
   type MatchProject,
   type ServerHealth,
+  type ShooterListEntry,
   type StageEntry,
   type StageVideo,
   type VideoRole,
@@ -51,21 +54,47 @@ import { cn } from "@/lib/utils";
 type StorageMode = "symlink" | "copy";
 
 export function Ingest() {
+  const { slug } = useParams<{ slug: string }>();
+  if (!slug) return <Navigate to="/shooters" replace />;
+  return <IngestInner slug={slug} />;
+}
+
+function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
+
+  // Match-level shooter list drives the chip-strip switcher. 409
+  // (legacy single-shooter project) collapses to an empty list, which
+  // hides the strip without surfacing as an error to the user.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => {
+        if (alive) setShooters(r.shooters);
+      })
+      .catch(() => {
+        if (alive) setShooters([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function reload() {
     setError(null);
     try {
       const [p, h] = await Promise.all([
-        api.getProject(),
+        api.getProject(slug),
         api.getHealth(),
       ]);
       setProject(p);
@@ -91,7 +120,7 @@ export function Ingest() {
     setScanning(true);
     setError(null);
     try {
-      await api.scanVideos(path, true, storage);
+      await api.scanVideos(slug, path, true, storage);
       setLastScannedDir(path);
       await reload();
     } catch (e: unknown) {
@@ -106,7 +135,7 @@ export function Ingest() {
     setScanning(true);
     setError(null);
     try {
-      await api.scanFiles(files.map((f) => f.path), true, storage);
+      await api.scanFiles(slug, files.map((f) => f.path), true, storage);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -123,7 +152,7 @@ export function Ingest() {
     setBusy(true);
     setError(null);
     try {
-      await api.moveAssignment(videoPath, toStage, role);
+      await api.moveAssignment(slug, videoPath, toStage, role);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -136,7 +165,7 @@ export function Ingest() {
     setBusy(true);
     setError(null);
     try {
-      await api.removeVideo(videoPath, false);
+      await api.removeVideo(slug, videoPath, false);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -209,7 +238,53 @@ export function Ingest() {
           </p>
         </div>
 
-        <ShooterBanner project={project} />
+        {/* Switch which shooter you're managing videos for. Same chip
+         *  pattern as Audit / Coach / Export so the user has one mental
+         *  model for moving between shooters. Hides itself in
+         *  single-shooter matches and legacy projects. */}
+        <div className="mb-5">
+          <ShooterChipStrip
+            shooters={shooters}
+            activeSlug={slug}
+            urlBase="ingest"
+            label="Adding footage for"
+            count={(s) =>
+              `${s.video_count} video${s.video_count === 1 ? "" : "s"}`
+            }
+          />
+        </div>
+
+        {/* Top-level actions. The relink dialog handles the "I moved my
+         *  source videos and the project's symlinks are now broken"
+         *  JTBD. It scans a folder recursively, matches by basename, and
+         *  rewrites the per-video symlinks. Reachable here so the user
+         *  doesn't have to dig through Settings or the CLI. */}
+        {!isEmpty && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowRelinkDialog(true)}
+            >
+              <Folder className="size-3.5" />
+              <span className="font-display uppercase tracking-[0.08em]">
+                Find moved videos
+              </span>
+            </Button>
+            <span className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+              Use this when source files have moved and the project's symlinks are broken.
+            </span>
+          </div>
+        )}
+
+        {showRelinkDialog && (
+          <RelinkDialog
+            slug={slug}
+            onClose={() => setShowRelinkDialog(false)}
+            onApplied={() => void reload()}
+          />
+        )}
 
         {error && (
           <div className="mb-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
@@ -220,6 +295,7 @@ export function Ingest() {
         {showFolderPicker && (
           <div className="mb-5 rounded-2xl border border-rule-strong bg-surface p-4">
             <FolderPicker
+              slug={slug}
               initialPath={lastScannedDir ?? undefined}
               onSelect={(path) => void scanFolder(path)}
               onSelectFiles={(files) => void scanFiles(files)}
@@ -249,6 +325,7 @@ export function Ingest() {
           />
         ) : project ? (
           <ReviewState
+            slug={slug}
             project={project}
             storage={storage}
             onStorageChange={setStorage}
@@ -258,6 +335,7 @@ export function Ingest() {
             onConfirm={() => navigate("/", { replace: true })}
             busy={busy}
             lastScannedDir={lastScannedDir}
+            onError={setError}
           />
         ) : null}
       </main>
@@ -342,7 +420,7 @@ function DropZone({ onPickFolder }: { onPickFolder: () => void }) {
       <div className="inline-flex gap-2.5">
         <Button
           onClick={onPickFolder}
-          className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+          className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
         >
           <Folder className="size-3.5" />
           <span className="font-display uppercase tracking-[0.1em]">
@@ -590,7 +668,7 @@ function StorageOption({
         className={cn(
           "relative mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px]",
           selected
-            ? "border-led bg-led shadow-[0_0_10px_var(--color-led-glow)]"
+            ? "border-led-deep bg-led-fill shadow-[0_0_10px_var(--color-led-glow)]"
             : "border-rule-strong bg-surface",
         )}
       >
@@ -605,7 +683,7 @@ function StorageOption({
         >
           {title}
           {badge && (
-            <span className="rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
+            <span className="rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
               {badge}
             </span>
           )}
@@ -647,54 +725,11 @@ function StorageOption({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Shooter banner                                                             */
-/* -------------------------------------------------------------------------- */
-
-function ShooterBanner({ project }: { project: MatchProject | null }) {
-  const name = project?.competitor_name ?? "You";
-  return (
-    <div className="relative mb-5 flex items-center gap-3.5 overflow-hidden rounded-xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 px-4.5 py-3.5">
-      <span
-        aria-hidden
-        className="absolute inset-y-0 left-0 w-[3px] bg-led shadow-[0_0_12px_var(--color-led-glow)]"
-      />
-      <span
-        aria-hidden
-        className="inline-flex size-10 items-center justify-center rounded-full font-mono text-[0.8125rem] font-bold text-ink"
-        style={{
-          background:
-            "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-          boxShadow:
-            "0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--color-led-glow)",
-        }}
-      >
-        {initials(name)}
-      </span>
-      <div className="flex-1">
-        <div className="mb-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-subtle">
-          Adding footage for
-        </div>
-        <div className="inline-flex items-center gap-2.5 font-display text-base font-bold uppercase tracking-[0.04em] text-ink">
-          {name}
-          <span className="rounded bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
-            YOU
-          </span>
-        </div>
-        {project?.match_date && (
-          <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-            Match {project.match_date}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 /* Review state                                                               */
 /* -------------------------------------------------------------------------- */
 
 function ReviewState({
+  slug,
   project,
   storage,
   onStorageChange,
@@ -704,7 +739,9 @@ function ReviewState({
   onConfirm,
   busy,
   lastScannedDir,
+  onError,
 }: {
+  slug: string;
   project: MatchProject;
   storage: StorageMode;
   onStorageChange: (s: StorageMode) => void;
@@ -718,6 +755,7 @@ function ReviewState({
   onConfirm: () => void;
   busy: boolean;
   lastScannedDir: string | null;
+  onError: (msg: string | null) => void;
 }) {
   const assignedVideos: { video: StageVideo; stage: StageEntry }[] = useMemo(
     () =>
@@ -749,7 +787,7 @@ function ReviewState({
             aria-hidden
             className="absolute inset-y-0 left-0 w-0.5 bg-led shadow-[0_0_12px_var(--color-led-glow)]"
           />
-          <span className="inline-flex size-11 items-center justify-center rounded-[10px] bg-led text-bg shadow-[0_0_16px_var(--color-led-glow)]">
+          <span className="inline-flex size-11 items-center justify-center rounded-[10px] bg-led-fill text-ink shadow-[0_0_16px_var(--color-led-glow)]">
             <Package className="size-5" strokeWidth={2.2} />
           </span>
           <div className="flex-1">
@@ -820,6 +858,7 @@ function ReviewState({
             return (
               <StageBlock
                 key={stage.stage_number}
+                slug={slug}
                 stage={stage}
                 allStages={project.stages}
                 videos={videos}
@@ -827,18 +866,21 @@ function ReviewState({
                 onMove={onMoveAssignment}
                 onRemove={onRemoveVideo}
                 busy={busy}
+                onError={onError}
               />
             );
           })}
 
           {unassignedVideos.length > 0 && (
             <UnassignedBlock
+              slug={slug}
               videos={unassignedVideos}
               allStages={project.stages}
               cameras={cameras}
               onMove={onMoveAssignment}
               onRemove={onRemoveVideo}
               busy={busy}
+              onError={onError}
             />
           )}
         </div>
@@ -859,7 +901,7 @@ function ReviewState({
             type="button"
             onClick={onConfirm}
             disabled={busy || willProcess === 0}
-            className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+            className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
           >
             <span className="font-display uppercase tracking-[0.08em]">
               Confirm &amp; start processing
@@ -876,7 +918,7 @@ function ReviewState({
         Background jobs queue immediately (audio extract + beep detect per
         video). Stages with confirmed beeps become available for audit.
         Continue to <Link to="/" className="text-led hover:text-led-soft">match overview</Link>{" "}
-        or open the <Link to="/audit" className="text-led hover:text-led-soft">audit</Link>{" "}
+        or open the <Link to={`/audit/${slug}`} className="text-led hover:text-led-soft">audit</Link>{" "}
         page to start reviewing.
       </div>
     </>
@@ -927,6 +969,7 @@ function groupByCamera(
 }
 
 function StageBlock({
+  slug,
   stage,
   allStages,
   videos,
@@ -934,7 +977,9 @@ function StageBlock({
   onMove,
   onRemove,
   busy,
+  onError,
 }: {
+  slug: string;
   stage: StageEntry;
   allStages: StageEntry[];
   videos: StageVideo[];
@@ -946,6 +991,7 @@ function StageBlock({
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
+  onError: (msg: string | null) => void;
 }) {
   const primaryCount = videos.filter((v) => v.role === "primary").length;
   const status: "ok" | "warn" =
@@ -985,6 +1031,7 @@ function StageBlock({
       {videos.map((v) => (
         <VideoRow
           key={v.video_id}
+          slug={slug}
           video={v}
           camera={cameras.find((c) => c.videoPaths.has(v.path))}
           currentStage={stage.stage_number}
@@ -992,6 +1039,7 @@ function StageBlock({
           onMove={onMove}
           onRemove={onRemove}
           busy={busy}
+          onError={onError}
         />
       ))}
     </div>
@@ -999,13 +1047,16 @@ function StageBlock({
 }
 
 function UnassignedBlock({
+  slug,
   videos,
   allStages,
   cameras,
   onMove,
   onRemove,
   busy,
+  onError,
 }: {
+  slug: string;
   videos: StageVideo[];
   allStages: StageEntry[];
   cameras: CameraGroup[];
@@ -1016,6 +1067,7 @@ function UnassignedBlock({
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
+  onError: (msg: string | null) => void;
 }) {
   return (
     <div className="border-y border-live/30 bg-gradient-to-r from-live/[0.06] to-transparent">
@@ -1036,6 +1088,7 @@ function UnassignedBlock({
       {videos.map((v) => (
         <VideoRow
           key={v.video_id}
+          slug={slug}
           video={v}
           camera={cameras.find((c) => c.videoPaths.has(v.path))}
           currentStage={null}
@@ -1043,6 +1096,7 @@ function UnassignedBlock({
           onMove={onMove}
           onRemove={onRemove}
           busy={busy}
+          onError={onError}
         />
       ))}
     </div>
@@ -1050,6 +1104,7 @@ function UnassignedBlock({
 }
 
 function VideoRow({
+  slug,
   video,
   camera,
   currentStage,
@@ -1057,7 +1112,9 @@ function VideoRow({
   onMove,
   onRemove,
   busy,
+  onError,
 }: {
+  slug: string;
   video: StageVideo;
   camera?: CameraGroup;
   currentStage: number | null;
@@ -1069,7 +1126,30 @@ function VideoRow({
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   busy: boolean;
+  onError: (msg: string | null) => void;
 }) {
+  const [detecting, setDetecting] = useState(false);
+  const needsBeep =
+    video.role !== "ignored" &&
+    video.beep_time == null &&
+    currentStage != null;
+
+  async function detectBeep() {
+    if (currentStage == null) return;
+    setDetecting(true);
+    onError(null);
+    try {
+      // Server-side dedupe: if a detect_beep job is already in flight for
+      // this video, ``_submit_detect_beep`` returns the existing job
+      // without spawning a parallel one. JobsPanel surfaces progress;
+      // we leave the user here.
+      await api.detectBeepForVideo(slug, currentStage, video.video_id);
+    } catch (e) {
+      onError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setDetecting(false);
+    }
+  }
   const filename = video.path.split("/").pop() ?? video.path;
   const cameraLabel = camera?.label ?? "Camera";
   const cameraDetail = [
@@ -1100,7 +1180,7 @@ function VideoRow({
 
   return (
     <div
-      className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_36px] items-center gap-3.5 border-b border-rule px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
+      className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px] items-center gap-3.5 border-b border-rule px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
     >
       <span
         aria-hidden
@@ -1141,6 +1221,34 @@ function VideoRow({
         ))}
       </select>
       <RoleToggles value={video.role} onChange={(r) => void setRole(r)} disabled={busy} />
+      {/* Beep status + manual retry. Auto-queue fires at scan / move /
+       *  swap-primary time; if a job never ran or failed silently, the
+       *  user needs an explicit affordance to kick detection. Clicking
+       *  hits ``detectBeepForVideo``; the server dedupes against an
+       *  in-flight job so double-clicks are safe. JobsPanel surfaces
+       *  progress; on success the row re-renders via project reload. */}
+      <div className="flex items-center justify-end gap-2">
+        {video.beep_time != null ? (
+          <span className="inline-flex items-center gap-1.5 rounded border border-beep/40 bg-beep-tint px-2 py-0.5 font-mono text-[0.625rem] font-bold tabular-nums text-beep">
+            beep {video.beep_time.toFixed(2)}s
+          </span>
+        ) : video.role === "ignored" ? (
+          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+            ignored
+          </span>
+        ) : null}
+        {needsBeep ? (
+          <button
+            type="button"
+            onClick={() => void detectBeep()}
+            disabled={busy || detecting}
+            title="Detect beep on this video"
+            className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-ink-2 transition-colors hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+          >
+            {detecting ? "Queuing..." : "Detect beep"}
+          </button>
+        ) : null}
+      </div>
       <button
         type="button"
         onClick={() => void onRemove(video.path)}
@@ -1232,11 +1340,4 @@ function CameraCard({ camera }: { camera: CameraGroup }) {
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0 || !parts[0]) return "??";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }

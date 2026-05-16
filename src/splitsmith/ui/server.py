@@ -285,9 +285,7 @@ def _ensure_ui_built() -> None:
 
     npm = shutil.which("npm")
     if npm is None:
-        logger.warning(
-            "ui_static/dist appears stale but npm is not on PATH; serving whatever is in dist/"
-        )
+        logger.warning("ui_static/dist appears stale but npm is not on PATH; serving whatever is in dist/")
         return
 
     logger.info(
@@ -502,52 +500,123 @@ def _no_project_error() -> HTTPException:
 
 @dataclass
 class AppState:
-    """Per-process state. Holds at most one bound project at a time.
+    """Process state. One bound project at a time (#353).
 
-    The server can boot without a project (``splitsmith ui`` with no
-    ``--project`` arg). In that mode every project-bound endpoint raises
-    409 ``no_project`` via the :attr:`project_root` property; the SPA
-    renders the picker route until the user binds via
-    ``POST /api/user/recent-projects/bind``.
+    A bound project is either a **Match folder** (multi-shooter) or a
+    **legacy single-shooter project**. The two layouts share a single
+    state record but expose different resolution paths:
+
+    - Match-level operations (list shooters, merge, export the whole
+      match) read :attr:`match_root` directly.
+    - Shooter-scoped operations require a slug from the URL path and
+      resolve via :meth:`shooter_root` / :meth:`shooter_project`.
+
+    There is no notion of an "active" or "current" shooter on the
+    server. Every shooter-scoped request must carry the slug in its
+    path; the SPA's URL is the single source of truth.
+
+    The server can boot without a bound project (``splitsmith ui`` with
+    no ``--project``); in that mode every scoped property raises 409
+    ``no_project`` and the SPA stays on the picker.
     """
 
-    _project_root: Path | None = None
-    _project_name: str | None = None
+    _bound_root: Path | None = None
+    _bound_kind: Literal["match", "legacy"] | None = None
+    _bound_name: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
 
     @property
-    def project_root(self) -> Path:
-        """Bound project root. Raises 409 ``no_project`` when unbound.
-
-        Property indirection means every existing call-site
-        (``state.project_root``) gets the right behaviour automatically
-        without auditing 80+ usages -- FastAPI translates the
-        HTTPException into a structured response the SPA recognises.
-        """
-        if self._project_root is None:
-            raise _no_project_error()
-        return self._project_root
-
-    @property
     def is_bound(self) -> bool:
-        return self._project_root is not None
+        return self._bound_root is not None
 
     @property
-    def project_name(self) -> str | None:
-        return self._project_name
+    def bound_kind(self) -> Literal["match", "legacy"] | None:
+        return self._bound_kind
 
-    def bind(self, root: Path, name: str) -> None:
-        self._project_root = root
-        self._project_name = name
+    @property
+    def bound_name(self) -> str | None:
+        return self._bound_name
+
+    @property
+    def bound_root(self) -> Path:
+        """The bound project's on-disk root (match folder OR legacy project)."""
+        if self._bound_root is None:
+            raise _no_project_error()
+        return self._bound_root
+
+    @property
+    def match_root(self) -> Path:
+        """The bound match folder. 409 ``not_a_match`` for legacy projects."""
+        if self._bound_root is None:
+            raise _no_project_error()
+        if self._bound_kind != "match":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "not_a_match",
+                    "message": (
+                        "Bound project is a legacy single-shooter layout. "
+                        "Match-level operations require a Match folder."
+                    ),
+                },
+            )
+        return self._bound_root
+
+    def shooter_root(self, slug: str) -> Path:
+        """Resolve ``slug`` to the shooter's project directory on disk.
+
+        For a Match folder: validates the slug is registered and the
+        directory exists, then returns ``<match>/shooters/<slug>``.
+
+        For a legacy single-shooter project: there is exactly one shooter
+        and its data lives at the bound root. The slug is accepted as-is
+        (the SPA derives it from ``competitor_name`` via :func:`legacy_slug`)
+        so callers don't need to special-case the legacy layout.
+        """
+        if self._bound_root is None:
+            raise _no_project_error()
+        if self._bound_kind == "legacy":
+            return self._bound_root
+        match = match_model.Match.load(self._bound_root)
+        if slug not in match.shooters:
+            raise HTTPException(
+                status_code=404,
+                detail=f"shooter {slug!r} is not registered on this match",
+            )
+        return match_model.Match.shooter_root(self._bound_root, slug)
+
+    def shooter_project(self, slug: str) -> MatchProject:
+        """Load the legacy ``MatchProject`` for ``slug``."""
+        return MatchProject.load(self.shooter_root(slug))
+
+    def bind_match(self, root: Path, name: str) -> None:
+        self._bound_root = root
+        self._bound_kind = "match"
+        self._bound_name = name
+
+    def bind_legacy(self, root: Path, name: str) -> None:
+        self._bound_root = root
+        self._bound_kind = "legacy"
+        self._bound_name = name
 
     def unbind(self) -> None:
-        self._project_root = None
-        self._project_name = None
+        self._bound_root = None
+        self._bound_kind = None
+        self._bound_name = None
 
-    def load(self) -> MatchProject:
-        if self._project_root is None:
-            raise _no_project_error()
-        return MatchProject.load(self._project_root)
+
+def legacy_slug(project: MatchProject) -> str:
+    """Synthesise a shooter slug for a legacy single-shooter project.
+
+    Legacy projects predate the Match -> Shooter split; their on-disk
+    layout has no ``shooters/<slug>/`` subdir. To keep every shooter-
+    scoped URL slug-bearing (no second URL family for legacy projects),
+    we mint a deterministic *opaque* slug from the project's metadata
+    (name + scoreboard ids) so the URL is stable across reloads but
+    doesn't carry the competitor name. The SPA reads it via
+    ``/api/health.default_shooter_slug`` after binding.
+    """
+    return match_model._legacy_view_slug(project)
 
 
 def _any_active_job(state: AppState) -> Job | None:
@@ -640,7 +709,14 @@ class HealthResponse(BaseModel):
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
-    schema_version: int | None = None
+    # Layout discriminator + a default slug for shooter-scoped URLs (#353).
+    # Match-bound: the alphabetically-first registered shooter, or ``None``
+    # when the match is empty. Legacy-bound: the deterministic legacy slug.
+    # Lets the SPA build /audit/<slug>/... links from any slugless surface
+    # (Home, sidebar Audit/Coach/Export rows) without forcing the user to
+    # pick a shooter when there's only one sensible default.
+    kind: str | None = None  # "match" | "legacy" | None when unbound
+    default_shooter_slug: str | None = None
 
 
 class PromoteSecondaryBody(BaseModel):
@@ -792,7 +868,6 @@ class ShooterListEntry(BaseModel):
 
     slug: str
     name: str
-    is_active: bool
     selected_shooter_id: int | None
     selected_competitor_id: int | None
     stages_audited: int
@@ -835,7 +910,6 @@ class CompareShooterRecord(BaseModel):
 
     slug: str
     name: str
-    is_active: bool
     # Path to the lossless trim clip on disk; the SPA streams via
     # GET /api/match/shooters/{slug}/videos/stream?path=...
     video_path: str | None
@@ -1572,15 +1646,11 @@ def _bind_project_to_state(
     on-disk display name so the caller can echo it back.
 
     When ``root`` is a redesign-era Match folder (has ``match.json``),
-    the first shooter's directory is bound instead so the rest of the
-    server (which still speaks legacy ``MatchProject``) keeps working.
-    The match folder is recorded in the recent-projects index with
-    ``kind="match"`` so the picker can reopen it as a match next time.
-    Multi-shooter selection lives in #324; for now we pick the first
-    registered shooter.
+    the match itself is bound (``state.bind_match``) and the SPA addresses
+    individual shooters via slug-bearing URLs. Otherwise we bind the
+    legacy single-shooter project directly.
     """
     resolved = root.resolve()
-    # If this is a Match folder, transparently bind its first shooter.
     if match_model.is_match_folder(resolved):
         try:
             match = match_model.Match.load(resolved)
@@ -1595,20 +1665,17 @@ def _bind_project_to_state(
                 detail={
                     "code": "match_empty",
                     "message": (
-                        f"Match {resolved} has no shooters yet. "
-                        "Add a shooter or recreate the match."
+                        f"Match {resolved} has no shooters yet. " "Add a shooter or recreate the match."
                     ),
                 },
             )
-        shooter_slug = match.shooters[0]
-        shooter_root = match_model.Match.shooter_root(resolved, shooter_slug)
-        user_config.record_project_open(resolved, match.name or fallback_name, kind="match")
-        return _bind_legacy_root_to_state(
-            state,
-            shooter_root,
-            fallback_name=match.name or fallback_name,
-            register=False,
-        )
+        name = match.name or fallback_name
+        user_config.record_project_open(resolved, name, kind="match")
+        loaded_env = _load_env_files(resolved)
+        if loaded_env:
+            logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
+        state.bind_match(resolved, name)
+        return name
     return _bind_legacy_root_to_state(state, resolved, fallback_name=fallback_name)
 
 
@@ -1616,15 +1683,8 @@ def _bind_legacy_root_to_state(
     state: AppState,
     root: Path,
     fallback_name: str,
-    *,
-    register: bool = True,
 ) -> str:
-    """Bind a legacy MatchProject directory (project.json layout).
-
-    ``register=False`` is for shooter subdirs inside a match: the parent
-    match is already recorded in recent-projects, and the shooter dir
-    must not show up as a standalone "legacy" project in the picker.
-    """
+    """Bind a legacy MatchProject directory (project.json layout)."""
     MatchProject.init(root, name=fallback_name)
     resolved = root.resolve()
     loaded_env = _load_env_files(resolved)
@@ -1635,9 +1695,8 @@ def _bind_legacy_root_to_state(
         recorded_name = loaded_project.name or fallback_name
     except Exception:  # pragma: no cover -- defensive: never block boot
         recorded_name = fallback_name
-    if register:
-        user_config.record_project_open(resolved, recorded_name, kind="legacy")
-    state.bind(resolved, recorded_name)
+    user_config.record_project_open(resolved, recorded_name, kind="legacy")
+    state.bind_legacy(resolved, recorded_name)
     return recorded_name
 
 
@@ -1688,9 +1747,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                 audited_total += sum(1 for s in shooter.stages if s.time_seconds > 0 or s.skipped)
                 shooter_names.append(shooter.name or slug)
             detail.shooter_names = shooter_names
-            detail.stages_audited = (
-                audited_total // max(len(match.shooters), 1) if match.shooters else 0
-            )
+            detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
             metadata_path = path / match_model.MATCH_FILE
         else:
             project = MatchProject.load(path)
@@ -1700,9 +1757,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.stage_count = len(project.stages)
             detail.match_date = project.match_date.isoformat() if project.match_date else None
             detail.manual = project.scoreboard_match_id is None
-            detail.stages_audited = sum(
-                1 for s in project.stages if s.time_seconds > 0 or s.skipped
-            )
+            detail.stages_audited = sum(1 for s in project.stages if s.time_seconds > 0 or s.skipped)
             if project.competitor_name:
                 detail.shooter_names = [project.competitor_name]
             metadata_path = path / "project.json"
@@ -1775,12 +1830,12 @@ def create_app(
     # API
     # ----------------------------------------------------------------------
 
-    def _local_match_path() -> Path:
-        """Resolve ``<project>/scoreboard/match.json`` (offline source path)."""
-        return state.project_root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
+    def _local_match_path(root: Path) -> Path:
+        """Resolve ``<root>/scoreboard/match.json`` (offline source path)."""
+        return root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
 
-    def _resolve_scoreboard_client() -> ScoreboardClient:
-        """Pick the concrete ``ScoreboardClient`` for this request.
+    def _resolve_scoreboard_client(root: Path) -> ScoreboardClient:
+        """Pick the concrete ``ScoreboardClient`` for this shooter root.
 
         Local JSON wins when present so the user can stay fully offline by
         dropping a file. Otherwise we wrap the HTTP client in the project-
@@ -1788,7 +1843,7 @@ def create_app(
         caller is responsible for ``close()`` -- both implementations are
         context managers (Local is a no-op; HTTP closes the httpx Client).
         """
-        local_path = _local_match_path()
+        local_path = _local_match_path(root)
         if local_path.exists():
             local = LocalJsonScoreboard(local_path)
             return _ScoreboardClientCtx(local, owns_close=False)
@@ -1796,28 +1851,45 @@ def create_app(
             http = SsiHttpClient()
         except ScoreboardAuthError as exc:
             _raise_scoreboard_http(exc)
-        cache_dir = state.project_root / "scoreboard" / "cache"
+        cache_dir = root / "scoreboard" / "cache"
         cached = CachingScoreboardClient(http, cache_dir)
         return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
+
+    def _health_after_bind(recorded_name: str) -> HealthResponse:
+        """Build a HealthResponse from the currently-bound project."""
+        default_slug: str | None = None
+        kind = state.bound_kind
+        if kind == "match":
+            match = match_model.Match.load(state.bound_root)
+            shooters = sorted(match.shooters)
+            default_slug = shooters[0] if shooters else None
+        elif kind == "legacy":
+            try:
+                project = MatchProject.load(state.bound_root)
+                default_slug = legacy_slug(project)
+            except Exception:  # noqa: BLE001 -- defensive
+                default_slug = None
+        return HealthResponse(
+            bound=True,
+            project_name=recorded_name,
+            project_root=str(state.bound_root),
+            kind=kind,
+            default_shooter_slug=default_slug,
+        )
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         if not state.is_bound:
             return HealthResponse(bound=False)
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=project.name,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(state.bound_name or "")
 
-    @app.get("/api/project")
-    def get_project() -> JSONResponse:
-        return JSONResponse(state.load().model_dump(mode="json"))
+    @app.get("/api/shooters/{slug}/project")
+    def get_project(slug: str) -> JSONResponse:
+        return JSONResponse(state.shooter_project(slug).model_dump(mode="json"))
 
-    @app.get("/api/project/export")
+    @app.get("/api/shooters/{slug}/project/export")
     def export_project_endpoint(
+        slug: str,
         include_trimmed: bool = Query(False),
         include_exports: bool = Query(False),
         include_raw: bool = Query(False),
@@ -1832,7 +1904,7 @@ def create_app(
         written to a temp file and deleted once the response finishes
         streaming.
         """
-        root = state.project_root
+        root = state.shooter_root(slug)
         tmp = Path(tempfile.mkdtemp(prefix="splitsmith-export-"))
         archive = tmp / f"{root.name}.tar.gz"
         try:
@@ -1857,7 +1929,7 @@ def create_app(
             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
         )
 
-    @app.post("/api/project/import")
+    @app.post("/api/me/projects/import")
     async def import_project_endpoint(
         archive: UploadFile = File(...),
         dest_root: str = Form(...),
@@ -1888,8 +1960,7 @@ def create_app(
             shutil.rmtree(tmp, ignore_errors=True)
 
         if bind:
-            state.bind(result.project_root, result.project_name)
-            user_config.record_project_open(result.project_root, result.project_name)
+            _bind_project_to_state(state, result.project_root, fallback_name=result.project_name)
 
         return JSONResponse(
             {
@@ -1899,8 +1970,8 @@ def create_app(
             }
         )
 
-    @app.get("/api/automation")
-    def get_automation() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/automation")
+    def get_automation(slug: str) -> JSONResponse:
         """Resolved automation settings + per-field provenance (#215 / #216).
 
         Combines the global YAML / env-var defaults with the bound
@@ -1909,7 +1980,7 @@ def create_app(
         ``cli_value`` is always None on the daemon path -- the server
         doesn't take per-call CLI flags.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         resolved = automation_settings.resolve_automation(
             project_override=project.automation,
         )
@@ -1928,8 +1999,8 @@ def create_app(
             }
         )
 
-    @app.post("/api/project/nudges/dismiss")
-    def dismiss_nudge(req: NudgeDismissRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/nudges/dismiss")
+    def dismiss_nudge(slug: str, req: NudgeDismissRequest) -> JSONResponse:
         """Persist a per-project nudge dismissal (#218 phase 4).
 
         Adds ``stage_number`` to ``MatchProject.nudges_dismissed_stages``
@@ -1937,7 +2008,8 @@ def create_app(
         Returns the full project dump so the SPA can replace its
         cached state without a separate refetch.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.stage(req.stage_number)
         except KeyError as exc:
@@ -1948,11 +2020,11 @@ def create_app(
         else:
             current.discard(req.stage_number)
         project.nudges_dismissed_stages = sorted(current)
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.get("/api/hitl-queue")
-    def get_hitl_queue() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/hitl-queue")
+    def get_hitl_queue(slug: str) -> JSONResponse:
         """Items in the project that need human (or agent) attention (#219).
 
         Walks every primary video and emits one item per beep that's
@@ -1983,7 +2055,7 @@ def create_app(
         order. The SPA shows this as a project-level work queue; the
         MCP exposes it as a resource so an agent can drive the picks.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         resolved = automation_settings.resolve_automation(
             project_override=project.automation,
         )
@@ -2010,11 +2082,7 @@ def create_app(
                     }
                 )
                 continue
-            if (
-                primary.beep_source == "auto"
-                and primary.beep_time is not None
-                and not primary.beep_reviewed
-            ):
+            if primary.beep_source == "auto" and primary.beep_time is not None and not primary.beep_reviewed:
                 # Either confidence is below the threshold OR the field
                 # predates layer 3a (None) -- both warrant review.
                 items.append(
@@ -2032,8 +2100,8 @@ def create_app(
                 )
         return JSONResponse({"items": items, "threshold": threshold})
 
-    @app.get("/api/project/match-analysis")
-    def get_match_analysis() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/project/match-analysis")
+    def get_match_analysis(slug: str) -> JSONResponse:
         """Run the canonical video-match heuristic over the project and return
         per-stage windows + per-video classification.
 
@@ -2043,19 +2111,20 @@ def create_app(
         improvements (per-stage tolerance, ML-based scoring, confidence
         bands) extend this endpoint rather than adding policy to the SPA.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         return JSONResponse(project.match_analysis().model_dump(mode="json"))
 
-    @app.post("/api/scoreboard/import")
-    def import_scoreboard(req: ScoreboardImportRequest) -> JSONResponse:
-        project = state.load()
+    @app.post("/api/shooters/{slug}/scoreboard/import")
+    def import_scoreboard(slug: str, req: ScoreboardImportRequest) -> JSONResponse:
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.import_scoreboard(req.data, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
     # ----------------------------------------------------------------------
@@ -2069,15 +2138,15 @@ def create_app(
     # next request hits the live API. Errors are mapped to HTTP statuses
     # the SPA can render as actionable banners (acceptance criterion).
 
-    @app.get("/api/scoreboard/source")
-    def scoreboard_source() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/source")
+    def scoreboard_source(slug: str) -> JSONResponse:
         """Report whether the offline JSON or the live API will serve requests.
 
         The SPA renders a "loaded from local JSON, no network used" indicator
         when ``mode == "local"`` so the user can verify the offline path
         without watching dev tools.
         """
-        local_path = _local_match_path()
+        local_path = _local_match_path(state.shooter_root(slug))
         local = local_path.exists()
         http_ready = bool(os.environ.get("SPLITSMITH_SSI_TOKEN"))
         return JSONResponse(
@@ -2088,8 +2157,8 @@ def create_app(
             }
         )
 
-    @app.post("/api/scoreboard/upload")
-    def scoreboard_upload(req: ScoreboardUploadRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/upload")
+    def scoreboard_upload(slug: str, req: ScoreboardUploadRequest) -> JSONResponse:
         """Accept a dropped SSI ``match.json`` and populate the project.
 
         Three input shapes are accepted (see ``LocalJsonScoreboard``):
@@ -2102,7 +2171,8 @@ def create_app(
         competitor -- auto-pins that competitor and merges the times so
         the user lands on a fully-populated stage list in one drop.
         """
-        local_path = _local_match_path()
+        root = state.shooter_root(slug)
+        local_path = _local_match_path(root)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_text(
             json.dumps(req.data, indent=2, sort_keys=True),
@@ -2116,7 +2186,7 @@ def create_app(
                 detail=f"dropped JSON is not a recognized scoreboard payload: {exc}",
             ) from exc
 
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             project.populate_from_match_data(scoreboard.match, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
@@ -2152,21 +2222,21 @@ def create_app(
                 if picked is not None:
                     project.selected_shooter_id = picked.shooterId
                     project.competitor_name = picked.name
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    @app.get("/api/scoreboard/search")
-    def scoreboard_search(q: str = Query("", min_length=0)) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/search")
+    def scoreboard_search(slug: str, q: str = Query("", min_length=0)) -> JSONResponse:
         """Search the active scoreboard source for matches by free-text query."""
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(state.shooter_root(slug)) as client:
             try:
                 refs = client.search_matches(q)
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
         return JSONResponse([ref.model_dump(mode="json") for ref in refs])
 
-    @app.post("/api/scoreboard/fetch")
-    def scoreboard_fetch(req: ScoreboardFetchRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/fetch")
+    def scoreboard_fetch(slug: str, req: ScoreboardFetchRequest) -> JSONResponse:
         """Fetch a full match (cache-first) and populate the project.
 
         When the project already has a pinned competitor (carried over from
@@ -2174,14 +2244,15 @@ def create_app(
         round-trip. New picks (no pin yet) still need ``/select-shooter``
         afterwards -- the SPA flow stays the same.
         """
-        with _resolve_scoreboard_client() as client:
+        root = state.shooter_root(slug)
+        with _resolve_scoreboard_client(root) as client:
             try:
                 match_data = client.get_match(req.content_type, req.match_id)
             except MatchNotFound as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             project.populate_from_match_data(match_data, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
@@ -2191,6 +2262,7 @@ def create_app(
         if project.selected_competitor_id is not None:
             try:
                 merged = _fetch_and_merge_stage_times(
+                    root,
                     project,
                     req.content_type,
                     req.match_id,
@@ -2201,14 +2273,14 @@ def create_app(
                 # Persist the populated stage shell anyway so the user
                 # has something to work with; they can hit refresh-times
                 # once the upstream resolves.
-                project.save(state.project_root)
+                project.save(root)
                 raise
         else:
-            project.save(state.project_root)
+            project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    @app.get("/api/scoreboard/match-data")
-    def scoreboard_match_data() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/match-data")
+    def scoreboard_match_data(slug: str) -> JSONResponse:
         """Return the resolved ``MatchData`` for the project's loaded match.
 
         The SPA needs this to map a picked ``shooterId`` to the per-match
@@ -2217,7 +2289,8 @@ def create_app(
         drifts when upstream re-fetches; serving on demand keeps the
         cache as the single source of truth.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
             raise HTTPException(
                 status_code=404,
@@ -2234,7 +2307,7 @@ def create_app(
                     "predates the v1 wiring (#50). Re-import via /upload or /fetch."
                 ),
             ) from exc
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(root) as client:
             try:
                 match_data = client.get_match(ct, mid)
             except MatchNotFound as exc:
@@ -2243,21 +2316,21 @@ def create_app(
                 _raise_scoreboard_http(exc)
         return JSONResponse(match_data.model_dump(mode="json"))
 
-    @app.get("/api/scoreboard/shooter/search")
-    def scoreboard_shooter_search(q: str = Query("", min_length=0)) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/shooter/search")
+    def scoreboard_shooter_search(slug: str, q: str = Query("", min_length=0)) -> JSONResponse:
         """Find shooters by name. Offline mode searches this match's
         competitor list only; online mode hits the live shooter index."""
         if not q.strip():
             return JSONResponse([])
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(state.shooter_root(slug)) as client:
             try:
                 refs = client.find_shooter(q)
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
         return JSONResponse([ref.model_dump(mode="json") for ref in refs])
 
-    @app.post("/api/scoreboard/select-shooter")
-    def scoreboard_select_shooter(req: SelectShooterRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/select-shooter")
+    def scoreboard_select_shooter(slug: str, req: SelectShooterRequest) -> JSONResponse:
         """Pin (shooter_id, competitor_id) and merge stage times into the project.
 
         Validates the competitor against the loaded match before
@@ -2275,7 +2348,8 @@ def create_app(
         - 502 ``scoreboard_offline``: transient upstream issue;
           pin persisted so refresh-times retries on the same selection
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
             raise HTTPException(
                 status_code=409,
@@ -2298,7 +2372,7 @@ def create_app(
         # avoids the "I picked a shooter and now my project is in a bad
         # state" pattern. 404 with a discrete code so the SPA can prompt
         # the user to pick again rather than rendering an upstream banner.
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(root) as client:
             try:
                 match_data = client.get_match(ct, mid)
             except ScoreboardError as exc:
@@ -2313,8 +2387,7 @@ def create_app(
                 detail={
                     "code": "competitor_not_in_match",
                     "message": (
-                        f"competitor {req.competitor_id} isn't in this match. "
-                        "Pick a different shooter."
+                        f"competitor {req.competitor_id} isn't in this match. " "Pick a different shooter."
                     ),
                 },
             )
@@ -2325,13 +2398,13 @@ def create_app(
         # scoreboard summary doesn't have to re-fetch MatchData just to
         # render "pinned: Mathias Rinaldo" instead of an integer id.
         project.competitor_name = picked.name
-        project.save(state.project_root)
+        project.save(root)
 
-        merged = _fetch_and_merge_stage_times(project, ct, mid, req.competitor_id)
+        merged = _fetch_and_merge_stage_times(root, project, ct, mid, req.competitor_id)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    @app.post("/api/scoreboard/refresh-times")
-    def scoreboard_refresh_times() -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/refresh-times")
+    def scoreboard_refresh_times(slug: str) -> JSONResponse:
         """Re-pull and re-merge stage times for the pinned competitor.
 
         Invalidates every cached stage-times entry for the match (not
@@ -2339,7 +2412,8 @@ def create_app(
         update multiple shooters at once and a fresh pull is cheap. Use
         this after the user knows the upstream has new scorecards.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         if (
             project.selected_competitor_id is None
             or project.scoreboard_match_id is None
@@ -2360,16 +2434,16 @@ def create_app(
 
         # Drop every cached stage_times entry for this match so the
         # next get_stage_times call goes upstream.
-        cache_dir = state.project_root / "scoreboard" / "cache"
+        cache_dir = root / "scoreboard" / "cache"
         if cache_dir.exists():
             cache = CachingScoreboardClient(_NoOpClient(), cache_dir)
             cache.invalidate_match_stage_times(ct, mid)
 
-        merged = _fetch_and_merge_stage_times(project, ct, mid, project.selected_competitor_id)
+        merged = _fetch_and_merge_stage_times(root, project, ct, mid, project.selected_competitor_id)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
     def _fetch_and_merge_stage_times(
-        project: MatchProject, ct: int, mid: int, competitor_id: int
+        root: Path, project: MatchProject, ct: int, mid: int, competitor_id: int
     ) -> int:
         """Shared helper -- get_stage_times + merge_stage_times, with the
         right error mapping. Persists the project on success.
@@ -2380,7 +2454,7 @@ def create_app(
         requiring a full overwrite-import that would orphan video
         assignments.
         """
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(root) as client:
             try:
                 results = client.get_stage_times(ct, mid, competitor_id)
             except ScoreboardError as exc:
@@ -2400,15 +2474,16 @@ def create_app(
             except ScoreboardError:
                 pass
         merged = project.merge_stage_times(results)
-        project.save(state.project_root)
+        project.save(root)
         return merged
 
-    @app.post("/api/project/placeholder-stages")
-    def create_placeholder_stages(req: PlaceholderStagesRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/placeholder-stages")
+    def create_placeholder_stages(slug: str, req: PlaceholderStagesRequest) -> JSONResponse:
         """Create N placeholder stages so source-first ingest works without a
         scoreboard. A real scoreboard import later overlays the placeholders
         and preserves video assignments by ``stage_number``."""
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.init_placeholder_stages(
                 req.stage_count,
@@ -2419,11 +2494,11 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/videos/scan", response_model=ScanResponse)
-    def scan_videos(req: ScanRequest) -> ScanResponse:
+    @app.post("/api/shooters/{slug}/videos/scan", response_model=ScanResponse)
+    def scan_videos(slug: str, req: ScanRequest) -> ScanResponse:
         if req.link_mode not in ("symlink", "copy"):
             raise HTTPException(status_code=400, detail="link_mode must be 'symlink' or 'copy'")
         if (req.source_dir is None) == (req.source_paths is None):
@@ -2467,14 +2542,15 @@ def create_app(
                 candidates.append(p)
             last_dir = candidates[0].parent.resolve() if candidates else None
 
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         registered: list[str] = []
         skipped: list[str] = []
         for entry in candidates:
             try:
                 video = project.register_video(
                     entry,
-                    state.project_root,
+                    root,
                     link_mode=req.link_mode,  # type: ignore[arg-type]
                 )
             except (FileNotFoundError, ValueError) as exc:
@@ -2484,7 +2560,7 @@ def create_app(
 
         auto_assigned: dict[int, str] = {}
         if req.auto_assign_primary:
-            suggestions = project.auto_match(state.project_root)
+            suggestions = project.auto_match(root)
             for stage_num, video_path in suggestions.items():
                 stage = project.stage(stage_num)
                 # Only auto-assign primary when the stage has no primary yet.
@@ -2496,7 +2572,7 @@ def create_app(
         if last_dir is not None:
             project.last_scanned_dir = str(last_dir)
 
-        project.save(state.project_root)
+        project.save(root)
 
         # Queue auto-beep for every freshly-primaried video (#67). Done
         # after save so the persisted state reflects the assignment when
@@ -2505,7 +2581,7 @@ def create_app(
             stage = project.stage(stage_num)
             video = next((v for v in stage.videos if str(v.path) == video_path), None)
             if video is not None:
-                _auto_queue_beep_if_needed(project, stage_num, video)
+                _auto_queue_beep_if_needed(slug, project, stage_num, video)
 
         return ScanResponse(
             registered=registered,
@@ -2513,8 +2589,8 @@ def create_app(
             skipped=skipped,
         )
 
-    @app.get("/api/videos/link-status", response_model=LinkStatusResponse)
-    def get_link_status() -> LinkStatusResponse:
+    @app.get("/api/shooters/{slug}/videos/link-status", response_model=LinkStatusResponse)
+    def get_link_status(slug: str) -> LinkStatusResponse:
         """Per-video status of ``raw/<name>`` symlinks.
 
         Lets the SPA badge broken / missing entries on the project page
@@ -2522,8 +2598,9 @@ def create_app(
         """
         from .. import relink as relink_mod
 
-        project = state.load()
-        infos = relink_mod.inspect_links(project, state.project_root)
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
+        infos = relink_mod.inspect_links(project, root)
         return LinkStatusResponse(
             entries=[
                 LinkStatusEntry(
@@ -2537,8 +2614,8 @@ def create_app(
             ]
         )
 
-    @app.post("/api/videos/relink/scan", response_model=RelinkScanResponse)
-    def relink_scan(req: RelinkScanRequest) -> RelinkScanResponse:
+    @app.post("/api/shooters/{slug}/videos/relink/scan", response_model=RelinkScanResponse)
+    def relink_scan(slug: str, req: RelinkScanRequest) -> RelinkScanResponse:
         """Recursive dry-run: walk ``search_root`` and report per-video
         candidates without touching the filesystem.
         """
@@ -2549,8 +2626,8 @@ def create_app(
             index = relink_mod.index_search_root(search_root)
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        infos = relink_mod.inspect_links(project, state.project_root)
+        project = state.shooter_project(slug)
+        infos = relink_mod.inspect_links(project, state.shooter_root(slug))
         plan = relink_mod.plan_relink(infos, index)
         return RelinkScanResponse(
             search_root=str(search_root.resolve()),
@@ -2559,9 +2636,7 @@ def create_app(
                     video_id=entry.video_id,
                     name=entry.name,
                     link_path=str(entry.link_path),
-                    current_target=(
-                        str(entry.current_target) if entry.current_target is not None else None
-                    ),
+                    current_target=(str(entry.current_target) if entry.current_target is not None else None),
                     current_status=entry.current_status,
                     candidates=[str(p) for p in entry.candidates],
                     chosen_path=str(entry.chosen_path) if entry.chosen_path is not None else None,
@@ -2572,8 +2647,8 @@ def create_app(
             ],
         )
 
-    @app.post("/api/videos/relink/apply", response_model=RelinkApplyResponse)
-    def relink_apply(req: RelinkApplyRequest) -> RelinkApplyResponse:
+    @app.post("/api/shooters/{slug}/videos/relink/apply", response_model=RelinkApplyResponse)
+    def relink_apply(slug: str, req: RelinkApplyRequest) -> RelinkApplyResponse:
         """Apply a user-confirmed set of symlink rewrites.
 
         ``project.json`` is not modified -- only the symlinks under
@@ -2584,10 +2659,8 @@ def create_app(
 
         if not req.decisions:
             raise HTTPException(status_code=400, detail="decisions must be non-empty")
-        project = state.load()
-        infos = {
-            info.video_id: info for info in relink_mod.inspect_links(project, state.project_root)
-        }
+        project = state.shooter_project(slug)
+        infos = {info.video_id: info for info in relink_mod.inspect_links(project, state.shooter_root(slug))}
         decisions: list[tuple[Path, Path]] = []
         id_for_link: dict[Path, str] = {}
         for video_id, target_str in req.decisions.items():
@@ -2622,8 +2695,8 @@ def create_app(
             ]
         )
 
-    @app.post("/api/project/settings")
-    def update_settings(req: SettingsRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/settings")
+    def update_settings(slug: str, req: SettingsRequest) -> JSONResponse:
         """Update storage path overrides. Any None field is left unchanged;
         pass an empty string to clear back to the project-root default.
 
@@ -2632,7 +2705,8 @@ def create_app(
         ``confirm=True`` is sent. Existing files are not auto-migrated --
         the warning lets the caller surface "you'll be leaving these behind".
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         update: dict[str, str | None] = {}
         for fname in (
             "raw_dir",
@@ -2661,7 +2735,7 @@ def create_app(
         for fname, new_value in update.items():
             if new_value == getattr(project, fname):
                 continue  # no change
-            old_path = resolver_for[fname](state.project_root)
+            old_path = resolver_for[fname](root)
             if not old_path.exists() or not old_path.is_dir():
                 continue
             try:
@@ -2723,7 +2797,7 @@ def create_app(
             project.probes_path,
             project.thumbs_path,
         ):
-            target = resolver(state.project_root)
+            target = resolver(root)
             try:
                 target.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
@@ -2732,11 +2806,11 @@ def create_app(
                     detail=f"cannot create directory {target}: {exc}",
                 ) from exc
 
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
     def _resolve_stage_video(
-        stage_number: int, video_id: str
+        slug: str, stage_number: int, video_id: str
     ) -> tuple[MatchProject, StageEntry, StageVideo]:
         """Load the project + stage + video for a per-video endpoint.
 
@@ -2745,7 +2819,7 @@ def create_app(
         source-on-disk lives at the call site so endpoints that don't need
         a reachable file (clear, manual override) can skip it.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -2773,6 +2847,7 @@ def create_app(
     _align_confidence_floor = 1.10
 
     def _try_align_secondary_to_primary(
+        root: Path,
         proj: MatchProject,
         stage: StageEntry,
         video: StageVideo,
@@ -2794,12 +2869,8 @@ def create_app(
         primary = stage.primary()
         if primary is None or primary.beep_time is None:
             return None
-        primary_audio_path = audio_helpers.primary_audio_path(
-            state.project_root, stage.stage_number, project=proj
-        )
-        secondary_audio_path = audio_helpers.video_audio_path(
-            state.project_root, stage.stage_number, video, project=proj
-        )
+        primary_audio_path = audio_helpers.primary_audio_path(root, stage.stage_number, project=proj)
+        secondary_audio_path = audio_helpers.video_audio_path(root, stage.stage_number, video, project=proj)
         if not primary_audio_path.exists() or not secondary_audio_path.exists():
             # Either side missing means the user hasn't run beep-detect on
             # the primary yet, or the secondary's own audio extract failed
@@ -2827,7 +2898,7 @@ def create_app(
             return None
         return result
 
-    def _run_detect_beep_for_video(handle: JobHandle, stage_number: int, video_id: str) -> None:
+    def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker: detect ``video``'s beep, then auto-chain trim.
 
         Generic over role:
@@ -2839,12 +2910,12 @@ def create_app(
         own and the SPA can re-trim later.
         """
         handle.update(progress=0.05, message="Loading project...")
-        proj = state.load()
+        proj = state.shooter_project(slug)
         stg = proj.stage(stage_number)
         video = stg.find_video_by_id(video_id)
         if video is None:
             raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
-        source = proj.resolve_video_path(state.project_root, video.path)
+        source = proj.resolve_video_path(state.shooter_root(slug), video.path)
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(
             progress=0.15,
@@ -2852,7 +2923,7 @@ def create_app(
         )
         try:
             beep = audio_helpers.detect_video_beep(
-                state.project_root,
+                state.shooter_root(slug),
                 stage_number,
                 video,
                 source,
@@ -2881,7 +2952,7 @@ def create_app(
             # same room means the loudness envelopes line up modulo a
             # constant time offset, even when the secondary's mic missed
             # the sustained 2-5 kHz tone the in-stream detector wants.
-            aligned = _try_align_secondary_to_primary(proj, stg, video, handle)
+            aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
             video.beep_candidates = []
@@ -2897,9 +2968,7 @@ def create_app(
             if aligned is not None and aligned.confidence >= _align_confidence_floor:
                 handle.update(
                     progress=0.55,
-                    message=(
-                        f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"
-                    ),
+                    message=(f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"),
                 )
                 video.beep_time = aligned.secondary_beep_time
                 video.beep_source = "aligned"
@@ -2962,7 +3031,7 @@ def create_app(
             # trust the in-stream answer; when they disagree we let the
             # user decide.
             if video.role != "primary":
-                check = _try_align_secondary_to_primary(proj, stg, video, handle)
+                check = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
                 if check is not None and check.confidence >= _align_confidence_floor:
                     video.beep_alignment_confidence = check.confidence
                     video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
@@ -2973,7 +3042,7 @@ def create_app(
             handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
             try:
                 audio_helpers.ensure_video_audit_trim(
-                    state.project_root,
+                    state.shooter_root(slug),
                     stage_number,
                     video,
                     source,
@@ -3001,7 +3070,7 @@ def create_app(
         # copying our targeted fields onto the fresh project preserves
         # those concurrent edits instead of stomping them with the
         # snapshot we loaded at job start.
-        fresh = state.load()
+        fresh = state.shooter_project(slug)
         try:
             stg_fresh = fresh.stage(stage_number)
         except KeyError:
@@ -3021,7 +3090,7 @@ def create_app(
             v_fresh.processed["beep"] = True
             if trimmed_ok:
                 v_fresh.processed["trim"] = True
-            fresh.save(state.project_root)
+            fresh.save(state.shooter_root(slug))
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
             # Shot detection is primary-only AND gated on
             # ``beep_reviewed`` (#71). That flag is True either because
@@ -3047,11 +3116,11 @@ def create_app(
                 state.jobs.submit(
                     kind="shot_detect",
                     stage_number=stage_number,
-                    fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                    fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
                 )
         handle.update(progress=1.0, message="Done")
 
-    def _submit_detect_beep(stage_number: int, video: StageVideo) -> JSONResponse:
+    def _submit_detect_beep(slug: str, stage_number: int, video: StageVideo) -> JSONResponse:
         """Validate + dedupe + queue a detect-beep job for ``video``.
 
         Shared by the per-video endpoint and the primary-only legacy
@@ -3067,12 +3136,14 @@ def create_app(
             kind="detect_beep",
             stage_number=stage_number,
             video_id=video.video_id,
-            fn=lambda h, n=stage_number, vid=video.video_id: _run_detect_beep_for_video(h, n, vid),
+            fn=lambda h, sl=slug, n=stage_number, vid=video.video_id: (
+                _run_detect_beep_for_video(h, sl, n, vid)
+            ),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
     def _auto_queue_beep_if_needed(
-        project: MatchProject, stage_number: int, video: StageVideo
+        slug: str, project: MatchProject, stage_number: int, video: StageVideo
     ) -> bool:
         """Best-effort auto-queue of detect_beep on a freshly-assigned video.
 
@@ -3106,7 +3177,7 @@ def create_app(
             return False
         if video.beep_source == "manual":
             return False
-        source = project.resolve_video_path(state.project_root, video.path)
+        source = project.resolve_video_path(state.shooter_root(slug), video.path)
         if not source.exists():
             logger.info(
                 "auto-beep skipped for stage %d video %s: source not reachable (%s)",
@@ -3115,12 +3186,12 @@ def create_app(
                 source,
             )
             return False
-        _submit_detect_beep(stage_number, video)
+        _submit_detect_beep(slug, stage_number, video)
         return True
 
-    @app.post("/api/stages/{stage_number}/videos/{video_id}/detect-beep")
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/detect-beep")
     def detect_beep_for_video(
-        stage_number: int, video_id: str, force: bool = False
+        slug: str, stage_number: int, video_id: str, force: bool = False
     ) -> JSONResponse:
         """Submit a beep-detection job for ``video_id`` on ``stage_number``.
 
@@ -3131,9 +3202,9 @@ def create_app(
         primary results; secondaries align to the primary timeline by
         their own beep so they don't need their own shot timeline.
         """
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.project_root, video.path)
+            stage_number, project.resolve_video_path(state.shooter_root(slug), video.path)
         )
         if video.beep_source == "manual" and not force:
             raise HTTPException(
@@ -3143,10 +3214,10 @@ def create_app(
                     "replace it with auto-detected output"
                 ),
             )
-        return _submit_detect_beep(stage_number, video)
+        return _submit_detect_beep(slug, stage_number, video)
 
-    @app.post("/api/stages/{stage_number}/detect-beep")
-    def detect_beep(stage_number: int, force: bool = False) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/detect-beep")
+    def detect_beep(slug: str, stage_number: int, force: bool = False) -> JSONResponse:
         """Submit a beep-detection job for the stage's primary.
 
         Backward-compat shim that resolves the primary's id and forwards to
@@ -3154,7 +3225,7 @@ def create_app(
         polls ``/api/jobs/{id}`` for progress and refetches ``/api/project``
         on completion.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -3166,7 +3237,7 @@ def create_app(
                 detail=f"stage {stage_number} has no primary video",
             )
         _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.project_root, primary.path)
+            stage_number, project.resolve_video_path(state.shooter_root(slug), primary.path)
         )
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
@@ -3176,10 +3247,10 @@ def create_app(
                     "replace it with auto-detected output"
                 ),
             )
-        return _submit_detect_beep(stage_number, primary)
+        return _submit_detect_beep(slug, stage_number, primary)
 
-    @app.post("/api/stages/{stage_number}/trim")
-    def trim_stage(stage_number: int) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/trim")
+    def trim_stage(slug: str, stage_number: int) -> JSONResponse:
         """Submit an audit-mode short-GOP trim job for the stage's primary.
 
         Backward-compat shim: forwards to the per-video pipeline. Returns
@@ -3187,7 +3258,7 @@ def create_app(
         MP4 is newer than the source, the job completes near-instantly
         without re-encoding.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -3198,9 +3269,10 @@ def create_app(
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        return _submit_trim(stage_number, stage, primary, project)
+        return _submit_trim(slug, stage_number, stage, primary, project)
 
     def _submit_trim(
+        slug: str,
         stage_number: int,
         stage: StageEntry,
         video: StageVideo,
@@ -3213,7 +3285,7 @@ def create_app(
         and a non-zero stage_time to define the trim window.
         """
         _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.project_root, video.path)
+            stage_number, project.resolve_video_path(state.shooter_root(slug), video.path)
         )
         if video.beep_time is None:
             raise HTTPException(
@@ -3228,26 +3300,24 @@ def create_app(
                     "scoreboard or set the stage time before trimming"
                 ),
             )
-        existing = state.jobs.find_active(
-            kind="trim", stage_number=stage_number, video_id=video.video_id
-        )
+        existing = state.jobs.find_active(kind="trim", stage_number=stage_number, video_id=video.video_id)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(
             kind="trim",
             stage_number=stage_number,
             video_id=video.video_id,
-            fn=lambda h, n=stage_number, vid=video.video_id: _run_trim_for_video(h, n, vid),
+            fn=lambda h, sl=slug, n=stage_number, vid=video.video_id: (_run_trim_for_video(h, sl, n, vid)),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    @app.post("/api/stages/{stage_number}/videos/{video_id}/trim")
-    def trim_for_video(stage_number: int, video_id: str) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/trim")
+    def trim_for_video(slug: str, stage_number: int, video_id: str) -> JSONResponse:
         """Submit an audit-mode trim job for ``video_id`` on ``stage_number``."""
-        project, stage, video = _resolve_stage_video(stage_number, video_id)
-        return _submit_trim(stage_number, stage, video, project)
+        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        return _submit_trim(slug, stage_number, stage, video, project)
 
-    def _run_trim_for_video(handle: JobHandle, stage_number: int, video_id: str) -> None:
+    def _run_trim_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker for the audit-mode trim of a specific video.
 
         Auto-chains shot detection only when the trimmed video is the
@@ -3255,17 +3325,17 @@ def create_app(
         their own beep, so they do not need their own shot-detection run.
         """
         handle.update(progress=0.1, message="Preparing trim...")
-        proj = state.load()
+        proj = state.shooter_project(slug)
         stg = proj.stage(stage_number)
         video = stg.find_video_by_id(video_id)
         if video is None or video.beep_time is None:
             raise RuntimeError("video or beep disappeared mid-flight")
-        source = proj.resolve_video_path(state.project_root, video.path)
+        source = proj.resolve_video_path(state.shooter_root(slug), video.path)
         handle.check_cancel()
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
         audio_helpers.ensure_video_audit_trim(
-            state.project_root,
+            state.shooter_root(slug),
             stage_number,
             video,
             source,
@@ -3277,12 +3347,12 @@ def create_app(
         handle.update(progress=0.85, message="Saving project...")
         # Read-modify-write to avoid stomping concurrent edits made
         # while ffmpeg was running (e.g. another stage's beep review).
-        fresh = state.load()
+        fresh = state.shooter_project(slug)
         stg_fresh = fresh.stage(stage_number)
         v_fresh = stg_fresh.find_video_by_id(video_id)
         if v_fresh is not None:
             v_fresh.processed["trim"] = True
-            fresh.save(state.project_root)
+            fresh.save(state.shooter_root(slug))
         if (
             video.role == "primary"
             and video.beep_reviewed
@@ -3304,7 +3374,7 @@ def create_app(
                 state.jobs.submit(
                     kind="shot_detect",
                     stage_number=stage_number,
-                    fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                    fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
                 )
         handle.update(progress=1.0, message="Done")
 
@@ -3353,7 +3423,7 @@ def create_app(
             fresh.save(shooter_root)
         handle.update(progress=1.0, message="Done")
 
-    def _run_trim_for_stage(handle: JobHandle, stage_number: int) -> None:
+    def _run_trim_for_stage(handle: JobHandle, slug: str, stage_number: int) -> None:
         """Backward-compat shim for legacy callers (e.g. beep-override
         endpoints) that submit a trim by stage_number alone.
 
@@ -3361,7 +3431,7 @@ def create_app(
         worker. New callers should pass a ``video_id`` and submit via
         :func:`_run_trim_for_video` directly.
         """
-        proj = state.load()
+        proj = state.shooter_project(slug)
         try:
             stg = proj.stage(stage_number)
         except KeyError as exc:
@@ -3369,9 +3439,9 @@ def create_app(
         primary = stg.primary()
         if primary is None:
             raise RuntimeError(f"stage {stage_number} has no primary mid-flight")
-        _run_trim_for_video(handle, stage_number, primary.video_id)
+        _run_trim_for_video(handle, slug, stage_number, primary.video_id)
 
-    def _run_shot_detect(handle: JobHandle, stage_number: int, reset: bool = False) -> None:
+    def _run_shot_detect(handle: JobHandle, slug: str, stage_number: int, reset: bool = False) -> None:
         """Worker that runs the 4-voter ensemble on the stage's audit clip.
 
         Reads the trimmed clip's WAV (extracting it on demand if needed),
@@ -3392,7 +3462,7 @@ def create_app(
         top-(K+slack) mode and the apriori boost lifts the top-K
         confidence-ranked candidates over the consensus line.
         """
-        proj = state.load()
+        proj = state.shooter_project(slug)
         stg = proj.stage(stage_number)
         prim = stg.primary()
         if prim is None or prim.beep_time is None:
@@ -3402,7 +3472,7 @@ def create_app(
                 f"stage {stage_number} has time_seconds=0; import a "
                 "scoreboard before running shot detection"
             )
-        source = proj.resolve_video_path(state.project_root, prim.path)
+        source = proj.resolve_video_path(state.shooter_root(slug), prim.path)
 
         # Re-detect-all on an old project (and the v1->v2 cache migration in
         # #298) leaves stages with no trimmed MP4 cached. Without that file,
@@ -3414,7 +3484,7 @@ def create_app(
         handle.update(progress=0.05, message="Ensuring audit trim...")
         try:
             audio_helpers.ensure_video_audit_trim(
-                state.project_root,
+                state.shooter_root(slug),
                 stage_number,
                 prim,
                 source,
@@ -3423,14 +3493,14 @@ def create_app(
                 project=proj,
                 runner=_cancellable_runner(handle),
             )
-            trim_fresh = state.load()
+            trim_fresh = state.shooter_project(slug)
             try:
                 v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
             except KeyError:
                 v_fresh = None
             if v_fresh is not None and not v_fresh.processed.get("trim"):
                 v_fresh.processed["trim"] = True
-                trim_fresh.save(state.project_root)
+                trim_fresh.save(state.shooter_root(slug))
         except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
             # Soft failure: detection can still proceed against the source
             # WAV. ensure_audit_audio's fallback handles the missing trim,
@@ -3443,7 +3513,7 @@ def create_app(
 
         handle.update(progress=0.1, message="Preparing audio...")
         audit = audio_helpers.ensure_audit_audio(
-            state.project_root,
+            state.shooter_root(slug),
             stage_number,
             source,
             prim.beep_time,
@@ -3454,7 +3524,7 @@ def create_app(
         # Read existing audit JSON up-front: we need ``stage_rounds.expected``
         # before running detection (it changes voter C's mode and the
         # apriori boost) and we'll merge results back into the same dict.
-        audit_dir = proj.audit_path(state.project_root)
+        audit_dir = proj.audit_path(state.shooter_root(slug))
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"stage{stage_number}.json"
         if audit_file.exists():
@@ -3477,9 +3547,7 @@ def create_app(
         # detection after a scoreboard refresh should pick up the new
         # round count without manual edits.
         if stg.stage_rounds is not None:
-            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(
-                mode="json", exclude_none=True
-            )
+            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
         expected_rounds: int | None = None
         sr_block = existing_json.get("stage_rounds")
         if isinstance(sr_block, dict):
@@ -3603,16 +3671,16 @@ def create_app(
         # interim (the review action kicks shot_detect, so concurrent
         # bursts are the common case). Reloading from disk and mutating
         # only the targeted field preserves those concurrent edits.
-        fresh = state.load()
+        fresh = state.shooter_project(slug)
         stg_fresh = fresh.stage(stage_number)
         prim_fresh = stg_fresh.primary()
         if prim_fresh is not None:
             prim_fresh.processed["shot_detect"] = True
-            fresh.save(state.project_root)
+            fresh.save(state.shooter_root(slug))
         handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
 
-    @app.post("/api/stages/shot-detect")
-    def shot_detect_all_endpoint(reset: bool = False) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/shot-detect")
+    def shot_detect_all_endpoint(slug: str, reset: bool = False) -> JSONResponse:
         """Submit shot-detection on every eligible stage in the project.
 
         A stage is eligible when it has a primary video with a confirmed
@@ -3626,7 +3694,7 @@ def create_app(
         ``reset=true`` clears each affected stage's ``shots[]`` before
         running, matching the per-stage endpoint's semantics.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         jobs: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for stage in project.stages:
@@ -3648,13 +3716,13 @@ def create_app(
             job = state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
-                fn=lambda h, n=stage_number, r=reset: _run_shot_detect(h, n, reset=r),
+                fn=lambda h, sl=slug, n=stage_number, r=reset: _run_shot_detect(h, sl, n, reset=r),
             )
             jobs.append(job.model_dump(mode="json"))
         return JSONResponse({"jobs": jobs, "skipped": skipped})
 
-    @app.post("/api/stages/{stage_number}/shot-detect")
-    def shot_detect_endpoint(stage_number: int, reset: bool = False) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/shot-detect")
+    def shot_detect_endpoint(slug: str, stage_number: int, reset: bool = False) -> JSONResponse:
         """Submit a shot-detection job for the stage's audit clip.
 
         Returns a Job snapshot. Idempotent dedupe via the registry: a second
@@ -3664,7 +3732,7 @@ def create_app(
 
         ``reset=true`` wipes ``shots[]`` first so the user can start over.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -3695,16 +3763,16 @@ def create_app(
         job = state.jobs.submit(
             kind="shot_detect",
             stage_number=stage_number,
-            fn=lambda h, r=reset: _run_shot_detect(h, stage_number, reset=r),
+            fn=lambda h, sl=slug, r=reset: _run_shot_detect(h, sl, stage_number, reset=r),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    @app.get("/api/jobs", response_model=list[Job])
+    @app.get("/api/me/jobs", response_model=list[Job])
     def list_jobs() -> list[Job]:
         """Snapshot of all retained jobs (active + recently finished)."""
         return state.jobs.list()
 
-    @app.get("/api/jobs/{job_id}", response_model=Job)
+    @app.get("/api/me/jobs/{job_id}", response_model=Job)
     def get_job(job_id: str) -> Job:
         """Poll a single job. SPA polls ~1 Hz while a job is active."""
         job = state.jobs.get(job_id)
@@ -3712,7 +3780,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
-    @app.post("/api/jobs/acknowledge-failures", response_model=list[Job])
+    @app.post("/api/me/jobs/acknowledge-failures", response_model=list[Job])
     def acknowledge_all_failures() -> list[Job]:
         """Mark every currently-unacknowledged FAILED job as seen (issue #73).
 
@@ -3722,7 +3790,7 @@ def create_app(
         """
         return state.jobs.acknowledge_all_failures()
 
-    @app.post("/api/jobs/{job_id}/acknowledge", response_model=Job)
+    @app.post("/api/me/jobs/{job_id}/acknowledge", response_model=Job)
     def acknowledge_job(job_id: str) -> Job:
         """Mark a single failed job as seen (issue #73).
 
@@ -3735,7 +3803,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
-    @app.post("/api/jobs/{job_id}/cancel", response_model=Job)
+    @app.post("/api/me/jobs/{job_id}/cancel", response_model=Job)
     def cancel_job(job_id: str) -> Job:
         """Request cooperative cancellation of a running or pending job.
 
@@ -3751,6 +3819,7 @@ def create_app(
         return job
 
     def _apply_beep_override(
+        slug: str,
         project: MatchProject,
         stage: StageEntry,
         video: StageVideo,
@@ -3802,10 +3871,10 @@ def create_app(
                 video.processed["shot_detect"] = False
 
         audio_helpers.invalidate_video_audit_trim(
-            state.project_root, stage.stage_number, video, project=project
+            state.shooter_root(slug), stage.stage_number, video, project=project
         )
 
-    def _maybe_chain_trim(stage: StageEntry, video: StageVideo) -> None:
+    def _maybe_chain_trim(slug: str, stage: StageEntry, video: StageVideo) -> None:
         """Auto-fire a trim job for ``video`` when conditions allow.
 
         Used after a beep override / candidate select: if the user just
@@ -3816,9 +3885,7 @@ def create_app(
         if video.beep_time is None or stage.time_seconds <= 0:
             return
         if (
-            state.jobs.find_active(
-                kind="trim", stage_number=stage.stage_number, video_id=video.video_id
-            )
+            state.jobs.find_active(kind="trim", stage_number=stage.stage_number, video_id=video.video_id)
             is not None
         ):
             return
@@ -3826,7 +3893,9 @@ def create_app(
             kind="trim",
             stage_number=stage.stage_number,
             video_id=video.video_id,
-            fn=lambda h, n=stage.stage_number, vid=video.video_id: _run_trim_for_video(h, n, vid),
+            fn=lambda h, sl=slug, n=stage.stage_number, vid=video.video_id: (
+                _run_trim_for_video(h, sl, n, vid)
+            ),
         )
 
     def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
@@ -3874,9 +3943,9 @@ def create_app(
         if video.role == "primary":
             video.processed["shot_detect"] = False
 
-    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep")
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep")
     def override_beep_for_video(
-        stage_number: int, video_id: str, req: BeepOverrideRequest
+        slug: str, stage_number: int, video_id: str, req: BeepOverrideRequest
     ) -> JSONResponse:
         """Manually set or clear ``video``'s beep timestamp.
 
@@ -3885,19 +3954,19 @@ def create_app(
         with ``beep_source="manual"``. Same dedupe + auto-trim chain as
         the legacy primary endpoint, just keyed per video.
         """
-        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         if req.beep_time is not None and req.beep_time < 0.0:
             raise HTTPException(status_code=400, detail="beep_time must be >= 0")
-        _apply_beep_override(project, stage, video, req.beep_time)
-        project.save(state.project_root)
+        _apply_beep_override(slug, project, stage, video, req.beep_time)
+        project.save(state.shooter_root(slug))
         if req.beep_time is not None:
-            _maybe_chain_trim(stage, video)
+            _maybe_chain_trim(slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/stages/{stage_number}/beep")
-    def override_beep(stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
+    def override_beep(slug: str, stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
         """Backward-compat shim: manually set / clear the primary's beep."""
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -3910,14 +3979,14 @@ def create_app(
             )
         if req.beep_time is not None and req.beep_time < 0.0:
             raise HTTPException(status_code=400, detail="beep_time must be >= 0")
-        _apply_beep_override(project, stage, primary, req.beep_time)
-        project.save(state.project_root)
+        _apply_beep_override(slug, project, stage, primary, req.beep_time)
+        project.save(state.shooter_root(slug))
         if req.beep_time is not None:
-            _maybe_chain_trim(stage, primary)
+            _maybe_chain_trim(slug, stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/stages/{stage_number}/time")
-    def set_stage_time(stage_number: int, req: StageTimeRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/time")
+    def set_stage_time(slug: str, stage_number: int, req: StageTimeRequest) -> JSONResponse:
         """Manually set or clear the stage duration.
 
         For projects without scoreboard data (the only source that
@@ -3930,7 +3999,7 @@ def create_app(
         Does NOT auto-chain a trim job -- the user clicks Trim
         themselves once they're satisfied with the duration.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -3946,11 +4015,13 @@ def create_app(
                 )
             stage.time_seconds = float(req.time_seconds)
             stage.time_seconds_manual = True
-        project.save(state.project_root)
+        project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/snap")
-    def snap_beep_for_video(stage_number: int, video_id: str, req: BeepSnapRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/snap")
+    def snap_beep_for_video(
+        slug: str, stage_number: int, video_id: str, req: BeepSnapRequest
+    ) -> JSONResponse:
         """Refine a user-placed beep marker by snapping it to the strongest
         tone in a tight window around the hint.
 
@@ -3965,8 +4036,8 @@ def create_app(
         criteria. The SPA surfaces that as "no beep found nearby; widen
         the window or move the marker".
         """
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
-        source = project.resolve_video_path(state.project_root, video.path)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        source = project.resolve_video_path(state.shooter_root(slug), video.path)
         _ensure_source_reachable(stage_number, source)
         if req.hint_time < 0.0:
             raise HTTPException(status_code=400, detail="hint_time must be >= 0")
@@ -3974,7 +4045,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="window_s must be > 0")
 
         audio_path = audio_helpers.ensure_video_audio(
-            state.project_root, stage_number, video, source, project=project
+            state.shooter_root(slug), stage_number, video, source, project=project
         )
         audio, sr = beep_detect.load_audio(audio_path)
         duration_s = audio.size / sr if sr > 0 else 0.0
@@ -4041,22 +4112,24 @@ def create_app(
             ).model_dump()
         )
 
-    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/select")
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/select")
     def select_beep_candidate_for_video(
-        stage_number: int, video_id: str, req: BeepSelectRequest
+        slug: str, stage_number: int, video_id: str, req: BeepSelectRequest
     ) -> JSONResponse:
         """Promote one of ``video``'s ranked candidates as authoritative."""
-        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         _select_candidate_on_video(video, req.time)
         audio_helpers.invalidate_video_audit_trim(
-            state.project_root, stage_number, video, project=project
+            state.shooter_root(slug), stage_number, video, project=project
         )
-        project.save(state.project_root)
-        _maybe_chain_trim(stage, video)
+        project.save(state.shooter_root(slug))
+        _maybe_chain_trim(slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/stages/{stage_number}/videos/{video_id}/beep/review")
-    def set_beep_reviewed(stage_number: int, video_id: str, req: BeepReviewRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
+    def set_beep_reviewed(
+        slug: str, stage_number: int, video_id: str, req: BeepReviewRequest
+    ) -> JSONResponse:
         """Flip ``video.beep_reviewed`` (issue #71).
 
         Setting True requires ``beep_time`` to be set; setting False is
@@ -4067,14 +4140,14 @@ def create_app(
         ensemble doesn't burn cycles on an unconfirmed beep, and we
         finally fire it here once the user has listened and approved).
         """
-        project, stage, video = _resolve_stage_video(stage_number, video_id)
+        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         if req.reviewed and video.beep_time is None:
             raise HTTPException(
                 status_code=400,
                 detail="cannot mark a beep reviewed before one has been detected",
             )
         video.beep_reviewed = bool(req.reviewed)
-        project.save(state.project_root)
+        project.save(state.shooter_root(slug))
 
         # When the user confirms the primary's beep AND the trim is
         # already cached from the auto-detect chain, kick off the
@@ -4090,13 +4163,15 @@ def create_app(
             state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
-                fn=lambda h, n=stage_number: _run_shot_detect(h, n),
+                fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
             )
 
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.patch("/api/stages/{stage_number}/videos/{video_id}/camera-mount")
-    def set_camera_mount(stage_number: int, video_id: str, req: CameraMountRequest) -> JSONResponse:
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/camera-mount")
+    def set_camera_mount(
+        slug: str, stage_number: int, video_id: str, req: CameraMountRequest
+    ) -> JSONResponse:
         """Override the heuristic ``camera_mount`` (issue #143).
 
         Validated against the fixture-schema ``CameraMount`` enum so
@@ -4104,7 +4179,7 @@ def create_app(
         override -- the next shot-detect run will use the artifact's
         default class instead of a per-class threshold.
         """
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         from ..fixture_schema import CameraMount
 
         if req.mount is not None:
@@ -4119,11 +4194,13 @@ def create_app(
                     ),
                 ) from exc
         video.camera_mount = req.mount
-        project.save(state.project_root)
+        project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.patch("/api/stages/{stage_number}/videos/{video_id}/camera-model")
-    def set_camera_model(stage_number: int, video_id: str, req: CameraModelRequest) -> JSONResponse:
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/camera-model")
+    def set_camera_model(
+        slug: str, stage_number: int, video_id: str, req: CameraModelRequest
+    ) -> JSONResponse:
         """Override the ffprobed camera make + model (#303-followup).
 
         Used when ffprobe couldn't read the QuickTime tag (e.g. Meta
@@ -4143,10 +4220,10 @@ def create_app(
                 status_code=400,
                 detail="camera-model: 'make' and 'model' must be supplied together or both null",
             )
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         video.camera_make = req.make
         video.camera_model = req.model
-        project.save(state.project_root)
+        project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.get("/api/calibrated-camera-models")
@@ -4173,17 +4250,15 @@ def create_app(
                 {
                     "key": key,
                     "make": meta.get("make", key.split(" ", 1)[0].title()),
-                    "model": meta.get(
-                        "model", key.split(" ", 1)[1].title() if " " in key else key.title()
-                    ),
+                    "model": meta.get("model", key.split(" ", 1)[1].title() if " " in key else key.title()),
                     "amp_floor": float(floor),
                 }
             )
         rows.sort(key=lambda r: (-r["amp_floor"], r["key"]))
         return JSONResponse({"models": rows})
 
-    @app.post("/api/stages/{stage_number}/beep/select")
-    def select_beep_candidate(stage_number: int, req: BeepSelectRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/beep/select")
+    def select_beep_candidate(slug: str, stage_number: int, req: BeepSelectRequest) -> JSONResponse:
         """Backward-compat shim: promote a ranked candidate on the primary.
 
         Lets the user fix a wrong auto-pick without typing a timestamp.
@@ -4191,7 +4266,7 @@ def create_app(
         from the detector -- we only changed which candidate the project
         trusts. Triggers a re-trim so the cached audit clip lines up.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -4204,14 +4279,14 @@ def create_app(
             )
         _select_candidate_on_video(primary, req.time)
         audio_helpers.invalidate_video_audit_trim(
-            state.project_root, stage_number, primary, project=project
+            state.shooter_root(slug), stage_number, primary, project=project
         )
-        project.save(state.project_root)
-        _maybe_chain_trim(stage, primary)
+        project.save(state.shooter_root(slug))
+        _maybe_chain_trim(slug, stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
 
     def _resolve_audit_audio(
-        project: MatchProject, stage_number: int
+        slug: str, project: MatchProject, stage_number: int
     ) -> audio_helpers.AuditAudioResult:
         """Shared resolver for /audio + /peaks: prefers the trimmed clip's
         WAV, falls back to full primary on cache miss / no trim."""
@@ -4227,9 +4302,9 @@ def create_app(
             )
         try:
             return audio_helpers.ensure_audit_audio(
-                state.project_root,
+                state.shooter_root(slug),
                 stage_number,
-                project.resolve_video_path(state.project_root, primary.path),
+                project.resolve_video_path(state.shooter_root(slug), primary.path),
                 primary.beep_time,
                 project=project,
             )
@@ -4239,7 +4314,7 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     def _resolve_video_audio(
-        project: MatchProject, stage_number: int, video: StageVideo
+        slug: str, project: MatchProject, stage_number: int, video: StageVideo
     ) -> audio_helpers.AuditAudioResult:
         """Per-video version of :func:`_resolve_audit_audio`.
 
@@ -4253,10 +4328,10 @@ def create_app(
         ``beep_in_clip`` is just ``video.beep_time``; the WAV is in source
         time so no trim offset applies.
         """
-        source = project.resolve_video_path(state.project_root, video.path)
+        source = project.resolve_video_path(state.shooter_root(slug), video.path)
         try:
             audio_path = audio_helpers.ensure_video_audio(
-                state.project_root,
+                state.shooter_root(slug),
                 stage_number,
                 video,
                 source,
@@ -4273,6 +4348,7 @@ def create_app(
         )
 
     def _serve_beep_preview(
+        slug: str,
         project: MatchProject,
         stage_number: int,
         video: StageVideo,
@@ -4283,7 +4359,7 @@ def create_app(
         Shared by the legacy primary endpoint and the per-video endpoint
         so both honour the same 404 / 424 / cache semantics.
         """
-        source = project.resolve_video_path(state.project_root, video.path)
+        source = project.resolve_video_path(state.shooter_root(slug), video.path)
         _ensure_source_reachable(stage_number, source)
         center = t if t is not None else video.beep_time
         if center is None:
@@ -4293,7 +4369,7 @@ def create_app(
             )
         if center < 0:
             raise HTTPException(status_code=400, detail="t must be >= 0")
-        thumbs_dir = project.thumbs_path(state.project_root)
+        thumbs_dir = project.thumbs_path(state.shooter_root(slug))
         try:
             clip = thumbnail_helpers.ensure_clip(
                 source,
@@ -4306,16 +4382,16 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return FileResponse(clip, media_type="video/mp4", filename=clip.name)
 
-    @app.get("/api/stages/{stage_number}/videos/{video_id}/beep-preview")
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-preview")
     def video_beep_preview(
-        stage_number: int, video_id: str, t: float | None = None
+        slug: str, stage_number: int, video_id: str, t: float | None = None
     ) -> FileResponse:
         """Serve a ~1 s MP4 around ``video``'s beep (or override ``t``)."""
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
-        return _serve_beep_preview(project, stage_number, video, t)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        return _serve_beep_preview(slug, project, stage_number, video, t)
 
-    @app.get("/api/stages/{stage_number}/beep-preview")
-    def stage_beep_preview(stage_number: int, t: float | None = None) -> FileResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/beep-preview")
+    def stage_beep_preview(slug: str, stage_number: int, t: float | None = None) -> FileResponse:
         """Serve a tiny MP4 around the primary's beep timestamp (#27, #22).
 
         Default center is the primary's persisted ``beep_time``. The
@@ -4324,7 +4400,7 @@ def create_app(
         promoting them first. Cache keys on (source mtime/size, center
         time, duration), so each distinct ``t`` gets its own cached clip.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -4335,10 +4411,10 @@ def create_app(
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
-        return _serve_beep_preview(project, stage_number, primary, t)
+        return _serve_beep_preview(slug, project, stage_number, primary, t)
 
-    @app.get("/api/stages/{stage_number}/audio")
-    def stage_audio(stage_number: int) -> FileResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/audio")
+    def stage_audio(slug: str, stage_number: int) -> FileResponse:
         """Serve the audit-clip WAV for ``stage_number``.
 
         Prefers the primary's audit WAV (extracted from the short-GOP trimmed
@@ -4347,16 +4423,17 @@ def create_app(
         when no trimmed clip exists yet -- the SPA surfaces this with a
         "trim required" hint.
         """
-        project = state.load()
-        result = _resolve_audit_audio(project, stage_number)
+        project = state.shooter_project(slug)
+        result = _resolve_audit_audio(slug, project, stage_number)
         return FileResponse(
             result.audio_path,
             media_type="audio/wav",
             filename=result.audio_path.name,
         )
 
-    @app.get("/api/stages/{stage_number}/peaks")
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/peaks")
     def stage_peaks(
+        slug: str,
         stage_number: int,
         bins: int = Query(default=1200, ge=16, le=8192),
     ) -> JSONResponse:
@@ -4368,16 +4445,16 @@ def create_app(
         timeline + ``trimmed`` so the SPA can render the beep marker
         correctly and warn when the user is auditing an untrimmed source.
         """
-        project = state.load()
-        audit = _resolve_audit_audio(project, stage_number)
+        project = state.shooter_project(slug)
+        audit = _resolve_audit_audio(slug, project, stage_number)
         peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip
         payload["trimmed"] = audit.trimmed
         return JSONResponse(payload)
 
-    @app.get("/api/stages/{stage_number}/videos/{video_id}/audio")
-    def video_audio(stage_number: int, video_id: str) -> FileResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/audio")
+    def video_audio(slug: str, stage_number: int, video_id: str) -> FileResponse:
         """Serve ``video``'s WAV for the per-video beep picker.
 
         Primary forwards to the legacy stage audio resolver so the
@@ -4387,16 +4464,17 @@ def create_app(
         the user can find the buzzer / first-shot regardless of where
         the current beep estimate is.
         """
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
-        result = _resolve_video_audio(project, stage_number, video)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        result = _resolve_video_audio(slug, project, stage_number, video)
         return FileResponse(
             result.audio_path,
             media_type="audio/wav",
             filename=result.audio_path.name,
         )
 
-    @app.get("/api/stages/{stage_number}/videos/{video_id}/peaks")
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/peaks")
     def video_peaks(
+        slug: str,
         stage_number: int,
         video_id: str,
         bins: int = Query(default=1200, ge=16, le=8192),
@@ -4407,42 +4485,41 @@ def create_app(
         picker can take the same path for primary + secondary -- the
         only thing that varies between roles is the URL.
         """
-        project, _stage, video = _resolve_stage_video(stage_number, video_id)
-        audit = _resolve_video_audio(project, stage_number, video)
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        audit = _resolve_video_audio(slug, project, stage_number, video)
         peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip
         payload["trimmed"] = audit.trimmed
         return JSONResponse(payload)
 
-    @app.get("/api/stages/{stage_number}/audit")
-    def get_stage_audit(stage_number: int) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/audit")
+    def get_stage_audit(slug: str, stage_number: int) -> JSONResponse:
         """Return the stage's audit JSON (issue #15) if one has been written.
 
         Lives at ``<project>/audit/stage<N>.json`` -- the same path the
-        existing audit-prep / audit-apply flow uses. 404 when no audit file
-        exists yet (the audit screen treats this as "fresh -- start from
-        candidates if any, otherwise empty markers").
+        existing audit-prep / audit-apply flow uses. Returns ``200 null``
+        when no audit file exists yet (the audit screen treats this as
+        "fresh -- start from candidates if any, otherwise empty
+        markers"); 404 is reserved for genuinely-unknown stages so the
+        SPA can distinguish.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
         if not audit_file.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"no audit JSON yet for stage {stage_number}",
-            )
+            return JSONResponse(None)
         try:
             payload = json.loads(audit_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
         return JSONResponse(payload)
 
-    @app.put("/api/stages/{stage_number}/audit")
-    def put_stage_audit(stage_number: int, payload: dict[str, Any]) -> JSONResponse:
+    @app.put("/api/shooters/{slug}/stages/{stage_number}/audit")
+    def put_stage_audit(slug: str, stage_number: int, payload: dict[str, Any]) -> JSONResponse:
         """Atomically write the audit JSON for a stage.
 
         Layout follows the existing audit-prep / audit-apply convention plus
@@ -4457,12 +4534,12 @@ def create_app(
         rename ``.tmp`` to final. A crashed process never leaves the SPA
         without a readable JSON.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_dir = project.audit_path(state.project_root)
+        audit_dir = project.audit_path(state.shooter_root(slug))
         audit_dir.mkdir(parents=True, exist_ok=True)
         target = audit_dir / f"stage{stage_number}.json"
         tmp = target.with_suffix(target.suffix + ".tmp")
@@ -4480,8 +4557,8 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return JSONResponse(payload)
 
-    @app.get("/api/stages/{stage_number}/anomalies")
-    def get_stage_anomalies(stage_number: int) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
+    def get_stage_anomalies(slug: str, stage_number: int) -> JSONResponse:
         """Return structured anomalies for the saved audit JSON (issue #42).
 
         Single source of truth for ``report.detect_anomalies_structured``:
@@ -4495,13 +4572,13 @@ def create_app(
         beep yet, or an empty ``shots[]`` -- the SPA renders these as
         "no anomalies" / "no shots audited yet" depending on context.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stg = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
         if not audit_file.exists():
             return JSONResponse({"anomalies": []})
         try:
@@ -4511,9 +4588,7 @@ def create_app(
 
         prim = stg.primary()
         beep_time = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
-        shots = export_helpers.audit_shots_to_engine_shots(
-            audit_payload, beep_time_in_source=beep_time
-        )
+        shots = export_helpers.audit_shots_to_engine_shots(audit_payload, beep_time_in_source=beep_time)
         anomalies = report.detect_anomalies_structured(shots, beep_time, stg.time_seconds)
         return JSONResponse({"anomalies": [a.model_dump() for a in anomalies]})
 
@@ -4527,6 +4602,7 @@ def create_app(
     # ----------------------------------------------------------------------
 
     def _video_beep_in_clip(
+        slug: str,
         project: MatchProject,
         stage_number: int,
         video: StageVideo,
@@ -4544,13 +4620,13 @@ def create_app(
         if video.beep_time is None:
             return None
         trimmed = audio_helpers.trimmed_video_path(
-            state.project_root, stage_number, video, project=project
+            state.shooter_root(slug), stage_number, video, project=project
         )
         if trimmed.exists() and trimmed.stat().st_size > 0:
             return min(video.beep_time, project.trim_pre_buffer_seconds)
         return video.beep_time
 
-    def _coach_video_entries(project: MatchProject, stg: Any) -> list[dict[str, Any]]:
+    def _coach_video_entries(slug: str, project: MatchProject, stg: Any) -> list[dict[str, Any]]:
         """Per-video metadata the SPA needs to seek every synced camera.
 
         Order mirrors VideoPanel's expectation: primary first, then
@@ -4570,23 +4646,24 @@ def create_app(
                 {
                     "path": str(v.path),
                     "role": v.role,
-                    "beep_in_clip": _video_beep_in_clip(project, stg.stage_number, v),
+                    "beep_in_clip": _video_beep_in_clip(slug, project, stg.stage_number, v),
                 }
             )
         return out
 
     def _load_audit_for_coach(
+        slug: str,
         stage_number: int,
     ) -> tuple[dict[str, Any], Path, float | None, Any, MatchProject]:
         """Shared loader: validates the stage, reads the audit JSON,
         returns (payload, path, primary_beep_in_clip, stage, project).
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stg = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_file = project.audit_path(state.project_root) / f"stage{stage_number}.json"
+        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
         if not audit_file.exists():
             raise HTTPException(
                 status_code=404,
@@ -4598,7 +4675,7 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
         prim = stg.primary()
         primary_beep_in_clip = (
-            _video_beep_in_clip(project, stage_number, prim) if prim is not None else None
+            _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
         )
         return payload, audit_file, primary_beep_in_clip, stg, project
 
@@ -4618,6 +4695,7 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"coach write failed: {exc}") from exc
 
     def _build_coach_response(
+        slug: str,
         payload: dict[str, Any],
         primary_beep_in_clip: float | None,
         stg: Any,
@@ -4676,30 +4754,40 @@ def create_app(
             # secondaries (each ``videos[i].beep_in_clip`` mirrors this
             # field for that camera's served clip).
             "beep_time": clip_anchor,
-            "videos": _coach_video_entries(project, stg),
+            "videos": _coach_video_entries(slug, project, stg),
             "shots": coach_shots,
         }
 
-    @app.get("/api/stages/{stage_number}/coach")
-    def get_stage_coach(stage_number: int) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/coach")
+    def get_stage_coach(slug: str, stage_number: int) -> JSONResponse:
         """Return the per-shot coach view for a stage.
 
         Read-only: the stored ``interval_class`` is surfaced as-is, plus a
         ``stale`` flag indicating whether the current rule disagrees. The
         client can call ``POST /coach/reclassify`` to persist the rule's
-        verdict onto unset/auto entries.
+        verdict onto unset/auto entries. Returns ``200 null`` when the
+        stage has no audit JSON yet (a normal pre-audit state); 404 is
+        reserved for genuinely-unknown stage numbers.
         """
-        payload, _audit_file, beep_in_clip, stg, project = _load_audit_for_coach(stage_number)
+        project = state.shooter_project(slug)
+        try:
+            stg = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            return JSONResponse(None)
+        payload, _audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
-        return JSONResponse(_build_coach_response(payload, beep_in_clip, stg, project, cfg))
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
-    @app.post("/api/stages/{stage_number}/coach/reclassify")
-    def reclassify_stage_coach(stage_number: int) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
+    def reclassify_stage_coach(slug: str, stage_number: int) -> JSONResponse:
         """Force the auto-classifier to (re)write ``interval_class`` for
         every shot whose source is unset or ``"auto"``. Manual entries are
         preserved. Idempotent.
         """
-        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(stage_number)
+        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
@@ -4715,10 +4803,11 @@ def create_app(
         )
         payload["audit_events"] = events
         _coach_atomic_write(audit_file, payload)
-        return JSONResponse(_build_coach_response(payload, beep_in_clip, stg, project, cfg))
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
-    @app.patch("/api/stages/{stage_number}/shots/{shot_number}/coach")
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
     def patch_stage_shot_coach(
+        slug: str,
         stage_number: int,
         shot_number: int,
         body: CoachShotPatchRequest,
@@ -4726,17 +4815,13 @@ def create_app(
         """Patch the coaching annotation fields on one shot. Returns the
         updated coach response for the stage so the client can refresh.
         """
-        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(stage_number)
+        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
         target = next(
-            (
-                s
-                for s in shots
-                if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number
-            ),
+            (s for s in shots if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number),
             None,
         )
         if target is None:
@@ -4770,17 +4855,17 @@ def create_app(
         )
         payload["audit_events"] = events
         _coach_atomic_write(audit_file, payload)
-        return JSONResponse(_build_coach_response(payload, beep_in_clip, stg, project, cfg))
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
-    @app.get("/api/stages/{stage_number}/coach/distributions")
-    def get_stage_coach_distributions(stage_number: int) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/coach/distributions")
+    def get_stage_coach_distributions(slug: str, stage_number: int) -> JSONResponse:
         """Histograms + summary stats for one stage's coach annotations.
 
         Unset interval classes are computed in memory; nothing persists.
         Empty classes still appear in the response with count=0 so the
         UI can render an empty histogram without a special case.
         """
-        payload, _audit_file, _beep_in_clip, stg, _project = _load_audit_for_coach(stage_number)
+        payload, _audit_file, _beep_in_clip, stg, _project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
@@ -4793,15 +4878,15 @@ def create_app(
         )
         return JSONResponse(result.model_dump())
 
-    @app.get("/api/coach/distributions")
-    def get_match_coach_distributions() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/coach/distributions")
+    def get_match_coach_distributions(slug: str) -> JSONResponse:
         """Match-level distributions across every stage with an audit
         JSON. Stages without an audit are silently skipped -- they
         haven't been audited yet so they'd just dilute the average.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         cfg = CoachAutoClassifyConfig()
-        audit_dir = project.audit_path(state.project_root)
+        audit_dir = project.audit_path(state.shooter_root(slug))
         triples: list[tuple[int, str, list[dict[str, Any]]]] = []
         for stg in project.stages:
             audit_file = audit_dir / f"stage{stg.stage_number}.json"
@@ -4932,8 +5017,9 @@ def create_app(
         media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(target, media_type=media_type, filename=target.name)
 
-    @app.get("/api/videos/stream")
+    @app.get("/api/shooters/{slug}/videos/stream")
     def stream_video(
+        slug: str,
         path: str = Query(...),
         kind: Literal["auto", "trim", "source"] = Query("auto"),
     ) -> FileResponse:
@@ -4961,7 +5047,8 @@ def create_app(
         (any stage, any role, or unassigned) so the endpoint cannot be
         used as a generic file-read primitive.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         located = project.find_video(Path(path))
         if located is None:
             raise HTTPException(
@@ -4975,9 +5062,7 @@ def create_app(
             # Per-video short-GOP trim is keyed per role: each angle has
             # its own scrub clip cut around its own beep, so dragging
             # the audit playhead doesn't stall on a 4K MOV from a phone.
-            trimmed = audio_helpers.trimmed_video_path(
-                state.project_root, stage.stage_number, video, project=project
-            )
+            trimmed = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
         if served_path is None:
@@ -4986,18 +5071,17 @@ def create_app(
                     status_code=404,
                     detail=f"trimmed clip not built yet for {path}",
                 )
-            served_path = project.resolve_video_path(state.project_root, video.path).resolve()
+            served_path = project.resolve_video_path(root, video.path).resolve()
             # Same structured shape as detect-beep / trim / preview so
             # the SPA's "reconnect external storage" surface is uniform.
             _ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
-        media_type = (
-            "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
-        )
+        media_type = "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(served_path, media_type=media_type, filename=served_path.name)
 
-    @app.get("/api/fs/list", response_model=FsListing)
+    @app.get("/api/shooters/{slug}/fs/list", response_model=FsListing)
     def fs_list(
+        slug: str,
         path: str | None = Query(default=None),
         probe: bool = Query(default=False),
     ) -> FsListing:
@@ -5017,7 +5101,7 @@ def create_app(
           probes / thumbnails always populate -- the budget only gates the
           first-time work.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         target = Path(path).expanduser() if path else _default_start(project.last_scanned_dir)
         try:
             target = target.resolve(strict=True)
@@ -5032,8 +5116,8 @@ def create_app(
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-        probes_dir = project.probes_path(state.project_root)
-        thumbs_dir = project.thumbs_path(state.project_root)
+        probes_dir = project.probes_path(state.shooter_root(slug))
+        thumbs_dir = project.thumbs_path(state.shooter_root(slug))
         budget_deadline = time.monotonic() + 5.0  # wall-clock budget for new probes
 
         for child in children:
@@ -5051,6 +5135,7 @@ def create_app(
                     if is_video:
                         duration, thumbnail_url = _video_metadata_for(
                             child,
+                            slug=slug,
                             probes_dir=probes_dir,
                             thumbs_dir=thumbs_dir,
                             allow_new=probe and time.monotonic() < budget_deadline,
@@ -5081,8 +5166,8 @@ def create_app(
             suggested_starts=suggested,
         )
 
-    @app.get("/api/fs/probe")
-    def fs_probe(path: str = Query(...)) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/fs/probe")
+    def fs_probe(slug: str, path: str = Query(...)) -> JSONResponse:
         """Probe a single video file on demand: ffprobe + thumbnail extraction.
 
         Used by the SPA when a picker row came back with null fields (the
@@ -5091,11 +5176,11 @@ def create_app(
         surfaces resolution/codec/size so the unassigned-tray rows can show
         enough metadata for the user to identify which clip is which.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         # StageVideo.path is project-relative for default projects, so resolve
         # via the project root rather than process CWD before strict-resolving.
         raw_target = Path(path).expanduser()
-        target = project.resolve_video_path(state.project_root, raw_target)
+        target = project.resolve_video_path(state.shooter_root(slug), raw_target)
         try:
             target = target.resolve(strict=True)
         except (FileNotFoundError, OSError) as exc:
@@ -5105,10 +5190,11 @@ def create_app(
         if target.suffix.lower() not in VIDEO_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"not a video: {target}")
 
-        probes_dir = project.probes_path(state.project_root)
-        thumbs_dir = project.thumbs_path(state.project_root)
+        probes_dir = project.probes_path(state.shooter_root(slug))
+        thumbs_dir = project.thumbs_path(state.shooter_root(slug))
         duration, thumbnail_url = _video_metadata_for(
             target,
+            slug=slug,
             probes_dir=probes_dir,
             thumbs_dir=thumbs_dir,
             allow_new=True,
@@ -5131,8 +5217,8 @@ def create_app(
             }
         )
 
-    @app.get("/api/thumbnails/{cache_key}.jpg", include_in_schema=False)
-    def serve_thumbnail(cache_key: str) -> FileResponse:
+    @app.get("/api/shooters/{slug}/thumbnails/{cache_key}.jpg", include_in_schema=False)
+    def serve_thumbnail(slug: str, cache_key: str) -> FileResponse:
         """Serve a cached thumbnail by its content-addressed key.
 
         Keys are 16-char hex from :func:`video_probe.source_cache_key`. We
@@ -5141,21 +5227,21 @@ def create_app(
         """
         if not cache_key.isalnum() or len(cache_key) > 32:
             raise HTTPException(status_code=400, detail="invalid thumbnail key")
-        project = state.load()
-        thumbs_dir = project.thumbs_path(state.project_root)
+        project = state.shooter_project(slug)
+        thumbs_dir = project.thumbs_path(state.shooter_root(slug))
         candidate = thumbs_dir / f"{cache_key}.jpg"
         if not candidate.exists():
             raise HTTPException(status_code=404, detail="thumbnail not cached")
         return FileResponse(candidate, media_type="image/jpeg", filename=candidate.name)
 
-    @app.post("/api/videos/auto-match")
-    def auto_match() -> JSONResponse:
-        project = state.load()
-        suggestions = project.auto_match(state.project_root)
+    @app.post("/api/shooters/{slug}/videos/auto-match")
+    def auto_match(slug: str) -> JSONResponse:
+        project = state.shooter_project(slug)
+        suggestions = project.auto_match(state.shooter_root(slug))
         return JSONResponse({str(stage_num): str(path) for stage_num, path in suggestions.items()})
 
-    @app.post("/api/videos/remove")
-    def remove_video(req: RemoveVideoRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/videos/remove")
+    def remove_video(slug: str, req: RemoveVideoRequest) -> JSONResponse:
         """Remove a registered video and clean up its caches.
 
         Walks the :class:`RemovalPlan` returned by the model: unlinks the
@@ -5167,11 +5253,12 @@ def create_app(
         the same stage with a different file picks up where the user left
         off.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             plan = project.remove_video(
                 Path(req.video_path),
-                state.project_root,
+                root,
                 reset_audit=req.reset_audit,
             )
         except KeyError as exc:
@@ -5186,7 +5273,7 @@ def create_app(
             elif plan.raw_link_path.exists():
                 # Treat as a copy splitsmith placed (link_mode="copy"). We
                 # only delete files inside raw_dir; never anything beyond.
-                raw_dir = project.raw_path(state.project_root).resolve()
+                raw_dir = project.raw_path(root).resolve()
                 try:
                     plan.raw_link_path.resolve().relative_to(raw_dir)
                     plan.raw_link_path.unlink()
@@ -5213,7 +5300,7 @@ def create_app(
             except OSError as exc:
                 logger.warning("could not remove audit %s: %s", plan.audit_path, exc)
 
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(
             {
                 "project": project.model_dump(mode="json"),
@@ -5221,8 +5308,9 @@ def create_app(
             }
         )
 
-    @app.get("/api/project/cleanup/plan")
+    @app.get("/api/shooters/{slug}/project/cleanup/plan")
     def cleanup_plan(
+        slug: str,
         categories: str = Query("", description="Comma-separated category list."),
     ) -> JSONResponse:
         """Preview a cleanup plan without deleting anything.
@@ -5231,7 +5319,7 @@ def create_app(
         the SPA can debounce-fetch as the user toggles checkboxes
         without worrying about partial selections.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         cats: set[cleanup_module.CleanupCategory] = set()
         for token in categories.split(","):
             token = token.strip()
@@ -5243,11 +5331,11 @@ def create_app(
                 # Skip unknown categories silently; the SPA only sends
                 # known ones, and a stale tab shouldn't crash here.
                 continue
-        plan = cleanup_module.plan_cleanup(project, state.project_root, cats)
+        plan = cleanup_module.plan_cleanup(project, state.shooter_root(slug), cats)
         return JSONResponse(plan.model_dump(mode="json"))
 
-    @app.post("/api/project/cleanup")
-    def cleanup_apply(req: CleanupRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/cleanup")
+    def cleanup_apply(slug: str, req: CleanupRequest) -> JSONResponse:
         """Apply a cleanup. Refuses while jobs are pending or running.
 
         Re-plans server-side: the client only sends categories, never
@@ -5269,10 +5357,11 @@ def create_app(
                     "kind": active.kind,
                 },
             )
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         cats = set(req.categories)
-        plan = cleanup_module.plan_cleanup(project, state.project_root, cats)
-        result = cleanup_module.apply_cleanup(plan, root=state.project_root)
+        plan = cleanup_module.plan_cleanup(project, root, cats)
+        result = cleanup_module.apply_cleanup(plan, root=root)
         return JSONResponse(
             {
                 "plan": plan.model_dump(mode="json"),
@@ -5280,9 +5369,10 @@ def create_app(
             }
         )
 
-    @app.post("/api/assignments/move")
-    def move_assignment(req: MoveRequest) -> JSONResponse:
-        project = state.load()
+    @app.post("/api/shooters/{slug}/assignments/move")
+    def move_assignment(slug: str, req: MoveRequest) -> JSONResponse:
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.assign_video(
                 Path(req.video_path),
@@ -5291,7 +5381,7 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        project.save(state.project_root)
+        project.save(root)
 
         # Auto-queue beep on assignment to a real stage (#67). Skip when
         # unassigning (to_stage_number=None) or marking ignored -- those
@@ -5300,12 +5390,12 @@ def create_app(
             stage = project.stage(req.to_stage_number)
             video = next((v for v in stage.videos if str(v.path) == req.video_path), None)
             if video is not None:
-                _auto_queue_beep_if_needed(project, req.to_stage_number, video)
+                _auto_queue_beep_if_needed(slug, project, req.to_stage_number, video)
 
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/assignments/swap-primary")
-    def swap_primary(req: SwapPrimaryRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/assignments/swap-primary")
+    def swap_primary(slug: str, req: SwapPrimaryRequest) -> JSONResponse:
         """Promote ``video_path`` to primary on ``stage_number``.
 
         Audit-safe: when the stage has shots in its audit JSON, refuses with
@@ -5313,13 +5403,14 @@ def create_app(
         audit JSON is renamed to ``.bak`` so a bad swap is recoverable, and
         the new primary's processed flags are cleared so detection re-runs.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(req.stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        warns = project.primary_swap_warns(state.project_root, stage_number=req.stage_number)
+        warns = project.primary_swap_warns(root, stage_number=req.stage_number)
         if warns and not req.confirm:
             existing = stage.primary()
             raise HTTPException(
@@ -5339,13 +5430,13 @@ def create_app(
         try:
             project.swap_primary(
                 Path(req.video_path),
-                root=state.project_root,
+                root=root,
                 stage_number=req.stage_number,
                 backup_audit=warns,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        project.save(state.project_root)
+        project.save(root)
 
         # Auto-queue beep for the new primary (#67). swap_primary may
         # clear ``processed.beep`` to force re-detection on the new
@@ -5353,24 +5444,24 @@ def create_app(
         # accordingly. No-op when the video already had a current beep.
         new_primary = project.stage(req.stage_number).primary()
         if new_primary is not None:
-            _auto_queue_beep_if_needed(project, req.stage_number, new_primary)
+            _auto_queue_beep_if_needed(slug, project, req.stage_number, new_primary)
 
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.get("/api/exports/overview")
-    def export_overview() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/exports/overview")
+    def export_overview(slug: str) -> JSONResponse:
         """Match-overview payload for the Analysis & Export screen.
 
         Returns one row per stage with audit + export status (shot count,
         pending candidates, file paths, last export time, ready-to-export
         flag). Pure stat: no detection, no rewriting of audit JSON.
         """
-        project = state.load()
-        rows = project.export_overview(state.project_root)
+        project = state.shooter_project(slug)
+        rows = project.export_overview(state.shooter_root(slug))
         return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
 
-    @app.post("/api/stages/{stage_number}/export")
-    def export_stage(stage_number: int, req: ExportStageRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/export")
+    def export_stage(slug: str, stage_number: int, req: ExportStageRequest) -> JSONResponse:
         """Submit a per-stage export job.
 
         Wraps the ``export_helpers.export_stage`` orchestrator (lossless trim
@@ -5385,7 +5476,7 @@ def create_app(
         errors up front so the SPA can show a clear error before queueing
         a useless job.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -5403,8 +5494,7 @@ def create_app(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"stage {stage_number} is a placeholder; import a real "
-                    "scoreboard before exporting"
+                    f"stage {stage_number} is a placeholder; import a real " "scoreboard before exporting"
                 ),
             )
         # Source-reachability surfaces as a structured 424 so the SPA
@@ -5415,7 +5505,7 @@ def create_app(
         # message in the per-row anomaly list).
         if req.write_trim or req.write_fcpxml:
             _ensure_source_reachable(
-                stage_number, project.resolve_video_path(state.project_root, primary.path)
+                stage_number, project.resolve_video_path(state.shooter_root(slug), primary.path)
             )
 
         existing = state.jobs.find_active(kind="export", stage_number=stage_number)
@@ -5424,27 +5514,27 @@ def create_app(
         job = state.jobs.submit(
             kind="export",
             stage_number=stage_number,
-            fn=lambda h, n=stage_number, r=req: _run_export_for_stage(h, n, r),
+            fn=lambda h, sl=slug, n=stage_number, r=req: _run_export_for_stage(h, sl, n, r),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
     def _run_export_for_stage(
-        handle: JobHandle, stage_number: int, req: ExportStageRequest
+        handle: JobHandle, slug: str, stage_number: int, req: ExportStageRequest
     ) -> None:
         """Worker for /api/stages/{n}/export. Phases mirror the user's
         mental model so the JobsPanel message is meaningful."""
         from ..config import StageData as EngineStageData
 
         handle.update(progress=0.05, message="Loading project...")
-        proj = state.load()
+        proj = state.shooter_project(slug)
         stg = proj.stage(stage_number)
         prim = stg.primary()
         if prim is None or prim.beep_time is None:
             raise RuntimeError("primary or beep disappeared mid-flight")
 
-        audit_file = proj.audit_path(state.project_root) / f"stage{stage_number}.json"
-        exports_dir = proj.exports_path(state.project_root)
-        source_video = proj.resolve_video_path(state.project_root, prim.path)
+        audit_file = proj.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
+        exports_dir = proj.exports_path(state.shooter_root(slug))
+        source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
         engine_stage = EngineStageData(
             stage_number=stg.stage_number,
             stage_name=stg.stage_name,
@@ -5481,7 +5571,7 @@ def create_app(
                 continue
             if allowed_ids is not None and sv.video_id not in allowed_ids:
                 continue
-            sec_source = proj.resolve_video_path(state.project_root, sv.path)
+            sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
             secondaries.append(
                 export_helpers.SecondaryExport(
                     video_id=sv.video_id,
@@ -5523,7 +5613,7 @@ def create_app(
 
         handle.update(progress=0.95, message="Saving project...")
         proj.updated_at = datetime.now(UTC)
-        proj.save(state.project_root)
+        proj.save(state.shooter_root(slug))
 
         # Final message summarises what shipped + flags any skipped
         # artefacts (FCPXML without a trim, etc). The full list lives in
@@ -5570,22 +5660,21 @@ def create_app(
         ]
         return JSONResponse({"templates": payload})
 
-    @app.post("/api/match/export")
-    def export_match(req: MatchExportRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/export/match")
+    def export_match(slug: str, req: MatchExportRequest) -> JSONResponse:
         """Stitch N stages into one FCPXML (issue #171, #172).
 
         Job-queued: per-stage trims (and optional overlays) can take
         minutes for a real match, so the response is a Job snapshot the
-        SPA polls via ``/api/jobs/{id}``. The worker re-runs any missing
-        per-stage exports before invoking the match composer, so the user
-        doesn't have to click Generate on each stage first -- "Export
-        match" is a one-stop button.
+        SPA polls via ``/api/me/jobs/{id}``. The worker re-runs any
+        missing per-stage exports before invoking the match composer,
+        so the user doesn't have to click Generate on each stage first.
 
         Validation up-front (404 on unbound project, 400 on empty
         selection / unknown stage / missing primary or beep / padding out
         of range) so the SPA shows a clear error before queueing.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         if not req.stage_numbers:
             raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
 
@@ -5636,10 +5725,10 @@ def create_app(
             # Source-reachability matters because the worker may have to
             # produce missing trims via ffmpeg. Surface up-front rather
             # than letting the worker fail mid-flight.
-            if not project.resolve_video_path(state.project_root, primary.path).exists():
+            if not project.resolve_video_path(state.shooter_root(slug), primary.path).exists():
                 _ensure_source_reachable(
                     stage_number,
-                    project.resolve_video_path(state.project_root, primary.path),
+                    project.resolve_video_path(state.shooter_root(slug), primary.path),
                 )
 
         existing = state.jobs.find_active(kind="match_export")
@@ -5647,12 +5736,12 @@ def create_app(
             return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(
             kind="match_export",
-            fn=lambda h, r=req: _run_match_export(h, r),
+            fn=lambda h, sl=slug, r=req: _run_match_export(h, sl, r),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    def _run_match_export(handle: JobHandle, req: MatchExportRequest) -> None:
-        """Worker for /api/match/export. Re-runs the per-stage exporter for
+    def _run_match_export(handle: JobHandle, slug: str, req: MatchExportRequest) -> None:
+        """Worker for the shooter's match-export job. Re-runs the per-stage exporter for
         any selected stage missing its lossless trim, then composes the
         match FCPXML.
         """
@@ -5660,9 +5749,9 @@ def create_app(
         from . import exports as exports_mod
 
         handle.update(progress=0.02, message="Loading project...")
-        proj = state.load()
-        exports_dir = proj.exports_path(state.project_root)
-        audit_dir = proj.audit_path(state.project_root)
+        proj = state.shooter_project(slug)
+        exports_dir = proj.exports_path(state.shooter_root(slug))
+        audit_dir = proj.audit_path(state.shooter_root(slug))
 
         n = len(req.stage_numbers)
         # Reserve the last 10% for the match compose step; the rest is
@@ -5692,8 +5781,7 @@ def create_app(
                     if sv.role == "secondary" and sv.beep_time is not None:
                         wanted_secondary_ids.add(sv.video_id)
             secondary_trims_present = all(
-                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists()
-                for vid in wanted_secondary_ids
+                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
             )
             # Treat any non-default overlay format option as "force re-render"
             # so the dialog's codec / max-height / max-fps choices actually
@@ -5709,15 +5797,11 @@ def create_app(
                 not overlay_target.exists() or overlay_format_overridden
             )
 
-            needs_per_stage = (
-                not trimmed_path.exists() or not secondary_trims_present or overlay_missing
-            )
+            needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
             if needs_per_stage:
                 handle.update(
                     progress=0.02 + idx * per_stage_share,
-                    message=(
-                        f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."
-                    ),
+                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
                 )
                 # Build the secondaries list for the per-stage exporter --
                 # mirrors the single-stage endpoint's logic.
@@ -5726,7 +5810,7 @@ def create_app(
                     for sv in stg.videos:
                         if sv.role != "secondary" or sv.beep_time is None:
                             continue
-                        sec_source = proj.resolve_video_path(state.project_root, sv.path)
+                        sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
                         secondaries_in.append(
                             export_helpers.SecondaryExport(
                                 video_id=sv.video_id,
@@ -5735,7 +5819,7 @@ def create_app(
                                 label=f"Cam {sv.video_id}",
                             )
                         )
-                source_video = proj.resolve_video_path(state.project_root, prim.path)
+                source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
                 engine_stage = EngineStageData(
                     stage_number=stg.stage_number,
                     stage_name=stg.stage_name,
@@ -5771,10 +5855,7 @@ def create_app(
             else:
                 handle.update(
                     progress=0.02 + idx * per_stage_share,
-                    message=(
-                        f"Stage {stage_number} ({idx + 1} of {n}): "
-                        "trim already present; skipping"
-                    ),
+                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"),
                 )
 
         handle.check_cancel()
@@ -5782,7 +5863,7 @@ def create_app(
 
         # Re-load the project: the per-stage worker writes processed flags
         # via project.save() side-effects, so a fresh load picks those up.
-        proj = state.load()
+        proj = state.shooter_project(slug)
         stages_input: list[match_export_helpers.MatchStageInput] = []
         for stage_number in req.stage_numbers:
             stg = proj.stage(stage_number)
@@ -5859,10 +5940,7 @@ def create_app(
         anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
         handle.update(
             progress=1.0,
-            message=(
-                f"Done: {result.stage_count} stages, "
-                f"{result.duration_seconds:.1f}s{anom_suffix}"
-            ),
+            message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
     @app.post("/api/files/reveal")
@@ -5880,11 +5958,11 @@ def create_app(
         except (OSError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=f"not found: {target}") from exc
         try:
-            resolved.relative_to(state.project_root.resolve())
+            resolved.relative_to(state.bound_root.resolve())
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
-                detail="reveal path must be inside the project root",
+                detail="reveal path must be inside the bound project root",
             ) from exc
         try:
             if sys.platform == "darwin":
@@ -5897,13 +5975,11 @@ def create_app(
                 parent = resolved.parent if resolved.is_file() else resolved
                 subprocess.run(["xdg-open", str(parent)], check=False)
         except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"failed to launch file manager: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
         return JSONResponse({"revealed": str(resolved)})
 
-    @app.post("/api/videos/reveal")
-    def reveal_video(req: RevealRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/videos/reveal")
+    def reveal_video(slug: str, req: RevealRequest) -> JSONResponse:
         """Reveal a registered project video in the OS file manager.
 
         The generic ``/api/files/reveal`` requires the resolved path to be
@@ -5914,12 +5990,12 @@ def create_app(
         registering the source via the picker, so revealing the original
         location is the natural action for "open containing folder".
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         located = project.find_video(Path(req.path))
         if located is None:
             raise HTTPException(status_code=404, detail=f"video not registered: {req.path}")
         _, video = located
-        target = project.resolve_video_path(state.project_root, Path(str(video.path)))
+        target = project.resolve_video_path(state.shooter_root(slug), Path(str(video.path)))
         try:
             resolved = target.resolve(strict=True)
         except (OSError, FileNotFoundError) as exc:
@@ -5933,26 +6009,25 @@ def create_app(
                 parent = resolved.parent if resolved.is_file() else resolved
                 subprocess.run(["xdg-open", str(parent)], check=False)
         except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"failed to launch file manager: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
         return JSONResponse({"revealed": str(resolved)})
 
-    @app.post("/api/stages/{stage_number}/skip")
-    def set_stage_skipped(stage_number: int, req: SkipStageRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/skip")
+    def set_stage_skipped(slug: str, stage_number: int, req: SkipStageRequest) -> JSONResponse:
         """Mark ``stage_number`` as skipped (or un-skip it).
 
         A skipped stage is excluded from "next step" gating in the ingest
         screen so the user can advance even when the stage has no videos
         (e.g. they didn't film stage 4).
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         stage.skipped = req.skipped
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
     # ----------------------------------------------------------------------
@@ -5965,7 +6040,7 @@ def create_app(
     # project picker and read/write the saved SSI Scoreboard identity so the
     # scoreboard import flow can prefill 'me' instead of asking each project.
 
-    @app.get("/api/user/recent-projects")
+    @app.get("/api/me/recent-projects")
     def list_recent_projects(detail: bool = Query(False)) -> JSONResponse:
         """Return the recent-projects list.
 
@@ -5982,7 +6057,7 @@ def create_app(
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
-    @app.post("/api/user/recent-projects/forget")
+    @app.post("/api/me/recent-projects/forget")
     def forget_recent_project(req: ForgetRecentProjectRequest) -> JSONResponse:
         removed = user_config.remove_recent_project(Path(req.path))
         projects = user_config.get_recent_projects()
@@ -5993,7 +6068,7 @@ def create_app(
             }
         )
 
-    @app.post("/api/user/recent-projects/bind")
+    @app.post("/api/me/recent-projects/bind")
     def bind_recent_project(req: BindRecentProjectRequest) -> HealthResponse:
         """Switch the in-memory project. Used by the SPA picker route.
 
@@ -6027,13 +6102,7 @@ def create_app(
             )
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     @app.post("/api/match/create-manual")
     def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
@@ -6077,14 +6146,11 @@ def create_app(
         ]
         match.save(target)
 
-        shooter_slug = match_model.slugify(req.primary_shooter.name)
+        shooter_slug = match_model.mint_shooter_slug()
         shooter = match_model.Shooter(
             slug=shooter_slug,
             name=req.primary_shooter.name,
-            stages=[
-                match_model.ShooterStageData(stage_number=draft.stage_number)
-                for draft in req.stages
-            ],
+            stages=[match_model.ShooterStageData(stage_number=draft.stage_number) for draft in req.stages],
         )
         try:
             match.add_shooter(target, shooter)
@@ -6123,13 +6189,7 @@ def create_app(
             recorded = _bind_project_to_state(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     @app.post("/api/match/create-from-scoreboard")
     def create_match_from_scoreboard(
@@ -6165,7 +6225,7 @@ def create_app(
         match.scoreboard_content_type = req.content_type
         match.save(target)
 
-        shooter_slug = match_model.slugify(req.primary_shooter_name)
+        shooter_slug = match_model.mint_shooter_slug()
         shooter = match_model.Shooter(
             slug=shooter_slug,
             name=req.primary_shooter_name,
@@ -6188,43 +6248,20 @@ def create_app(
             recorded = _bind_project_to_state(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     # ----------------------------------------------------------------------
     # Shooters management (#324)
     # ----------------------------------------------------------------------
 
-    def _resolve_match_context() -> tuple[Path, match_model.Match, str]:
-        """Return ``(match_root, match, active_slug)`` for the bound project.
+    def _resolve_match_context() -> tuple[Path, match_model.Match]:
+        """Return ``(match_root, match)`` for the bound project.
 
-        Detects whether ``state.project_root`` lives at
-        ``<match_root>/shooters/<slug>/``; if so the SPA is browsing a
-        match-as-object project. Otherwise raises a structured 409 so the
-        shooters page can hide itself (the legacy single-shooter layout
-        has no concept of swapping shooters).
+        Raises 409 ``not_a_match`` for legacy single-shooter layouts (the
+        shooter-listing / merge / compare endpoints are match-only).
         """
-        root = state.project_root
-        parent = root.parent
-        match_root = parent.parent if parent.name == match_model.SHOOTERS_DIR else None
-        if match_root is None or not match_model.is_match_folder(match_root):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "not_a_match",
-                    "message": (
-                        "Bound project is a legacy single-shooter layout; "
-                        "shooter management is match-folder only."
-                    ),
-                },
-            )
-        match = match_model.Match.load(match_root)
-        return match_root, match, root.name
+        match_root = state.match_root
+        return match_root, match_model.Match.load(match_root)
 
     def _classify_shooter(shooter_root: Path, match: match_model.Match) -> ShooterListEntry:
         """Build a list entry for a single shooter directory."""
@@ -6241,9 +6278,7 @@ def create_app(
                     continue
             except Exception:  # noqa: BLE001 -- defensive
                 continue
-            cache = audio_helpers.trimmed_video_path(
-                shooter_root, s.stage_number, prim, project=legacy
-            )
+            cache = audio_helpers.trimmed_video_path(shooter_root, s.stage_number, prim, project=legacy)
             if not cache.exists():
                 stages_missing_trim += 1
         # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
@@ -6285,7 +6320,6 @@ def create_app(
         return ShooterListEntry(
             slug=shooter_root.name,
             name=legacy.competitor_name or shooter_root.name,
-            is_active=False,
             selected_shooter_id=legacy.selected_shooter_id,
             selected_competitor_id=legacy.selected_competitor_id,
             stages_audited=stages_audited,
@@ -6313,9 +6347,7 @@ def create_app(
                 MergePlanStage(
                     stage_number=s.stage_number,
                     stage_name=s.stage_name,
-                    expected_rounds=(
-                        s.stage_rounds.expected if s.stage_rounds is not None else None
-                    ),
+                    expected_rounds=(s.stage_rounds.expected if s.stage_rounds is not None else None),
                     placeholder=s.placeholder,
                 )
                 for s in plan.stages
@@ -6399,83 +6431,31 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        # Bind the new match. _bind_project_to_state's match branch
-        # records the match path in recent-projects (kind="match") and
-        # transparently binds the first shooter so existing audit/ingest
-        # endpoints have a working project context immediately. Passing
-        # the shooter path directly here would mis-register the shooter
-        # subdir as a standalone legacy project.
+        # Bind the new match. ``_bind_project_to_state`` records the match
+        # in recent-projects (kind="match") and switches state.bound_root
+        # to the match folder; shooters are addressed by slug from there.
         try:
             recorded = _bind_project_to_state(state, output, fallback_name=match.name)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     @app.get("/api/match/shooters", response_model=ShooterListResponse)
     def list_match_shooters() -> ShooterListResponse:
         """List every shooter in the currently-bound match with coverage."""
-        match_root, match, active_slug = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         entries: list[ShooterListEntry] = []
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                entry = _classify_shooter(shooter_root, match)
+                entries.append(_classify_shooter(shooter_root, match))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
-            entry.is_active = slug == active_slug
-            entries.append(entry)
         return ShooterListResponse(
             match_root=str(match_root),
             match_name=match.name,
             shooters=entries,
-        )
-
-    @app.post("/api/match/shooters/{slug}/select")
-    def select_active_shooter(slug: str) -> HealthResponse:
-        """Re-bind the server to a different shooter inside the same match.
-
-        After this call ``state.project_root`` points at the new shooter
-        dir; every subsequent project-bound endpoint reads that shooter's
-        data. The match folder itself stays bound in the recent-projects
-        index.
-        """
-        match_root, match, _ = _resolve_match_context()
-        if slug not in match.shooters:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "shooter_not_found",
-                    "message": f"shooter {slug!r} is not registered on this match",
-                },
-            )
-        shooter_root = match_model.Match.shooter_root(match_root, slug)
-        if not shooter_root.exists():
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "shooter_dir_missing",
-                    "message": (
-                        f"shooter {slug!r} is registered but {shooter_root} "
-                        "doesn't exist on disk"
-                    ),
-                },
-            )
-        recorded = _bind_legacy_root_to_state(
-            state, shooter_root, fallback_name=match.name, register=False
-        )
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
         )
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
@@ -6484,19 +6464,18 @@ def create_app(
 
         Creates the ``<match>/shooters/<slug>/`` tree, mirrors the match's
         stage definitions into the shooter's ``project.json``, and saves a
-        ``shooter.json`` next to it. Returns the refreshed list. Slug is
-        derived from ``name`` and disambiguated if it collides.
+        ``shooter.json`` next to it. Returns the refreshed list. Slugs are
+        opaque random ids (``s_<hex>``) so URLs / disk paths don't leak
+        competitor names.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if not req.name.strip():
             raise HTTPException(status_code=400, detail="name is required")
-        slug = match_model.disambiguate_slug(match_model.slugify(req.name), set(match.shooters))
+        slug = match_model.mint_shooter_slug(set(match.shooters))
         shooter = match_model.Shooter(
             slug=slug,
             name=req.name,
-            stages=[
-                match_model.ShooterStageData(stage_number=s.stage_number) for s in match.stages
-            ],
+            stages=[match_model.ShooterStageData(stage_number=s.stage_number) for s in match.stages],
         )
         try:
             match.add_shooter(match_root, shooter)
@@ -6528,21 +6507,9 @@ def create_app(
         """Remove a shooter from the bound match.
 
         Drops the slug from ``match.json`` and deletes
-        ``<match>/shooters/<slug>/`` from disk. Refuses if ``slug`` is
-        currently the active shooter (the SPA should switch first).
+        ``<match>/shooters/<slug>/`` from disk.
         """
-        match_root, match, active_slug = _resolve_match_context()
-        if slug == active_slug:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "active_shooter",
-                    "message": (
-                        "Cannot remove the currently-active shooter. "
-                        "Switch to another shooter first."
-                    ),
-                },
-            )
+        match_root, match = _resolve_match_context()
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -6566,7 +6533,7 @@ def create_app(
         ``ensure_video_audit_trim`` is idempotent, but skipping early
         avoids the queue churn).
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -6596,9 +6563,7 @@ def create_app(
             if not source.exists():
                 skipped.append({"stage": stage.stage_number, "reason": "source_missing"})
                 continue
-            cache = audio_helpers.trimmed_video_path(
-                shooter_root, stage.stage_number, primary, project=proj
-            )
+            cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, primary, project=proj)
             if cache.exists():
                 skipped.append({"stage": stage.stage_number, "reason": "already_cached"})
                 continue
@@ -6649,7 +6614,7 @@ def create_app(
         scalars. Shooters with no trim still appear so the SPA can render
         empty tiles instead of silently dropping the slot.
         """
-        match_root, match, active_slug = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         try:
             stage_def = match.stage(stage_number)
         except KeyError as exc:
@@ -6667,9 +6632,7 @@ def create_app(
                 None,
             )
             primary = (
-                next((v for v in stage.videos if v.role == "primary"), None)
-                if stage is not None
-                else None
+                next((v for v in stage.videos if v.role == "primary"), None) if stage is not None else None
             )
 
             beep_offset: float | None = None
@@ -6687,25 +6650,19 @@ def create_app(
                 stage_name = stage_def.stage_name
                 base = f"stage{stage_number}_{match_export_helpers._slugify(stage_name)}"
                 exports = (
-                    Path(legacy.exports_dir).expanduser()
-                    if legacy.exports_dir
-                    else shooter_root / "exports"
+                    Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
                 )
                 if not exports.is_absolute():
                     exports = shooter_root / exports
                 trimmed = (
-                    Path(legacy.trimmed_dir).expanduser()
-                    if legacy.trimmed_dir
-                    else shooter_root / "trimmed"
+                    Path(legacy.trimmed_dir).expanduser() if legacy.trimmed_dir else shooter_root / "trimmed"
                 )
                 if not trimmed.is_absolute():
                     trimmed = shooter_root / trimmed
                 lossless = exports / f"{base}_trimmed.mp4"
                 audit_cache = trimmed / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
                 resolved_trim = (
-                    lossless
-                    if lossless.exists()
-                    else (audit_cache if audit_cache.exists() else None)
+                    lossless if lossless.exists() else (audit_cache if audit_cache.exists() else None)
                 )
                 if resolved_trim is not None:
                     video_path = str(resolved_trim)
@@ -6735,9 +6692,7 @@ def create_app(
                                 CompareShotPoint(
                                     shot_number=int(shot.get("shot_number", 0)),
                                     time_after_beep=float(t) - float(audit_beep),
-                                    source=(
-                                        "manual" if shot.get("source") == "manual" else "detected"
-                                    ),
+                                    source=("manual" if shot.get("source") == "manual" else "detected"),
                                 )
                             )
 
@@ -6745,7 +6700,6 @@ def create_app(
                 CompareShooterRecord(
                     slug=slug,
                     name=legacy.competitor_name or slug,
-                    is_active=slug == active_slug,
                     video_path=video_path,
                     beep_offset_in_clip=beep_offset,
                     duration_seconds=duration_seconds,
@@ -6773,7 +6727,7 @@ def create_app(
         the named shooter's project then returns a FileResponse on the
         resolved trim/source.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -6845,15 +6799,19 @@ def create_app(
         Items are grouped by stage; per-stage shot detection is gated on
         every shooter's primary in that stage being ``beep_reviewed``.
         """
-        match_root, match, _ = _resolve_match_context()
-        # Resolve the low-confidence threshold from the active shooter's
-        # automation settings; per-shooter thresholds aren't supported.
-        try:
-            active_project = state.load()
-            resolved = automation_settings.resolve_automation(active_project)
-            threshold = resolved.settings.beep_low_confidence_threshold
-        except Exception:  # noqa: BLE001
-            threshold = 0.5
+        match_root, match = _resolve_match_context()
+        # Resolve the low-confidence threshold from any shooter's automation
+        # settings; per-shooter thresholds aren't supported, the gate is
+        # global to the match.
+        threshold = 0.5
+        for first_slug in match.shooters:
+            try:
+                proj_for_threshold = state.shooter_project(first_slug)
+                resolved = automation_settings.resolve_automation(proj_for_threshold)
+                threshold = resolved.settings.beep_low_confidence_threshold
+                break
+            except Exception:  # noqa: BLE001
+                continue
 
         stage_lookup = {s.stage_number: s.stage_name for s in match.stages}
         groups: dict[int, BeepQueueStageGroup] = {}
@@ -6937,7 +6895,7 @@ def create_app(
         When ``time`` is supplied, it overrides ``beep_time``; the call
         always sets ``beep_reviewed = True``.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if req.slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, req.slug)
@@ -6966,7 +6924,7 @@ def create_app(
         proj.save(shooter_root)
         return get_beep_queue()
 
-    @app.post("/api/user/recent-projects/unbind")
+    @app.post("/api/me/recent-projects/unbind")
     def unbind_recent_project() -> HealthResponse:
         """Drop the bound project so the SPA returns to the picker.
 
@@ -6977,14 +6935,17 @@ def create_app(
         state.unbind()
         return HealthResponse(bound=False)
 
-    @app.get("/api/user/scoreboard-identity")
+    @app.get("/api/me/scoreboard-identity")
     def get_scoreboard_identity() -> JSONResponse:
+        # "Not pinned yet" is a normal state, not an error -- return a
+        # 200 with a null body so the SPA doesn't have to catch a 404
+        # on every page load and DevTools doesn't log a failed request.
         identity = user_config.load_scoreboard_identity()
         if identity is None:
-            raise HTTPException(status_code=404, detail="no scoreboard identity saved")
+            return JSONResponse(None)
         return JSONResponse(identity.model_dump(mode="json"))
 
-    @app.put("/api/user/scoreboard-identity")
+    @app.put("/api/me/scoreboard-identity")
     def put_scoreboard_identity(req: ScoreboardIdentityRequest) -> JSONResponse:
         identity = user_config.ScoreboardIdentity(
             shooter_id=req.shooter_id,
@@ -6996,7 +6957,7 @@ def create_app(
         user_config.save_scoreboard_identity(identity)
         return JSONResponse(identity.model_dump(mode="json"))
 
-    @app.delete("/api/user/scoreboard-identity")
+    @app.delete("/api/me/scoreboard-identity")
     def delete_scoreboard_identity() -> JSONResponse:
         user_config.clear_scoreboard_identity()
         return JSONResponse({"ok": True})
@@ -7122,14 +7083,14 @@ def create_app(
                     status_code=400,
                     detail="payload must include integer 'stage_number' and string 'slug'",
                 )
-            project = state.load()
+            project = state.shooter_project(slug)
             try:
                 stg = project.stage(stage_n)
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-            audit_json = project.audit_path(state.project_root) / f"stage{stage_n}.json"
+            audit_json = project.audit_path(state.shooter_root(slug)) / f"stage{stage_n}.json"
             try:
-                audit_audio = _resolve_audit_audio(project, stage_n)
+                audit_audio = _resolve_audit_audio(slug, project, stage_n)
             except HTTPException:
                 raise
             audit_wav = audit_audio.audio_path
@@ -7196,16 +7157,12 @@ def create_app(
             if stage_time_seconds is None:
                 raise HTTPException(
                     status_code=409,
-                    detail=(
-                        f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."
-                    ),
+                    detail=(f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."),
                 )
-            source_video_path = project.resolve_video_path(state.project_root, primary.path)
+            source_video_path = project.resolve_video_path(state.shooter_root(slug), primary.path)
             trim_start = max(0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds))
             trim_end = (
-                float(primary.beep_time)
-                + float(stage_time_seconds)
-                + float(project.trim_post_buffer_seconds)
+                float(primary.beep_time) + float(stage_time_seconds) + float(project.trim_post_buffer_seconds)
             )
             # Camera make/model (#303): use the values cached on the
             # StageVideo at register time -- those came from ffprobe and
@@ -7503,8 +7460,7 @@ def create_app(
                 fixtures_root.mkdir(parents=True, exist_ok=True)
                 tmp = target_json.with_suffix(".json.tmp")
                 tmp.write_text(
-                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
                 tmp.replace(target_json)
@@ -7514,8 +7470,7 @@ def create_app(
 
                 report_path = fixtures_root / f"{body.slug}-promotion-report.json"
                 report_path.write_text(
-                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
 
@@ -7553,9 +7508,7 @@ def create_app(
             try:
                 data = __import__("json").loads(report_path.read_text(encoding="utf-8"))
             except Exception as exc:
-                raise HTTPException(
-                    status_code=500, detail=f"failed to read report: {exc}"
-                ) from exc
+                raise HTTPException(status_code=500, detail=f"failed to read report: {exc}") from exc
             return JSONResponse(data)
 
         @app.delete("/api/lab/fixture")
@@ -7575,9 +7528,7 @@ def create_app(
             try:
                 payload = __import__("json").loads(json_path.read_text(encoding="utf-8"))
             except Exception as exc:
-                raise HTTPException(
-                    status_code=500, detail=f"failed to read fixture: {exc}"
-                ) from exc
+                raise HTTPException(status_code=500, detail=f"failed to read fixture: {exc}") from exc
             anchor_block = payload.get("anchor")
             if not isinstance(anchor_block, dict) or not anchor_block.get("fixture_slug"):
                 raise HTTPException(
@@ -7616,8 +7567,9 @@ def create_app(
         # Project-aware secondary promotion (issue #125 follow-up)
         # ------------------------------------------------------------------
 
-        @app.post("/api/stages/{stage_number}/videos/{video_id}/promote-secondary")
+        @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/promote-secondary")
         def promote_secondary(
+            slug: str,
             stage_number: int,
             video_id: str,
             body: PromoteSecondaryBody = Body(...),  # noqa: B008
@@ -7629,7 +7581,7 @@ def create_app(
             caller only has to supply ``mount`` + ``position``. Anchor
             fixture must already exist (run the primary promote first).
             """
-            project, stage, video = _resolve_stage_video(stage_number, video_id)
+            project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
             if video.role != "secondary":
                 raise HTTPException(
                     status_code=400,
@@ -7648,15 +7600,11 @@ def create_app(
             if project.selected_shooter_id is None:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        "this project has no SSI shooter pinned; "
-                        "cannot resolve anchor fixture slug."
-                    ),
+                    detail=("this project has no SSI shooter pinned; " "cannot resolve anchor fixture slug."),
                 )
             anchor_token = lab_module.shooter_token(project.selected_shooter_id)
             primary_slug = (
-                f"stage-shots-{export_helpers._slugify(project.name)}-stage{stage_number}"
-                f"-{anchor_token}"
+                f"stage-shots-{export_helpers._slugify(project.name)}-stage{stage_number}" f"-{anchor_token}"
             )
             fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
             anchor_path = fixtures_root / f"{primary_slug}.json"
@@ -7675,35 +7623,33 @@ def create_app(
                     detail=f"anchor WAV missing: {anchor_wav_path.name}",
                 )
 
-            source = project.resolve_video_path(state.project_root, video.path)
+            source = project.resolve_video_path(state.shooter_root(slug), video.path)
             _ensure_source_reachable(stage_number, source)
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
-                    state.project_root, stage_number, video, source, project=project
+                    state.shooter_root(slug), stage_number, video, source, project=project
                 )
             except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
             probe = probe_camera_metadata(source)
-            camera_id = (
-                body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}"
-            ).strip()
+            camera_id = (body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}").strip()
             if not camera_id:
                 raise HTTPException(
                     status_code=400,
                     detail="camera_id could not be derived; please supply one",
                 )
 
-            slug = (body.slug or f"{primary_slug}-{camera_id}").strip()
-            target_json = fixtures_root / f"{slug}.json"
+            # ``slug`` (URL path param) names the shooter; ``fixture_slug``
+            # below names the derived fixture being written. Same string
+            # convention but different identities -- don't rebind ``slug``.
+            fixture_slug = (body.slug or f"{primary_slug}-{camera_id}").strip()
+            target_json = fixtures_root / f"{fixture_slug}.json"
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=(
-                        f"fixture already exists: {target_json.name}"
-                        " (set overwrite=true to replace)"
-                    ),
+                    detail=(f"fixture already exists: {target_json.name}" " (set overwrite=true to replace)"),
                 )
 
             try:
@@ -7749,7 +7695,7 @@ def create_app(
                         secondary_sr=secondary_sr,
                         secondary_source_desc=secondary_source_desc,
                         camera=camera,
-                        slug=slug,
+                        slug=fixture_slug,
                         snap_window_ms=body.snap_window_ms,
                         min_spacing_ms=body.min_spacing_ms,
                         secondary_beep_time=known_secondary_beep,
@@ -7771,9 +7717,7 @@ def create_app(
                 fixture_data = dict(result.fixture_data)
                 secondary_beep = float(fixture_data.get("beep_time") or 0.0)
                 shot_times = [
-                    float(s["time"])
-                    for s in fixture_data.get("shots", [])
-                    if s.get("time") is not None
+                    float(s["time"]) for s in fixture_data.get("shots", []) if s.get("time") is not None
                 ]
                 trim_buffer = 5.0
                 trim_tail = 5.0
@@ -7783,7 +7727,7 @@ def create_app(
                 clip_end = max(clip_end, clip_end_floor)
 
                 fixtures_root.mkdir(parents=True, exist_ok=True)
-                target_wav = fixtures_root / f"{slug}.wav"
+                target_wav = fixtures_root / f"{fixture_slug}.wav"
                 handle.update(progress=0.88, message="trimming clip audio...")
                 _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
 
@@ -7820,10 +7764,9 @@ def create_app(
                 )
                 tmp.replace(target_json)
 
-                report_path = fixtures_root / f"{slug}-promotion-report.json"
+                report_path = fixtures_root / f"{fixture_slug}-promotion-report.json"
                 report_path.write_text(
-                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
 
@@ -7841,7 +7784,7 @@ def create_app(
                     "job": job.model_dump(mode="json"),
                     "fixture_path": str(target_json),
                     "anchor_path": str(anchor_path),
-                    "slug": slug,
+                    "slug": fixture_slug,
                     "camera_id": camera_id,
                     "anchor_slug": primary_slug,
                 }
@@ -7855,8 +7798,9 @@ def create_app(
         # in-project primary required, any video on the stage works.
         # ------------------------------------------------------------------
 
-        @app.post("/api/lab/projects/{stage_number}/videos/{video_id}/promote-against-fixture")
+        @app.post("/api/lab/projects/{slug}/{stage_number}/videos/{video_id}/promote-against-fixture")
         def lab_promote_against_fixture(
+            slug: str,
             stage_number: int,
             video_id: str,
             body: PromoteAgainstFixtureBody = Body(...),  # noqa: B008
@@ -7870,7 +7814,7 @@ def create_app(
             comes from ``body.anchor_slug`` (any fixture in
             ``tests/fixtures/``).
             """
-            project, _stage, video = _resolve_stage_video(stage_number, video_id)
+            project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
             if video.beep_time is None:
                 raise HTTPException(
                     status_code=409,
@@ -7894,20 +7838,18 @@ def create_app(
                     detail=f"anchor WAV missing: {anchor_wav_path.name}",
                 )
 
-            source = project.resolve_video_path(state.project_root, video.path)
+            source = project.resolve_video_path(state.shooter_root(slug), video.path)
             _ensure_source_reachable(stage_number, source)
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
-                    state.project_root, stage_number, video, source, project=project
+                    state.shooter_root(slug), stage_number, video, source, project=project
                 )
             except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
             probe = probe_camera_metadata(source)
-            camera_id = (
-                body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}"
-            ).strip()
+            camera_id = (body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}").strip()
             if not camera_id:
                 raise HTTPException(
                     status_code=400,
@@ -7919,10 +7861,7 @@ def create_app(
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=(
-                        f"fixture already exists: {target_json.name}"
-                        " (set overwrite=true to replace)"
-                    ),
+                    detail=(f"fixture already exists: {target_json.name}" " (set overwrite=true to replace)"),
                 )
 
             try:
@@ -7980,9 +7919,7 @@ def create_app(
                 fixture_data = dict(result.fixture_data)
                 secondary_beep = float(fixture_data.get("beep_time") or 0.0)
                 shot_times = [
-                    float(s["time"])
-                    for s in fixture_data.get("shots", [])
-                    if s.get("time") is not None
+                    float(s["time"]) for s in fixture_data.get("shots", []) if s.get("time") is not None
                 ]
                 trim_buffer = 5.0
                 trim_tail = 5.0
@@ -8126,11 +8063,7 @@ def create_app(
     def _shooter_from_slug(slug: str) -> str | None:
         # Shooter is encoded as ``s<8-hex-chars>`` (the slug hash).
         for tok in slug.split("-"):
-            if (
-                len(tok) == 9
-                and tok.startswith("s")
-                and all(c in "0123456789abcdef" for c in tok[1:])
-            ):
+            if len(tok) == 9 and tok.startswith("s") and all(c in "0123456789abcdef" for c in tok[1:]):
                 return tok
         return None
 
@@ -8574,6 +8507,7 @@ def _query_windows_drives() -> dict[str, tuple[int, str | None]]:
 def _video_metadata_for(
     source: Path,
     *,
+    slug: str,
     probes_dir: Path,
     thumbs_dir: Path,
     allow_new: bool,
@@ -8600,7 +8534,7 @@ def _video_metadata_for(
     thumbnail_url: str | None = None
     cached_thumb = thumbnail_helpers.cached(source, thumbs_dir)
     if cached_thumb is not None:
-        thumbnail_url = f"/api/thumbnails/{cached_thumb.stem}.jpg"
+        thumbnail_url = f"/api/shooters/{slug}/thumbnails/{cached_thumb.stem}.jpg"
     elif allow_new:
         try:
             t_dur = duration_for_thumb if duration_for_thumb is not None else duration
@@ -8609,7 +8543,7 @@ def _video_metadata_for(
                 cache_dir=thumbs_dir,
                 duration=t_dur,
             )
-            thumbnail_url = f"/api/thumbnails/{extracted.stem}.jpg"
+            thumbnail_url = f"/api/shooters/{slug}/thumbnails/{extracted.stem}.jpg"
         except thumbnail_helpers.ThumbnailError as exc:
             logger.debug("thumbnail failed for %s: %s", source, exc)
 
@@ -8723,8 +8657,7 @@ def _print_active_jobs(app: FastAPI) -> None:
         print("Shutting down (no background jobs running).", file=sys.stderr, flush=True)
         return
     print(
-        f"Shutting down -- waiting for {len(active)} background job"
-        f"{'' if len(active) == 1 else 's'}:",
+        f"Shutting down -- waiting for {len(active)} background job" f"{'' if len(active) == 1 else 's'}:",
         file=sys.stderr,
         flush=True,
     )

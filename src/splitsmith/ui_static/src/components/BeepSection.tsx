@@ -74,6 +74,7 @@ function ReleasingPreviewVideo(
 }
 
 interface Props {
+  slug: string;
   stageNumber: number;
   /** The video this section operates on. Beep fields, candidate lists and
    *  the preview clip are all read from / written to this video; the
@@ -88,6 +89,7 @@ interface Props {
 }
 
 export function BeepSection({
+  slug,
   stageNumber,
   video,
   onProjectUpdate,
@@ -172,7 +174,7 @@ export function BeepSection({
         try {
           const final = await api.pollJob(active.id, setJobStatus);
           if (cancelled) return;
-          if (final.status === "succeeded") onProjectUpdate(await api.getProject());
+          if (final.status === "succeeded") onProjectUpdate(await api.getProject(slug));
           else if (final.status === "failed") setError(final.error ?? "Beep detection failed");
         } finally {
           if (!cancelled) {
@@ -193,13 +195,13 @@ export function BeepSection({
     setBusy(true);
     setError(null);
     try {
-      const job = await api.detectBeepForVideo(stageNumber, videoId, force);
+      const job = await api.detectBeepForVideo(slug, stageNumber, videoId, force);
       setJobStatus(job);
       const final = await api.pollJob(job.id, setJobStatus);
       if (final.status === "failed") {
         setError(final.error ?? "Beep detection failed");
       } else {
-        onProjectUpdate(await api.getProject());
+        onProjectUpdate(await api.getProject(slug));
       }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -237,12 +239,12 @@ export function BeepSection({
     setRedetecting(true);
     setError(null);
     try {
-      const job = await api.detectShots(stageNumber, { reset: true });
+      const job = await api.detectShots(slug, stageNumber, { reset: true });
       const final = await api.pollJob(job.id, () => {});
       if (final.status === "failed") {
         setError(final.error ?? "Shot detection failed");
       } else {
-        onProjectUpdate(await api.getProject());
+        onProjectUpdate(await api.getProject(slug));
       }
       setPendingShotRedetect(null);
     } catch (e) {
@@ -267,7 +269,7 @@ export function BeepSection({
     const prevHadShots = isPrimary && video.processed.shot_detect;
     setBusy(true);
     try {
-      const updated = await api.overrideBeepForVideo(stageNumber, videoId, value);
+      const updated = await api.overrideBeepForVideo(slug, stageNumber, videoId, value);
       onProjectUpdate(updated);
       setError(null);
       setEditing(false);
@@ -282,7 +284,7 @@ export function BeepSection({
   const clear = async () => {
     setBusy(true);
     try {
-      const updated = await api.overrideBeepForVideo(stageNumber, videoId, null);
+      const updated = await api.overrideBeepForVideo(slug, stageNumber, videoId, null);
       onProjectUpdate(updated);
       setError(null);
       setEditing(false);
@@ -298,7 +300,7 @@ export function BeepSection({
     const prevHadShots = isPrimary && video.processed.shot_detect;
     setBusy(true);
     try {
-      const updated = await api.selectBeepCandidateForVideo(stageNumber, videoId, time);
+      const updated = await api.selectBeepCandidateForVideo(slug, stageNumber, videoId, time);
       onProjectUpdate(updated);
       setError(null);
       queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, time);
@@ -341,6 +343,7 @@ export function BeepSection({
           </Button>
         </div>
         <BeepWaveformPicker
+          slug={slug}
           stageNumber={stageNumber}
           videoId={videoId}
           videoBeepTime={video.beep_time}
@@ -465,7 +468,7 @@ export function BeepSection({
     setBusy(true);
     setError(null);
     try {
-      const updated = await api.setBeepReviewed(stageNumber, videoId, true);
+      const updated = await api.setBeepReviewed(slug, stageNumber, videoId, true);
       onProjectUpdate(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -478,7 +481,7 @@ export function BeepSection({
     setBusy(true);
     setError(null);
     try {
-      const updated = await api.setBeepReviewed(stageNumber, videoId, false);
+      const updated = await api.setBeepReviewed(slug, stageNumber, videoId, false);
       onProjectUpdate(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -601,6 +604,7 @@ export function BeepSection({
       </div>
       {disagreement && crossAlignSuggestion != null ? (
         <AlignmentDisagreement
+          slug={slug}
           stageNumber={stageNumber}
           videoId={videoId}
           inStreamTime={video.beep_time!}
@@ -613,6 +617,7 @@ export function BeepSection({
             setBusy(true);
             try {
               const updated = await api.overrideBeepForVideo(
+                slug,
                 stageNumber,
                 videoId,
                 crossAlignSuggestion,
@@ -630,6 +635,7 @@ export function BeepSection({
         />
       ) : null}
       <BeepCandidates
+        slug={slug}
         stageNumber={stageNumber}
         videoId={videoId}
         candidates={video.beep_candidates}
@@ -638,6 +644,7 @@ export function BeepSection({
         onSelect={selectCandidate}
       />
       <BeepPreview
+        slug={slug}
         stageNumber={stageNumber}
         videoId={videoId}
         beepTime={video.beep_time}
@@ -677,6 +684,7 @@ export function BeepSection({
  *  (`/api/stages/{n}/videos/{vid}/...`) so primary and secondary use the
  *  same component, the same controls, and the same snap-to-beep flow. */
 export function BeepWaveformPicker({
+  slug,
   stageNumber,
   videoId,
   videoBeepTime,
@@ -688,6 +696,7 @@ export function BeepWaveformPicker({
   instructions,
   ariaLabel,
 }: {
+  slug: string;
   stageNumber: number;
   videoId: string;
   videoBeepTime: number | null;
@@ -724,7 +733,7 @@ export function BeepWaveformPicker({
     setLoading(true);
     setUnavailable(false);
     api
-      .getVideoPeaks(stageNumber, videoId)
+      .getVideoPeaks(slug, stageNumber, videoId)
       .then((p) => {
         if (cancelled) return;
         setPeaks(p);
@@ -739,7 +748,7 @@ export function BeepWaveformPicker({
     return () => {
       cancelled = true;
     };
-  }, [stageNumber, videoId]);
+  }, [slug, stageNumber, videoId]);
 
   // Source-time <-> clip-time bridge. Zero when the WAV is the full
   // source; equal to the trim window's start when an audit clip is
@@ -821,7 +830,7 @@ export function BeepWaveformPicker({
     setSnapping(true);
     setError(null);
     try {
-      const result = await api.snapBeepForVideo(stageNumber, videoId, draftSourceTime, 1.5);
+      const result = await api.snapBeepForVideo(slug, stageNumber, videoId, draftSourceTime, 1.5);
       setProposal(result);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
@@ -921,7 +930,7 @@ export function BeepWaveformPicker({
       />
       <audio
         ref={audioRef}
-        src={api.videoAudioUrl(stageNumber, videoId)}
+        src={api.videoAudioUrl(slug, stageNumber, videoId)}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
@@ -954,6 +963,7 @@ export function BeepWaveformPicker({
       </div>
       {proposal != null ? (
         <SnapProposal
+          slug={slug}
           stageNumber={stageNumber}
           videoId={videoId}
           proposal={proposal}
@@ -967,12 +977,14 @@ export function BeepWaveformPicker({
 
 
 function SnapProposal({
+  slug,
   stageNumber,
   videoId,
   proposal,
   onAccept,
   onDismiss,
 }: {
+  slug: string;
   stageNumber: number;
   videoId: string;
   proposal: BeepSnapResult;
@@ -1010,6 +1022,7 @@ function SnapProposal({
         </div>
       </div>
       <ProposalPreview
+        slug={slug}
         stageNumber={stageNumber}
         videoId={videoId}
         time={proposal.snapped_time}
@@ -1025,11 +1038,13 @@ function SnapProposal({
  *  cross-align suggestions, etc. Smaller than BeepPreview so it can sit
  *  inside a confirmation banner without dominating the row. */
 function ProposalPreview({
+  slug,
   stageNumber,
   videoId,
   time,
   ariaLabel,
 }: {
+  slug: string;
   stageNumber: number;
   videoId: string;
   time: number;
@@ -1050,7 +1065,7 @@ function ProposalPreview({
   return (
     <ReleasingPreviewVideo
       key={`${stageNumber}:${videoId}:${time.toFixed(3)}`}
-      src={api.videoBeepPreviewUrl(stageNumber, videoId, time)}
+      src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, time)}
       className="h-32 w-56 rounded-md border border-border/60 bg-black object-cover"
       playsInline
       controls
@@ -1063,6 +1078,7 @@ function ProposalPreview({
 }
 
 function BeepCandidates({
+  slug,
   stageNumber,
   videoId,
   candidates,
@@ -1070,6 +1086,7 @@ function BeepCandidates({
   busy,
   onSelect,
 }: {
+  slug: string;
   stageNumber: number;
   videoId: string;
   candidates: BeepCandidate[];
@@ -1161,6 +1178,7 @@ function BeepCandidates({
                 <ReleasingPreviewVideo
                   key={`${stageNumber}:${videoId}:${candidates[previewIndex].time.toFixed(3)}`}
                   src={api.videoBeepPreviewUrl(
+                    slug,
                     stageNumber,
                     videoId,
                     candidates[previewIndex].time,
@@ -1251,11 +1269,13 @@ function CandidateRow({
 }
 
 function BeepPreview({
+  slug,
   stageNumber,
   videoId,
   beepTime,
   isPrimary,
 }: {
+  slug: string;
   stageNumber: number;
   videoId: string;
   beepTime: number;
@@ -1276,7 +1296,7 @@ function BeepPreview({
       ) : (
         <ReleasingPreviewVideo
           key={`${stageNumber}:${videoId}:${beepTime.toFixed(3)}`}
-          src={api.videoBeepPreviewUrl(stageNumber, videoId, beepTime)}
+          src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, beepTime)}
           className="h-40 w-64 rounded-md border border-border/60 bg-black object-cover"
           playsInline
           controls
@@ -1288,7 +1308,7 @@ function BeepPreview({
       )}
       {isPrimary ? (
         <Link
-          to={`/audit/${stageNumber}`}
+          to={`/audit/${slug}/${stageNumber}`}
           className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           title="Open the audit screen to verify or correct this beep on the waveform"
         >
@@ -1309,6 +1329,7 @@ function BeepPreview({
  *  override -- in-stream has frequency-domain information cross-align
  *  doesn't -- but we offer the user a one-click swap. */
 function AlignmentDisagreement({
+  slug,
   stageNumber,
   videoId,
   inStreamTime,
@@ -1318,6 +1339,7 @@ function AlignmentDisagreement({
   onUseCrossAlign,
   busy,
 }: {
+  slug: string;
   stageNumber: number;
   videoId: string;
   inStreamTime: number;
@@ -1369,6 +1391,7 @@ function AlignmentDisagreement({
             Cross-align preview ({crossAlignTime.toFixed(3)}s)
           </span>
           <ProposalPreview
+            slug={slug}
             stageNumber={stageNumber}
             videoId={videoId}
             time={crossAlignTime}

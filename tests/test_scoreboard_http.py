@@ -84,9 +84,7 @@ def test_bearer_header_sent(client: SsiHttpClient) -> None:
 @respx.mock
 def test_get_match_returns_parsed_match_data(client: SsiHttpClient) -> None:
     payload = _load(MATCH_FIXTURE)
-    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(
-        return_value=httpx.Response(200, json=payload)
-    )
+    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(return_value=httpx.Response(200, json=payload))
     match = client.get_match(22, 27190)
     assert isinstance(match, MatchData)
     assert match.name == payload["name"]
@@ -105,9 +103,7 @@ def test_get_match_404_maps_to_match_not_found(client: SsiHttpClient) -> None:
 @respx.mock
 def test_search_matches_passes_query(client: SsiHttpClient) -> None:
     payload = _load(EVENTS_FIXTURE)
-    route = respx.get(f"{DEFAULT_BASE_URL}/events").mock(
-        return_value=httpx.Response(200, json=payload)
-    )
+    route = respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=payload))
     hits = client.search_matches("SPSK")
     assert all(isinstance(h, MatchRef) for h in hits)
     assert route.calls.last.request.url.params["q"] == "SPSK"
@@ -123,9 +119,7 @@ def test_search_matches_empty_query_omits_param(client: SsiHttpClient) -> None:
 @respx.mock
 def test_find_shooter(client: SsiHttpClient) -> None:
     payload = _load(SHOOTER_SEARCH_FIXTURE)
-    respx.get(f"{DEFAULT_BASE_URL}/shooter/search").mock(
-        return_value=httpx.Response(200, json=payload)
-    )
+    respx.get(f"{DEFAULT_BASE_URL}/shooter/search").mock(return_value=httpx.Response(200, json=payload))
     hits = client.find_shooter("Axell")
     assert hits, "fixture must have at least one shooter"
     assert all(isinstance(h, ShooterRef) for h in hits)

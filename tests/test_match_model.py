@@ -18,15 +18,15 @@ from splitsmith.match_model import (
     MergeConflictError,
     Shooter,
     ShooterStageData,
-    disambiguate_slug,
     execute_merge,
     from_path,
     is_legacy_project_folder,
     is_match_folder,
     legacy_to_match_view,
     load_match_or_legacy,
+    mint_shooter_slug,
     plan_merge,
-    slugify,
+    slugify_filename,
 )
 from splitsmith.ui.project import MatchProject, StageEntry
 
@@ -76,27 +76,37 @@ def _make_legacy(
 # ---------------------------------------------------------------------------
 
 
-def test_slugify_basic():
-    assert slugify("Mathias Axell") == "mathias-axell"
+def test_mint_shooter_slug_shape():
+    slug = mint_shooter_slug()
+    assert slug.startswith("s_")
+    assert len(slug) == 10  # "s_" + 8 hex chars
+    assert all(c in "0123456789abcdef" for c in slug[2:])
 
 
-def test_slugify_handles_accents():
-    assert slugify("Martin Engström") == "martin-engstrom"
+def test_mint_shooter_slug_avoids_taken():
+    """The minter retries until it gets a slug outside ``taken``."""
+    slug = mint_shooter_slug(taken={"s_00000000"})
+    assert slug != "s_00000000"
 
 
-def test_slugify_collapses_punctuation_and_strips_edges():
-    assert slugify("  Anders! Andersson??  ") == "anders-andersson"
+def test_mint_shooter_slug_uniqueness():
+    """Two calls without coordination still collide vanishingly rarely; the
+    primary safety is the ``taken`` set, which the helper consults."""
+    slugs = {mint_shooter_slug() for _ in range(100)}
+    assert len(slugs) == 100
 
 
-def test_slugify_empty_falls_back():
-    assert slugify("") == "shooter"
-    assert slugify("---") == "shooter"
+def test_slugify_filename_basic():
+    assert slugify_filename("Stage 1: H1") == "stage-1-h1"
 
 
-def test_disambiguate_slug():
-    taken = {"anton", "anton-2"}
-    assert disambiguate_slug("anton", taken) == "anton-3"
-    assert disambiguate_slug("anton", set()) == "anton"
+def test_slugify_filename_handles_accents():
+    assert slugify_filename("Långvägen") == "langvagen"
+
+
+def test_slugify_filename_empty_falls_back():
+    assert slugify_filename("") == "name"
+    assert slugify_filename("---") == "name"
 
 
 # ---------------------------------------------------------------------------
@@ -195,14 +205,26 @@ def test_legacy_to_match_view_preserves_core_fields(tmp_path: Path):
     assert match.name == "VADS"
     assert match.scoreboard_match_id == "27242"
     assert match.match_date == date(2026, 4, 3)
-    assert match.shooters == ["anton-johansson"]
+    assert len(match.shooters) == 1
+    only_slug = match.shooters[0]
+    assert only_slug.startswith("s_")
     assert len(match.stages) == 3
     assert match.stages[0].stage_name == "Egg Grab"
 
-    assert shooter.slug == "anton-johansson"
+    assert shooter.slug == only_slug
     assert shooter.name == "Anton Johansson"
     assert shooter.selected_shooter_id == 55429
     assert shooter.stages[0].time_seconds == 11.0
+
+
+def test_legacy_to_match_view_slug_is_deterministic(tmp_path: Path):
+    """Same project metadata -> same opaque slug across reloads."""
+    root = tmp_path / "legacy"
+    project = _make_legacy(root, name="VADS", competitor="Anton Johansson")
+
+    match_a, _ = legacy_to_match_view(project)
+    match_b, _ = legacy_to_match_view(project)
+    assert match_a.shooters == match_b.shooters
 
 
 def test_load_match_or_legacy_legacy_path(tmp_path: Path):
@@ -211,8 +233,10 @@ def test_load_match_or_legacy_legacy_path(tmp_path: Path):
 
     match, roots = load_match_or_legacy(root)
 
-    assert match.shooters == ["anton-johansson"]
-    assert roots["anton-johansson"] == root
+    assert len(match.shooters) == 1
+    only_slug = match.shooters[0]
+    assert only_slug.startswith("s_")
+    assert roots[only_slug] == root
 
 
 def test_load_match_or_legacy_match_path(tmp_path: Path):
@@ -241,7 +265,9 @@ def test_plan_merge_happy_path(tmp_path: Path):
     assert plan.scoreboard_match_id == "27242"
     assert plan.match_date == date(2026, 4, 3)
     assert len(plan.stages) == 3
-    assert [m.slug for m in plan.shooter_moves] == ["anton-johansson", "martin-engstrom"]
+    slugs = [m.slug for m in plan.shooter_moves]
+    assert all(s.startswith("s_") for s in slugs), slugs
+    assert len(set(slugs)) == 2
     # Suppress unused-var warnings.
     assert a.name == b.name == "VADS"
 
@@ -274,9 +300,7 @@ def test_plan_merge_rejects_stage_name_disagreement(tmp_path: Path):
 
 def test_plan_merge_tolerates_placeholder_loss(tmp_path: Path):
     # One project has a placeholder stage; the other has the real name.
-    proj_a = _make_legacy(
-        tmp_path / "a", name="X", competitor="A", stage_names=["Stage 1", "S2", "S3"]
-    )
+    proj_a = _make_legacy(tmp_path / "a", name="X", competitor="A", stage_names=["Stage 1", "S2", "S3"])
     proj_a.stages[0].placeholder = True
     proj_a.save(tmp_path / "a")
     _make_legacy(tmp_path / "b", name="X", competitor="B", stage_names=["Egg Grab", "S2", "S3"])
@@ -325,13 +349,16 @@ def test_plan_merge_accepts_explicit_name_override(tmp_path: Path):
     assert plan.name == "VADS Easter 2026"
 
 
-def test_plan_merge_disambiguates_colliding_slugs(tmp_path: Path):
+def test_plan_merge_assigns_opaque_slugs(tmp_path: Path):
+    """Slugs are random opaque ids (``s_<hex>``), not derived from the
+    competitor names, so the on-disk layout doesn't leak PII."""
     _make_legacy(tmp_path / "a", name="X", competitor="Anton Johansson")
-    _make_legacy(tmp_path / "b", name="X", competitor="anton johansson")  # same after slugify
+    _make_legacy(tmp_path / "b", name="X", competitor="Martin Engström")
 
     plan = plan_merge([tmp_path / "a", tmp_path / "b"], tmp_path / "merged")
-    assert plan.shooter_moves[0].slug == "anton-johansson"
-    assert plan.shooter_moves[1].slug == "anton-johansson-2"
+    slugs = [m.slug for m in plan.shooter_moves]
+    assert all(s.startswith("s_") and len(s) == 10 for s in slugs), slugs
+    assert len(set(slugs)) == len(slugs), "slugs must be unique"
 
 
 # ---------------------------------------------------------------------------
@@ -351,12 +378,18 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
     plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
     match = execute_merge(plan, move=False)
 
+    # Resolve the opaque slug for each source so the asserts below don't
+    # need to know the random ids.
+    moves_by_src = {m.source_root: m for m in plan.shooter_moves}
+    anton_slug = moves_by_src[tmp_path / "anton"].slug
+    martin_slug = moves_by_src[tmp_path / "martin"].slug
+
     # match.json present, shooters subdirs populated. project.json is kept
     # alongside shooter.json as a legacy compat shim (most server endpoints
     # still speak the legacy MatchProject schema); match-level fields are
     # stripped so match.json stays authoritative.
     assert (out / MATCH_FILE).is_file()
-    for slug in ("anton-johansson", "martin-engstrom"):
+    for slug in (anton_slug, martin_slug):
         sroot = out / SHOOTERS_DIR / slug
         assert (sroot / SHOOTER_FILE).is_file(), slug
         assert (sroot / "project.json").is_file(), slug
@@ -367,18 +400,16 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
         assert legacy["match_date"] is None
 
     # User data carried across.
-    raw_file = out / SHOOTERS_DIR / "anton-johansson" / "raw" / "fake.mp4"
+    raw_file = out / SHOOTERS_DIR / anton_slug / "raw" / "fake.mp4"
     assert raw_file.read_bytes() == b"raw-anton"
-    assert (
-        out / SHOOTERS_DIR / "anton-johansson" / "audit" / "stage1.json"
-    ).read_text() == '{"shots": []}'
+    assert (out / SHOOTERS_DIR / anton_slug / "audit" / "stage1.json").read_text() == '{"shots": []}'
 
     # Sources untouched (copy mode).
     assert (tmp_path / "anton" / "raw" / "fake.mp4").exists()
     assert (tmp_path / "anton" / "project.json").exists()
 
     # Returned Match is loadable.
-    assert match.shooters == ["anton-johansson", "martin-engstrom"]
+    assert sorted(match.shooters) == sorted([anton_slug, martin_slug])
     Match.load(out)  # raises if invalid
 
 
@@ -392,7 +423,10 @@ def test_execute_merge_move_relocates_sources(tmp_path: Path):
 
     assert not (tmp_path / "anton").exists()
     assert not (tmp_path / "martin").exists()
-    assert (out / SHOOTERS_DIR / "anton" / SHOOTER_FILE).is_file()
+    match = Match.load(out)
+    assert len(match.shooters) == 2
+    for slug in match.shooters:
+        assert (out / SHOOTERS_DIR / slug / SHOOTER_FILE).is_file()
 
 
 def test_execute_merge_refuses_existing_match(tmp_path: Path):
@@ -419,7 +453,8 @@ def test_execute_merge_shooter_json_has_no_match_fields(tmp_path: Path):
     plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
     execute_merge(plan, move=False)
 
-    shooter_json = json.loads((out / SHOOTERS_DIR / "anton" / SHOOTER_FILE).read_text())
+    anton_slug = next(m.slug for m in plan.shooter_moves if m.source_root == tmp_path / "anton")
+    shooter_json = json.loads((out / SHOOTERS_DIR / anton_slug / SHOOTER_FILE).read_text())
     for forbidden in ("name", "scoreboard_match_id", "scoreboard_content_type", "match_date"):
         # ``name`` IS a Shooter field (the human-readable shooter name), so
         # only the *match*-flavored fields are forbidden. The shooter's own

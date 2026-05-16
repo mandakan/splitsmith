@@ -236,9 +236,7 @@ def test_beep_alignment_offsets_smaller_beep_later(tmp_path: Path) -> None:
     m = _manifest(out, "Mathias", ["Anders", "Mathias"])
     emit_compare_fcpxml(manifest=m, shooters=[a, b], output_path=out, runner=_stub_ffmpeg_runner())
     root = ET.fromstring(out.read_bytes())
-    by_name = {
-        c.attrib["name"]: c for c in root.findall("./resources/media/sequence/spine/asset-clip")
-    }
+    by_name = {c.attrib["name"]: c for c in root.findall("./resources/media/sequence/spine/asset-clip")}
     # delta = round((5.1 - 4.0)/0.0333...) = 33
     assert by_name["Anders"].attrib["offset"] == "33/30s"
     assert by_name["Anders"].attrib["start"] == "0s"

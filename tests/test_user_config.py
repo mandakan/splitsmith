@@ -54,9 +54,7 @@ def test_xdg_config_home_honoured_on_linux(monkeypatch: pytest.MonkeyPatch, tmp_
     assert user_config.user_config_dir() == xdg / "splitsmith"
 
 
-def test_directory_created_lazily_on_first_write(
-    _isolated_user_config: Path, tmp_path: Path
-) -> None:
+def test_directory_created_lazily_on_first_write(_isolated_user_config: Path, tmp_path: Path) -> None:
     project = tmp_path / "match"
     project.mkdir()
     assert not _isolated_user_config.exists()
@@ -74,9 +72,7 @@ def test_directory_created_lazily_on_first_write(
     assert (_isolated_user_config / user_config.PROJECTS_FILENAME).is_file()
 
 
-def test_record_project_open_appends_and_dedupes(
-    _isolated_user_config: Path, tmp_path: Path
-) -> None:
+def test_record_project_open_appends_and_dedupes(_isolated_user_config: Path, tmp_path: Path) -> None:
     a = tmp_path / "a"
     b = tmp_path / "b"
     a.mkdir()
@@ -106,9 +102,7 @@ def test_record_project_open_resolves_paths(_isolated_user_config: Path, tmp_pat
     # entry; otherwise users see one row per ``cd`` they tried.
     assert len(user_config.get_recent_projects()) <= 2  # parent + project both valid
     # The exact project itself is one entry, not duplicated.
-    project_entries = [
-        p for p in user_config.get_recent_projects() if Path(p.path) == project.resolve()
-    ]
+    project_entries = [p for p in user_config.get_recent_projects() if Path(p.path) == project.resolve()]
     assert len(project_entries) == 1
 
 

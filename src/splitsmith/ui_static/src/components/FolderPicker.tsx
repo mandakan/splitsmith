@@ -41,6 +41,10 @@ import {
 import { cn } from "@/lib/utils";
 
 interface FolderPickerProps {
+  /** Shooter slug for shooter-scoped fs endpoints. The picker browses
+   *  the host filesystem boundary-checked against this shooter's project
+   *  root. */
+  slug: string;
   initialPath?: string | null;
   onSelect: (path: string) => void;
   /** Optional callback for multi-file selection. When provided, video rows
@@ -70,6 +74,7 @@ interface FolderPickerProps {
 }
 
 export function FolderPicker({
+  slug,
   initialPath,
   onSelect,
   onSelectFiles,
@@ -98,7 +103,7 @@ export function FolderPicker({
       setBusy(true);
       setError(null);
       try {
-        const data = await api.listFolder(next ?? undefined, { probe: wantMetadata });
+        const data = await api.listFolder(slug, next ?? undefined, { probe: wantMetadata });
         setListing(data);
         setPath(data.path);
         // Reset multi-file selection when navigating to a new directory.
@@ -109,7 +114,7 @@ export function FolderPicker({
         setBusy(false);
       }
     },
-    [wantMetadata],
+    [slug, wantMetadata],
   );
 
   useEffect(() => {
@@ -263,6 +268,7 @@ export function FolderPicker({
                     return (
                       <VideoRowMulti
                         key={`v-${entry.name}`}
+                        slug={slug}
                         entry={entry}
                         fullPath={fullPath}
                         checked={checked}
@@ -422,6 +428,7 @@ function SidebarIcon({ kind }: { kind: SuggestedStart["kind"] }) {
 }
 
 function VideoRowMulti({
+  slug,
   entry,
   fullPath,
   checked,
@@ -430,6 +437,7 @@ function VideoRowMulti({
   onToggle,
   onProbed,
 }: {
+  slug: string;
   entry: FsEntry;
   fullPath: string;
   checked: boolean;
@@ -447,14 +455,14 @@ function VideoRowMulti({
     if (probing) return;
     setProbing(true);
     try {
-      const r = await api.probeFile(fullPath);
+      const r = await api.probeFile(slug, fullPath);
       onProbed(r.duration, r.thumbnail_url);
     } catch {
       // Best effort; leave fields null so the row still shows what it can.
     } finally {
       setProbing(false);
     }
-  }, [entry.duration, entry.thumbnail_url, fullPath, onProbed, probing]);
+  }, [entry.duration, entry.thumbnail_url, fullPath, onProbed, probing, slug]);
 
   return (
     <li

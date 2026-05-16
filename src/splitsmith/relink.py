@@ -230,9 +230,7 @@ def apply_relink(
             previous = Path(link_path.readlink())
             link_path.unlink()
         elif link_path.exists():
-            raise ValueError(
-                f"refusing to overwrite non-symlink at {link_path} (status not_a_symlink)"
-            )
+            raise ValueError(f"refusing to overwrite non-symlink at {link_path} (status not_a_symlink)")
         link_path.parent.mkdir(parents=True, exist_ok=True)
         link_path.symlink_to(new_target_abs)
         applied.append(

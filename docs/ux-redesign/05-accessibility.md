@@ -46,14 +46,29 @@ All values measured against the surrounding surface color.
   dot/border is exempt as decoration as long as a text label is
   present.
 
-Specifically watch the "subtle" tier (`#5C5851` and below on cream
-paper). Anything used for actionable or informational text must hit
-AA, even at small sizes.
+Specifically watch the `subtle` / `whisper` tiers on dark surfaces.
+Anything used for actionable or informational text must hit AA even
+at small sizes.
 
-Branded vermillion (`#C73A2F`) on cream (`#EFEBE2`) is borderline for
-small body text. Use the deeper variant (`#9F2C24`) for body or label
-text; the bright variant is reserved for decorative accents (dots,
-underlines, brand mark).
+**Red text and red CTAs.** Saturated LED red (`#FF2D2D`) against cream
+text is below AA for normal body (4.5:1) and especially fails for
+red-green colorblindness. Two design-system patterns capture the
+fixed approach:
+
+- Filled primary CTAs and any "fill with text inside" surface use
+  `--color-led-fill` (`#DC2626`, slightly deeper red) with
+  `--color-ink` cream text, Antonio 14px bold, and an LED-red glow
+  halo. Captured as `.btn-led-fill` / `.tab-pill-led-fill` /
+  `.badge-led-fill` in `theme.css`. See `06-design-system.md` section
+  2.6.
+- Saturated `--color-led` (`#FF2D2D`) is reserved for accent dots,
+  hairlines, focus rings, and the brand mark -- decorative roles
+  where saturation gives the instrument-panel feel and where the
+  shape is the meaning, not the color.
+
+Do **not** combine saturated `--color-led` with `text-bg` (dark text
+on saturated red). That pattern caused recurring contrast pain and
+was swept out of the codebase in `6ed90bc`.
 
 ## 3. Motion and animation
 

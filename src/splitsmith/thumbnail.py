@@ -111,9 +111,7 @@ def ensure(
     except subprocess.TimeoutExpired as exc:
         raise ThumbnailError(f"ffmpeg timed out extracting thumbnail for {source}") from exc
     except subprocess.CalledProcessError as exc:
-        raise ThumbnailError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
+        raise ThumbnailError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
     if not dest.exists():
         raise ThumbnailError(f"ffmpeg produced no output for {source}")
     return dest
@@ -226,9 +224,7 @@ def ensure_clip(
     except subprocess.TimeoutExpired as exc:
         raise ThumbnailError(f"ffmpeg timed out extracting clip for {source}") from exc
     except subprocess.CalledProcessError as exc:
-        raise ThumbnailError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
+        raise ThumbnailError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
     if not dest.exists():
         raise ThumbnailError(f"ffmpeg produced no clip for {source}")
     return dest

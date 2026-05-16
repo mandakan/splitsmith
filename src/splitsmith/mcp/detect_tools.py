@@ -98,8 +98,7 @@ def detect_beep_for_video(
     _stage, video = _resolve_stage_video(project, stage_number=stage_number, video_id=video_id)
     if video.role == "ignored":
         raise ValueError(
-            f"video {video_id} on stage {stage_number} is ignored; "
-            "assign it as primary or secondary first"
+            f"video {video_id} on stage {stage_number} is ignored; " "assign it as primary or secondary first"
         )
     if not force and video.beep_time is not None and video.beep_source == "manual":
         # Manual entries are explicit user intent; never overwrite
@@ -111,9 +110,7 @@ def detect_beep_for_video(
 
     source = project.resolve_video_path(root, video.path)
     if not source.exists():
-        raise FileNotFoundError(
-            f"source video missing for stage {stage_number} video {video_id}: {source}"
-        )
+        raise FileNotFoundError(f"source video missing for stage {stage_number} video {video_id}: {source}")
 
     try:
         beep = audio_helpers.detect_video_beep(
@@ -184,9 +181,7 @@ def _apply_beep_not_found(video: Any) -> None:
         video.processed["shot_detect"] = False
 
 
-def _summary(
-    video: Any, *, gate_threshold: float | None, error: str | None = None
-) -> dict[str, Any]:
+def _summary(video: Any, *, gate_threshold: float | None, error: str | None = None) -> dict[str, Any]:
     """Compact response shape -- enough for the agent to decide what
     to do next without a separate get_project round-trip."""
     return {
@@ -243,8 +238,7 @@ def detect_shots_for_stage(
         raise ValueError(f"stage {stage_number} has no primary video")
     if primary.beep_time is None:
         raise ValueError(
-            f"stage {stage_number} primary has no beep_time yet; "
-            "run detect_beep or set_beep_manual first"
+            f"stage {stage_number} primary has no beep_time yet; " "run detect_beep or set_beep_manual first"
         )
     if stage.time_seconds <= 0:
         raise ValueError(
@@ -255,9 +249,7 @@ def detect_shots_for_stage(
     if not source.exists():
         raise FileNotFoundError(f"primary source missing for stage {stage_number}: {source}")
 
-    audit = audio_helpers.ensure_audit_audio(
-        root, stage_number, source, primary.beep_time, project=project
-    )
+    audit = audio_helpers.ensure_audit_audio(root, stage_number, source, primary.beep_time, project=project)
     beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else primary.beep_time
 
     audit_dir = project.audit_path(root)
@@ -265,9 +257,7 @@ def detect_shots_for_stage(
     audit_file = audit_dir / f"stage{stage_number}.json"
     existing_json = _load_or_seed_audit_json(audit_file, stage, beep_in_clip)
     if stage.stage_rounds is not None:
-        existing_json["stage_rounds"] = stage.stage_rounds.model_dump(
-            mode="json", exclude_none=True
-        )
+        existing_json["stage_rounds"] = stage.stage_rounds.model_dump(mode="json", exclude_none=True)
     expected_rounds = _expected_rounds_from(existing_json)
 
     runtime = _get_ensemble_runtime()
@@ -442,9 +432,7 @@ def trim_audit_clip(
     except KeyError as exc:
         raise ValueError(f"stage {stage_number} not found") from exc
     if stage.time_seconds <= 0:
-        raise ValueError(
-            f"stage {stage_number} has time_seconds=0; set the stage time " "before trimming"
-        )
+        raise ValueError(f"stage {stage_number} has time_seconds=0; set the stage time " "before trimming")
     if video_id is None:
         target = next((v for v in stage.videos if v.role == "primary"), None)
         if target is None:

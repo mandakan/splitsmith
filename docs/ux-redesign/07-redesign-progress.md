@@ -2,7 +2,8 @@
 
 Source-of-truth status doc for the redesign initiative.
 
-Last touched: 2026-05-15 (post-implementation polish + doc resync).
+Last touched: 2026-05-16 (path-scoped shooter refactor + Videos nav +
+inline beep re-pick + a11y sweep).
 
 ## Status: implementation complete, polish ongoing
 
@@ -111,6 +112,26 @@ shooter slug (not initials), drawing from this 4-color rotation.
 | Coach per-stage playhead auto-sync                                  | Shot list + ruler + hero panel froze on click instead of following the video |
 | Cascade-layer fix for `.btn-led-fill` family                        | Component-layer custom utility lost to Tailwind base utilities; moved to utilities layer |
 
+## Path-scoped shooter refactor (2026-05-16, #353)
+
+The shooter slug moved into the URL. Singleton "active shooter" server
+state is gone; per-request slug from the URL is the source of truth.
+
+| Change                                                              | Why                                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `/audit/<slug>`, `/coach/<slug>`, `/ingest/<slug>`, `/export/<slug>` | Two browser tabs can hold two shooters' views with no cross-contamination |
+| Opaque shooter slugs (`s_<8 hex>`)                                  | URLs / disk paths / server logs no longer leak competitor names; migration via `splitsmith match rename-shooter-slugs` |
+| Shared `ShooterChipStrip` mounted on every shooter-scoped page     | Audit-only switcher pattern propagated to Videos / Coach / Export so the user has one mental model for shooter switching |
+| Persistent **Videos** nav row in MatchShell sidebar                 | Video management is an ongoing workspace, not a one-shot wizard; reachable from anywhere in match mode |
+| "Find moved videos" relink dialog reachable on Videos               | JTBD-I (relocated source files) had API + component support but was never mounted in the redesigned shell |
+| Inline "Re-pick beep" on Audit + proactive anomaly banner           | Fix wrong beep without leaving Audit; opens `BeepWaveformPicker` inline, Apply queues trim + shot-detect via `overrideBeepForVideo` |
+| Per-video "Detect beep" button on Videos                            | Manual retry when scan-time auto-queue never fired (HITL queue can't help -- it requires `beep_auto_detect_failed=true`) |
+| Audit's "beep" filter chip count derived from primary state         | Was hardcoded to 1; now reflects whether the primary actually has a beep (0 or 1) |
+| A11y sweep: every `bg-led text-bg` -> `bg-led-fill text-ink`        | Finishes the work `888933c` started -- the legacy pattern had stayed in 10+ files and every new page reproduced it |
+| `200 null` for "doesn't exist yet" GETs                             | `/api/me/scoreboard-identity`, stage audit, stage coach return `200 null` instead of 404 to stop DevTools showing failed requests on every page load |
+| `default_shooter_slug` on `/api/health`                             | Slug-less surfaces (Home, sidebar Audit/Coach/Export rows) plug into a sensible `/audit/<slug>` without forcing the user to pick first |
+| Auto-redirect on 409 `no_project`                                   | Dev-server restart wipes bind state; `request()` fires a `splitsmith:no-project` event; `MatchShell` re-fetches health and the existing bound-check sends the user to `/pick` |
+
 ## Open items
 
 - **Promote / rollback / multi-version artifact storage** for
@@ -131,6 +152,14 @@ shooter slug (not initials), drawing from this 4-color rotation.
 - **Lab removal milestone.** `/dev/legacy/lab` is reachable for parity
   verification; remove after a few weeks of confirming the new dev
   pages cover the corpus + review flows.
+- **Stateless backend** -- the path-scoped refactor moved the slug
+  into the URL, but `AppState` still holds the bound match-root in
+  memory; a server restart wipes it. The auto-redirect to `/pick` is
+  the safety net; truly stateless would put the match-root in the URL
+  or a request header (option A / B in the design discussion). Noted
+  as a SaaS-readiness follow-up; not blocking the local-first product.
+- **End-to-end JTBD #1 on a fresh project** -- planned. The walk-
+  through is the canonical regression check before the next release.
 
 ## Critical rules (do not break)
 

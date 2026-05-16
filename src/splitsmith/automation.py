@@ -169,9 +169,7 @@ def load_global(config_path: Path | None = None) -> AutomationSettings:
         # Pass the YAML block as init kwargs; pydantic-settings will
         # still let env vars override missing keys.
         return AutomationSettings(**block)
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 -- log then fall back so a malformed config doesn't break the app
+    except Exception as exc:  # noqa: BLE001 -- log then fall back so a malformed config doesn't break the app
         logger.warning("Discarding malformed automation block at %s: %s", path, exc)
         return AutomationSettings()
 

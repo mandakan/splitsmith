@@ -50,9 +50,7 @@ def _load_match_payload(*, scoring_completed: float) -> dict:
 
 
 @respx.mock
-def test_first_call_hits_network_second_does_not(
-    tmp_path: Path, http_client: SsiHttpClient
-) -> None:
+def test_first_call_hits_network_second_does_not(tmp_path: Path, http_client: SsiHttpClient) -> None:
     cache = CachingScoreboardClient(http_client, tmp_path / "cache")
     payload = _load_match_payload(scoring_completed=100.0)
     route = respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(
@@ -69,9 +67,7 @@ def test_first_call_hits_network_second_does_not(
 
 
 @respx.mock
-def test_in_progress_match_does_not_serve_from_cache(
-    tmp_path: Path, http_client: SsiHttpClient
-) -> None:
+def test_in_progress_match_does_not_serve_from_cache(tmp_path: Path, http_client: SsiHttpClient) -> None:
     cache = CachingScoreboardClient(http_client, tmp_path / "cache")
     payload = _load_match_payload(scoring_completed=42.0)
     route = respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(
@@ -130,9 +126,7 @@ def test_cache_survives_across_instances(tmp_path: Path, http_client: SsiHttpCli
 
 
 @respx.mock
-def test_project_portability_copy_cache_to_new_path(
-    tmp_path: Path, http_client: SsiHttpClient
-) -> None:
+def test_project_portability_copy_cache_to_new_path(tmp_path: Path, http_client: SsiHttpClient) -> None:
     project_a = tmp_path / "project_a" / "scoreboard" / "cache"
     project_b = tmp_path / "project_b" / "scoreboard" / "cache"
     payload = _load_match_payload(scoring_completed=100.0)
@@ -155,9 +149,7 @@ def test_project_portability_copy_cache_to_new_path(
 @respx.mock
 def test_for_project_resolves_conventional_path(tmp_path: Path, http_client: SsiHttpClient) -> None:
     payload = _load_match_payload(scoring_completed=100.0)
-    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(
-        return_value=httpx.Response(200, json=payload)
-    )
+    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(return_value=httpx.Response(200, json=payload))
 
     cache = CachingScoreboardClient.for_project(http_client, tmp_path)
     cache.get_match(22, 27190)
@@ -166,9 +158,7 @@ def test_for_project_resolves_conventional_path(tmp_path: Path, http_client: Ssi
 
 
 @respx.mock
-def test_unrelated_endpoints_pass_through_uncached(
-    tmp_path: Path, http_client: SsiHttpClient
-) -> None:
+def test_unrelated_endpoints_pass_through_uncached(tmp_path: Path, http_client: SsiHttpClient) -> None:
     cache = CachingScoreboardClient(http_client, tmp_path / "cache")
     route = respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=[]))
 
@@ -188,9 +178,7 @@ def test_corrupt_cache_file_falls_back_to_inner(tmp_path: Path, http_client: Ssi
 
     payload = _load_match_payload(scoring_completed=100.0)
     with respx.mock() as mock:
-        mock.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        mock.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(return_value=httpx.Response(200, json=payload))
         cache.get_match(22, 27190)
 
     # After the fetch, the corrupt file should be replaced with a valid envelope.

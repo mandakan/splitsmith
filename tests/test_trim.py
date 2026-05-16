@@ -289,9 +289,7 @@ def test_select_audit_encoder_explicit_override_when_unsupported(monkeypatch) ->
     import splitsmith.trim as trim_module
 
     trim_module._probe_available_encoders.cache_clear()
-    monkeypatch.setattr(
-        trim_module, "_probe_available_encoders", lambda *a, **kw: frozenset({"libx264"})
-    )
+    monkeypatch.setattr(trim_module, "_probe_available_encoders", lambda *a, **kw: frozenset({"libx264"}))
 
     assert select_audit_encoder("h264_nvenc") == "libx264"
 
@@ -383,6 +381,5 @@ def test_trim_audit_mode_emits_short_gop(tmp_path: Path, fixtures_dir: Path) -> 
     assert len(keyframe_times) >= 2, f"expected multiple keyframes, got {keyframe_times}"
     gaps = [b - a for a, b in zip(keyframe_times, keyframe_times[1:], strict=False)]
     assert max(gaps) <= 0.6, (
-        f"keyframe gaps exceed 0.5s tolerance: max={max(gaps):.3f}s, "
-        f"gaps={[round(g, 3) for g in gaps]}"
+        f"keyframe gaps exceed 0.5s tolerance: max={max(gaps):.3f}s, " f"gaps={[round(g, 3) for g in gaps]}"
     )

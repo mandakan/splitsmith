@@ -741,6 +741,7 @@ export function Review() {
                     detected: detectedCount,
                     rejected: rejectedCount,
                     manual: manualCount,
+                    beep: peaks.beep_time != null ? 1 : 0,
                   }}
                   onChange={setFilters}
                 />

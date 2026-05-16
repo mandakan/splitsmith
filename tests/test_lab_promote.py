@@ -251,9 +251,7 @@ def test_lab_promote_endpoint_400s_when_camera_mount_missing(tmp_path: Path) -> 
     assert "camera_mount" in resp.json()["detail"]
 
 
-def test_lab_promote_endpoint_writes_full_provenance(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_lab_promote_endpoint_writes_full_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy path: project has primary + camera_mount + beep -> the
     fixture lands with source_video / fixture_window_in_source / camera
     derived from project context."""

@@ -105,8 +105,7 @@ class SsiHttpClient:
         resolved_token = token if token is not None else os.environ.get(TOKEN_ENV_VAR)
         if not resolved_token:
             raise ScoreboardAuthError(
-                f"{TOKEN_ENV_VAR} is not set; obtain a bearer token and export it. "
-                f"See {API_DOCS_URL}"
+                f"{TOKEN_ENV_VAR} is not set; obtain a bearer token and export it. " f"See {API_DOCS_URL}"
             )
         self._owns_client = client is None
         self._client = client or httpx.Client(
@@ -128,9 +127,7 @@ class SsiHttpClient:
     def search_matches(self, query: str) -> list[MatchRef]:
         data = self._get_json("/events", params={"q": query} if query else None)
         if not isinstance(data, list):
-            raise ScoreboardUpstreamError(
-                f"unexpected /events response shape: {type(data).__name__}"
-            )
+            raise ScoreboardUpstreamError(f"unexpected /events response shape: {type(data).__name__}")
         return [MatchRef.model_validate(item) for item in data]
 
     def get_match(self, content_type: int, match_id: int) -> MatchData:
@@ -143,9 +140,7 @@ class SsiHttpClient:
     def find_shooter(self, name: str) -> list[ShooterRef]:
         data = self._get_json("/shooter/search", params={"q": name})
         if not isinstance(data, list):
-            raise ScoreboardUpstreamError(
-                f"unexpected /shooter/search response shape: {type(data).__name__}"
-            )
+            raise ScoreboardUpstreamError(f"unexpected /shooter/search response shape: {type(data).__name__}")
         return [ShooterRef.model_validate(item) for item in data]
 
     def get_shooter(self, shooter_id: int) -> ShooterDashboard:
@@ -155,9 +150,7 @@ class SsiHttpClient:
             raise ShooterNotFound(f"shooter {shooter_id} not found on scoreboard") from exc
         return ShooterDashboard.model_validate(data)
 
-    def get_stage_times(
-        self, content_type: int, match_id: int, competitor_id: int
-    ) -> CompetitorStageResults:
+    def get_stage_times(self, content_type: int, match_id: int, competitor_id: int) -> CompetitorStageResults:
         # Mirrors the live ``GET /match/{ct}/{id}/competitor/{cid}/stages``
         # shipped in ssi-scoreboard#400. A 404 here -- now that the
         # endpoint is part of the v1 contract -- means the competitor
@@ -165,9 +158,7 @@ class SsiHttpClient:
         # as ``CompetitorNotInMatch`` so the UI can prompt for a re-pick
         # rather than blaming the upstream.
         try:
-            data = self._get_json(
-                f"/match/{content_type}/{match_id}/competitor/{competitor_id}/stages"
-            )
+            data = self._get_json(f"/match/{content_type}/{match_id}/competitor/{competitor_id}/stages")
         except _NotFound as exc:
             raise CompetitorNotInMatch(
                 f"competitor {competitor_id} isn't part of match "
@@ -190,8 +181,7 @@ class SsiHttpClient:
             return response.json()
         if status == 401:
             raise ScoreboardAuthError(
-                f"scoreboard rejected the bearer token (401). "
-                f"Set {TOKEN_ENV_VAR}; see {API_DOCS_URL}"
+                f"scoreboard rejected the bearer token (401). " f"Set {TOKEN_ENV_VAR}; see {API_DOCS_URL}"
             )
         if status == 404:
             raise _NotFound(path)
@@ -208,9 +198,7 @@ class SsiHttpClient:
                 retry_after=retry_after,
             )
         if 500 <= status < 600:
-            raise ScoreboardUpstreamError(
-                f"scoreboard upstream returned {status}; try the offline JSON path"
-            )
+            raise ScoreboardUpstreamError(f"scoreboard upstream returned {status}; try the offline JSON path")
         raise ScoreboardError(f"unexpected scoreboard response: {status} {response.text[:200]}")
 
 

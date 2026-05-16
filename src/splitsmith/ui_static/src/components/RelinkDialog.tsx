@@ -32,6 +32,7 @@ import {
 } from "@/lib/api";
 
 interface RelinkDialogProps {
+  slug: string;
   onClose: () => void;
   onApplied?: () => void;
 }
@@ -72,7 +73,7 @@ function statusBadgeClass(status: LinkStatus): string {
   }
 }
 
-export function RelinkDialog({ onClose, onApplied }: RelinkDialogProps) {
+export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
   const [rows, setRows] = useState<RowState[]>([]);
   const [searchRoot, setSearchRoot] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -86,7 +87,7 @@ export function RelinkDialog({ onClose, onApplied }: RelinkDialogProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const resp = await api.getLinkStatus();
+        const resp = await api.getLinkStatus(slug);
         if (cancelled) return;
         setRows(
           resp.entries.map((link) => ({ link, scan: null, picked: null })),
@@ -120,7 +121,7 @@ export function RelinkDialog({ onClose, onApplied }: RelinkDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      const resp = await api.relinkScan(root);
+      const resp = await api.relinkScan(slug, root);
       setRows((prev) =>
         prev.map((row) => {
           const found = resp.entries.find((e) => e.video_id === row.link.video_id);
@@ -154,11 +155,11 @@ export function RelinkDialog({ onClose, onApplied }: RelinkDialogProps) {
       for (const row of eligibleForApply) {
         if (row.picked) decisions[row.link.video_id] = row.picked;
       }
-      const resp = await api.relinkApply(decisions);
+      const resp = await api.relinkApply(slug, decisions);
       setAppliedCount((c) => c + resp.applied.length);
       // Refresh statuses so applied rows flip to ``ok`` and the user
       // sees them turn green.
-      const fresh = await api.getLinkStatus();
+      const fresh = await api.getLinkStatus(slug);
       setRows((prev) =>
         fresh.entries.map((link) => {
           const old = prev.find((r) => r.link.video_id === link.video_id);
@@ -234,6 +235,7 @@ export function RelinkDialog({ onClose, onApplied }: RelinkDialogProps) {
           {pickerOpen ? (
             <div className="rounded-md border border-border p-2">
               <FolderPicker
+                slug={slug}
                 onSelect={async (path) => {
                   setPickerOpen(false);
                   await runScan(path);

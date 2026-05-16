@@ -60,8 +60,7 @@ def apply_audit_to_fixture(candidates_csv: Path, fixture_json: Path) -> int:
     candidates = data.get("_candidates_pending_audit", {}).get("candidates")
     if not candidates:
         raise ValueError(
-            f"{fixture_json}: no candidates block found. Expected "
-            f"'_candidates_pending_audit.candidates'."
+            f"{fixture_json}: no candidates block found. Expected " f"'_candidates_pending_audit.candidates'."
         )
     by_num = {c["candidate_number"]: c for c in candidates}
 

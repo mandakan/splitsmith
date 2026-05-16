@@ -39,14 +39,39 @@ Markers:
 - Each match is a folder containing `match.json` + `shooters/<slug>/`
   subdirs; the per-shooter dir holds a `project.json` (legacy shape
   preserved for audit/ingest endpoints)
-- Add, remove, and switch the active shooter on a match
+- Add and remove shooters on a match; *switching* between shooters is
+  per-request via URL slug (no in-memory "active shooter" since #353)
 - List shooters on the active match with per-shooter audit progress,
   camera coverage, and HITL queue counts
 - Per-shooter video streaming for cross-shooter views (Compare)
-- Shooter slug stable across renames; per-shooter racing-color identity
-  used in Compare + Shooters management
+- Per-shooter racing-color identity used in Compare + Shooters
+  management
+- **Path-scoped shooter URLs** (#353): every shooter-scoped page
+  carries the slug in its URL (`/audit/<slug>`, `/audit/<slug>/<stage>`,
+  `/ingest/<slug>`, `/coach/<slug>`, `/coach/<slug>/<stage>`,
+  `/export/<slug>`, `/export/<slug>/<stage>`). Slugless visits redirect
+  to `/shooters`. Two tabs can hold two shooters' views simultaneously
+  with no cross-contamination.
+- **Opaque shooter slugs** (`s_<8 hex>`, minted by
+  `secrets.token_hex`) so URLs / disk paths / server logs don't leak
+  competitor names. Display names live in `shooter.json`. Migration
+  command: `splitsmith match rename-shooter-slugs <path>`.
+- **`default_shooter_slug`** on `/api/health` -- the
+  alphabetically-first shooter in match mode, or the deterministic
+  `legacy_slug(project)` in legacy mode. Lets slug-less surfaces (Home,
+  sidebar Audit/Coach/Export rows) plug into a sensible
+  `/audit/<slug>` URL without the user picking first.
+- **`ShooterChipStrip`** -- shared chip-strip switcher mounted on
+  every shooter-scoped page (Audit, Videos, Coach, Export).
+  Parameterised by `urlBase` + optional `stage`; hides itself for
+  single-shooter matches.
 
-## Footage ingest
+## Footage ingest / video management
+
+The page is reachable from the persistent **Videos** sidebar row on
+every match-mode shell, not just immediately after project creation.
+It functions as the ongoing video-management workspace, not a one-shot
+wizard.
 
 - Scan a folder of video files and symlink into `raw/`
 - Auto-match videos to stages by mtime
@@ -54,17 +79,38 @@ Markers:
 - Unassign videos from a stage
 - Remove videos from the project (and disk)
 - View per-video link status across stages
-- Relink videos to different stages or roles (relink dialog with folder picker)
+- Per-video beep status pill (`beep 12.34s` when set) + manual
+  "Detect beep" button on rows that lack a beep -- explicit retry path
+  for primaries the scan-time auto-queue missed
+- **Find moved videos** -- relink dialog reachable from the page
+  header; scans a folder recursively, matches by basename, lets the
+  user confirm each per-video target before rewriting the symlinks
 - Select camera model and mount type with provenance tracking
 
 ## Beep handling
 
 - Auto-detect beep time on one video or across a stage
+- Auto-queue beep detection at scan / move-assignment /
+  swap-primary time (best-effort; conservative -- never replaces
+  manual entry or fires when the source is unreachable)
+- **Manually trigger detect-beep per video** from the Videos page when
+  the auto-queue missed (no UI dependency on `beep_auto_detect_failed`
+  having ever flipped to True; works on pristine never-attempted
+  primaries too)
 - View beep candidates ranked by confidence with preview clips
 - Manually place / override beep time
 - Snap beep to nearest detected peak
 - Pick a beep from the candidate list
 - Multi-camera beep review (primary + secondary synchronized at detected beep)
+- **Inline beep re-pick on Audit** -- always-visible "Re-pick beep"
+  button next to the audit toolbar beep readout opens an inline
+  `BeepWaveformPicker`. Apply queues a fresh trim + shot-detect
+  chain via `overrideBeepForVideo` (which clears shots[] server-side)
+  so the user fixes a wrong beep without leaving Audit.
+- **Proactive "beep looks wrong" nudge on Audit** -- yellow banner
+  appears when the post-detection state has heuristic signals the
+  beep is mis-placed (draw > 2.5s, last shot overshoots official
+  stage time > 1s). Banner CTA opens the same inline picker.
 - Re-run beep detection with fresh config
 - Suppress auto-detection (env var)
 - View beep waveform preview with confidence score
@@ -250,6 +296,15 @@ Markers:
 - Thumbnail generation and caching for video previews
 - Match-level export overview (stages complete, export ready)
 - Anomaly detection (splits outside expected distribution)
+- **Bind-state drift recovery** (#353): a 409 ``no_project`` from any
+  endpoint dispatches a `splitsmith:no-project` window event;
+  `MatchShell` listens, re-fetches health, and the existing bound
+  check redirects to `/pick`. Survives dev-server restarts cleanly.
+- **`200 null` for "doesn't exist yet" GETs**: `/api/me/scoreboard-identity`,
+  `/api/shooters/<slug>/stages/<n>/audit`, and `.../coach` return
+  `200 null` for the "not pinned yet" / "no audit JSON yet" cases so
+  these don't show up as failed requests in DevTools on every page
+  load. 404 is reserved for genuinely-unknown resources.
 
 ---
 

@@ -188,9 +188,7 @@ def trimmed_video_path(
     Keyed by ``video_id`` for every role so each angle has its own scrub
     clip cut around its own beep.
     """
-    return (
-        project.trimmed_path(project_root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
-    )
+    return project.trimmed_path(project_root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
 
 
 def trimmed_primary_path(project_root: Path, stage_number: int, *, project: MatchProject) -> Path:
@@ -258,9 +256,7 @@ def ensure_audit_audio(
         # trim_start. trim_start = max(0, beep - pre_buffer); so:
         #   beep_in_clip = min(beep_in_source, pre_buffer)
         beep_in_clip = (
-            min(primary_beep_time, project.trim_pre_buffer_seconds)
-            if primary_beep_time is not None
-            else None
+            min(primary_beep_time, project.trim_pre_buffer_seconds) if primary_beep_time is not None else None
         )
         return AuditAudioResult(audio_path=audio_path, beep_in_clip=beep_in_clip, trimmed=True)
 
@@ -394,9 +390,7 @@ def ensure_video_audit_trim(
         raise FileNotFoundError(f"video missing on disk: {src_resolved}")
 
     cache_hit = (
-        output.exists()
-        and output.stat().st_mtime >= src_resolved.stat().st_mtime
-        and params_file.exists()
+        output.exists() and output.stat().st_mtime >= src_resolved.stat().st_mtime and params_file.exists()
     )
     if cache_hit:
         try:
@@ -415,9 +409,7 @@ def ensure_video_audit_trim(
         if p.exists():
             p.unlink()
 
-    encoder = trim_module.select_audit_encoder(
-        project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary
-    )
+    encoder = trim_module.select_audit_encoder(project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary)
     trim_kwargs: dict[str, object] = {
         "input_path": src_resolved,
         "output_path": partial,

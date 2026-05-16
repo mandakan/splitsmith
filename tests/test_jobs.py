@@ -345,8 +345,7 @@ def test_acknowledge_all_failures_marks_only_unacked_failures() -> None:
 
     def _all_done() -> bool:
         return all(
-            reg.get(j.id) is not None
-            and reg.get(j.id).status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
+            reg.get(j.id) is not None and reg.get(j.id).status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
             for j in (fail_a, fail_b, ok)
         )
 

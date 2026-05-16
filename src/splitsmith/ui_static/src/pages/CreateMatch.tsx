@@ -442,7 +442,7 @@ function ScoreboardVariant({
                 disabled={
                   creating || !shooterName.trim() || !projectFolder.trim()
                 }
-                className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+                className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led hover:text-ink"
               >
                 <span className="font-display uppercase tracking-[0.08em]">
                   {creating ? "Creating..." : "Create match"}
@@ -486,7 +486,7 @@ function ResultRow({
         className={cn(
           "inline-flex size-7 items-center justify-center rounded-md",
           selected
-            ? "bg-led text-bg shadow-[0_0_10px_var(--color-led-glow)]"
+            ? "bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
             : "bg-surface-3 text-muted",
         )}
       >
@@ -545,7 +545,7 @@ function ResultRow({
         )}
       </div>
       {selected ? (
-        <span className="inline-flex size-5 items-center justify-center rounded-full bg-led text-bg shadow-[0_0_10px_var(--color-led-glow)]">
+        <span className="inline-flex size-5 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]">
           <Check className="size-3" strokeWidth={3} />
         </span>
       ) : (
@@ -836,7 +836,7 @@ function ManualVariant({
               !shooterName.trim() ||
               stages.length === 0
             }
-            className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
+            className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led hover:text-ink"
           >
             <span className="font-display uppercase tracking-[0.08em]">
               {creating ? "Creating..." : "Create match"}
