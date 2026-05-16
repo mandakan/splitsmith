@@ -26,9 +26,11 @@ def test_clean_preset_matches_legacy_hardcoded_values() -> None:
 def test_splitsmith_preset_loads_from_packaged_json() -> None:
     """The ``splitsmith`` preset must round-trip through the JSON mirror so
     a regenerate step actually flows into runtime."""
-    with resources.files("splitsmith.data").joinpath("overlay_theme.json").open(
-        "r", encoding="utf-8"
-    ) as fh:
+    with (
+        resources.files("splitsmith.data")
+        .joinpath("overlay_theme.json")
+        .open("r", encoding="utf-8") as fh
+    ):
         data = json.load(fh)
 
     t = overlay_theme.load_theme("splitsmith")

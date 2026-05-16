@@ -82,9 +82,11 @@ _CLEAN = OverlayTheme(
 
 def _load_splitsmith() -> OverlayTheme:
     try:
-        with resources.files("splitsmith.data").joinpath("overlay_theme.json").open(
-            "r", encoding="utf-8"
-        ) as fh:
+        with (
+            resources.files("splitsmith.data")
+            .joinpath("overlay_theme.json")
+            .open("r", encoding="utf-8") as fh
+        ):
             data = json.load(fh)
     except (FileNotFoundError, OSError) as exc:
         raise OverlayThemeError(
