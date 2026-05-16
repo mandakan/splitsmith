@@ -256,6 +256,7 @@ function IngestInner({ slug }: { slug: string }) {
           />
         ) : project ? (
           <ReviewState
+            slug={slug}
             project={project}
             storage={storage}
             onStorageChange={setStorage}
@@ -702,6 +703,7 @@ function ShooterBanner({ project }: { project: MatchProject | null }) {
 /* -------------------------------------------------------------------------- */
 
 function ReviewState({
+  slug,
   project,
   storage,
   onStorageChange,
@@ -712,6 +714,7 @@ function ReviewState({
   busy,
   lastScannedDir,
 }: {
+  slug: string;
   project: MatchProject;
   storage: StorageMode;
   onStorageChange: (s: StorageMode) => void;
@@ -883,7 +886,7 @@ function ReviewState({
         Background jobs queue immediately (audio extract + beep detect per
         video). Stages with confirmed beeps become available for audit.
         Continue to <Link to="/" className="text-led hover:text-led-soft">match overview</Link>{" "}
-        or open the <Link to="/audit" className="text-led hover:text-led-soft">audit</Link>{" "}
+        or open the <Link to={`/audit/${slug}`} className="text-led hover:text-led-soft">audit</Link>{" "}
         page to start reviewing.
       </div>
     </>

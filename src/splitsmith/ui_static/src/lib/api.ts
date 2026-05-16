@@ -1089,6 +1089,17 @@ export interface ServerHealth {
   bound: boolean;
   project_name: string | null;
   project_root: string | null;
+  /** Discriminates the on-disk layout. ``"match"`` for the Match -> Shooter
+   *  folder layout; ``"legacy"`` for single-shooter projects that predate
+   *  the split; ``null`` when the server is unbound. */
+  kind: "match" | "legacy" | null;
+  /** Slug that the SPA can plug into ``/audit/<slug>/...`` URLs from any
+   *  slugless surface (Home, sidebar Audit/Coach/Export rows) so the
+   *  user lands somewhere sensible without picking a shooter first. For
+   *  a match this is the alphabetically-first registered shooter; for a
+   *  legacy project it's the deterministic legacy slug. Null when the
+   *  match is empty or the server is unbound. */
+  default_shooter_slug: string | null;
   schema_version: number | null;
 }
 

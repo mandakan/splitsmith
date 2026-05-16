@@ -709,6 +709,14 @@ class HealthResponse(BaseModel):
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
+    # Layout discriminator + a default slug for shooter-scoped URLs (#353).
+    # Match-bound: the alphabetically-first registered shooter, or ``None``
+    # when the match is empty. Legacy-bound: the deterministic legacy slug.
+    # Lets the SPA build /audit/<slug>/... links from any slugless surface
+    # (Home, sidebar Audit/Coach/Export rows) without forcing the user to
+    # pick a shooter when there's only one sensible default.
+    kind: str | None = None  # "match" | "legacy" | None when unbound
+    default_shooter_slug: str | None = None
 
 
 class PromoteSecondaryBody(BaseModel):
@@ -1854,10 +1862,24 @@ def create_app(
 
     def _health_after_bind(recorded_name: str) -> HealthResponse:
         """Build a HealthResponse from the currently-bound project."""
+        default_slug: str | None = None
+        kind = state.bound_kind
+        if kind == "match":
+            match = match_model.Match.load(state.bound_root)
+            shooters = sorted(match.shooters)
+            default_slug = shooters[0] if shooters else None
+        elif kind == "legacy":
+            try:
+                project = MatchProject.load(state.bound_root)
+                default_slug = legacy_slug(project)
+            except Exception:  # noqa: BLE001 -- defensive
+                default_slug = None
         return HealthResponse(
             bound=True,
             project_name=recorded_name,
             project_root=str(state.bound_root),
+            kind=kind,
+            default_shooter_slug=default_slug,
         )
 
     @app.get("/api/health", response_model=HealthResponse)

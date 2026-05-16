@@ -55,6 +55,10 @@ export function Home() {
   const navigate = useNavigate();
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
+  // Slug used for slug-bearing nav links from this page. Lifted off the
+  // health snapshot the shell already loaded, so Home doesn't need its
+  // own fetch. Falls back to "/shooters" routing when no default exists.
+  const navSlug = ctx?.health?.default_shooter_slug ?? null;
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
 
   useEffect(() => {
@@ -176,7 +180,12 @@ export function Home() {
           )}
         </div>
         <div className="mt-4 inline-flex gap-2.5">
-          <Button variant="outline" onClick={() => navigate("/export")}>
+          <Button
+            variant="outline"
+            onClick={() =>
+              navigate(navSlug ? `/export/${navSlug}` : "/shooters")
+            }
+          >
             <ArrowDownToLine className="size-3.5" />
             <span className="font-display uppercase tracking-[0.08em]">
               Export Match
@@ -197,6 +206,7 @@ export function Home() {
             project={project}
             stageViews={stageViews}
             shooters={shooters}
+            navSlug={navSlug}
           />
         ) : (
           <ActiveVariant
@@ -206,6 +216,7 @@ export function Home() {
             nextUp={nextUp ?? null}
             totalsByTone={totalsByTone}
             auditedPct={auditedPct}
+            navSlug={navSlug}
           />
         )}
       </div>
@@ -224,6 +235,7 @@ function ActiveVariant({
   nextUp,
   totalsByTone,
   auditedPct,
+  navSlug,
 }: {
   project: MatchProject;
   stageViews: StageView[];
@@ -231,8 +243,11 @@ function ActiveVariant({
   nextUp: StageView | null;
   totalsByTone: Record<StagePillTone, number>;
   auditedPct: number;
+  navSlug: string | null;
 }) {
   const navigate = useNavigate();
+  const stageHref = (n: number) =>
+    navSlug ? `/audit/${navSlug}/${n}` : "/shooters";
   return (
     <>
       {/* Resume hero */}
@@ -301,7 +316,7 @@ function ActiveVariant({
           <div className="relative z-10">
             <button
               type="button"
-              onClick={() => navigate(`/audit/${nextUp.stage.stage_number}`)}
+              onClick={() => navigate(stageHref(nextUp.stage.stage_number))}
               className="inline-flex min-h-[60px] items-center gap-3.5 rounded-[11px] border border-led bg-led px-6 py-4 font-display text-base font-bold uppercase tracking-[0.06em] text-bg shadow-[0_0_0_1px_var(--color-led),0_0_32px_var(--color-led-glow),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all hover:bg-led-soft hover:-translate-y-0.5"
             >
               <div className="flex flex-col items-start gap-1">
@@ -387,7 +402,7 @@ function ActiveVariant({
           <StageTile
             key={v.stage.stage_number}
             view={v}
-            onClick={() => navigate(`/audit/${v.stage.stage_number}`)}
+            onClick={() => navigate(stageHref(v.stage.stage_number))}
           />
         ))}
       </div>
@@ -403,12 +418,15 @@ function EmptyVariant({
   project,
   stageViews,
   shooters,
+  navSlug,
 }: {
   project: MatchProject;
   stageViews: StageView[];
   shooters: ShooterListEntry[];
+  navSlug: string | null;
 }) {
   const navigate = useNavigate();
+  const ingestHref = navSlug ? `/ingest/${navSlug}` : "/shooters";
   return (
     <>
       <section
@@ -445,7 +463,7 @@ function EmptyVariant({
         </p>
         <div className="inline-flex gap-2.5">
           <Button
-            onClick={() => navigate("/ingest")}
+            onClick={() => navigate(ingestHref)}
             className="bg-led text-bg shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led-soft hover:text-bg"
           >
             <ArrowDownToLine className="size-3.5" />
@@ -496,7 +514,7 @@ function EmptyVariant({
                   : "No footage yet"
               }
               addLink={s.video_count === 0 ? "Add footage" : undefined}
-              onAddLink={() => navigate("/ingest")}
+              onAddLink={() => navigate(ingestHref)}
             />
           ))
         ) : (
@@ -505,7 +523,7 @@ function EmptyVariant({
             name={project.competitor_name ?? "Shooter"}
             stats="No footage yet"
             addLink="Add footage"
-            onAddLink={() => navigate("/ingest")}
+            onAddLink={() => navigate(ingestHref)}
           />
         )}
         <div
@@ -545,7 +563,7 @@ function EmptyVariant({
           title="Drop your SD card"
           desc="Drag a folder of head-cam videos. Splitsmith auto-matches each video to a stage by recording time."
           cta="Start ingest"
-          onClick={() => navigate("/ingest")}
+          onClick={() => navigate(ingestHref)}
         />
         <HelpCard
           icon={<Users className="size-4" />}

@@ -1308,7 +1308,7 @@ function BeepPreview({
       )}
       {isPrimary ? (
         <Link
-          to={`/audit/${stageNumber}`}
+          to={`/audit/${slug}/${stageNumber}`}
           className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           title="Open the audit screen to verify or correct this beep on the waveform"
         >

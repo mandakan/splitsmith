@@ -92,9 +92,14 @@ export function MatchShell() {
       .then((h) => {
         if (alive) setHealth(h);
         if (h?.bound) {
-          if (slug) {
+          // Sidebar stage list needs *some* shooter's project to render
+          // status. URL slug wins; otherwise fall back to the server's
+          // default shooter (alphabetically-first match shooter, or the
+          // legacy slug for single-shooter projects).
+          const fetchSlug = slug ?? h.default_shooter_slug ?? null;
+          if (fetchSlug) {
             api
-              .getProject(slug)
+              .getProject(fetchSlug)
               .then((p) => {
                 if (alive) setProject(p);
               })
@@ -264,9 +269,11 @@ export function MatchShell() {
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
-          onStageClick={(n) =>
-            navigate(slug ? `/audit/${slug}/${n}` : "/shooters")
-          }
+          onStageClick={(n) => {
+            const target = slug ?? health?.default_shooter_slug;
+            navigate(target ? `/audit/${target}/${n}` : "/shooters");
+          }}
+          shooterSlug={slug ?? health?.default_shooter_slug ?? undefined}
         />
         <div className={cn("min-w-0 flex-1")}>
           <Outlet
