@@ -832,6 +832,45 @@ export function Audit() {
     [markers],
   );
 
+  // "Beep looks wrong" heuristic. Fires when the post-detection state
+  // has signals that strongly suggest the beep was placed on the wrong
+  // sound rather than e.g. the user missing shots. Surfacing this as a
+  // banner is the proactive counterpart to the always-visible 'Re-pick
+  // beep' button: catches the mistake even before the user manually
+  // compares shot count vs expected.
+  //
+  // Heuristic, conservative to avoid false alarms:
+  //   - "draw too long": first detected shot lands > 2.5s after beep
+  //     (typical IPSC draw is < 2s; > 2.5s means the beep is probably
+  //     before the actual buzzer).
+  //   - "stage time overshoot": the last detected shot lands more than
+  //     1s AFTER the official stage time. Stage time is the call from
+  //     beep to last shot; if our beep is too early, last shot's time-
+  //     from-beep exceeds stage_time.
+  //
+  // Only fires when there are enough shots to draw a conclusion (>= 3).
+  const beepDiagnostic = useMemo<{ reason: string } | null>(() => {
+    if (!stage || stage.time_seconds <= 0 || auditBeep == null) return null;
+    if (keptShots.length < 3) return null;
+    const sorted = keptShots.slice().sort((a, b) => a.time - b.time);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const firstFromBeep = first.time - auditBeep;
+    const lastFromBeep = last.time - auditBeep;
+    const overshoot = lastFromBeep - stage.time_seconds;
+    if (firstFromBeep > 2.5) {
+      return {
+        reason: `First shot lands ${firstFromBeep.toFixed(2)}s after the beep -- typical draws are well under 2 s, so the beep is likely placed before the actual buzzer.`,
+      };
+    }
+    if (overshoot > 1.0) {
+      return {
+        reason: `Last shot lands ${overshoot.toFixed(2)}s after the official stage time (${stage.time_seconds.toFixed(2)}s) -- the beep may have been picked up too early.`,
+      };
+    }
+    return null;
+  }, [keptShots, auditBeep, stage]);
+
   // Whenever the kept-shot list shrinks (reject / delete), keep the index
   // in range. Don't change otherwise -- the user's position is sticky.
   useEffect(() => {
@@ -1560,6 +1599,45 @@ export function Audit() {
               />
             ) : null}
           </div>
+
+          {/* Proactive nudge: when the post-detection state has signals
+           *  the beep was wrong (draw too long, overshoot the official
+           *  stage time, etc.), surface a banner that opens the re-pick
+           *  picker in one click. Suppressed once the picker is open --
+           *  the user has clearly seen the affordance and doesn't need
+           *  another reminder underneath it. */}
+          {beepDiagnostic && !showRepickBeep ? (
+            <div
+              role="status"
+              className="flex flex-wrap items-start gap-3 rounded-2xl border border-live/40 bg-live/10 px-4 py-3 text-sm"
+            >
+              <span
+                aria-hidden
+                className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-live/60 bg-live-tint font-mono text-[0.625rem] font-bold text-live"
+              >
+                !
+              </span>
+              <div className="flex-1">
+                <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.08em] text-live">
+                  Looks like the beep is wrong
+                </div>
+                <p className="mt-1 text-[0.8125rem] leading-snug text-ink-2">
+                  {beepDiagnostic.reason}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-led-fill text-ink hover:bg-led hover:text-ink"
+                onClick={() => {
+                  setShowRepickBeep(true);
+                  setRepickDraft(null);
+                }}
+              >
+                Re-pick beep
+              </Button>
+            </div>
+          ) : null}
 
           {/* Inline beep re-pick. Mounts under the toolbar so the user
            *  who notices a mis-aligned beep mid-audit doesn't have to
