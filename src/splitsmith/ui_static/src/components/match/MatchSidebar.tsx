@@ -16,6 +16,7 @@ import {
   ArrowDownToLine,
   ClipboardCheck,
   Crosshair,
+  Film,
   LayoutGrid,
   Users,
 } from "lucide-react";
@@ -117,6 +118,12 @@ export function MatchSidebar({
           count={shooterCount}
         >
           Shooters
+        </SidebarLink>
+        <SidebarLink
+          to={shooterSlug ? `/ingest/${shooterSlug}` : "/shooters"}
+          icon={<Film className="size-[15px]" />}
+        >
+          Videos
         </SidebarLink>
         <SidebarLink
           to={shooterSlug ? `/export/${shooterSlug}` : "/shooters"}

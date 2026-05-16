@@ -4532,9 +4532,11 @@ def create_app(
         """Return the stage's audit JSON (issue #15) if one has been written.
 
         Lives at ``<project>/audit/stage<N>.json`` -- the same path the
-        existing audit-prep / audit-apply flow uses. 404 when no audit file
-        exists yet (the audit screen treats this as "fresh -- start from
-        candidates if any, otherwise empty markers").
+        existing audit-prep / audit-apply flow uses. Returns ``200 null``
+        when no audit file exists yet (the audit screen treats this as
+        "fresh -- start from candidates if any, otherwise empty
+        markers"); 404 is reserved for genuinely-unknown stages so the
+        SPA can distinguish.
         """
         project = state.shooter_project(slug)
         try:
@@ -4543,10 +4545,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
         if not audit_file.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"no audit JSON yet for stage {stage_number}",
-            )
+            return JSONResponse(None)
         try:
             payload = json.loads(audit_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -4802,8 +4801,18 @@ def create_app(
         Read-only: the stored ``interval_class`` is surfaced as-is, plus a
         ``stale`` flag indicating whether the current rule disagrees. The
         client can call ``POST /coach/reclassify`` to persist the rule's
-        verdict onto unset/auto entries.
+        verdict onto unset/auto entries. Returns ``200 null`` when the
+        stage has no audit JSON yet (a normal pre-audit state); 404 is
+        reserved for genuinely-unknown stage numbers.
         """
+        project = state.shooter_project(slug)
+        try:
+            stg = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            return JSONResponse(None)
         payload, _audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
@@ -7009,9 +7018,12 @@ def create_app(
 
     @app.get("/api/me/scoreboard-identity")
     def get_scoreboard_identity() -> JSONResponse:
+        # "Not pinned yet" is a normal state, not an error -- return a
+        # 200 with a null body so the SPA doesn't have to catch a 404
+        # on every page load and DevTools doesn't log a failed request.
         identity = user_config.load_scoreboard_identity()
         if identity is None:
-            raise HTTPException(status_code=404, detail="no scoreboard identity saved")
+            return JSONResponse(None)
         return JSONResponse(identity.model_dump(mode="json"))
 
     @app.put("/api/me/scoreboard-identity")

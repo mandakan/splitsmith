@@ -1930,14 +1930,11 @@ export const api = {
 
   /** Saved SSI Scoreboard identity for the operator running this install,
    *  or null when nothing has been pinned yet. The header chrome uses
-   *  this to render the user badge; null hides it. */
+   *  this to render the user badge; null hides it. The server returns
+   *  ``200 null`` for the "not pinned" case so it doesn't show up as a
+   *  failed request in DevTools. */
   getScoreboardIdentity: () =>
-    request<ScoreboardIdentity>("/api/me/scoreboard-identity").catch(
-      (err) => {
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      },
-    ),
+    request<ScoreboardIdentity | null>("/api/me/scoreboard-identity"),
 
   /** Recent-projects list, most-recent first. Drives the picker. */
   getRecentProjects: () =>
@@ -2175,20 +2172,13 @@ export const api = {
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`,
     ),
 
-  /** Returns the saved audit JSON for a stage, or null when none exists yet. */
-  getStageAudit: async (
-    slug: string,
-    stageNumber: number,
-  ): Promise<StageAudit | null> => {
-    try {
-      return await request<StageAudit>(
-        `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audit`,
-      );
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return null;
-      throw err;
-    }
-  },
+  /** Returns the saved audit JSON for a stage, or null when none exists yet.
+   *  Server returns ``200 null`` for the "no audit yet" state so this
+   *  doesn't show up as a failed request in DevTools. */
+  getStageAudit: (slug: string, stageNumber: number) =>
+    request<StageAudit | null>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audit`,
+    ),
 
   /** Atomically write the stage's audit JSON. The server keeps the prior
    *  version as ``stage<N>.json.bak`` so a bad save can be recovered. */
@@ -2203,20 +2193,12 @@ export const api = {
 
   /** Coach view: per-shot interval class + flags + notes (#161). The
    *  GET is read-only; ``stale=true`` means the rule disagrees with the
-   *  stored class and the user can accept the recompute via reclassify. */
-  getStageCoach: async (
-    slug: string,
-    stageNumber: number,
-  ): Promise<CoachStageResponse | null> => {
-    try {
-      return await request<CoachStageResponse>(
-        `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach`,
-      );
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return null;
-      throw err;
-    }
-  },
+   *  stored class and the user can accept the recompute via reclassify.
+   *  Returns null when the stage has no audit JSON yet. */
+  getStageCoach: (slug: string, stageNumber: number) =>
+    request<CoachStageResponse | null>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach`,
+    ),
 
   reclassifyStageCoach: (slug: string, stageNumber: number) =>
     request<CoachStageResponse>(

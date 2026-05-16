@@ -34,6 +34,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { FolderPicker } from "@/components/FolderPicker";
+import { RelinkDialog } from "@/components/RelinkDialog";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,6 +64,7 @@ function IngestInner({ slug }: { slug: string }) {
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
@@ -216,6 +218,38 @@ function IngestInner({ slug }: { slug: string }) {
         </div>
 
         <ShooterBanner project={project} />
+
+        {/* Top-level actions. The relink dialog handles the "I moved my
+         *  source videos and the project's symlinks are now broken"
+         *  JTBD. It scans a folder recursively, matches by basename, and
+         *  rewrites the per-video symlinks. Reachable here so the user
+         *  doesn't have to dig through Settings or the CLI. */}
+        {!isEmpty && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowRelinkDialog(true)}
+            >
+              <Folder className="size-3.5" />
+              <span className="font-display uppercase tracking-[0.08em]">
+                Find moved videos
+              </span>
+            </Button>
+            <span className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+              Use this when source files have moved and the project's symlinks are broken.
+            </span>
+          </div>
+        )}
+
+        {showRelinkDialog && (
+          <RelinkDialog
+            slug={slug}
+            onClose={() => setShowRelinkDialog(false)}
+            onApplied={() => void reload()}
+          />
+        )}
 
         {error && (
           <div className="mb-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">

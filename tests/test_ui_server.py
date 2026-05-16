@@ -3043,12 +3043,14 @@ def test_get_stage_audit_returns_payload_when_file_exists(tmp_path: Path) -> Non
     assert resp.json()["shots"][0]["candidate_number"] == 4
 
 
-def test_get_stage_audit_404_when_missing(tmp_path: Path) -> None:
-    """No audit JSON yet -> 404. The SPA treats this as 'start fresh'."""
+def test_get_stage_audit_returns_null_when_missing(tmp_path: Path) -> None:
+    """No audit JSON yet -> 200 null. The SPA treats this as 'start
+    fresh' and we don't want the request showing up as a failure in
+    DevTools on every audit-page mount."""
     client, _ = _seed_project_with_primary(tmp_path)
     resp = client.get("/api/shooters/me/stages/1/audit")
-    assert resp.status_code == 404
-    assert "no audit" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert resp.json() is None
 
 
 def test_get_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
@@ -5000,8 +5002,11 @@ def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path)
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)
 
-    # Empty: 404 (SPA renders the prompt rather than autopin).
-    assert client.get("/api/me/scoreboard-identity").status_code == 404
+    # Empty: 200 null. "Not pinned yet" is a normal state, not an error,
+    # so the SPA doesn't have to catch a 404 on every page load.
+    empty = client.get("/api/me/scoreboard-identity")
+    assert empty.status_code == 200
+    assert empty.json() is None
 
     payload = {
         "shooter_id": 12345,
@@ -5019,9 +5024,11 @@ def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path)
     assert got.status_code == 200
     assert got.json()["display_name"] == "Mathias Axell"
 
-    # Delete clears it.
+    # Delete clears it back to null.
     client.delete("/api/me/scoreboard-identity")
-    assert client.get("/api/me/scoreboard-identity").status_code == 404
+    cleared = client.get("/api/me/scoreboard-identity")
+    assert cleared.status_code == 200
+    assert cleared.json() is None
 
 
 def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_home: Path) -> None:
@@ -5275,9 +5282,11 @@ def test_user_config_disable_flag_makes_endpoints_safe(
     body = client.get("/api/me/recent-projects").json()
     assert body == {"projects": []}
 
-    # PUT silently drops; GET still returns 404.
+    # PUT silently drops; GET still returns 200 null.
     client.put("/api/me/scoreboard-identity", json={"shooter_id": 1})
-    assert client.get("/api/me/scoreboard-identity").status_code == 404
+    cleared = client.get("/api/me/scoreboard-identity")
+    assert cleared.status_code == 200
+    assert cleared.json() is None
 
 
 def test_load_env_files_picks_up_user_config_env(

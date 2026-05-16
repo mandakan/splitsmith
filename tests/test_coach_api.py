@@ -188,7 +188,10 @@ def test_get_match_distributions_aggregates(tmp_path: Path) -> None:
     assert body["first_shot_seconds"] == pytest.approx([1.5])
 
 
-def test_get_coach_404_when_no_audit(tmp_path: Path) -> None:
+def test_get_coach_returns_null_when_no_audit(tmp_path: Path) -> None:
+    """No audit JSON yet -> 200 null. "Stage exists but isn't audited"
+    is a normal pre-audit state and shouldn't surface as a failed
+    request in DevTools. 404 is reserved for unknown stage numbers."""
     root = tmp_path / "match"
     project = MatchProject.init(root, name="Empty")
     project.stages = [StageEntry(stage_number=1, stage_name="x", time_seconds=10.0, videos=[])]
@@ -196,7 +199,8 @@ def test_get_coach_404_when_no_audit(tmp_path: Path) -> None:
     app = create_app(project_root=root, project_name="Empty")
     client = TestClient(app)
     resp = client.get("/api/shooters/me/stages/1/coach")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.json() is None
 
 
 # ---------------------------------------------------------------------------
