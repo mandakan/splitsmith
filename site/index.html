@@ -181,6 +181,211 @@ header.shell {
 }
 .gh-btn svg { width: 16px; height: 16px; }
 
+/* --- Sign-in chip (opens waitlist modal) ---
+   Faux-login button: visually signals "an app exists" but the
+   click opens an honest "coming soon" panel with a waitlist
+   form. LED-outlined to read as the primary header CTA without
+   stealing focus from the hero. */
+.signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--led);
+  background: var(--led-tint);
+  color: var(--led);
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+}
+.signin-btn:hover {
+  background: var(--led-fill);
+  color: var(--ink);
+  box-shadow: 0 0 18px var(--led-glow);
+}
+.signin-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 45, 45, 0.28);
+}
+.signin-btn .signin-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  flex-shrink: 0;
+}
+
+/* --- Waitlist modal --- */
+.waitlist-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+.waitlist-modal.open {
+  display: flex;
+  animation: waitlist-fade 160ms var(--ease);
+}
+@keyframes waitlist-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.waitlist-panel {
+  position: relative;
+  max-width: 540px;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 28px 32px 32px;
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 45, 45, 0.12);
+  animation: waitlist-rise 200ms var(--ease);
+}
+@keyframes waitlist-rise {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.waitlist-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.125rem;
+  line-height: 1;
+  transition: all 150ms var(--ease);
+}
+.waitlist-close:hover {
+  color: var(--ink);
+  border-color: var(--rule);
+  background: var(--surface-2);
+}
+.waitlist-kicker {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--led);
+  margin: 0 0 10px;
+}
+.waitlist-panel h2 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 14px;
+  letter-spacing: 0.01em;
+}
+.waitlist-body {
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+.waitlist-points {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.waitlist-points li {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding-left: 18px;
+  position: relative;
+}
+.waitlist-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 8px;
+  height: 1px;
+  background: var(--led);
+}
+.waitlist-form {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.waitlist-form input[type="email"] {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  color: var(--ink);
+  letter-spacing: 0;
+  outline: none;
+  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+.waitlist-form input[type="email"]::placeholder { color: var(--subtle); }
+.waitlist-form input[type="email"]:focus {
+  border-color: var(--led);
+  box-shadow: 0 0 0 3px rgba(255, 45, 45, 0.18);
+}
+.waitlist-form button {
+  background: var(--led-fill);
+  color: var(--ink);
+  border: none;
+  border-radius: 8px;
+  padding: 0 20px;
+  font-family: var(--display);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 180ms var(--ease);
+  white-space: nowrap;
+}
+.waitlist-form button:hover:not(:disabled) {
+  background: var(--led-soft);
+  box-shadow: 0 0 18px var(--led-glow);
+}
+.waitlist-form button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+.waitlist-foot {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  margin: 0;
+}
+body.modal-open { overflow: hidden; }
+
 /* ============================================================
    MAIN
    ============================================================ */
@@ -672,6 +877,16 @@ footer.colophon {
   .gh-btn { padding: 9px 11px; gap: 0; }
   .gh-btn span { display: none; }
 
+  /* Compact sign-in chip on narrow viewports; keep label visible
+     because the chip is the primary "an app exists" signal. */
+  .signin-btn { padding: 8px 12px; font-size: 0.75rem; gap: 8px; }
+  .signin-btn .signin-dot { width: 6px; height: 6px; }
+
+  .waitlist-panel { padding: 24px 22px 26px; }
+  .waitlist-panel h2 { font-size: 1.25rem; }
+  .waitlist-form { flex-direction: column; }
+  .waitlist-form button { padding: 12px 18px; }
+
   main {
     padding: 56px 18px 48px;
   }
@@ -738,6 +953,10 @@ footer.colophon {
 
     <a class="nav-link" href="#pipeline">Pipeline</a>
     <a class="nav-link" href="#quickstart">Quickstart</a>
+    <button class="signin-btn" type="button" aria-haspopup="dialog" aria-controls="waitlist-modal" data-open-waitlist>
+      <span class="signin-dot" aria-hidden="true"></span>
+      <span>Sign in</span>
+    </button>
     <a class="gh-btn" href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener" aria-label="Splitsmith on GitHub">
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.04 11.04 0 0 1 5.8 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.26 5.69.41.35.78 1.05.78 2.11v3.13c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12.02C23.5 5.65 18.35.5 12 .5Z"/>
@@ -958,6 +1177,37 @@ uv sync
   </div>
 </footer>
 
+<!-- ============================================================
+     WAITLIST MODAL
+     Opened by the .signin-btn in the header. Form is intentionally
+     not wired to a backend yet -- the submit handler just confirms
+     the click without storing the email. Backend (Cloudflare Pages
+     Function + KV / Resend audience / etc.) is a separate step.
+     ============================================================ -->
+<div class="waitlist-modal" id="waitlist-modal" role="dialog" aria-modal="true" aria-labelledby="waitlist-title" aria-describedby="waitlist-body" hidden>
+  <div class="waitlist-panel">
+    <button class="waitlist-close" type="button" aria-label="Close" data-close-waitlist>&times;</button>
+    <p class="waitlist-kicker">Hosted Splitsmith</p>
+    <h2 id="waitlist-title">Coming soon</h2>
+    <p class="waitlist-body" id="waitlist-body">
+      Share projects with a coach or a squadmate for review, without anyone
+      needing a local environment. Sync your stages between devices, keep
+      every split in one place, and invite others to annotate the runs that
+      matter.
+    </p>
+    <ul class="waitlist-points">
+      <li>Hosted projects — no local install required</li>
+      <li>Invite a coach to annotate your stages</li>
+      <li>Cross-device split history and match recaps</li>
+    </ul>
+    <form class="waitlist-form" novalidate>
+      <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required />
+      <button type="submit">Notify me</button>
+    </form>
+    <p class="waitlist-foot">Waitlist signup opens shortly — no email is stored yet.</p>
+  </div>
+</div>
+
 <script>
   document.querySelectorAll('.copy-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -981,6 +1231,63 @@ uv sync
       }, 1500);
     });
   });
+
+  // --- Waitlist modal ----------------------------------------
+  (function () {
+    const modal = document.getElementById('waitlist-modal');
+    if (!modal) return;
+    const panel = modal.querySelector('.waitlist-panel');
+    const openers = document.querySelectorAll('[data-open-waitlist]');
+    const closers = modal.querySelectorAll('[data-close-waitlist]');
+    const emailInput = modal.querySelector('input[type="email"]');
+    const form = modal.querySelector('.waitlist-form');
+    const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+    let lastTrigger = null;
+
+    function openModal(trigger) {
+      lastTrigger = trigger || null;
+      modal.hidden = false;
+      modal.classList.add('open');
+      document.body.classList.add('modal-open');
+      window.setTimeout(() => {
+        if (emailInput) emailInput.focus();
+      }, 50);
+    }
+    function closeModal() {
+      modal.classList.remove('open');
+      modal.hidden = true;
+      document.body.classList.remove('modal-open');
+      if (lastTrigger && typeof lastTrigger.focus === 'function') {
+        lastTrigger.focus();
+      }
+    }
+
+    openers.forEach((btn) => {
+      btn.addEventListener('click', () => openModal(btn));
+    });
+    closers.forEach((btn) => {
+      btn.addEventListener('click', closeModal);
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+    });
+
+    if (form && submitBtn) {
+      const originalLabel = submitBtn.textContent;
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Not wired up yet';
+        window.setTimeout(() => {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalLabel;
+        }, 1800);
+      });
+    }
+  })();
 </script>
 
 </body>
