@@ -502,52 +502,160 @@ def _no_project_error() -> HTTPException:
 
 @dataclass
 class AppState:
-    """Per-process state. Holds at most one bound project at a time.
+    """Process state. One bound project at a time (#353).
 
-    The server can boot without a project (``splitsmith ui`` with no
-    ``--project`` arg). In that mode every project-bound endpoint raises
-    409 ``no_project`` via the :attr:`project_root` property; the SPA
-    renders the picker route until the user binds via
-    ``POST /api/user/recent-projects/bind``.
+    A bound project is either a **Match folder** (multi-shooter) or a
+    **legacy single-shooter project**. The two layouts share a single
+    state record but expose different resolution paths:
+
+    - Match-level operations (list shooters, merge, export the whole
+      match) read :attr:`match_root` directly.
+    - Shooter-scoped operations require a slug from the URL path and
+      resolve via :meth:`shooter_root` / :meth:`shooter_project`.
+
+    There is no notion of an "active" or "current" shooter on the
+    server. Every shooter-scoped request must carry the slug in its
+    path; the SPA's URL is the single source of truth.
+
+    The server can boot without a bound project (``splitsmith ui`` with
+    no ``--project``); in that mode every scoped property raises 409
+    ``no_project`` and the SPA stays on the picker.
     """
 
-    _project_root: Path | None = None
-    _project_name: str | None = None
+    _bound_root: Path | None = None
+    _bound_kind: Literal["match", "legacy"] | None = None
+    _bound_name: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
 
     @property
-    def project_root(self) -> Path:
-        """Bound project root. Raises 409 ``no_project`` when unbound.
-
-        Property indirection means every existing call-site
-        (``state.project_root``) gets the right behaviour automatically
-        without auditing 80+ usages -- FastAPI translates the
-        HTTPException into a structured response the SPA recognises.
-        """
-        if self._project_root is None:
-            raise _no_project_error()
-        return self._project_root
+    def is_bound(self) -> bool:
+        return self._bound_root is not None
 
     @property
-    def is_bound(self) -> bool:
-        return self._project_root is not None
+    def bound_kind(self) -> Literal["match", "legacy"] | None:
+        return self._bound_kind
+
+    @property
+    def bound_name(self) -> str | None:
+        return self._bound_name
+
+    @property
+    def bound_root(self) -> Path:
+        """The bound project's on-disk root (match folder OR legacy project)."""
+        if self._bound_root is None:
+            raise _no_project_error()
+        return self._bound_root
+
+    @property
+    def match_root(self) -> Path:
+        """The bound match folder. 409 ``not_a_match`` for legacy projects."""
+        if self._bound_root is None:
+            raise _no_project_error()
+        if self._bound_kind != "match":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "not_a_match",
+                    "message": (
+                        "Bound project is a legacy single-shooter layout. "
+                        "Match-level operations require a Match folder."
+                    ),
+                },
+            )
+        return self._bound_root
+
+    def shooter_root(self, slug: str) -> Path:
+        """Resolve ``slug`` to the shooter's project directory on disk.
+
+        For a Match folder: validates the slug is registered and the
+        directory exists, then returns ``<match>/shooters/<slug>``.
+
+        For a legacy single-shooter project: there is exactly one shooter
+        and its data lives at the bound root. The slug is accepted as-is
+        (the SPA derives it from ``competitor_name`` via :func:`legacy_slug`)
+        so callers don't need to special-case the legacy layout.
+        """
+        if self._bound_root is None:
+            raise _no_project_error()
+        if self._bound_kind == "legacy":
+            return self._bound_root
+        match = match_model.Match.load(self._bound_root)
+        if slug not in match.shooters:
+            raise HTTPException(
+                status_code=404,
+                detail=f"shooter {slug!r} is not registered on this match",
+            )
+        return match_model.Match.shooter_root(self._bound_root, slug)
+
+    def shooter_project(self, slug: str) -> MatchProject:
+        """Load the legacy ``MatchProject`` for ``slug``."""
+        return MatchProject.load(self.shooter_root(slug))
+
+    def bind_match(self, root: Path, name: str) -> None:
+        self._bound_root = root
+        self._bound_kind = "match"
+        self._bound_name = name
+
+    def bind_legacy(self, root: Path, name: str) -> None:
+        self._bound_root = root
+        self._bound_kind = "legacy"
+        self._bound_name = name
+
+    def unbind(self) -> None:
+        self._bound_root = None
+        self._bound_kind = None
+        self._bound_name = None
+
+    # ------------------------------------------------------------------
+    # Migration scaffolding (#353 follow-up). REMOVE before merging the
+    # path-scoped refactor. Lets endpoints that haven't been migrated to
+    # the slug-in-path model keep functioning while the refactor is in
+    # flight. Match-mode: returns the first-registered shooter's root
+    # (matches the legacy "active shooter" behaviour the singleton used
+    # to encode). Legacy: returns the bound root directly.
+    @property
+    def project_root(self) -> Path:
+        if self._bound_root is None:
+            raise _no_project_error()
+        if self._bound_kind == "legacy":
+            return self._bound_root
+        match = match_model.Match.load(self._bound_root)
+        if not match.shooters:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "match_empty",
+                    "message": f"Match {self._bound_root} has no shooters.",
+                },
+            )
+        return match_model.Match.shooter_root(self._bound_root, match.shooters[0])
 
     @property
     def project_name(self) -> str | None:
-        return self._project_name
-
-    def bind(self, root: Path, name: str) -> None:
-        self._project_root = root
-        self._project_name = name
-
-    def unbind(self) -> None:
-        self._project_root = None
-        self._project_name = None
+        return self._bound_name
 
     def load(self) -> MatchProject:
-        if self._project_root is None:
-            raise _no_project_error()
-        return MatchProject.load(self._project_root)
+        return MatchProject.load(self.project_root)
+
+    def bind(self, root: Path, name: str) -> None:
+        """Legacy bind alias. Detects layout and dispatches to bind_match
+        or bind_legacy. REMOVE once every caller uses the typed variants."""
+        if (root / match_model.MATCH_FILE).exists():
+            self.bind_match(root, name)
+        else:
+            self.bind_legacy(root, name)
+
+
+def legacy_slug(project: MatchProject) -> str:
+    """Synthesise a shooter slug for a legacy single-shooter project.
+
+    Legacy projects predate the Match -> Shooter split; their on-disk
+    layout has no ``shooters/<slug>/`` subdir. To keep every shooter-
+    scoped URL slug-bearing (no second URL family for legacy projects),
+    we mint a deterministic slug from the project's ``competitor_name``.
+    The SPA reads it via /api/health.bound_shooter_slug after binding.
+    """
+    return match_model.slugify(project.competitor_name or "shooter")
 
 
 def _any_active_job(state: AppState) -> Job | None:
