@@ -1371,12 +1371,14 @@ export function Audit() {
           </div>
 
           {/* Shooter switcher: only renders for multi-shooter matches.
-              See #350 for the operator-vs-active-shooter discussion --
-              ``is_active`` here is "currently bound", not "this is you".
               Chip is a Link to /audit/:newSlug/:stage; ShooterScopedRoute
-              handles the rebind + remount (#353 phase 1). */}
+              keys the page on slug so the switch remounts cleanly (#353). */}
           {shooters.length > 1 && (
-            <ShooterChipStrip shooters={shooters} stage={stageNumber} />
+            <ShooterChipStrip
+              shooters={shooters}
+              stage={stageNumber}
+              activeSlug={slugParam}
+            />
           )}
 
           {/* Toolbar: Save + Undo + status badges + filter chips + zoom */}
@@ -1755,9 +1757,11 @@ function Readout({ label, value }: { label: string; value: string }) {
 function ShooterChipStrip({
   shooters,
   stage,
+  activeSlug,
 }: {
   shooters: ShooterListEntry[];
   stage: number | null;
+  activeSlug: string | undefined;
 }) {
   return (
     <div className="-mt-1 mb-3 inline-flex flex-wrap items-center gap-2">
@@ -1765,7 +1769,7 @@ function ShooterChipStrip({
         Auditing
       </span>
       {shooters.map((s) => {
-        const isActive = s.is_active;
+        const isActive = s.slug === activeSlug;
         const target = stage != null ? `/audit/${s.slug}/${stage}` : `/audit/${s.slug}`;
         return (
           <Link

@@ -103,8 +103,7 @@ export function Compare() {
         if (!alive) return;
         setBundle(b);
         if (b.shooters.length > 0) {
-          const active = b.shooters.find((s) => s.is_active) ?? b.shooters[0];
-          setAudioSlug(active.slug);
+          setAudioSlug(b.shooters[0].slug);
           setVisibleSlugs(
             new Set(b.shooters.filter((s) => s.video_path).map((s) => s.slug)),
           );
@@ -379,9 +378,6 @@ export function Compare() {
           <CompareEmptyState
             unfinished={orderedShooters.filter((s) => !s.video_path)}
             onOpenInAudit={(slug) => {
-              // #353 phase 1: target the slug-scoped audit URL directly.
-              // ShooterScopedRoute handles the rebind before mounting
-              // the page, so we don't need to await it here.
               navigate(`/audit/${slug}/${stageNumber}`);
             }}
           />
@@ -501,7 +497,7 @@ function ShooterChip({
       <Avatar
         size="xs"
         initials={initials(shooter.name)}
-        tone={shooter.is_active ? "you" : undefined}
+        tone={undefined}
         seed={shooter.slug}
         name={shooter.name}
       />
@@ -598,18 +594,13 @@ function VideoTile({
         <Avatar
           size="xs"
           initials={initials(shooter.name)}
-          tone={shooter.is_active ? "you" : undefined}
+          tone={undefined}
           seed={shooter.slug}
           name={shooter.name}
         />
         <span className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em] text-ink">
           {shooter.name}
         </span>
-        {shooter.is_active && (
-          <span className="rounded border border-led-deep bg-led/10 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-led">
-            You
-          </span>
-        )}
         {isAudio && (
           <span className="ml-auto inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
             <Volume2 className="size-2.5" />
@@ -959,27 +950,19 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
       {rows.map((row) => (
         <div
           key={row.shooter.slug}
-          className={cn(
-            "grid grid-cols-[48px_1fr_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0",
-            row.shooter.is_active && "bg-led/[0.05]",
-          )}
+          className="grid grid-cols-[48px_1fr_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0"
         >
           <RankPill rank={row.rank} />
           <div className="inline-flex items-center gap-2.5">
             <Avatar
               size="sm"
               initials={initials(row.shooter.name)}
-              tone={row.shooter.is_active ? "you" : undefined}
+              tone={undefined}
               seed={row.shooter.slug}
             />
             <span className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
               {row.shooter.name}
             </span>
-            {row.shooter.is_active && (
-              <span className="rounded border border-led-deep bg-led/10 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-led">
-                You
-              </span>
-            )}
           </div>
           <span
             className={cn(

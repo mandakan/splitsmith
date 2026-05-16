@@ -64,7 +64,7 @@ def test_health_returns_project_info(tmp_path: Path) -> None:
     body = resp.json()
     assert body["status"] == "ok"
     assert body["project_name"] == "Test Match"
-    assert body["schema_version"] == 2
+    assert body["bound"] is True
 
 
 def test_get_project_returns_full_dump(tmp_path: Path) -> None:
@@ -5145,8 +5145,11 @@ def test_create_match_manual_refuses_existing_match_folder(
     assert resp.json()["detail"]["code"] == "match_already_exists"
 
 
-def test_bind_match_folder_routes_to_first_shooter(tmp_path: Path, _user_config_home: Path) -> None:
-    """Binding a Match folder transparently switches state to the first shooter."""
+def test_bind_match_folder_binds_match_root(tmp_path: Path, _user_config_home: Path) -> None:
+    """Binding a Match folder binds the match itself, not a shooter subdir.
+
+    Shooters are addressed per-request via slug-bearing URLs (#353).
+    """
     from splitsmith import match_model
 
     target = tmp_path / "rich-match"
@@ -5161,10 +5164,9 @@ def test_bind_match_folder_routes_to_first_shooter(tmp_path: Path, _user_config_
         json={"path": str(target)},
     )
     assert resp.status_code == 200
-    # The bound root is the shooter directory, not the match root.
     body = resp.json()
     assert body["bound"] is True
-    assert body["project_root"].endswith("/shooters/ma")
+    assert body["project_root"] == str(target.resolve())
 
 
 def test_list_match_shooters_returns_active_and_others(
@@ -5208,31 +5210,6 @@ def test_list_match_shooters_returns_active_and_others(
     assert body["match_name"] == "Multi-shooter"
     slugs = [s["slug"] for s in body["shooters"]]
     assert slugs == ["ma", "jl"]
-    active = [s for s in body["shooters"] if s["is_active"]]
-    assert len(active) == 1 and active[0]["slug"] == "ma"
-
-
-def test_select_active_shooter_rebinds(tmp_path: Path, _user_config_home: Path) -> None:
-    from splitsmith import match_model
-
-    target = tmp_path / "mm"
-    match = match_model.Match.init(target, name="Test")
-    for slug, name in [("a", "A"), ("b", "B")]:
-        match.add_shooter(target, match_model.Shooter(slug=slug, name=name))
-        MatchProject.init(match_model.Match.shooter_root(target, slug), name="Test")
-
-    app = create_app()
-    client = TestClient(app)
-    client.post(
-        "/api/user/recent-projects/bind",
-        json={"path": str(target.resolve())},
-    )
-    resp = client.post("/api/match/shooters/b/select")
-    assert resp.status_code == 200
-    assert resp.json()["project_root"].endswith("/shooters/b")
-    listing = client.get("/api/match/shooters").json()
-    actives = [s["slug"] for s in listing["shooters"] if s["is_active"]]
-    assert actives == ["b"]
 
 
 def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_home: Path) -> None:
@@ -5259,7 +5236,7 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
     assert (new_root / "shooter.json").exists()
 
 
-def test_remove_match_shooter_refuses_active(tmp_path: Path, _user_config_home: Path) -> None:
+def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import match_model
 
     target = tmp_path / "mm"
@@ -5275,9 +5252,6 @@ def test_remove_match_shooter_refuses_active(tmp_path: Path, _user_config_home: 
         "/api/user/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
-    resp = client.delete("/api/match/shooters/ma")
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["code"] == "active_shooter"
     resp = client.delete("/api/match/shooters/jl")
     assert resp.status_code == 200
     assert not match_model.Match.shooter_root(target, "jl").exists()

@@ -637,14 +637,6 @@ class AppState:
     def load(self) -> MatchProject:
         return MatchProject.load(self.project_root)
 
-    def bind(self, root: Path, name: str) -> None:
-        """Legacy bind alias. Detects layout and dispatches to bind_match
-        or bind_legacy. REMOVE once every caller uses the typed variants."""
-        if (root / match_model.MATCH_FILE).exists():
-            self.bind_match(root, name)
-        else:
-            self.bind_legacy(root, name)
-
 
 def legacy_slug(project: MatchProject) -> str:
     """Synthesise a shooter slug for a legacy single-shooter project.
@@ -748,7 +740,6 @@ class HealthResponse(BaseModel):
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
-    schema_version: int | None = None
 
 
 class PromoteSecondaryBody(BaseModel):
@@ -900,7 +891,6 @@ class ShooterListEntry(BaseModel):
 
     slug: str
     name: str
-    is_active: bool
     selected_shooter_id: int | None
     selected_competitor_id: int | None
     stages_audited: int
@@ -943,7 +933,6 @@ class CompareShooterRecord(BaseModel):
 
     slug: str
     name: str
-    is_active: bool
     # Path to the lossless trim clip on disk; the SPA streams via
     # GET /api/match/shooters/{slug}/videos/stream?path=...
     video_path: str | None
@@ -1680,15 +1669,11 @@ def _bind_project_to_state(
     on-disk display name so the caller can echo it back.
 
     When ``root`` is a redesign-era Match folder (has ``match.json``),
-    the first shooter's directory is bound instead so the rest of the
-    server (which still speaks legacy ``MatchProject``) keeps working.
-    The match folder is recorded in the recent-projects index with
-    ``kind="match"`` so the picker can reopen it as a match next time.
-    Multi-shooter selection lives in #324; for now we pick the first
-    registered shooter.
+    the match itself is bound (``state.bind_match``) and the SPA addresses
+    individual shooters via slug-bearing URLs. Otherwise we bind the
+    legacy single-shooter project directly.
     """
     resolved = root.resolve()
-    # If this is a Match folder, transparently bind its first shooter.
     if match_model.is_match_folder(resolved):
         try:
             match = match_model.Match.load(resolved)
@@ -1708,15 +1693,13 @@ def _bind_project_to_state(
                     ),
                 },
             )
-        shooter_slug = match.shooters[0]
-        shooter_root = match_model.Match.shooter_root(resolved, shooter_slug)
-        user_config.record_project_open(resolved, match.name or fallback_name, kind="match")
-        return _bind_legacy_root_to_state(
-            state,
-            shooter_root,
-            fallback_name=match.name or fallback_name,
-            register=False,
-        )
+        name = match.name or fallback_name
+        user_config.record_project_open(resolved, name, kind="match")
+        loaded_env = _load_env_files(resolved)
+        if loaded_env:
+            logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
+        state.bind_match(resolved, name)
+        return name
     return _bind_legacy_root_to_state(state, resolved, fallback_name=fallback_name)
 
 
@@ -1724,15 +1707,8 @@ def _bind_legacy_root_to_state(
     state: AppState,
     root: Path,
     fallback_name: str,
-    *,
-    register: bool = True,
 ) -> str:
-    """Bind a legacy MatchProject directory (project.json layout).
-
-    ``register=False`` is for shooter subdirs inside a match: the parent
-    match is already recorded in recent-projects, and the shooter dir
-    must not show up as a standalone "legacy" project in the picker.
-    """
+    """Bind a legacy MatchProject directory (project.json layout)."""
     MatchProject.init(root, name=fallback_name)
     resolved = root.resolve()
     loaded_env = _load_env_files(resolved)
@@ -1743,9 +1719,8 @@ def _bind_legacy_root_to_state(
         recorded_name = loaded_project.name or fallback_name
     except Exception:  # pragma: no cover -- defensive: never block boot
         recorded_name = fallback_name
-    if register:
-        user_config.record_project_open(resolved, recorded_name, kind="legacy")
-    state.bind(resolved, recorded_name)
+    user_config.record_project_open(resolved, recorded_name, kind="legacy")
+    state.bind_legacy(resolved, recorded_name)
     return recorded_name
 
 
@@ -1908,17 +1883,19 @@ def create_app(
         cached = CachingScoreboardClient(http, cache_dir)
         return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
 
+    def _health_after_bind(recorded_name: str) -> HealthResponse:
+        """Build a HealthResponse from the currently-bound project."""
+        return HealthResponse(
+            bound=True,
+            project_name=recorded_name,
+            project_root=str(state.bound_root),
+        )
+
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         if not state.is_bound:
             return HealthResponse(bound=False)
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=project.name,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(state.bound_name or "")
 
     @app.get("/api/project")
     def get_project() -> JSONResponse:
@@ -1996,8 +1973,9 @@ def create_app(
             shutil.rmtree(tmp, ignore_errors=True)
 
         if bind:
-            state.bind(result.project_root, result.project_name)
-            user_config.record_project_open(result.project_root, result.project_name)
+            _bind_project_to_state(
+                state, result.project_root, fallback_name=result.project_name
+            )
 
         return JSONResponse(
             {
@@ -6135,13 +6113,7 @@ def create_app(
             )
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     @app.post("/api/match/create-manual")
     def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
@@ -6231,13 +6203,7 @@ def create_app(
             recorded = _bind_project_to_state(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     @app.post("/api/match/create-from-scoreboard")
     def create_match_from_scoreboard(
@@ -6296,43 +6262,20 @@ def create_app(
             recorded = _bind_project_to_state(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     # ----------------------------------------------------------------------
     # Shooters management (#324)
     # ----------------------------------------------------------------------
 
-    def _resolve_match_context() -> tuple[Path, match_model.Match, str]:
-        """Return ``(match_root, match, active_slug)`` for the bound project.
+    def _resolve_match_context() -> tuple[Path, match_model.Match]:
+        """Return ``(match_root, match)`` for the bound project.
 
-        Detects whether ``state.project_root`` lives at
-        ``<match_root>/shooters/<slug>/``; if so the SPA is browsing a
-        match-as-object project. Otherwise raises a structured 409 so the
-        shooters page can hide itself (the legacy single-shooter layout
-        has no concept of swapping shooters).
+        Raises 409 ``not_a_match`` for legacy single-shooter layouts (the
+        shooter-listing / merge / compare endpoints are match-only).
         """
-        root = state.project_root
-        parent = root.parent
-        match_root = parent.parent if parent.name == match_model.SHOOTERS_DIR else None
-        if match_root is None or not match_model.is_match_folder(match_root):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "not_a_match",
-                    "message": (
-                        "Bound project is a legacy single-shooter layout; "
-                        "shooter management is match-folder only."
-                    ),
-                },
-            )
-        match = match_model.Match.load(match_root)
-        return match_root, match, root.name
+        match_root = state.match_root
+        return match_root, match_model.Match.load(match_root)
 
     def _classify_shooter(shooter_root: Path, match: match_model.Match) -> ShooterListEntry:
         """Build a list entry for a single shooter directory."""
@@ -6393,7 +6336,6 @@ def create_app(
         return ShooterListEntry(
             slug=shooter_root.name,
             name=legacy.competitor_name or shooter_root.name,
-            is_active=False,
             selected_shooter_id=legacy.selected_shooter_id,
             selected_competitor_id=legacy.selected_competitor_id,
             stages_audited=stages_audited,
@@ -6507,83 +6449,31 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        # Bind the new match. _bind_project_to_state's match branch
-        # records the match path in recent-projects (kind="match") and
-        # transparently binds the first shooter so existing audit/ingest
-        # endpoints have a working project context immediately. Passing
-        # the shooter path directly here would mis-register the shooter
-        # subdir as a standalone legacy project.
+        # Bind the new match. ``_bind_project_to_state`` records the match
+        # in recent-projects (kind="match") and switches state.bound_root
+        # to the match folder; shooters are addressed by slug from there.
         try:
             recorded = _bind_project_to_state(state, output, fallback_name=match.name)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
-        )
+        return _health_after_bind(recorded)
 
     @app.get("/api/match/shooters", response_model=ShooterListResponse)
     def list_match_shooters() -> ShooterListResponse:
         """List every shooter in the currently-bound match with coverage."""
-        match_root, match, active_slug = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         entries: list[ShooterListEntry] = []
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                entry = _classify_shooter(shooter_root, match)
+                entries.append(_classify_shooter(shooter_root, match))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
-            entry.is_active = slug == active_slug
-            entries.append(entry)
         return ShooterListResponse(
             match_root=str(match_root),
             match_name=match.name,
             shooters=entries,
-        )
-
-    @app.post("/api/match/shooters/{slug}/select")
-    def select_active_shooter(slug: str) -> HealthResponse:
-        """Re-bind the server to a different shooter inside the same match.
-
-        After this call ``state.project_root`` points at the new shooter
-        dir; every subsequent project-bound endpoint reads that shooter's
-        data. The match folder itself stays bound in the recent-projects
-        index.
-        """
-        match_root, match, _ = _resolve_match_context()
-        if slug not in match.shooters:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "shooter_not_found",
-                    "message": f"shooter {slug!r} is not registered on this match",
-                },
-            )
-        shooter_root = match_model.Match.shooter_root(match_root, slug)
-        if not shooter_root.exists():
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "shooter_dir_missing",
-                    "message": (
-                        f"shooter {slug!r} is registered but {shooter_root} "
-                        "doesn't exist on disk"
-                    ),
-                },
-            )
-        recorded = _bind_legacy_root_to_state(
-            state, shooter_root, fallback_name=match.name, register=False
-        )
-        project = state.load()
-        return HealthResponse(
-            bound=True,
-            project_name=recorded,
-            project_root=str(state.project_root),
-            schema_version=project.schema_version,
         )
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
@@ -6595,7 +6485,7 @@ def create_app(
         ``shooter.json`` next to it. Returns the refreshed list. Slug is
         derived from ``name`` and disambiguated if it collides.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if not req.name.strip():
             raise HTTPException(status_code=400, detail="name is required")
         slug = match_model.disambiguate_slug(match_model.slugify(req.name), set(match.shooters))
@@ -6636,21 +6526,9 @@ def create_app(
         """Remove a shooter from the bound match.
 
         Drops the slug from ``match.json`` and deletes
-        ``<match>/shooters/<slug>/`` from disk. Refuses if ``slug`` is
-        currently the active shooter (the SPA should switch first).
+        ``<match>/shooters/<slug>/`` from disk.
         """
-        match_root, match, active_slug = _resolve_match_context()
-        if slug == active_slug:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "active_shooter",
-                    "message": (
-                        "Cannot remove the currently-active shooter. "
-                        "Switch to another shooter first."
-                    ),
-                },
-            )
+        match_root, match = _resolve_match_context()
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -6674,7 +6552,7 @@ def create_app(
         ``ensure_video_audit_trim`` is idempotent, but skipping early
         avoids the queue churn).
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -6757,7 +6635,7 @@ def create_app(
         scalars. Shooters with no trim still appear so the SPA can render
         empty tiles instead of silently dropping the slot.
         """
-        match_root, match, active_slug = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         try:
             stage_def = match.stage(stage_number)
         except KeyError as exc:
@@ -6853,7 +6731,6 @@ def create_app(
                 CompareShooterRecord(
                     slug=slug,
                     name=legacy.competitor_name or slug,
-                    is_active=slug == active_slug,
                     video_path=video_path,
                     beep_offset_in_clip=beep_offset,
                     duration_seconds=duration_seconds,
@@ -6881,7 +6758,7 @@ def create_app(
         the named shooter's project then returns a FileResponse on the
         resolved trim/source.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -6953,7 +6830,7 @@ def create_app(
         Items are grouped by stage; per-stage shot detection is gated on
         every shooter's primary in that stage being ``beep_reviewed``.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         # Resolve the low-confidence threshold from the active shooter's
         # automation settings; per-shooter thresholds aren't supported.
         try:
@@ -7045,7 +6922,7 @@ def create_app(
         When ``time`` is supplied, it overrides ``beep_time``; the call
         always sets ``beep_reviewed = True``.
         """
-        match_root, match, _ = _resolve_match_context()
+        match_root, match = _resolve_match_context()
         if req.slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, req.slug)

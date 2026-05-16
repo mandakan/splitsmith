@@ -216,17 +216,9 @@ export function BeepReview() {
             onConfirm={() => void confirm(active)}
             onConfirmAlt={(t) => void confirm(active, t)}
             onSkip={skip}
-            onOpenAudit={() => {
-              // Switch to that shooter's audit page.
-              void (async () => {
-                try {
-                  await api.selectActiveShooter(active.slug);
-                  navigate(`/audit/${active.stage_number}`);
-                } catch {
-                  /* swallow */
-                }
-              })();
-            }}
+            onOpenAudit={() =>
+              navigate(`/audit/${active.slug}/${active.stage_number}`)
+            }
           />
         ) : (
           <div className="flex h-full items-center justify-center text-center text-sm text-muted">

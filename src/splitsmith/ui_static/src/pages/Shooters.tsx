@@ -18,7 +18,6 @@
 
 import {
   ArrowRight,
-  Camera,
   CheckCircle2,
   Plus,
   RefreshCw,
@@ -119,18 +118,6 @@ export function Shooters() {
     void reload();
   }, [reload]);
 
-  async function activate(slug: string) {
-    setBusy(slug);
-    try {
-      await api.selectActiveShooter(slug);
-      await reload();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function remove(slug: string, name: string) {
     if (
       !window.confirm(
@@ -224,9 +211,8 @@ export function Shooters() {
               shooter={shooter}
               stagesTotal={stagesTotal}
               busy={busy === shooter.slug}
-              onActivate={() => void activate(shooter.slug)}
               onRemove={() => void remove(shooter.slug, shooter.name)}
-              onOpenAudit={() => navigate("/audit")}
+              onOpenAudit={() => navigate(`/audit/${shooter.slug}`)}
               onRebuildTrims={() =>
                 void rebuildTrims(
                   shooter.slug,
@@ -310,7 +296,6 @@ function ShooterCard({
   shooter,
   stagesTotal,
   busy,
-  onActivate,
   onRemove,
   onOpenAudit,
   onRebuildTrims,
@@ -318,12 +303,11 @@ function ShooterCard({
   shooter: ShooterListEntry;
   stagesTotal: number;
   busy: boolean;
-  onActivate: () => void;
   onRemove: () => void;
   onOpenAudit: () => void;
   onRebuildTrims: () => void;
 }) {
-  const palette = pickPalette(shooter.slug, shooter.is_active);
+  const palette = pickPalette(shooter.slug, false);
   const style = PALETTE_STYLE[palette];
   const progress =
     stagesTotal > 0 ? shooter.stages_audited / stagesTotal : 0;
@@ -342,10 +326,7 @@ function ShooterCard({
 
   return (
     <article
-      className={cn(
-        "relative overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]",
-        shooter.is_active && style.glow,
-      )}
+      className="relative overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]"
     >
       <span
         aria-hidden
@@ -364,11 +345,6 @@ function ShooterCard({
         <div className="min-w-0 flex-1">
           <div className="inline-flex items-center gap-2.5 font-display text-base font-bold uppercase tracking-[0.04em] text-ink">
             {shooter.name}
-            {shooter.is_active && (
-              <span className="rounded border border-led-deep bg-led/10 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-led">
-                Active
-              </span>
-            )}
           </div>
           <div className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
             {shooter.cameras.length} camera
@@ -413,38 +389,20 @@ function ShooterCard({
               Rebuild ({shooter.stages_missing_trim})
             </button>
           )}
-          {!shooter.is_active && (
-            <button
-              type="button"
-              onClick={onActivate}
-              disabled={busy}
-              title={`Switch to ${shooter.name}`}
-              aria-label={`Switch to ${shooter.name}`}
-              className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led disabled:opacity-50"
-            >
-              <ArrowRight className="size-4" />
-            </button>
-          )}
-          {shooter.is_active && (
-            <button
-              type="button"
-              onClick={onOpenAudit}
-              title="Open audit"
-              aria-label="Open audit"
-              className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
-            >
-              <Camera className="size-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onOpenAudit}
+            title={`Open ${shooter.name}'s audit`}
+            aria-label={`Open ${shooter.name}'s audit`}
+            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led"
+          >
+            <ArrowRight className="size-4" />
+          </button>
           <button
             type="button"
             onClick={onRemove}
-            disabled={busy || shooter.is_active}
-            title={
-              shooter.is_active
-                ? "Switch to another shooter before removing this one"
-                : `Remove ${shooter.name}`
-            }
+            disabled={busy}
+            title={`Remove ${shooter.name}`}
             aria-label="Remove shooter"
             className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-subtle transition-colors hover:border-led/40 hover:bg-led/10 hover:text-led disabled:opacity-30 disabled:hover:bg-surface-2 disabled:hover:text-subtle"
           >

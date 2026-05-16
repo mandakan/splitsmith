@@ -1173,7 +1173,6 @@ export interface ShooterCameraInfo {
 export interface ShooterListEntry {
   slug: string;
   name: string;
-  is_active: boolean;
   selected_shooter_id: number | null;
   selected_competitor_id: number | null;
   stages_audited: number;
@@ -1211,7 +1210,6 @@ export interface CompareShotPoint {
 export interface CompareShooterRecord {
   slug: string;
   name: string;
-  is_active: boolean;
   video_path: string | null;
   beep_offset_in_clip: number | null;
   duration_seconds: number | null;
@@ -1832,13 +1830,6 @@ export const api = {
   /** List every shooter in the currently-bound match (#324). */
   listMatchShooters: () =>
     request<ShooterListResponse>("/api/match/shooters"),
-
-  /** Re-bind the server to a different shooter inside the same match (#324). */
-  selectActiveShooter: (slug: string) =>
-    request<ServerHealth>(
-      `/api/match/shooters/${encodeURIComponent(slug)}/select`,
-      { method: "POST" },
-    ),
 
   /** Queue trim-cache rebuild jobs for every missing-but-rebuildable stage
    *  in the named shooter's project. Works against the shooter's project
