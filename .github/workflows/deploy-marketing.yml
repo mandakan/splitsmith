@@ -23,6 +23,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Once a root package.json + pnpm-lock.yaml landed (for the
+      # wrangler dev dep used by the waitlist backend), wrangler-action
+      # auto-detects pnpm as the package manager and shells out to it.
+      # Install pnpm + Node first so that resolution finds them.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:

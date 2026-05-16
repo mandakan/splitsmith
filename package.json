@@ -2,6 +2,7 @@
   "name": "splitsmith-marketing",
   "private": true,
   "description": "Root package.json scoped to the marketing site / Cloudflare Pages tooling. The React app under src/splitsmith/ui_static/ keeps its own package.json.",
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "wrangler": "wrangler",
     "kv:create": "wrangler kv namespace create WAITLIST",
