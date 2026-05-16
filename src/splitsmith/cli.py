@@ -26,6 +26,7 @@ from . import (
     csv_gen,
     fcpxml_gen,
     overlay_render,
+    overlay_theme,
     report,
     shot_detect,
     shot_refine,
@@ -868,6 +869,15 @@ def overlay(
     font_name: str | None = typer.Option(
         None, "--font", help=f"Preset font: {', '.join(overlay_render.available_font_names())}."
     ),
+    theme: str = typer.Option(
+        "splitsmith",
+        "--theme",
+        help=(
+            f"Color palette preset: {', '.join(overlay_theme.THEME_NAMES)}. "
+            f"'splitsmith' uses the same tokens as the web UI; 'clean' "
+            f"is the neutral white-on-amber alternative."
+        ),
+    ),
 ) -> None:
     """Render an alpha overlay MOV for an audited stage.
 
@@ -878,6 +888,10 @@ def overlay(
         raise typer.BadParameter(
             f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}"
         )
+    if theme not in overlay_theme.THEME_NAMES:
+        raise typer.BadParameter(
+            f"--theme must be one of {overlay_theme.THEME_NAMES}, got {theme!r}"
+        )
     overlay_render.render_overlay(
         audit_path=audit_path,
         trimmed_video_path=video,
@@ -887,6 +901,7 @@ def overlay(
         max_height=max_height,
         max_fps=max_fps,
         font_name=font_name,
+        theme=theme,  # type: ignore[arg-type]
     )
     console.print(f"[green]Wrote[/] {output}")
 

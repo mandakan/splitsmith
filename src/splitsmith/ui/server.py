@@ -1355,6 +1355,11 @@ class ExportStageRequest(BaseModel):
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
+    # Palette preset for the overlay text + stroke. ``"splitsmith"``
+    # (default) uses the same tokens the web UI ships, mirrored into
+    # ``data/overlay_theme.json``. ``"clean"`` is the neutral
+    # white-on-amber alternative.
+    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
     # Multi-cam selection (issue #54). Allowlist of secondary
     # ``video_id``s to ride the FCPXML / get their own lossless trim. The
     # default ``None`` means "include every secondary with a beep" -- the
@@ -1389,6 +1394,7 @@ class MatchExportRequest(BaseModel):
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
+    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
     project_name: str | None = None
     # Issue #193. ``"stacked"`` keeps secondaries full-frame (today's
     # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
@@ -5497,6 +5503,7 @@ def create_app(
                     overlay_codec=req.overlay_codec,
                     overlay_max_height=req.overlay_max_height,
                     overlay_max_fps=req.overlay_max_fps,
+                    overlay_theme=req.overlay_theme,
                 ),
                 audit_path=audit_file,
                 exports_dir=exports_dir,
@@ -5696,6 +5703,7 @@ def create_app(
                 req.overlay_codec != "auto"
                 or req.overlay_max_height is not None
                 or req.overlay_max_fps is not None
+                or req.overlay_theme != "splitsmith"
             )
             overlay_missing = req.include_overlay and (
                 not overlay_target.exists() or overlay_format_overridden
@@ -5746,6 +5754,7 @@ def create_app(
                             overlay_codec=req.overlay_codec,
                             overlay_max_height=req.overlay_max_height,
                             overlay_max_fps=req.overlay_max_fps,
+                            overlay_theme=req.overlay_theme,
                         ),
                         audit_path=audit_dir / f"stage{stage_number}.json",
                         exports_dir=exports_dir,

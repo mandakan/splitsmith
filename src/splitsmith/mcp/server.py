@@ -285,6 +285,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         overlay_codec: str = "auto",
         overlay_max_height: int | None = None,
         overlay_max_fps: float | None = None,
+        overlay_theme: str = "splitsmith",
     ) -> dict:
         """Run a single stage's export.
 
@@ -305,6 +306,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             overlay_codec=overlay_codec,  # type: ignore[arg-type]
             overlay_max_height=overlay_max_height,
             overlay_max_fps=overlay_max_fps,
+            overlay_theme=overlay_theme,  # type: ignore[arg-type]
         )
 
     @mcp.tool()

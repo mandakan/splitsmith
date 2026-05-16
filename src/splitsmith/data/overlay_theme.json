@@ -1,0 +1,40 @@
+{
+  "colors": {
+    "accent": [
+      255,
+      45,
+      45
+    ],
+    "ink": [
+      244,
+      244,
+      245
+    ],
+    "split": [
+      251,
+      191,
+      36
+    ],
+    "split_good": [
+      74,
+      222,
+      128
+    ],
+    "split_slow": [
+      255,
+      45,
+      45
+    ],
+    "stroke": [
+      10,
+      11,
+      13
+    ]
+  },
+  "fonts": {
+    "display": "Antonio",
+    "mono": "JetBrains Mono",
+    "sans": "Geist"
+  },
+  "source": "src/splitsmith/ui_static/src/styles/index.css"
+}

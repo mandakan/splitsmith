@@ -39,6 +39,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
+from .overlay_theme import OverlayTheme, ThemeName, load_theme
 
 OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
 """Pluggable encoder for the alpha overlay MOV.
@@ -176,11 +177,13 @@ class DefaultTemplate(Template):
         stroke_width_px: int | None = None,
         shadow_blur_px: int | None = None,
         shadow_offset_px: int | None = None,
+        theme: OverlayTheme | None = None,
     ) -> None:
         self.width = width
         self.height = height
         self.split_hold_seconds = split_hold_seconds
         self.split_fade_seconds = split_fade_seconds
+        self.theme = theme if theme is not None else load_theme("splitsmith")
         big = max(48, height // 14)
         try:
             self.font_big = _load_font(font_path, big, font_name=font_name)
@@ -200,9 +203,10 @@ class DefaultTemplate(Template):
     def draw_frame(self, canvas: Image.Image, state: FrameState) -> None:
         d = ImageDraw.Draw(canvas)
 
+        ink = (*self.theme.ink, 255)
         if state.shot_count > 0:
             shot_text = f"{state.shots_fired}/{state.shot_count}"
-            self._draw(canvas, d, (self.pad, self.pad), shot_text, (255, 255, 255, 255))
+            self._draw(canvas, d, (self.pad, self.pad), shot_text, ink)
 
         total_text = _format_running_total(state.running_total)
         bbox = d.textbbox((0, 0), total_text, font=self.font_big)
@@ -212,7 +216,7 @@ class DefaultTemplate(Template):
             d,
             (self.width - tw - self.pad, self.pad),
             total_text,
-            (255, 255, 255, 255),
+            ink,
         )
 
         if state.last_split is not None and state.last_shot_time_in_clip is not None:
@@ -225,7 +229,7 @@ class DefaultTemplate(Template):
                 th = bbox[3] - bbox[1]
                 x = (self.width - tw) // 2
                 y = self.height - th - self.pad * 2
-                self._draw(canvas, d, (x, y), split_text, (255, 220, 80, alpha))
+                self._draw(canvas, d, (x, y), split_text, (*self.theme.split, alpha))
 
     def _draw(
         self,
@@ -245,6 +249,8 @@ class DefaultTemplate(Template):
             stroke_width=self.stroke_width_px,
             shadow_offset=self.shadow_offset_px,
             shadow_blur=self.shadow_blur_px,
+            stroke_color=self.theme.stroke,
+            shadow_color=self.theme.shadow,
         )
 
 
@@ -360,6 +366,8 @@ def _draw_text_with_shadow(
     stroke_width: int = 2,
     shadow_offset: int = 3,
     shadow_blur: int = 6,
+    stroke_color: tuple[int, int, int] = (0, 0, 0),
+    shadow_color: tuple[int, int, int] = (0, 0, 0),
 ) -> None:
     """Stroke + soft drop shadow so text reads on bright/busy backgrounds.
 
@@ -388,9 +396,9 @@ def _draw_text_with_shadow(
                 (x - sx0 + shadow_offset, y - sy0 + shadow_offset),
                 text,
                 font=font,
-                fill=(0, 0, 0, shadow_alpha),
+                fill=(*shadow_color, shadow_alpha),
                 stroke_width=stroke_width,
-                stroke_fill=(0, 0, 0, shadow_alpha),
+                stroke_fill=(*shadow_color, shadow_alpha),
             )
             if shadow_blur > 0:
                 shadow_img = shadow_img.filter(ImageFilter.GaussianBlur(shadow_blur))
@@ -402,7 +410,7 @@ def _draw_text_with_shadow(
         font=font,
         fill=fill,
         stroke_width=stroke_width,
-        stroke_fill=(0, 0, 0, fg_alpha),
+        stroke_fill=(*stroke_color, fg_alpha),
     )
 
 
@@ -592,6 +600,7 @@ def render_overlay(
     codec: OverlayCodec = "auto",
     max_height: int | None = None,
     max_fps: float | None = None,
+    theme: ThemeName = "splitsmith",
 ) -> Path:
     """Render an alpha overlay MOV alongside a trimmed clip.
 
@@ -619,6 +628,11 @@ def render_overlay(
         over the timeline.
     ``max_fps``: cap output frame rate. Source rate is preserved when it
         already fits under the cap.
+    ``theme``: palette preset for the default template. ``"splitsmith"``
+        (default) pulls colors from the web UI's @theme tokens so the
+        overlay matches the brand. ``"clean"`` is the neutral
+        white-on-amber alternative. Ignored when ``template`` is supplied
+        explicitly.
 
     Returns the written ``output_path``.
     """
@@ -649,7 +663,11 @@ def render_overlay(
 
     if template is None:
         template = DefaultTemplate(
-            width=width, height=height, font_path=font_path, font_name=font_name
+            width=width,
+            height=height,
+            font_path=font_path,
+            font_name=font_name,
+            theme=load_theme(theme),
         )
 
     states = build_frame_states(

@@ -23,6 +23,7 @@ from typing import Any
 from .. import csv_gen, fcpxml_gen, overlay_render, report, trim
 from ..config import Config, ReportFiles, Shot, StageAnalysis, StageData
 from ..overlay_render import OverlayCodec
+from ..overlay_theme import ThemeName
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,10 @@ class StageExportRequest:
     overlay_codec: OverlayCodec = "auto"
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
+    # Palette preset. ``"splitsmith"`` (default) pulls the same tokens
+    # the web UI uses out of overlay_theme.json so the overlay matches
+    # the brand. ``"clean"`` is the neutral white-on-amber alternative.
+    overlay_theme: ThemeName = "splitsmith"
 
 
 @dataclass(frozen=True)
@@ -374,6 +379,7 @@ def export_stage(
                     codec=request.overlay_codec,
                     max_height=request.overlay_max_height,
                     max_fps=request.overlay_max_fps,
+                    theme=request.overlay_theme,
                 )
                 overlay_path = overlay_target
             except (overlay_render.OverlayRenderError, OSError) as exc:
