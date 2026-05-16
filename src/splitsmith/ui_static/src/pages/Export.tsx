@@ -41,6 +41,7 @@ import {
 
 import { Navigate, useParams } from "react-router-dom";
 
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
@@ -50,6 +51,7 @@ import {
   type MatchExportResult,
   type MatchProject,
   type OverlayCodec,
+  type ShooterListEntry,
   type StageExportStatus,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -121,6 +123,7 @@ export function Export() {
 function ExportInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
@@ -142,6 +145,17 @@ function ExportInner({ slug }: { slug: string }) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => alive && setShooters(r.shooters))
+      .catch(() => alive && setShooters([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // === Form state ===
   const [mode, setMode] = useState<OutputMode>("single");
@@ -323,6 +337,12 @@ function ExportInner({ slug }: { slug: string }) {
 
   return (
     <div className="px-7 py-5">
+      <ShooterChipStrip
+        shooters={shooters}
+        activeSlug={slug}
+        urlBase="export"
+        label="Exporting"
+      />
       <div className="mb-5">
         <Kicker className="mb-2">Final cut &middot; bundle</Kicker>
         <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">

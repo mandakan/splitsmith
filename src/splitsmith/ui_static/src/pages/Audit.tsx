@@ -28,7 +28,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -53,11 +53,11 @@ import {
   visibleKindsFromFilters,
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
-import { Avatar } from "@/components/ui";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { MountSelect } from "@/components/MountSelect";
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { ShotStepper } from "@/components/ShotStepper";
 import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
@@ -1377,13 +1377,13 @@ export function Audit() {
           {/* Shooter switcher: only renders for multi-shooter matches.
               Chip is a Link to /audit/:newSlug/:stage; ShooterScopedRoute
               keys the page on slug so the switch remounts cleanly (#353). */}
-          {shooters.length > 1 && (
-            <ShooterChipStrip
-              shooters={shooters}
-              stage={stageNumber}
-              activeSlug={slugParam}
-            />
-          )}
+          <ShooterChipStrip
+            shooters={shooters}
+            stage={stageNumber}
+            activeSlug={slugParam}
+            urlBase="audit"
+            label="Auditing"
+          />
 
           {/* Toolbar: Save + Undo + status badges + filter chips + zoom */}
           <div className="flex flex-wrap items-center gap-2.5">
@@ -1759,68 +1759,6 @@ function Readout({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   );
-}
-
-function ShooterChipStrip({
-  shooters,
-  stage,
-  activeSlug,
-}: {
-  shooters: ShooterListEntry[];
-  stage: number | null;
-  activeSlug: string | undefined;
-}) {
-  return (
-    <div className="-mt-1 mb-3 inline-flex flex-wrap items-center gap-2">
-      <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-subtle">
-        Auditing
-      </span>
-      {shooters.map((s) => {
-        const isActive = s.slug === activeSlug;
-        const target = stage != null ? `/audit/${s.slug}/${stage}` : `/audit/${s.slug}`;
-        return (
-          <Link
-            key={s.slug}
-            to={target}
-            replace
-            aria-current={isActive ? "page" : undefined}
-            title={
-              isActive
-                ? `${s.name} -- currently auditing`
-                : `Switch to ${s.name}`
-            }
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors no-underline",
-              isActive
-                ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
-                : "border-rule bg-surface-2 text-ink-2 hover:border-rule-strong hover:bg-surface-3",
-              isActive && "pointer-events-none",
-            )}
-          >
-            <Avatar
-              size="xs"
-              initials={chipInitials(s.name)}
-              seed={s.slug}
-              name={s.name}
-            />
-            <span className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em]">
-              {s.name}
-            </span>
-            <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-              {pad2(s.stages_audited)}/{pad2(s.stages_total)}
-            </span>
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-function chipInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function ShortcutsStrip() {

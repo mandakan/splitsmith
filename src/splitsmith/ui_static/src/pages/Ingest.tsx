@@ -35,6 +35,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { FolderPicker } from "@/components/FolderPicker";
 import { RelinkDialog } from "@/components/RelinkDialog";
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +44,7 @@ import {
   type CameraMount,
   type MatchProject,
   type ServerHealth,
+  type ShooterListEntry,
   type StageEntry,
   type StageVideo,
   type VideoRole,
@@ -61,6 +63,7 @@ function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -68,6 +71,24 @@ function IngestInner({ slug }: { slug: string }) {
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
+
+  // Match-level shooter list drives the chip-strip switcher. 409
+  // (legacy single-shooter project) collapses to an empty list, which
+  // hides the strip without surfacing as an error to the user.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listMatchShooters()
+      .then((r) => {
+        if (alive) setShooters(r.shooters);
+      })
+      .catch(() => {
+        if (alive) setShooters([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function reload() {
     setError(null);
@@ -217,7 +238,21 @@ function IngestInner({ slug }: { slug: string }) {
           </p>
         </div>
 
-        <ShooterBanner project={project} />
+        {/* Switch which shooter you're managing videos for. Same chip
+         *  pattern as Audit / Coach / Export so the user has one mental
+         *  model for moving between shooters. Hides itself in
+         *  single-shooter matches and legacy projects. */}
+        <div className="mb-5">
+          <ShooterChipStrip
+            shooters={shooters}
+            activeSlug={slug}
+            urlBase="ingest"
+            label="Adding footage for"
+            count={(s) =>
+              `${s.video_count} video${s.video_count === 1 ? "" : "s"}`
+            }
+          />
+        </div>
 
         {/* Top-level actions. The relink dialog handles the "I moved my
          *  source videos and the project's symlinks are now broken"
@@ -685,50 +720,6 @@ function StorageOption({
         </div>
       </div>
     </button>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Shooter banner                                                             */
-/* -------------------------------------------------------------------------- */
-
-function ShooterBanner({ project }: { project: MatchProject | null }) {
-  const name = project?.competitor_name ?? "You";
-  return (
-    <div className="relative mb-5 flex items-center gap-3.5 overflow-hidden rounded-xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 px-4.5 py-3.5">
-      <span
-        aria-hidden
-        className="absolute inset-y-0 left-0 w-[3px] bg-led shadow-[0_0_12px_var(--color-led-glow)]"
-      />
-      <span
-        aria-hidden
-        className="inline-flex size-10 items-center justify-center rounded-full font-mono text-[0.8125rem] font-bold text-ink"
-        style={{
-          background:
-            "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-          boxShadow:
-            "0 0 0 1px rgba(255,45,45,0.4), 0 0 14px var(--color-led-glow)",
-        }}
-      >
-        {initials(name)}
-      </span>
-      <div className="flex-1">
-        <div className="mb-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-subtle">
-          Adding footage for
-        </div>
-        <div className="inline-flex items-center gap-2.5 font-display text-base font-bold uppercase tracking-[0.04em] text-ink">
-          {name}
-          <span className="rounded bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-bg shadow-[0_0_8px_var(--color-led-glow)]">
-            YOU
-          </span>
-        </div>
-        {project?.match_date && (
-          <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-            Match {project.match_date}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -1276,11 +1267,4 @@ function CameraCard({ camera }: { camera: CameraGroup }) {
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0 || !parts[0]) return "??";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
