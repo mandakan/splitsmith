@@ -368,7 +368,9 @@ def _load_bundled_font(name: str, size: int) -> ImageFont.FreeTypeFont | None:
     spec = _BUNDLED_FONTS.get(name)
     if spec is None:
         return None
-    resource = files("splitsmith.data").joinpath("fonts", spec.filename)
+    # Chain ``joinpath`` calls -- ``MultiplexedPath.joinpath`` only accepts
+    # one path segment per call, unlike ``pathlib.Path.joinpath``.
+    resource = files("splitsmith.data").joinpath("fonts").joinpath(spec.filename)
     if not resource.is_file():
         return None
     with as_file(resource) as p:
