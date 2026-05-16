@@ -1009,7 +1009,7 @@ export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancel
 
 /** Mirror of splitsmith.ui.jobs.Job. Long-running endpoints (detect-beep,
  *  trim, future shot-detect/export) submit a job and return a snapshot;
- *  the SPA polls /api/jobs/{id} until status leaves "pending" / "running". */
+ *  the SPA polls /api/me/jobs/{id} until status leaves "pending" / "running". */
 export interface Job {
   id: string;
   kind: string;
@@ -1023,12 +1023,12 @@ export interface Job {
   progress: number | null;
   message: string | null;
   error: string | null;
-  /** True after the SPA POSTed /api/jobs/{id}/cancel for this job. The flag
+  /** True after the SPA POSTed /api/me/jobs/{id}/cancel for this job. The flag
    *  stays True on the terminal snapshot so the row can be labelled
    *  "Cancelled by user" instead of "Aborted". */
   cancel_requested: boolean;
   /** True once the user has dismissed this failure via
-   *  /api/jobs/{id}/acknowledge (issue #73). Meaningful only on FAILED
+   *  /api/me/jobs/{id}/acknowledge (issue #73). Meaningful only on FAILED
    *  jobs; the JobsPanel badge counts failures with acknowledged=false
    *  and the registry rolls acknowledged failures off faster than
    *  unacknowledged ones. */
@@ -1093,7 +1093,7 @@ export interface ServerHealth {
 }
 
 /** Saved SSI Scoreboard identity for the operator. Returned by
- *  ``GET /api/user/scoreboard-identity``; null when nothing is pinned. */
+ *  ``GET /api/me/scoreboard-identity``; null when nothing is pinned. */
 export interface ScoreboardIdentity {
   shooter_id: number;
   display_name: string | null;
@@ -1102,7 +1102,7 @@ export interface ScoreboardIdentity {
   base_url: string | null;
 }
 
-/** One entry from ``GET /api/user/recent-projects``. ``last_opened_at``
+/** One entry from ``GET /api/me/recent-projects``. ``last_opened_at``
  *  is an ISO-8601 UTC timestamp the picker uses to sort. ``path`` is
  *  resolved server-side; we don't normalise it client-side. ``kind``
  *  was added in #320 -- ``null`` covers entries written before the
@@ -1643,7 +1643,7 @@ export const api = {
     }),
 
   /** Submit a beep-detection job for the stage's primary. Returns a Job
-   *  snapshot; poll via {@link api.pollJob} (or read /api/jobs/{id})
+   *  snapshot; poll via {@link api.pollJob} (or read /api/me/jobs/{id})
    *  until the status flips out of "pending"/"running". On success the
    *  SPA should re-fetch /api/project to pick up the new beep_time +
    *  processed.trim. Backed by the per-video pipeline; identical to
@@ -1799,7 +1799,7 @@ export const api = {
    *  or null when nothing has been pinned yet. The header chrome uses
    *  this to render the user badge; null hides it. */
   getScoreboardIdentity: () =>
-    request<ScoreboardIdentity>("/api/user/scoreboard-identity").catch(
+    request<ScoreboardIdentity>("/api/me/scoreboard-identity").catch(
       (err) => {
         if (err instanceof ApiError && err.status === 404) return null;
         throw err;
@@ -1808,7 +1808,7 @@ export const api = {
 
   /** Recent-projects list, most-recent first. Drives the picker. */
   getRecentProjects: () =>
-    request<{ projects: RecentProject[] }>("/api/user/recent-projects").then(
+    request<{ projects: RecentProject[] }>("/api/me/recent-projects").then(
       (r) => r.projects,
     ),
 
@@ -1816,7 +1816,7 @@ export const api = {
    *  stages, status). Used by the redesigned match picker (#322). */
   getRecentProjectsDetail: () =>
     request<{ projects: RecentProjectDetail[] }>(
-      "/api/user/recent-projects?detail=true",
+      "/api/me/recent-projects?detail=true",
     ).then((r) => r.projects),
 
   /** Create a new match from the manual variant of the create-match form
@@ -1895,7 +1895,7 @@ export const api = {
    *  list so the picker can re-render without a follow-up GET. */
   forgetRecentProject: (path: string) =>
     request<{ removed: boolean; projects: RecentProject[] }>(
-      "/api/user/recent-projects/forget",
+      "/api/me/recent-projects/forget",
       { method: "POST", json: { path } },
     ),
 
@@ -1907,7 +1907,7 @@ export const api = {
     name?: string,
     opts?: { create?: boolean },
   ) =>
-    request<ServerHealth>("/api/user/recent-projects/bind", {
+    request<ServerHealth>("/api/me/recent-projects/bind", {
       method: "POST",
       json: { path, name, create: opts?.create ?? false },
     }),
@@ -1915,12 +1915,12 @@ export const api = {
   /** Drop the bound project so the SPA returns to the picker (Cmd+P
    *  "Switch project..." path). */
   unbindProject: () =>
-    request<ServerHealth>("/api/user/recent-projects/unbind", { method: "POST" }),
+    request<ServerHealth>("/api/me/recent-projects/unbind", { method: "POST" }),
 
   listJobs: (opts?: { signal?: AbortSignal }) =>
-    request<Job[]>("/api/jobs", { signal: opts?.signal }),
+    request<Job[]>("/api/me/jobs", { signal: opts?.signal }),
   getJob: (jobId: string, opts?: { signal?: AbortSignal }) =>
-    request<Job>(`/api/jobs/${encodeURIComponent(jobId)}`, {
+    request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}`, {
       signal: opts?.signal,
     }),
 
@@ -1928,18 +1928,18 @@ export const api = {
    *  as-is. For a running trim job the server terminates the underlying
    *  ffmpeg subprocess so the cancel takes effect immediately. */
   cancelJob: (jobId: string) =>
-    request<Job>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+    request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
 
   /** Mark a single failed job as seen (issue #73). The badge stops
    *  counting it and the registry rolls it off ahead of unacknowledged
    *  failures. No-op for non-failed / already-acknowledged jobs. */
   acknowledgeJob: (jobId: string) =>
-    request<Job>(`/api/jobs/${encodeURIComponent(jobId)}/acknowledge`, { method: "POST" }),
+    request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/acknowledge`, { method: "POST" }),
 
   /** Bulk-dismiss every currently-unacknowledged failure. Returns the
    *  jobs that actually flipped to acknowledged. */
   acknowledgeAllFailures: () =>
-    request<Job[]>(`/api/jobs/acknowledge-failures`, { method: "POST" }),
+    request<Job[]>(`/api/me/jobs/acknowledge-failures`, { method: "POST" }),
 
   /** Poll a job until it leaves the running state. ``onUpdate`` fires on
    *  every snapshot (including the final one). Returns the terminal Job. */
@@ -1954,7 +1954,7 @@ export const api = {
     while (true) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       const job = await request<Job>(
-        `/api/jobs/${encodeURIComponent(jobId)}`,
+        `/api/me/jobs/${encodeURIComponent(jobId)}`,
         { signal },
       );
       onUpdate(job);
@@ -2098,7 +2098,7 @@ export const api = {
   getExportOverview: () => request<ExportOverview>("/api/exports/overview"),
 
   /** Submit a stage export job. Returns a Job snapshot; poll
-   *  ``/api/jobs/{id}`` (or {@link api.pollJob}) until it leaves the
+   *  ``/api/me/jobs/{id}`` (or {@link api.pollJob}) until it leaves the
    *  running state, then re-fetch the export overview to see updated
    *  paths + ``last_export_at``. Idempotent on the worker side: the
    *  registry dedupes by (kind, stage_number) so double-clicking

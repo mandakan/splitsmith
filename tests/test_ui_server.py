@@ -46,7 +46,7 @@ def _wait_for_job(client: TestClient, job_id: str, *, timeout: float = 5.0) -> d
 
     deadline = time.time() + timeout
     while time.time() < deadline:
-        resp = client.get(f"/api/jobs/{job_id}")
+        resp = client.get(f"/api/me/jobs/{job_id}")
         assert resp.status_code == 200
         body = resp.json()
         if body["status"] in ("succeeded", "failed", "cancelled"):
@@ -2086,7 +2086,7 @@ def test_trim_invalidates_when_beep_changes(tmp_path: Path, monkeypatch) -> None
     resp = client.post("/api/stages/1/beep", json={"beep_time": 7.5})
     assert resp.status_code == 200
     # The auto-fired job is the active trim job.
-    jobs = client.get("/api/jobs").json()
+    jobs = client.get("/api/me/jobs").json()
     active = next((j for j in jobs if j["kind"] == "trim" and j["stage_number"] == 1), None)
     assert active is not None, "override_beep should auto-fire a trim job"
     final = _wait_for_job(client, active["id"])
@@ -2224,7 +2224,7 @@ def test_cancel_endpoint_aborts_running_trim(tmp_path: Path, monkeypatch) -> Non
     job = client.post("/api/stages/1/trim").json()
     assert started.wait(timeout=3.0), "worker should have started by now"
 
-    cancel_resp = client.post(f"/api/jobs/{job['id']}/cancel")
+    cancel_resp = client.post(f"/api/me/jobs/{job['id']}/cancel")
     assert cancel_resp.status_code == 200
     snapshot = cancel_resp.json()
     assert snapshot["cancel_requested"] is True
@@ -2236,7 +2236,7 @@ def test_cancel_endpoint_aborts_running_trim(tmp_path: Path, monkeypatch) -> Non
 
 def test_cancel_endpoint_returns_404_for_unknown_job(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
-    resp = client.post("/api/jobs/does-not-exist/cancel")
+    resp = client.post("/api/me/jobs/does-not-exist/cancel")
     assert resp.status_code == 404
 
 
@@ -2836,7 +2836,7 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
 
 
 def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
-    """/api/jobs lists active + recent; /api/jobs/{id} polls one. detect-beep
+    """/api/me/jobs lists active + recent; /api/me/jobs/{id} polls one. detect-beep
     and trim both surface here so the SPA has a single status surface."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
@@ -2878,13 +2878,13 @@ def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
     assert final["kind"] == "detect_beep"
     assert final["stage_number"] == 1
 
-    listing = client.get("/api/jobs").json()
+    listing = client.get("/api/me/jobs").json()
     assert any(j["id"] == job_id for j in listing)
 
 
 def test_get_job_404_when_unknown(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
-    resp = client.get("/api/jobs/does-not-exist")
+    resp = client.get("/api/me/jobs/does-not-exist")
     assert resp.status_code == 404
 
 
@@ -2928,17 +2928,17 @@ def test_acknowledge_endpoint_marks_failed_job_as_seen(tmp_path: Path, monkeypat
     assert final["status"] == "failed"
     assert final["acknowledged"] is False
 
-    ack = client.post(f"/api/jobs/{job_id}/acknowledge")
+    ack = client.post(f"/api/me/jobs/{job_id}/acknowledge")
     assert ack.status_code == 200
     assert ack.json()["acknowledged"] is True
 
-    listing = client.get("/api/jobs").json()
+    listing = client.get("/api/me/jobs").json()
     assert next(j for j in listing if j["id"] == job_id)["acknowledged"] is True
 
 
 def test_acknowledge_endpoint_404_for_unknown_job(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
-    resp = client.post("/api/jobs/does-not-exist/acknowledge")
+    resp = client.post("/api/me/jobs/does-not-exist/acknowledge")
     assert resp.status_code == 404
 
 
@@ -2972,7 +2972,7 @@ def test_acknowledge_endpoint_noop_for_succeeded_job(tmp_path: Path, monkeypatch
     submit = client.post("/api/stages/1/detect-beep")
     job_id = submit.json()["id"]
     assert _wait_for_job(client, job_id)["status"] == "succeeded"
-    resp = client.post(f"/api/jobs/{job_id}/acknowledge")
+    resp = client.post(f"/api/me/jobs/{job_id}/acknowledge")
     assert resp.status_code == 200
     assert resp.json()["acknowledged"] is False
 
@@ -2998,14 +2998,14 @@ def test_acknowledge_failures_bulk_endpoint(tmp_path: Path, monkeypatch) -> None
         ids.append(jid)
 
     # Pre-ack one so the bulk endpoint reports only the other.
-    client.post(f"/api/jobs/{ids[0]}/acknowledge")
+    client.post(f"/api/me/jobs/{ids[0]}/acknowledge")
 
-    bulk = client.post("/api/jobs/acknowledge-failures")
+    bulk = client.post("/api/me/jobs/acknowledge-failures")
     assert bulk.status_code == 200
     affected = bulk.json()
     assert {j["id"] for j in affected} == {ids[1]}
 
-    listing = client.get("/api/jobs").json()
+    listing = client.get("/api/me/jobs").json()
     by_id = {j["id"]: j for j in listing}
     assert by_id[ids[0]]["acknowledged"] is True
     assert by_id[ids[1]]["acknowledged"] is True
@@ -4339,7 +4339,7 @@ def _wait_for_jobs_to_drain(client: TestClient, *, timeout: float = 5.0) -> list
 
     deadline = time.time() + timeout
     while time.time() < deadline:
-        jobs = client.get("/api/jobs").json()
+        jobs = client.get("/api/me/jobs").json()
         active = [j for j in jobs if j["status"] in ("pending", "running")]
         if not active:
             return jobs
@@ -4499,7 +4499,7 @@ def test_auto_beep_skipped_for_unassigned_destination(tmp_path: Path, monkeypatc
         json={"video_path": "raw/VID.mp4", "to_stage_number": 1, "role": "primary"},
     )
     _wait_for_jobs_to_drain(client)
-    job_count_after_assign = len(client.get("/api/jobs").json())
+    job_count_after_assign = len(client.get("/api/me/jobs").json())
 
     # Move back to tray -> no new job (idempotent on already-beeped is
     # also covered: the helper would skip even if we re-assigned).
@@ -4507,7 +4507,7 @@ def test_auto_beep_skipped_for_unassigned_destination(tmp_path: Path, monkeypatc
         "/api/assignments/move",
         json={"video_path": "raw/VID.mp4", "to_stage_number": None, "role": "secondary"},
     )
-    assert len(client.get("/api/jobs").json()) == job_count_after_assign
+    assert len(client.get("/api/me/jobs").json()) == job_count_after_assign
 
 
 def test_auto_beep_skipped_when_already_processed(tmp_path: Path, monkeypatch) -> None:
@@ -4558,14 +4558,14 @@ def test_auto_beep_skipped_when_already_processed(tmp_path: Path, monkeypatch) -
         json={"video_path": "raw/VID.mp4", "to_stage_number": 1, "role": "primary"},
     )
     _wait_for_jobs_to_drain(client)
-    jobs_before = len(client.get("/api/jobs").json())
+    jobs_before = len(client.get("/api/me/jobs").json())
 
     # Move to stage 2 -> processed.beep is already True, no new job.
     client.post(
         "/api/assignments/move",
         json={"video_path": "raw/VID.mp4", "to_stage_number": 2, "role": "primary"},
     )
-    assert len(client.get("/api/jobs").json()) == jobs_before
+    assert len(client.get("/api/me/jobs").json()) == jobs_before
 
 
 def test_auto_beep_disabled_via_env_var(tmp_path: Path, monkeypatch) -> None:
@@ -4784,7 +4784,7 @@ def test_shot_detect_gated_on_beep_review(tmp_path: Path, monkeypatch) -> None:
 
     # No shot_detect job queued -- the chain stops at trim until the
     # user confirms.
-    jobs = client.get("/api/jobs").json()
+    jobs = client.get("/api/me/jobs").json()
     assert not any(j["kind"] == "shot_detect" for j in jobs), [
         (j["kind"], j["status"]) for j in jobs
     ]
@@ -4813,12 +4813,12 @@ def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> 
     primary = client.get("/api/project").json()["stages"][0]["videos"][0]
     assert primary["processed"]["trim"] is True  # trim cached
     video_id = primary["video_id"]
-    jobs_before = client.get("/api/jobs").json()
+    jobs_before = client.get("/api/me/jobs").json()
     assert not any(j["kind"] == "shot_detect" for j in jobs_before)
 
     resp = client.post(f"/api/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
     assert resp.status_code == 200
-    jobs_after = client.get("/api/jobs").json()
+    jobs_after = client.get("/api/me/jobs").json()
     assert any(j["kind"] == "shot_detect" for j in jobs_after)
 
 
@@ -4855,7 +4855,7 @@ def test_recent_projects_endpoint(tmp_path: Path, _user_config_home: Path) -> No
     app = create_app(project_root=tmp_path / "beta", project_name="Beta")
     client = TestClient(app)
 
-    resp = client.get("/api/user/recent-projects")
+    resp = client.get("/api/me/recent-projects")
     assert resp.status_code == 200
     body = resp.json()
     names = [p["name"] for p in body["projects"]]
@@ -4869,7 +4869,7 @@ def test_forget_recent_project_endpoint(tmp_path: Path, _user_config_home: Path)
     client = TestClient(app)
 
     resp = client.post(
-        "/api/user/recent-projects/forget",
+        "/api/me/recent-projects/forget",
         json={"path": str((tmp_path / "alpha").resolve())},
     )
     assert resp.status_code == 200
@@ -4918,7 +4918,7 @@ def test_bind_recent_project_switches_in_memory(tmp_path: Path, _user_config_hom
     assert client.get("/api/health").json()["bound"] is False
 
     resp = client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(alpha.resolve())},
     )
     assert resp.status_code == 200
@@ -4938,7 +4938,7 @@ def test_bind_recent_project_404_when_path_missing(tmp_path: Path, _user_config_
     app = create_app()
     client = TestClient(app)
     resp = client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(tmp_path / "does-not-exist")},
     )
     assert resp.status_code == 404
@@ -4957,7 +4957,7 @@ def test_bind_recent_project_create_scaffolds_new_dir(
     assert not target.exists()
 
     resp = client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(target), "name": "Fresh Match", "create": True},
     )
     assert resp.status_code == 200, resp.text
@@ -4978,7 +4978,7 @@ def test_bind_recent_project_scaffolds_empty_existing_folder(
     target.mkdir()
 
     resp = client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(target)},
     )
     assert resp.status_code == 200
@@ -4990,7 +4990,7 @@ def test_unbind_returns_to_unbound_state(tmp_path: Path, _user_config_home: Path
     client = TestClient(app)
 
     assert client.get("/api/health").json()["bound"] is True
-    resp = client.post("/api/user/recent-projects/unbind")
+    resp = client.post("/api/me/recent-projects/unbind")
     assert resp.status_code == 200
     assert resp.json()["bound"] is False
     assert client.get("/api/project").status_code == 409
@@ -5001,7 +5001,7 @@ def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path)
     client = TestClient(app)
 
     # Empty: 404 (SPA renders the prompt rather than autopin).
-    assert client.get("/api/user/scoreboard-identity").status_code == 404
+    assert client.get("/api/me/scoreboard-identity").status_code == 404
 
     payload = {
         "shooter_id": 12345,
@@ -5010,18 +5010,18 @@ def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path)
         "club": "Bromma PK",
         "base_url": "https://shootnscoreit.com",
     }
-    resp = client.put("/api/user/scoreboard-identity", json=payload)
+    resp = client.put("/api/me/scoreboard-identity", json=payload)
     assert resp.status_code == 200
     assert resp.json()["shooter_id"] == 12345
 
     # Now readable.
-    got = client.get("/api/user/scoreboard-identity")
+    got = client.get("/api/me/scoreboard-identity")
     assert got.status_code == 200
     assert got.json()["display_name"] == "Mathias Axell"
 
     # Delete clears it.
-    client.delete("/api/user/scoreboard-identity")
-    assert client.get("/api/user/scoreboard-identity").status_code == 404
+    client.delete("/api/me/scoreboard-identity")
+    assert client.get("/api/me/scoreboard-identity").status_code == 404
 
 
 def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_home: Path) -> None:
@@ -5046,7 +5046,7 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     app = create_app()
     client = TestClient(app)
 
-    resp = client.get("/api/user/recent-projects?detail=true")
+    resp = client.get("/api/me/recent-projects?detail=true")
     assert resp.status_code == 200
     projects = resp.json()["projects"]
     by_kind = {p["kind"]: p for p in projects}
@@ -5070,7 +5070,7 @@ def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_
 
     app = create_app()
     client = TestClient(app)
-    resp = client.get("/api/user/recent-projects?detail=true")
+    resp = client.get("/api/me/recent-projects?detail=true")
     kinds = [p["kind"] for p in resp.json()["projects"]]
     assert kinds == ["missing"]
 
@@ -5119,7 +5119,7 @@ def test_create_match_manual_scaffolds_match_and_binds_shooter(
 
     # Recent-projects gets only the match folder; the shooter subdir
     # inside it must not register as a standalone legacy project.
-    detail = client.get("/api/user/recent-projects?detail=true").json()
+    detail = client.get("/api/me/recent-projects?detail=true").json()
     kinds = sorted(p["kind"] for p in detail["projects"])
     assert kinds == ["match"]
 
@@ -5160,7 +5160,7 @@ def test_bind_match_folder_binds_match_root(tmp_path: Path, _user_config_home: P
     app = create_app()
     client = TestClient(app)
     resp = client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(target)},
     )
     assert resp.status_code == 200
@@ -5199,7 +5199,7 @@ def test_list_match_shooters_returns_active_and_others(
     app = create_app()
     client = TestClient(app)
     resp = client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
     assert resp.status_code == 200
@@ -5223,7 +5223,7 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
     app = create_app()
     client = TestClient(app)
     client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
     resp = client.post("/api/match/shooters", json={"name": "Johan Larsson"})
@@ -5249,7 +5249,7 @@ def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path)
     app = create_app()
     client = TestClient(app)
     client.post(
-        "/api/user/recent-projects/bind",
+        "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
     resp = client.delete("/api/match/shooters/jl")
@@ -5267,12 +5267,12 @@ def test_user_config_disable_flag_makes_endpoints_safe(
     client = TestClient(app)
 
     # Recording was a no-op.
-    body = client.get("/api/user/recent-projects").json()
+    body = client.get("/api/me/recent-projects").json()
     assert body == {"projects": []}
 
     # PUT silently drops; GET still returns 404.
-    client.put("/api/user/scoreboard-identity", json={"shooter_id": 1})
-    assert client.get("/api/user/scoreboard-identity").status_code == 404
+    client.put("/api/me/scoreboard-identity", json={"shooter_id": 1})
+    assert client.get("/api/me/scoreboard-identity").status_code == 404
 
 
 def test_load_env_files_picks_up_user_config_env(

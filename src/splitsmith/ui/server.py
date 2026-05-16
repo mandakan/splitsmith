@@ -1858,12 +1858,12 @@ def create_app(
     # API
     # ----------------------------------------------------------------------
 
-    def _local_match_path() -> Path:
-        """Resolve ``<project>/scoreboard/match.json`` (offline source path)."""
-        return state.project_root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
+    def _local_match_path(root: Path) -> Path:
+        """Resolve ``<root>/scoreboard/match.json`` (offline source path)."""
+        return root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
 
-    def _resolve_scoreboard_client() -> ScoreboardClient:
-        """Pick the concrete ``ScoreboardClient`` for this request.
+    def _resolve_scoreboard_client(root: Path) -> ScoreboardClient:
+        """Pick the concrete ``ScoreboardClient`` for this shooter root.
 
         Local JSON wins when present so the user can stay fully offline by
         dropping a file. Otherwise we wrap the HTTP client in the project-
@@ -1871,7 +1871,7 @@ def create_app(
         caller is responsible for ``close()`` -- both implementations are
         context managers (Local is a no-op; HTTP closes the httpx Client).
         """
-        local_path = _local_match_path()
+        local_path = _local_match_path(root)
         if local_path.exists():
             local = LocalJsonScoreboard(local_path)
             return _ScoreboardClientCtx(local, owns_close=False)
@@ -1879,7 +1879,7 @@ def create_app(
             http = SsiHttpClient()
         except ScoreboardAuthError as exc:
             _raise_scoreboard_http(exc)
-        cache_dir = state.project_root / "scoreboard" / "cache"
+        cache_dir = root / "scoreboard" / "cache"
         cached = CachingScoreboardClient(http, cache_dir)
         return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
 
@@ -1897,12 +1897,13 @@ def create_app(
             return HealthResponse(bound=False)
         return _health_after_bind(state.bound_name or "")
 
-    @app.get("/api/project")
-    def get_project() -> JSONResponse:
-        return JSONResponse(state.load().model_dump(mode="json"))
+    @app.get("/api/shooters/{slug}/project")
+    def get_project(slug: str) -> JSONResponse:
+        return JSONResponse(state.shooter_project(slug).model_dump(mode="json"))
 
-    @app.get("/api/project/export")
+    @app.get("/api/shooters/{slug}/project/export")
     def export_project_endpoint(
+        slug: str,
         include_trimmed: bool = Query(False),
         include_exports: bool = Query(False),
         include_raw: bool = Query(False),
@@ -1917,7 +1918,7 @@ def create_app(
         written to a temp file and deleted once the response finishes
         streaming.
         """
-        root = state.project_root
+        root = state.shooter_root(slug)
         tmp = Path(tempfile.mkdtemp(prefix="splitsmith-export-"))
         archive = tmp / f"{root.name}.tar.gz"
         try:
@@ -1985,8 +1986,8 @@ def create_app(
             }
         )
 
-    @app.get("/api/automation")
-    def get_automation() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/automation")
+    def get_automation(slug: str) -> JSONResponse:
         """Resolved automation settings + per-field provenance (#215 / #216).
 
         Combines the global YAML / env-var defaults with the bound
@@ -1995,7 +1996,7 @@ def create_app(
         ``cli_value`` is always None on the daemon path -- the server
         doesn't take per-call CLI flags.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         resolved = automation_settings.resolve_automation(
             project_override=project.automation,
         )
@@ -2014,8 +2015,8 @@ def create_app(
             }
         )
 
-    @app.post("/api/project/nudges/dismiss")
-    def dismiss_nudge(req: NudgeDismissRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/nudges/dismiss")
+    def dismiss_nudge(slug: str, req: NudgeDismissRequest) -> JSONResponse:
         """Persist a per-project nudge dismissal (#218 phase 4).
 
         Adds ``stage_number`` to ``MatchProject.nudges_dismissed_stages``
@@ -2023,7 +2024,8 @@ def create_app(
         Returns the full project dump so the SPA can replace its
         cached state without a separate refetch.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.stage(req.stage_number)
         except KeyError as exc:
@@ -2034,11 +2036,11 @@ def create_app(
         else:
             current.discard(req.stage_number)
         project.nudges_dismissed_stages = sorted(current)
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.get("/api/hitl-queue")
-    def get_hitl_queue() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/hitl-queue")
+    def get_hitl_queue(slug: str) -> JSONResponse:
         """Items in the project that need human (or agent) attention (#219).
 
         Walks every primary video and emits one item per beep that's
@@ -2069,7 +2071,7 @@ def create_app(
         order. The SPA shows this as a project-level work queue; the
         MCP exposes it as a resource so an agent can drive the picks.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         resolved = automation_settings.resolve_automation(
             project_override=project.automation,
         )
@@ -2118,8 +2120,8 @@ def create_app(
                 )
         return JSONResponse({"items": items, "threshold": threshold})
 
-    @app.get("/api/project/match-analysis")
-    def get_match_analysis() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/project/match-analysis")
+    def get_match_analysis(slug: str) -> JSONResponse:
         """Run the canonical video-match heuristic over the project and return
         per-stage windows + per-video classification.
 
@@ -2129,19 +2131,20 @@ def create_app(
         improvements (per-stage tolerance, ML-based scoring, confidence
         bands) extend this endpoint rather than adding policy to the SPA.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         return JSONResponse(project.match_analysis().model_dump(mode="json"))
 
-    @app.post("/api/scoreboard/import")
-    def import_scoreboard(req: ScoreboardImportRequest) -> JSONResponse:
-        project = state.load()
+    @app.post("/api/shooters/{slug}/scoreboard/import")
+    def import_scoreboard(slug: str, req: ScoreboardImportRequest) -> JSONResponse:
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.import_scoreboard(req.data, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
     # ----------------------------------------------------------------------
@@ -2155,15 +2158,15 @@ def create_app(
     # next request hits the live API. Errors are mapped to HTTP statuses
     # the SPA can render as actionable banners (acceptance criterion).
 
-    @app.get("/api/scoreboard/source")
-    def scoreboard_source() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/source")
+    def scoreboard_source(slug: str) -> JSONResponse:
         """Report whether the offline JSON or the live API will serve requests.
 
         The SPA renders a "loaded from local JSON, no network used" indicator
         when ``mode == "local"`` so the user can verify the offline path
         without watching dev tools.
         """
-        local_path = _local_match_path()
+        local_path = _local_match_path(state.shooter_root(slug))
         local = local_path.exists()
         http_ready = bool(os.environ.get("SPLITSMITH_SSI_TOKEN"))
         return JSONResponse(
@@ -2174,8 +2177,8 @@ def create_app(
             }
         )
 
-    @app.post("/api/scoreboard/upload")
-    def scoreboard_upload(req: ScoreboardUploadRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/upload")
+    def scoreboard_upload(slug: str, req: ScoreboardUploadRequest) -> JSONResponse:
         """Accept a dropped SSI ``match.json`` and populate the project.
 
         Three input shapes are accepted (see ``LocalJsonScoreboard``):
@@ -2188,7 +2191,8 @@ def create_app(
         competitor -- auto-pins that competitor and merges the times so
         the user lands on a fully-populated stage list in one drop.
         """
-        local_path = _local_match_path()
+        root = state.shooter_root(slug)
+        local_path = _local_match_path(root)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_text(
             json.dumps(req.data, indent=2, sort_keys=True),
@@ -2202,7 +2206,7 @@ def create_app(
                 detail=f"dropped JSON is not a recognized scoreboard payload: {exc}",
             ) from exc
 
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             project.populate_from_match_data(scoreboard.match, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
@@ -2238,21 +2242,21 @@ def create_app(
                 if picked is not None:
                     project.selected_shooter_id = picked.shooterId
                     project.competitor_name = picked.name
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    @app.get("/api/scoreboard/search")
-    def scoreboard_search(q: str = Query("", min_length=0)) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/search")
+    def scoreboard_search(slug: str, q: str = Query("", min_length=0)) -> JSONResponse:
         """Search the active scoreboard source for matches by free-text query."""
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(state.shooter_root(slug)) as client:
             try:
                 refs = client.search_matches(q)
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
         return JSONResponse([ref.model_dump(mode="json") for ref in refs])
 
-    @app.post("/api/scoreboard/fetch")
-    def scoreboard_fetch(req: ScoreboardFetchRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/fetch")
+    def scoreboard_fetch(slug: str, req: ScoreboardFetchRequest) -> JSONResponse:
         """Fetch a full match (cache-first) and populate the project.
 
         When the project already has a pinned competitor (carried over from
@@ -2260,14 +2264,15 @@ def create_app(
         round-trip. New picks (no pin yet) still need ``/select-shooter``
         afterwards -- the SPA flow stays the same.
         """
-        with _resolve_scoreboard_client() as client:
+        root = state.shooter_root(slug)
+        with _resolve_scoreboard_client(root) as client:
             try:
                 match_data = client.get_match(req.content_type, req.match_id)
             except MatchNotFound as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             project.populate_from_match_data(match_data, overwrite=req.overwrite)
         except ScoreboardImportConflictError as exc:
@@ -2277,6 +2282,7 @@ def create_app(
         if project.selected_competitor_id is not None:
             try:
                 merged = _fetch_and_merge_stage_times(
+                    root,
                     project,
                     req.content_type,
                     req.match_id,
@@ -2287,14 +2293,14 @@ def create_app(
                 # Persist the populated stage shell anyway so the user
                 # has something to work with; they can hit refresh-times
                 # once the upstream resolves.
-                project.save(state.project_root)
+                project.save(root)
                 raise
         else:
-            project.save(state.project_root)
+            project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    @app.get("/api/scoreboard/match-data")
-    def scoreboard_match_data() -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/match-data")
+    def scoreboard_match_data(slug: str) -> JSONResponse:
         """Return the resolved ``MatchData`` for the project's loaded match.
 
         The SPA needs this to map a picked ``shooterId`` to the per-match
@@ -2303,7 +2309,8 @@ def create_app(
         drifts when upstream re-fetches; serving on demand keeps the
         cache as the single source of truth.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
             raise HTTPException(
                 status_code=404,
@@ -2320,7 +2327,7 @@ def create_app(
                     "predates the v1 wiring (#50). Re-import via /upload or /fetch."
                 ),
             ) from exc
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(root) as client:
             try:
                 match_data = client.get_match(ct, mid)
             except MatchNotFound as exc:
@@ -2329,21 +2336,21 @@ def create_app(
                 _raise_scoreboard_http(exc)
         return JSONResponse(match_data.model_dump(mode="json"))
 
-    @app.get("/api/scoreboard/shooter/search")
-    def scoreboard_shooter_search(q: str = Query("", min_length=0)) -> JSONResponse:
+    @app.get("/api/shooters/{slug}/scoreboard/shooter/search")
+    def scoreboard_shooter_search(slug: str, q: str = Query("", min_length=0)) -> JSONResponse:
         """Find shooters by name. Offline mode searches this match's
         competitor list only; online mode hits the live shooter index."""
         if not q.strip():
             return JSONResponse([])
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(state.shooter_root(slug)) as client:
             try:
                 refs = client.find_shooter(q)
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
         return JSONResponse([ref.model_dump(mode="json") for ref in refs])
 
-    @app.post("/api/scoreboard/select-shooter")
-    def scoreboard_select_shooter(req: SelectShooterRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/select-shooter")
+    def scoreboard_select_shooter(slug: str, req: SelectShooterRequest) -> JSONResponse:
         """Pin (shooter_id, competitor_id) and merge stage times into the project.
 
         Validates the competitor against the loaded match before
@@ -2361,7 +2368,8 @@ def create_app(
         - 502 ``scoreboard_offline``: transient upstream issue;
           pin persisted so refresh-times retries on the same selection
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         if project.scoreboard_match_id is None or project.scoreboard_content_type is None:
             raise HTTPException(
                 status_code=409,
@@ -2384,7 +2392,7 @@ def create_app(
         # avoids the "I picked a shooter and now my project is in a bad
         # state" pattern. 404 with a discrete code so the SPA can prompt
         # the user to pick again rather than rendering an upstream banner.
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(root) as client:
             try:
                 match_data = client.get_match(ct, mid)
             except ScoreboardError as exc:
@@ -2411,13 +2419,13 @@ def create_app(
         # scoreboard summary doesn't have to re-fetch MatchData just to
         # render "pinned: Mathias Rinaldo" instead of an integer id.
         project.competitor_name = picked.name
-        project.save(state.project_root)
+        project.save(root)
 
-        merged = _fetch_and_merge_stage_times(project, ct, mid, req.competitor_id)
+        merged = _fetch_and_merge_stage_times(root, project, ct, mid, req.competitor_id)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    @app.post("/api/scoreboard/refresh-times")
-    def scoreboard_refresh_times() -> JSONResponse:
+    @app.post("/api/shooters/{slug}/scoreboard/refresh-times")
+    def scoreboard_refresh_times(slug: str) -> JSONResponse:
         """Re-pull and re-merge stage times for the pinned competitor.
 
         Invalidates every cached stage-times entry for the match (not
@@ -2425,7 +2433,8 @@ def create_app(
         update multiple shooters at once and a fresh pull is cheap. Use
         this after the user knows the upstream has new scorecards.
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         if (
             project.selected_competitor_id is None
             or project.scoreboard_match_id is None
@@ -2446,16 +2455,16 @@ def create_app(
 
         # Drop every cached stage_times entry for this match so the
         # next get_stage_times call goes upstream.
-        cache_dir = state.project_root / "scoreboard" / "cache"
+        cache_dir = root / "scoreboard" / "cache"
         if cache_dir.exists():
             cache = CachingScoreboardClient(_NoOpClient(), cache_dir)
             cache.invalidate_match_stage_times(ct, mid)
 
-        merged = _fetch_and_merge_stage_times(project, ct, mid, project.selected_competitor_id)
+        merged = _fetch_and_merge_stage_times(root, project, ct, mid, project.selected_competitor_id)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
     def _fetch_and_merge_stage_times(
-        project: MatchProject, ct: int, mid: int, competitor_id: int
+        root: Path, project: MatchProject, ct: int, mid: int, competitor_id: int
     ) -> int:
         """Shared helper -- get_stage_times + merge_stage_times, with the
         right error mapping. Persists the project on success.
@@ -2466,7 +2475,7 @@ def create_app(
         requiring a full overwrite-import that would orphan video
         assignments.
         """
-        with _resolve_scoreboard_client() as client:
+        with _resolve_scoreboard_client(root) as client:
             try:
                 results = client.get_stage_times(ct, mid, competitor_id)
             except ScoreboardError as exc:
@@ -2486,15 +2495,16 @@ def create_app(
             except ScoreboardError:
                 pass
         merged = project.merge_stage_times(results)
-        project.save(state.project_root)
+        project.save(root)
         return merged
 
-    @app.post("/api/project/placeholder-stages")
-    def create_placeholder_stages(req: PlaceholderStagesRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/placeholder-stages")
+    def create_placeholder_stages(slug: str, req: PlaceholderStagesRequest) -> JSONResponse:
         """Create N placeholder stages so source-first ingest works without a
         scoreboard. A real scoreboard import later overlays the placeholders
         and preserves video assignments by ``stage_number``."""
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         try:
             project.init_placeholder_stages(
                 req.stage_count,
@@ -2505,11 +2515,11 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.post("/api/videos/scan", response_model=ScanResponse)
-    def scan_videos(req: ScanRequest) -> ScanResponse:
+    @app.post("/api/shooters/{slug}/videos/scan", response_model=ScanResponse)
+    def scan_videos(slug: str, req: ScanRequest) -> ScanResponse:
         if req.link_mode not in ("symlink", "copy"):
             raise HTTPException(status_code=400, detail="link_mode must be 'symlink' or 'copy'")
         if (req.source_dir is None) == (req.source_paths is None):
@@ -2553,14 +2563,15 @@ def create_app(
                 candidates.append(p)
             last_dir = candidates[0].parent.resolve() if candidates else None
 
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         registered: list[str] = []
         skipped: list[str] = []
         for entry in candidates:
             try:
                 video = project.register_video(
                     entry,
-                    state.project_root,
+                    root,
                     link_mode=req.link_mode,  # type: ignore[arg-type]
                 )
             except (FileNotFoundError, ValueError) as exc:
@@ -2570,7 +2581,7 @@ def create_app(
 
         auto_assigned: dict[int, str] = {}
         if req.auto_assign_primary:
-            suggestions = project.auto_match(state.project_root)
+            suggestions = project.auto_match(root)
             for stage_num, video_path in suggestions.items():
                 stage = project.stage(stage_num)
                 # Only auto-assign primary when the stage has no primary yet.
@@ -2582,7 +2593,7 @@ def create_app(
         if last_dir is not None:
             project.last_scanned_dir = str(last_dir)
 
-        project.save(state.project_root)
+        project.save(root)
 
         # Queue auto-beep for every freshly-primaried video (#67). Done
         # after save so the persisted state reflects the assignment when
@@ -2599,8 +2610,8 @@ def create_app(
             skipped=skipped,
         )
 
-    @app.get("/api/videos/link-status", response_model=LinkStatusResponse)
-    def get_link_status() -> LinkStatusResponse:
+    @app.get("/api/shooters/{slug}/videos/link-status", response_model=LinkStatusResponse)
+    def get_link_status(slug: str) -> LinkStatusResponse:
         """Per-video status of ``raw/<name>`` symlinks.
 
         Lets the SPA badge broken / missing entries on the project page
@@ -2608,8 +2619,9 @@ def create_app(
         """
         from .. import relink as relink_mod
 
-        project = state.load()
-        infos = relink_mod.inspect_links(project, state.project_root)
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
+        infos = relink_mod.inspect_links(project, root)
         return LinkStatusResponse(
             entries=[
                 LinkStatusEntry(
@@ -2623,8 +2635,8 @@ def create_app(
             ]
         )
 
-    @app.post("/api/videos/relink/scan", response_model=RelinkScanResponse)
-    def relink_scan(req: RelinkScanRequest) -> RelinkScanResponse:
+    @app.post("/api/shooters/{slug}/videos/relink/scan", response_model=RelinkScanResponse)
+    def relink_scan(slug: str, req: RelinkScanRequest) -> RelinkScanResponse:
         """Recursive dry-run: walk ``search_root`` and report per-video
         candidates without touching the filesystem.
         """
@@ -2635,8 +2647,8 @@ def create_app(
             index = relink_mod.index_search_root(search_root)
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        project = state.load()
-        infos = relink_mod.inspect_links(project, state.project_root)
+        project = state.shooter_project(slug)
+        infos = relink_mod.inspect_links(project, state.shooter_root(slug))
         plan = relink_mod.plan_relink(infos, index)
         return RelinkScanResponse(
             search_root=str(search_root.resolve()),
@@ -2658,8 +2670,8 @@ def create_app(
             ],
         )
 
-    @app.post("/api/videos/relink/apply", response_model=RelinkApplyResponse)
-    def relink_apply(req: RelinkApplyRequest) -> RelinkApplyResponse:
+    @app.post("/api/shooters/{slug}/videos/relink/apply", response_model=RelinkApplyResponse)
+    def relink_apply(slug: str, req: RelinkApplyRequest) -> RelinkApplyResponse:
         """Apply a user-confirmed set of symlink rewrites.
 
         ``project.json`` is not modified -- only the symlinks under
@@ -2670,9 +2682,9 @@ def create_app(
 
         if not req.decisions:
             raise HTTPException(status_code=400, detail="decisions must be non-empty")
-        project = state.load()
+        project = state.shooter_project(slug)
         infos = {
-            info.video_id: info for info in relink_mod.inspect_links(project, state.project_root)
+            info.video_id: info for info in relink_mod.inspect_links(project, state.shooter_root(slug))
         }
         decisions: list[tuple[Path, Path]] = []
         id_for_link: dict[Path, str] = {}
@@ -2708,8 +2720,8 @@ def create_app(
             ]
         )
 
-    @app.post("/api/project/settings")
-    def update_settings(req: SettingsRequest) -> JSONResponse:
+    @app.post("/api/shooters/{slug}/project/settings")
+    def update_settings(slug: str, req: SettingsRequest) -> JSONResponse:
         """Update storage path overrides. Any None field is left unchanged;
         pass an empty string to clear back to the project-root default.
 
@@ -2718,7 +2730,8 @@ def create_app(
         ``confirm=True`` is sent. Existing files are not auto-migrated --
         the warning lets the caller surface "you'll be leaving these behind".
         """
-        project = state.load()
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
         update: dict[str, str | None] = {}
         for fname in (
             "raw_dir",
@@ -2747,7 +2760,7 @@ def create_app(
         for fname, new_value in update.items():
             if new_value == getattr(project, fname):
                 continue  # no change
-            old_path = resolver_for[fname](state.project_root)
+            old_path = resolver_for[fname](root)
             if not old_path.exists() or not old_path.is_dir():
                 continue
             try:
@@ -2809,7 +2822,7 @@ def create_app(
             project.probes_path,
             project.thumbs_path,
         ):
-            target = resolver(state.project_root)
+            target = resolver(root)
             try:
                 target.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
@@ -2818,11 +2831,11 @@ def create_app(
                     detail=f"cannot create directory {target}: {exc}",
                 ) from exc
 
-        project.save(state.project_root)
+        project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
     def _resolve_stage_video(
-        stage_number: int, video_id: str
+        slug: str, stage_number: int, video_id: str
     ) -> tuple[MatchProject, StageEntry, StageVideo]:
         """Load the project + stage + video for a per-video endpoint.
 
@@ -2831,7 +2844,7 @@ def create_app(
         source-on-disk lives at the call site so endpoints that don't need
         a reachable file (clear, manual override) can skip it.
         """
-        project = state.load()
+        project = state.shooter_project(slug)
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -2859,6 +2872,7 @@ def create_app(
     _align_confidence_floor = 1.10
 
     def _try_align_secondary_to_primary(
+        root: Path,
         proj: MatchProject,
         stage: StageEntry,
         video: StageVideo,
@@ -2881,10 +2895,10 @@ def create_app(
         if primary is None or primary.beep_time is None:
             return None
         primary_audio_path = audio_helpers.primary_audio_path(
-            state.project_root, stage.stage_number, project=proj
+            root, stage.stage_number, project=proj
         )
         secondary_audio_path = audio_helpers.video_audio_path(
-            state.project_root, stage.stage_number, video, project=proj
+            root, stage.stage_number, video, project=proj
         )
         if not primary_audio_path.exists() or not secondary_audio_path.exists():
             # Either side missing means the user hasn't run beep-detect on
@@ -3785,12 +3799,12 @@ def create_app(
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    @app.get("/api/jobs", response_model=list[Job])
+    @app.get("/api/me/jobs", response_model=list[Job])
     def list_jobs() -> list[Job]:
         """Snapshot of all retained jobs (active + recently finished)."""
         return state.jobs.list()
 
-    @app.get("/api/jobs/{job_id}", response_model=Job)
+    @app.get("/api/me/jobs/{job_id}", response_model=Job)
     def get_job(job_id: str) -> Job:
         """Poll a single job. SPA polls ~1 Hz while a job is active."""
         job = state.jobs.get(job_id)
@@ -3798,7 +3812,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
-    @app.post("/api/jobs/acknowledge-failures", response_model=list[Job])
+    @app.post("/api/me/jobs/acknowledge-failures", response_model=list[Job])
     def acknowledge_all_failures() -> list[Job]:
         """Mark every currently-unacknowledged FAILED job as seen (issue #73).
 
@@ -3808,7 +3822,7 @@ def create_app(
         """
         return state.jobs.acknowledge_all_failures()
 
-    @app.post("/api/jobs/{job_id}/acknowledge", response_model=Job)
+    @app.post("/api/me/jobs/{job_id}/acknowledge", response_model=Job)
     def acknowledge_job(job_id: str) -> Job:
         """Mark a single failed job as seen (issue #73).
 
@@ -3821,7 +3835,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
-    @app.post("/api/jobs/{job_id}/cancel", response_model=Job)
+    @app.post("/api/me/jobs/{job_id}/cancel", response_model=Job)
     def cancel_job(job_id: str) -> Job:
         """Request cooperative cancellation of a running or pending job.
 
@@ -6051,7 +6065,7 @@ def create_app(
     # project picker and read/write the saved SSI Scoreboard identity so the
     # scoreboard import flow can prefill 'me' instead of asking each project.
 
-    @app.get("/api/user/recent-projects")
+    @app.get("/api/me/recent-projects")
     def list_recent_projects(detail: bool = Query(False)) -> JSONResponse:
         """Return the recent-projects list.
 
@@ -6068,7 +6082,7 @@ def create_app(
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
-    @app.post("/api/user/recent-projects/forget")
+    @app.post("/api/me/recent-projects/forget")
     def forget_recent_project(req: ForgetRecentProjectRequest) -> JSONResponse:
         removed = user_config.remove_recent_project(Path(req.path))
         projects = user_config.get_recent_projects()
@@ -6079,7 +6093,7 @@ def create_app(
             }
         )
 
-    @app.post("/api/user/recent-projects/bind")
+    @app.post("/api/me/recent-projects/bind")
     def bind_recent_project(req: BindRecentProjectRequest) -> HealthResponse:
         """Switch the in-memory project. Used by the SPA picker route.
 
@@ -6951,7 +6965,7 @@ def create_app(
         proj.save(shooter_root)
         return get_beep_queue()
 
-    @app.post("/api/user/recent-projects/unbind")
+    @app.post("/api/me/recent-projects/unbind")
     def unbind_recent_project() -> HealthResponse:
         """Drop the bound project so the SPA returns to the picker.
 
@@ -6962,14 +6976,14 @@ def create_app(
         state.unbind()
         return HealthResponse(bound=False)
 
-    @app.get("/api/user/scoreboard-identity")
+    @app.get("/api/me/scoreboard-identity")
     def get_scoreboard_identity() -> JSONResponse:
         identity = user_config.load_scoreboard_identity()
         if identity is None:
             raise HTTPException(status_code=404, detail="no scoreboard identity saved")
         return JSONResponse(identity.model_dump(mode="json"))
 
-    @app.put("/api/user/scoreboard-identity")
+    @app.put("/api/me/scoreboard-identity")
     def put_scoreboard_identity(req: ScoreboardIdentityRequest) -> JSONResponse:
         identity = user_config.ScoreboardIdentity(
             shooter_id=req.shooter_id,
@@ -6981,7 +6995,7 @@ def create_app(
         user_config.save_scoreboard_identity(identity)
         return JSONResponse(identity.model_dump(mode="json"))
 
-    @app.delete("/api/user/scoreboard-identity")
+    @app.delete("/api/me/scoreboard-identity")
     def delete_scoreboard_identity() -> JSONResponse:
         user_config.clear_scoreboard_identity()
         return JSONResponse({"ok": True})
