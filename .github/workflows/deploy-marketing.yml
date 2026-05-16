@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "functions/**"
       - "wrangler.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/deploy-marketing.yml"
   workflow_dispatch:
 

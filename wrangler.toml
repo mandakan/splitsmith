@@ -1,3 +1,18 @@
 name = "splitsmith"
 pages_build_output_dir = "./site"
 compatibility_date = "2026-05-15"
+
+# Waitlist storage for the "Hosted Splitsmith - coming soon" modal.
+# Bootstrap:
+#   1. `pnpm install`                          (one-time, installs wrangler)
+#   2. `pnpm wrangler login`                   (one-time, opens browser)
+#   3. `pnpm kv:create`                        (prints production namespace id)
+#   4. `pnpm kv:create-preview`                (prints preview namespace id)
+#   5. Paste both ids into the block below and commit.
+# After the production id is set, `wrangler pages deploy` (and CI) will
+# bind WAITLIST automatically; functions/api/waitlist.js reads it as
+# `env.WAITLIST`.
+[[kv_namespaces]]
+binding = "WAITLIST"
+id = "8e8512c2613e416bab5a445630f11000"
+preview_id = "6c81146d743f45c5af8e25e9ff4752e0"

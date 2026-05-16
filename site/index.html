@@ -1201,10 +1201,13 @@ uv sync
       <li>Cross-device split history and match recaps</li>
     </ul>
     <form class="waitlist-form" novalidate>
+      <!-- Honeypot: hidden from users, bots fill it. Server returns
+           200 without writing when hp is non-empty. -->
+      <input type="text" name="hp" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
       <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required />
       <button type="submit">Notify me</button>
     </form>
-    <p class="waitlist-foot">Waitlist signup opens shortly — no email is stored yet.</p>
+    <p class="waitlist-foot" data-waitlist-status>We'll only email you when there's news.</p>
   </div>
 </div>
 
@@ -1242,10 +1245,27 @@ uv sync
     const emailInput = modal.querySelector('input[type="email"]');
     const form = modal.querySelector('.waitlist-form');
     const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+    const status = modal.querySelector('[data-waitlist-status]');
+    const originalLabel = submitBtn ? submitBtn.textContent : '';
+    const defaultStatus = status ? status.textContent : '';
     let lastTrigger = null;
+
+    function setStatus(text) {
+      if (status) status.textContent = text;
+    }
+
+    function resetForm() {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+      }
+      setStatus(defaultStatus);
+      if (emailInput) emailInput.value = '';
+    }
 
     function openModal(trigger) {
       lastTrigger = trigger || null;
+      resetForm();
       modal.hidden = false;
       modal.classList.add('open');
       document.body.classList.add('modal-open');
@@ -1276,15 +1296,46 @@ uv sync
     });
 
     if (form && submitBtn) {
-      const originalLabel = submitBtn.textContent;
-      form.addEventListener('submit', (e) => {
+      form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const fd = new FormData(form);
+        const email = String(fd.get('email') || '').trim();
+        const hp = String(fd.get('hp') || '');
+        if (!email) {
+          setStatus('Please enter an email.');
+          return;
+        }
         submitBtn.disabled = true;
-        submitBtn.textContent = 'Not wired up yet';
-        window.setTimeout(() => {
+        submitBtn.textContent = 'Sending...';
+        try {
+          const res = await fetch('/api/waitlist', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email, hp }),
+          });
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            submitBtn.textContent = data.already ? 'Already on the list' : "You're on the list";
+            setStatus(
+              data.already
+                ? "Thanks — we already have you. We'll email when it's live."
+                : "Thanks — we'll email you when hosted Splitsmith is live."
+            );
+          } else if (res.status === 429) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
+            setStatus('Too many tries from this network. Please wait a bit.');
+          } else {
+            const data = await res.json().catch(() => ({}));
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
+            setStatus(data.error === 'invalid email' ? "That email doesn't look right." : 'Something went wrong. Try again?');
+          }
+        } catch (err) {
           submitBtn.disabled = false;
           submitBtn.textContent = originalLabel;
-        }, 1800);
+          setStatus('Network error. Try again?');
+        }
       });
     }
   })();
