@@ -1370,102 +1370,137 @@ async function request<T>(
 }
 
 export const api = {
-  getProject: () => request<MatchProject>("/api/project"),
+  getProject: (slug: string) =>
+    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/project`),
 
   /** Fetch the canonical match-window analysis (per-stage windows +
    *  per-video classification). Drives the ingest screen's timeline; SPA
    *  carries no policy of its own beyond rendering. */
-  getMatchAnalysis: () => request<MatchAnalysis>("/api/project/match-analysis"),
+  getMatchAnalysis: (slug: string) =>
+    request<MatchAnalysis>(
+      `/api/shooters/${encodeURIComponent(slug)}/project/match-analysis`,
+    ),
 
-  listFolder: (path?: string, opts?: { probe?: boolean }) => {
+  listFolder: (slug: string, path?: string, opts?: { probe?: boolean }) => {
     const params = new URLSearchParams();
     if (path) params.set("path", path);
     if (opts?.probe) params.set("probe", "true");
     const qs = params.toString();
-    return request<FsListing>(`/api/fs/list${qs ? `?${qs}` : ""}`);
+    return request<FsListing>(
+      `/api/shooters/${encodeURIComponent(slug)}/fs/list${qs ? `?${qs}` : ""}`,
+    );
   },
 
-  probeFile: (path: string) =>
-    request<FsProbeResponse>(`/api/fs/probe?path=${encodeURIComponent(path)}`),
+  probeFile: (slug: string, path: string) =>
+    request<FsProbeResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/fs/probe?path=${encodeURIComponent(path)}`,
+    ),
 
-  removeVideo: (videoPath: string, resetAudit = false) =>
-    request<RemoveVideoResponse>("/api/videos/remove", {
-      method: "POST",
-      json: { video_path: videoPath, reset_audit: resetAudit },
-    }),
+  removeVideo: (slug: string, videoPath: string, resetAudit = false) =>
+    request<RemoveVideoResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/remove`,
+      {
+        method: "POST",
+        json: { video_path: videoPath, reset_audit: resetAudit },
+      },
+    ),
 
-  getCleanupPlan: (categories: CleanupCategory[]) => {
+  getCleanupPlan: (slug: string, categories: CleanupCategory[]) => {
     const qs = categories.length
       ? `?categories=${encodeURIComponent(categories.join(","))}`
       : "";
-    return request<CleanupPlan>(`/api/project/cleanup/plan${qs}`);
+    return request<CleanupPlan>(
+      `/api/shooters/${encodeURIComponent(slug)}/project/cleanup/plan${qs}`,
+    );
   },
 
-  applyCleanup: (categories: CleanupCategory[]) =>
-    request<CleanupApplyResponse>("/api/project/cleanup", {
-      method: "POST",
-      json: { categories },
-    }),
+  applyCleanup: (slug: string, categories: CleanupCategory[]) =>
+    request<CleanupApplyResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/project/cleanup`,
+      {
+        method: "POST",
+        json: { categories },
+      },
+    ),
 
-  importScoreboard: (data: unknown, overwrite = false) =>
-    request<MatchProject>("/api/scoreboard/import", {
-      method: "POST",
-      json: { data, overwrite },
-    }),
+  importScoreboard: (slug: string, data: unknown, overwrite = false) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/import`,
+      {
+        method: "POST",
+        json: { data, overwrite },
+      },
+    ),
 
   // SSI Scoreboard v1 wiring (#50). The UI calls these without picking the
   // backend implementation -- the server resolves Local vs Http per request
   // based on whether ``<project>/scoreboard/match.json`` exists.
 
-  getScoreboardSource: () => request<ScoreboardSource>("/api/scoreboard/source"),
+  getScoreboardSource: (slug: string) =>
+    request<ScoreboardSource>(
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/source`,
+    ),
 
   /** Drop-and-populate: the SPA reads the file as text, parses JSON, and
    *  posts it here. Backend writes to ``<project>/scoreboard/match.json``
    *  and uses LocalJsonScoreboard so subsequent requests stay fully offline. */
-  uploadScoreboard: (data: unknown, overwrite = false) =>
-    request<MatchProject>("/api/scoreboard/upload", {
-      method: "POST",
-      json: { data, overwrite },
-    }),
+  uploadScoreboard: (slug: string, data: unknown, overwrite = false) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/upload`,
+      {
+        method: "POST",
+        json: { data, overwrite },
+      },
+    ),
 
   /** Free-text match search. In offline mode this hits the dropped match
    *  only; in online mode it goes to ``GET /api/v1/events?q=``. */
-  searchScoreboardMatches: (q: string) =>
+  searchScoreboardMatches: (slug: string, q: string) =>
     request<ScoreboardMatchRef[]>(
-      `/api/scoreboard/search?q=${encodeURIComponent(q)}`,
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/search?q=${encodeURIComponent(q)}`,
     ),
 
   /** Cache-first full match fetch -> populate project. */
   fetchScoreboardMatch: (
+    slug: string,
     contentType: number,
     matchId: number,
     overwrite = false,
   ) =>
-    request<MatchProject>("/api/scoreboard/fetch", {
-      method: "POST",
-      json: { content_type: contentType, match_id: matchId, overwrite },
-    }),
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/fetch`,
+      {
+        method: "POST",
+        json: { content_type: contentType, match_id: matchId, overwrite },
+      },
+    ),
 
   /** Resolve the current source's ``MatchData``. The SPA uses this to map
    *  a picked ``shooterId`` to a per-match ``competitor_id`` before
    *  pinning. 404 when the project has no match loaded. */
-  getScoreboardMatchData: () =>
-    request<ScoreboardMatchData>("/api/scoreboard/match-data"),
+  getScoreboardMatchData: (slug: string) =>
+    request<ScoreboardMatchData>(
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/match-data`,
+    ),
 
   /** Find shooters by name. Offline mode searches this match's competitor
    *  list only; online mode hits the live shooter index. */
-  searchScoreboardShooters: (q: string) =>
+  searchScoreboardShooters: (slug: string, q: string) =>
     request<ScoreboardShooterRef[]>(
-      `/api/scoreboard/shooter/search?q=${encodeURIComponent(q)}`,
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/shooter/search?q=${encodeURIComponent(q)}`,
     ),
 
   /** Pin (shooter, competitor) and merge stage times. The competitor id is
    *  resolved client-side from ``getScoreboardMatchData``; the server
    *  refuses to guess. The response carries the updated project plus a
    *  ``stage_times_merged`` count for the SPA to confirm. */
-  selectScoreboardShooter: (shooterId: number, competitorId: number) =>
+  selectScoreboardShooter: (
+    slug: string,
+    shooterId: number,
+    competitorId: number,
+  ) =>
     request<MatchProject & { stage_times_merged: number }>(
-      "/api/scoreboard/select-shooter",
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/select-shooter`,
       {
         method: "POST",
         json: { shooter_id: shooterId, competitor_id: competitorId },
@@ -1475,104 +1510,139 @@ export const api = {
   /** Re-pull and re-merge stage times for the pinned competitor. Used for
    *  in-progress matches where new scorecards land while the user is
    *  ingesting; clears the project-local cache for every cid in the match. */
-  refreshScoreboardTimes: () =>
+  refreshScoreboardTimes: (slug: string) =>
     request<MatchProject & { stage_times_merged: number }>(
-      "/api/scoreboard/refresh-times",
+      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/refresh-times`,
       { method: "POST" },
     ),
 
 
-  createPlaceholderStages: (req: PlaceholderStagesRequest) =>
-    request<MatchProject>("/api/project/placeholder-stages", {
-      method: "POST",
-      json: req,
-    }),
+  createPlaceholderStages: (slug: string, req: PlaceholderStagesRequest) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/project/placeholder-stages`,
+      {
+        method: "POST",
+        json: req,
+      },
+    ),
 
   scanVideos: (
+    slug: string,
     sourceDir: string,
     autoAssignPrimary = true,
     linkMode: "symlink" | "copy" = "symlink",
   ) =>
-    request<ScanResponse>("/api/videos/scan", {
-      method: "POST",
-      json: {
-        source_dir: sourceDir,
-        auto_assign_primary: autoAssignPrimary,
-        link_mode: linkMode,
+    request<ScanResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/scan`,
+      {
+        method: "POST",
+        json: {
+          source_dir: sourceDir,
+          auto_assign_primary: autoAssignPrimary,
+          link_mode: linkMode,
+        },
       },
-    }),
+    ),
 
   scanFiles: (
+    slug: string,
     sourcePaths: string[],
     autoAssignPrimary = true,
     linkMode: "symlink" | "copy" = "symlink",
   ) =>
-    request<ScanResponse>("/api/videos/scan", {
-      method: "POST",
-      json: {
-        source_paths: sourcePaths,
-        auto_assign_primary: autoAssignPrimary,
-        link_mode: linkMode,
+    request<ScanResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/scan`,
+      {
+        method: "POST",
+        json: {
+          source_paths: sourcePaths,
+          auto_assign_primary: autoAssignPrimary,
+          link_mode: linkMode,
+        },
       },
-    }),
+    ),
 
   /** Per-video filesystem status of the ``raw/<name>`` symlinks. The
    *  Project page polls this so it can badge broken/missing entries
    *  outside the relink dialog. */
-  getLinkStatus: () => request<LinkStatusResponse>("/api/videos/link-status"),
+  getLinkStatus: (slug: string) =>
+    request<LinkStatusResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/link-status`,
+    ),
 
   /** Recursive dry-run: walk ``searchRoot`` and report per-video
    *  candidates by basename. Pure -- no filesystem mutations. */
-  relinkScan: (searchRoot: string) =>
-    request<RelinkScanResponse>("/api/videos/relink/scan", {
-      method: "POST",
-      json: { search_root: searchRoot },
-    }),
+  relinkScan: (slug: string, searchRoot: string) =>
+    request<RelinkScanResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/relink/scan`,
+      {
+        method: "POST",
+        json: { search_root: searchRoot },
+      },
+    ),
 
   /** Apply a confirmed set of symlink rewrites. ``decisions`` maps
    *  ``video_id`` -> absolute target path. Any video_id not listed is
    *  left untouched. */
-  relinkApply: (decisions: Record<string, string>) =>
-    request<RelinkApplyResponse>("/api/videos/relink/apply", {
-      method: "POST",
-      json: { decisions },
-    }),
+  relinkApply: (slug: string, decisions: Record<string, string>) =>
+    request<RelinkApplyResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/relink/apply`,
+      {
+        method: "POST",
+        json: { decisions },
+      },
+    ),
 
-  updateSettings: (patch: ProjectSettingsPatch) =>
-    request<MatchProject>("/api/project/settings", {
-      method: "POST",
-      json: patch,
-    }),
+  updateSettings: (slug: string, patch: ProjectSettingsPatch) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/project/settings`,
+      {
+        method: "POST",
+        json: patch,
+      },
+    ),
 
-  getAutomation: () =>
-    request<ResolvedAutomationResponse>("/api/automation"),
+  getAutomation: (slug: string) =>
+    request<ResolvedAutomationResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/automation`,
+    ),
 
   /** Project-level work queue: beeps the auto-trust gate (#219) didn't
    *  clear -- either missing (auto-detect found nothing) or below the
    *  ``beep_low_confidence_threshold``. The HITL panel polls this on
    *  the Ingest page; the MCP wrapper exposes it as a resource so an
    *  agent can drive the picks. */
-  getHitlQueue: () => request<HitlQueueResponse>("/api/hitl-queue"),
+  getHitlQueue: (slug: string) =>
+    request<HitlQueueResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/hitl-queue`,
+    ),
 
-  dismissNudge: (stageNumber: number, dismissed: boolean) =>
-    request<MatchProject>("/api/project/nudges/dismiss", {
-      method: "POST",
-      json: { stage_number: stageNumber, dismissed },
-    }),
+  dismissNudge: (slug: string, stageNumber: number, dismissed: boolean) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/project/nudges/dismiss`,
+      {
+        method: "POST",
+        json: { stage_number: stageNumber, dismissed },
+      },
+    ),
 
   moveAssignment: (
+    slug: string,
     videoPath: string,
     toStageNumber: number | null,
     role: VideoRole = "secondary",
   ) =>
-    request<MatchProject>("/api/assignments/move", {
-      method: "POST",
-      json: {
-        video_path: videoPath,
-        to_stage_number: toStageNumber,
-        role,
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/assignments/move`,
+      {
+        method: "POST",
+        json: {
+          video_path: videoPath,
+          to_stage_number: toStageNumber,
+          role,
+        },
       },
-    }),
+    ),
 
   /** Promote ``videoPath`` to primary on ``stageNumber``. The server
    *  refuses with a 409 (``code: "audit_exists"``) when the stage has
@@ -1586,12 +1656,13 @@ export const api = {
    *  override and fall back to the artifact's default class on the next
    *  shot-detect run. */
   setCameraMount: (
+    slug: string,
     stageNumber: number,
     videoId: string,
     mount: CameraMount | null,
   ) =>
     request<MatchProject>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/camera-mount`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/camera-mount`,
       {
         method: "PATCH",
         json: { mount },
@@ -1604,13 +1675,14 @@ export const api = {
    *  generic-headcam amplitude floor. ``make`` and ``model`` must be
    *  supplied together or both ``null``. */
   setCameraModel: (
+    slug: string,
     stageNumber: number,
     videoId: string,
     make: string | null,
     model: string | null,
   ) =>
     request<MatchProject>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/camera-model`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/camera-model`,
       {
         method: "PATCH",
         json: { make, model },
@@ -1624,23 +1696,34 @@ export const api = {
       "/api/calibrated-camera-models",
     ),
 
-  swapPrimary: (videoPath: string, stageNumber: number, confirm = false) =>
-    request<MatchProject>("/api/assignments/swap-primary", {
-      method: "POST",
-      json: {
-        video_path: videoPath,
-        stage_number: stageNumber,
-        confirm,
+  swapPrimary: (
+    slug: string,
+    videoPath: string,
+    stageNumber: number,
+    confirm = false,
+  ) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/assignments/swap-primary`,
+      {
+        method: "POST",
+        json: {
+          video_path: videoPath,
+          stage_number: stageNumber,
+          confirm,
+        },
       },
-    }),
+    ),
 
   /** Toggle the ``skipped`` flag on a stage. Skipped stages don't block
    *  the "next step" gate even when they have no videos / no primary. */
-  setStageSkipped: (stageNumber: number, skipped: boolean) =>
-    request<MatchProject>(`/api/stages/${stageNumber}/skip`, {
-      method: "POST",
-      json: { skipped },
-    }),
+  setStageSkipped: (slug: string, stageNumber: number, skipped: boolean) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/skip`,
+      {
+        method: "POST",
+        json: { skipped },
+      },
+    ),
 
   /** Submit a beep-detection job for the stage's primary. Returns a Job
    *  snapshot; poll via {@link api.pollJob} (or read /api/me/jobs/{id})
@@ -1648,9 +1731,9 @@ export const api = {
    *  SPA should re-fetch /api/project to pick up the new beep_time +
    *  processed.trim. Backed by the per-video pipeline; identical to
    *  ``detectBeepForVideo(stage, primary.video_id)``. */
-  detectBeep: (stageNumber: number, force = false) =>
+  detectBeep: (slug: string, stageNumber: number, force = false) =>
     request<Job>(
-      `/api/stages/${stageNumber}/detect-beep${force ? "?force=true" : ""}`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/detect-beep${force ? "?force=true" : ""}`,
       { method: "POST" },
     ),
 
@@ -1659,41 +1742,57 @@ export const api = {
    *  audit-mode trim, and its own dedupe slot in the registry so
    *  primary + Cam 2 + Cam 3 can run in parallel. Shot detection
    *  auto-chains for primary results only. */
-  detectBeepForVideo: (stageNumber: number, videoId: string, force = false) =>
+  detectBeepForVideo: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    force = false,
+  ) =>
     request<Job>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/detect-beep${
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/detect-beep${
         force ? "?force=true" : ""
       }`,
       { method: "POST" },
     ),
 
-  overrideBeep: (stageNumber: number, beepTime: number | null) =>
-    request<MatchProject>(`/api/stages/${stageNumber}/beep`, {
-      method: "POST",
-      json: { beep_time: beepTime },
-    }),
+  overrideBeep: (slug: string, stageNumber: number, beepTime: number | null) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep`,
+      {
+        method: "POST",
+        json: { beep_time: beepTime },
+      },
+    ),
 
   /** Manually set or clear a stage's duration. Used for projects without
    *  scoreboard data, where ``time_seconds`` would otherwise stay 0 and
    *  block the trim / shot-detect gates. Pass ``null`` to clear back to
    *  placeholder. Does NOT chain a trim -- caller clicks Trim explicitly. */
-  setStageTime: (stageNumber: number, timeSeconds: number | null) =>
-    request<MatchProject>(`/api/stages/${stageNumber}/time`, {
-      method: "POST",
-      json: { time_seconds: timeSeconds },
-    }),
+  setStageTime: (
+    slug: string,
+    stageNumber: number,
+    timeSeconds: number | null,
+  ) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/time`,
+      {
+        method: "POST",
+        json: { time_seconds: timeSeconds },
+      },
+    ),
 
   /** Manually set or clear ``video``'s beep timestamp. ``beepTime=null``
    *  clears back to "no beep yet"; otherwise the value (>= 0) is taken
    *  as authoritative with ``beep_source="manual"``. Same auto-trim
    *  chain as the legacy primary endpoint, just keyed per video. */
   overrideBeepForVideo: (
+    slug: string,
     stageNumber: number,
     videoId: string,
     beepTime: number | null,
   ) =>
     request<MatchProject>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep`,
       { method: "POST", json: { beep_time: beepTime } },
     ),
 
@@ -1702,22 +1801,26 @@ export const api = {
    *  so the SPA can hold a slightly stale snapshot without breaking the
    *  click. The server keeps the candidate list intact so the user can
    *  switch again without re-running detection, and re-fires the trim job. */
-  selectBeepCandidate: (stageNumber: number, time: number) =>
-    request<MatchProject>(`/api/stages/${stageNumber}/beep/select`, {
-      method: "POST",
-      json: { time },
-    }),
+  selectBeepCandidate: (slug: string, stageNumber: number, time: number) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep/select`,
+      {
+        method: "POST",
+        json: { time },
+      },
+    ),
 
   /** Per-video candidate select. Same matching semantics as the primary
    *  endpoint (1 ms epsilon) but targets the video carrying the candidate
    *  list, so secondaries can pick from their own ranked alternatives. */
   selectBeepCandidateForVideo: (
+    slug: string,
     stageNumber: number,
     videoId: string,
     time: number,
   ) =>
     request<MatchProject>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/select`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/select`,
       { method: "POST", json: { time } },
     ),
 
@@ -1727,13 +1830,14 @@ export const api = {
    *  duration / amplitude in that window"; widen ``windowS`` or move
    *  the marker. */
   snapBeepForVideo: (
+    slug: string,
     stageNumber: number,
     videoId: string,
     hintTime: number,
     windowS: number = 0.5,
   ) =>
     request<BeepSnapResult>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
       { method: "POST", json: { hint_time: hintTime, window_s: windowS } },
     ),
 
@@ -1741,24 +1845,32 @@ export const api = {
    *  endpoint -- no detection or trim chain runs. Setting ``true``
    *  requires ``beep_time`` to already be set; the server returns 400
    *  otherwise. */
-  setBeepReviewed: (stageNumber: number, videoId: string, reviewed: boolean) =>
+  setBeepReviewed: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    reviewed: boolean,
+  ) =>
     request<MatchProject>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/review`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/review`,
       { method: "POST", json: { reviewed } },
     ),
 
   /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
    *  idempotent on the worker side -- when the cached MP4 is fresh the
    *  job completes near-instantly without re-encoding. */
-  trimStage: (stageNumber: number) =>
-    request<Job>(`/api/stages/${stageNumber}/trim`, { method: "POST" }),
+  trimStage: (slug: string, stageNumber: number) =>
+    request<Job>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/trim`,
+      { method: "POST" },
+    ),
 
   /** Per-video audit-mode trim. Mirrors ``trimStage`` for primaries but
    *  targets one specific camera, so multi-cam ingest can refresh a
    *  single secondary's scrub clip without retriggering the primary. */
-  trimVideo: (stageNumber: number, videoId: string) =>
+  trimVideo: (slug: string, stageNumber: number, videoId: string) =>
     request<Job>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/trim`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/trim`,
       { method: "POST" },
     ),
 
@@ -1768,21 +1880,31 @@ export const api = {
    *  this endpoint is for manual retrigger.
    *  Pass ``reset: true`` to wipe ``shots[]`` first, discarding the user's
    *  keep / reject decisions so the next pass starts fresh. */
-  detectShots: (stageNumber: number, opts: { reset?: boolean } = {}) => {
+  detectShots: (
+    slug: string,
+    stageNumber: number,
+    opts: { reset?: boolean } = {},
+  ) => {
     const qs = opts.reset ? "?reset=true" : "";
-    return request<Job>(`/api/stages/${stageNumber}/shot-detect${qs}`, { method: "POST" });
+    return request<Job>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/shot-detect${qs}`,
+      { method: "POST" },
+    );
   },
 
   /** Submit shot detection on every eligible stage. A stage is eligible
    *  when it has a primary with confirmed beep + non-zero time_seconds.
    *  Returns the list of submitted (or already-active) jobs plus a
    *  ``skipped`` array describing why ineligible stages were left alone. */
-  detectShotsAll: (opts: { reset?: boolean } = {}) => {
+  detectShotsAll: (slug: string, opts: { reset?: boolean } = {}) => {
     const qs = opts.reset ? "?reset=true" : "";
     return request<{
       jobs: Job[];
       skipped: { stage_number: number; reason: string }[];
-    }>(`/api/stages/shot-detect${qs}`, { method: "POST" });
+    }>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/shot-detect${qs}`,
+      { method: "POST" },
+    );
   },
 
   /** Server-side feature flags (fetched once on app mount). Today this
@@ -1982,26 +2104,32 @@ export const api = {
     }
   },
 
-  stageAudioUrl: (stageNumber: number) => `/api/stages/${stageNumber}/audio`,
+  stageAudioUrl: (slug: string, stageNumber: number) =>
+    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audio`,
 
   /** Per-video WAV URL. Primary forwards to the legacy stage audio
    *  endpoint (trimmed audit clip preferred); secondary serves the full
    *  per-cam WAV so the picker has the whole clip to scrub. */
-  videoAudioUrl: (stageNumber: number, videoId: string) =>
-    `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/audio`,
+  videoAudioUrl: (slug: string, stageNumber: number, videoId: string) =>
+    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/audio`,
 
   /** URL for a tiny MP4 around a beep timestamp (#27, #22). ``t`` is
    *  passed to the server (which centres the clip there) AND ms-rounded
    *  into the cache key, so each distinct ``t`` gets its own MP4. The
    *  candidate picker uses this with arbitrary candidate times; the
    *  default flow passes ``primary.beep_time``. */
-  stageBeepPreviewUrl: (stageNumber: number, beepTime: number) =>
-    `/api/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
+  stageBeepPreviewUrl: (slug: string, stageNumber: number, beepTime: number) =>
+    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
 
   /** Per-video beep preview URL. Same caching semantics as the primary
    *  endpoint (cached on source mtime/size + center time + duration). */
-  videoBeepPreviewUrl: (stageNumber: number, videoId: string, beepTime: number) =>
-    `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-preview?t=${beepTime.toFixed(3)}`,
+  videoBeepPreviewUrl: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    beepTime: number,
+  ) =>
+    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-preview?t=${beepTime.toFixed(3)}`,
 
   /** Stream URL for a registered video.
    *
@@ -2012,23 +2140,39 @@ export const api = {
    *  ``<video>`` element (which fails its next Range request with
    *  "source not found"). Other callers default to ``auto``: trim if
    *  present, source otherwise. */
-  videoStreamUrl: (videoPath: string, kind: "auto" | "trim" | "source" = "auto") =>
-    `/api/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
+  videoStreamUrl: (
+    slug: string,
+    videoPath: string,
+    kind: "auto" | "trim" | "source" = "auto",
+  ) =>
+    `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
 
-  getStagePeaks: (stageNumber: number, bins = 1200) =>
-    request<PeaksResult>(`/api/stages/${stageNumber}/peaks?bins=${bins}`),
+  getStagePeaks: (slug: string, stageNumber: number, bins = 1200) =>
+    request<PeaksResult>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/peaks?bins=${bins}`,
+    ),
 
   /** Per-video peaks. Same payload shape as the stage endpoint so the
    *  waveform picker takes the same code path for every role. */
-  getVideoPeaks: (stageNumber: number, videoId: string, bins = 1200) =>
+  getVideoPeaks: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    bins = 1200,
+  ) =>
     request<PeaksResult>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`,
     ),
 
   /** Returns the saved audit JSON for a stage, or null when none exists yet. */
-  getStageAudit: async (stageNumber: number): Promise<StageAudit | null> => {
+  getStageAudit: async (
+    slug: string,
+    stageNumber: number,
+  ): Promise<StageAudit | null> => {
     try {
-      return await request<StageAudit>(`/api/stages/${stageNumber}/audit`);
+      return await request<StageAudit>(
+        `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audit`,
+      );
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
@@ -2037,51 +2181,65 @@ export const api = {
 
   /** Atomically write the stage's audit JSON. The server keeps the prior
    *  version as ``stage<N>.json.bak`` so a bad save can be recovered. */
-  saveStageAudit: (stageNumber: number, payload: StageAudit) =>
-    request<StageAudit>(`/api/stages/${stageNumber}/audit`, {
-      method: "PUT",
-      json: payload,
-    }),
+  saveStageAudit: (slug: string, stageNumber: number, payload: StageAudit) =>
+    request<StageAudit>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audit`,
+      {
+        method: "PUT",
+        json: payload,
+      },
+    ),
 
   /** Coach view: per-shot interval class + flags + notes (#161). The
    *  GET is read-only; ``stale=true`` means the rule disagrees with the
    *  stored class and the user can accept the recompute via reclassify. */
-  getStageCoach: async (stageNumber: number): Promise<CoachStageResponse | null> => {
+  getStageCoach: async (
+    slug: string,
+    stageNumber: number,
+  ): Promise<CoachStageResponse | null> => {
     try {
-      return await request<CoachStageResponse>(`/api/stages/${stageNumber}/coach`);
+      return await request<CoachStageResponse>(
+        `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach`,
+      );
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
     }
   },
 
-  reclassifyStageCoach: (stageNumber: number) =>
-    request<CoachStageResponse>(`/api/stages/${stageNumber}/coach/reclassify`, {
-      method: "POST",
-    }),
+  reclassifyStageCoach: (slug: string, stageNumber: number) =>
+    request<CoachStageResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach/reclassify`,
+      {
+        method: "POST",
+      },
+    ),
 
   patchStageShotCoach: (
+    slug: string,
     stageNumber: number,
     shotNumber: number,
     patch: CoachShotPatch,
   ) =>
     request<CoachStageResponse>(
-      `/api/stages/${stageNumber}/shots/${shotNumber}/coach`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/shots/${shotNumber}/coach`,
       { method: "PATCH", json: patch },
     ),
 
   /** Per-stage histograms + summary stats for the Coach distributions
    *  panel (#163). Empty classes still appear with count=0 so the UI
    *  can render an empty histogram without a special case. */
-  getStageCoachDistributions: (stageNumber: number) =>
+  getStageCoachDistributions: (slug: string, stageNumber: number) =>
     request<CoachStageDistributions>(
-      `/api/stages/${stageNumber}/coach/distributions`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach/distributions`,
     ),
 
   /** Match-level histograms aggregated across every stage with an audit
    *  JSON. Stages without an audit are silently skipped server-side. */
-  getMatchCoachDistributions: () =>
-    request<CoachMatchDistributions>("/api/coach/distributions"),
+  getMatchCoachDistributions: (slug: string) =>
+    request<CoachMatchDistributions>(
+      `/api/shooters/${encodeURIComponent(slug)}/coach/distributions`,
+    ),
 
   /** Structured anomalies for the *saved* audit JSON (issue #42).
    *
@@ -2089,13 +2247,16 @@ export const api = {
    *  so the panel updates without a network round-trip on every keep /
    *  reject. This endpoint exists for external consumers + integration
    *  tests that want the same flags ``report.txt`` will produce. */
-  getStageAnomalies: (stageNumber: number) =>
+  getStageAnomalies: (slug: string, stageNumber: number) =>
     request<{ anomalies: import("./anomalies").Anomaly[] }>(
-      `/api/stages/${stageNumber}/anomalies`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/anomalies`,
     ),
 
   /** Match-overview payload for the Analysis & Export screen. */
-  getExportOverview: () => request<ExportOverview>("/api/exports/overview"),
+  getExportOverview: (slug: string) =>
+    request<ExportOverview>(
+      `/api/shooters/${encodeURIComponent(slug)}/exports/overview`,
+    ),
 
   /** Submit a stage export job. Returns a Job snapshot; poll
    *  ``/api/me/jobs/{id}`` (or {@link api.pollJob}) until it leaves the
@@ -2103,8 +2264,14 @@ export const api = {
    *  paths + ``last_export_at``. Idempotent on the worker side: the
    *  registry dedupes by (kind, stage_number) so double-clicking
    *  Generate returns the in-flight job instead of stacking. */
-  exportStage: (stageNumber: number, opts: ExportStageRequestPayload = {}) =>
-    request<Job>(`/api/stages/${stageNumber}/export`, {
+  exportStage: (
+    slug: string,
+    stageNumber: number,
+    opts: ExportStageRequestPayload = {},
+  ) =>
+    request<Job>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/export`,
+      {
       method: "POST",
       json: {
         write_trim: opts.write_trim ?? true,
@@ -2137,8 +2304,8 @@ export const api = {
    *  to "match FCPXML on disk" in one click. Returns a Job snapshot;
    *  poll via {@link api.pollJob} until terminal, then read the
    *  {@link MatchExportResult} from ``Job.result``. */
-  exportMatch: (payload: MatchExportRequestPayload) =>
-    request<Job>("/api/match/export", {
+  exportMatch: (slug: string, payload: MatchExportRequestPayload) =>
+    request<Job>(`/api/shooters/${encodeURIComponent(slug)}/export/match`, {
       method: "POST",
       json: {
         stage_numbers: payload.stage_numbers,
@@ -2213,11 +2380,14 @@ export const api = {
    *  it from). Use this for the per-video "open containing folder" button
    *  -- ``revealFile`` would refuse because the resolved target lives
    *  outside the project root. */
-  revealVideo: (videoPath: string) =>
-    request<{ revealed: string }>("/api/videos/reveal", {
-      method: "POST",
-      json: { path: videoPath },
-    }),
+  revealVideo: (slug: string, videoPath: string) =>
+    request<{ revealed: string }>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/reveal`,
+      {
+        method: "POST",
+        json: { path: videoPath },
+      },
+    ),
 
   // -----------------------------------------------------------------------
   // Fixture mode (closes #19): the /review SPA route reads + writes a single
@@ -2362,6 +2532,7 @@ export const api = {
     `/api/lab/sweeps/${encodeURIComponent(runId)}/plot/${encodeURIComponent(plotName)}.png`,
 
   promoteSecondary: (
+    shooterSlug: string,
     stageNumber: number,
     videoId: string,
     payload: {
@@ -2383,7 +2554,7 @@ export const api = {
       camera_id: string;
       anchor_slug: string;
     }>(
-      `/api/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-secondary`,
+      `/api/shooters/${encodeURIComponent(shooterSlug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-secondary`,
       { method: "POST", json: payload },
     ),
 
@@ -2392,6 +2563,7 @@ export const api = {
    *  as a fixture in ``tests/fixtures/`` and the project has a phone-cam
    *  primary that should be aligned against it. */
   promoteAgainstFixture: (
+    shooterSlug: string,
     stageNumber: number,
     videoId: string,
     payload: {
@@ -2414,7 +2586,7 @@ export const api = {
       camera_id: string;
       anchor_slug: string;
     }>(
-      `/api/lab/projects/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-against-fixture`,
+      `/api/lab/projects/${encodeURIComponent(shooterSlug)}/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-against-fixture`,
       { method: "POST", json: payload },
     ),
 
@@ -2422,19 +2594,22 @@ export const api = {
    *  tab / window to trigger a download; using a real URL (not fetch)
    *  lets the browser write to disk without buffering the whole archive
    *  in memory. */
-  exportProjectUrl: (opts?: {
-    includeTrimmed?: boolean;
-    includeExports?: boolean;
-    includeRaw?: boolean;
-    includeAudio?: boolean;
-  }) => {
+  exportProjectUrl: (
+    slug: string,
+    opts?: {
+      includeTrimmed?: boolean;
+      includeExports?: boolean;
+      includeRaw?: boolean;
+      includeAudio?: boolean;
+    },
+  ) => {
     const params = new URLSearchParams();
     if (opts?.includeTrimmed) params.set("include_trimmed", "true");
     if (opts?.includeExports) params.set("include_exports", "true");
     if (opts?.includeRaw) params.set("include_raw", "true");
     if (opts?.includeAudio) params.set("include_audio", "true");
     const qs = params.toString();
-    return `/api/project/export${qs ? `?${qs}` : ""}`;
+    return `/api/shooters/${encodeURIComponent(slug)}/project/export${qs ? `?${qs}` : ""}`;
   },
 
   /** Restore a previously exported project. The server extracts the
@@ -2454,7 +2629,7 @@ export const api = {
       project_root: string;
       project_name: string;
       manifest: Record<string, unknown> | null;
-    }>("/api/project/import", { method: "POST", body: form });
+    }>("/api/me/projects/import", { method: "POST", body: form });
   },
 };
 
