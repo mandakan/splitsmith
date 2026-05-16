@@ -68,7 +68,7 @@ def _read(audit_file: Path) -> dict[str, Any]:
 
 def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/stages/1/coach")
+    resp = client.get("/api/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stage_number"] == 1
@@ -94,7 +94,7 @@ def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
 
 def test_get_coach_returns_videos_with_beep_in_clip(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/stages/1/coach")
+    resp = client.get("/api/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "videos" in body
@@ -151,7 +151,7 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
 
     app = create_app(project_root=root, project_name="Trimmed Match")
     client = TestClient(app)
-    resp = client.get("/api/stages/1/coach")
+    resp = client.get("/api/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     # Default trim_pre_buffer_seconds is 5.0; beep clamps to that.
@@ -162,7 +162,7 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
 
 def test_get_stage_distributions(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/stages/1/coach/distributions")
+    resp = client.get("/api/shooters/me/stages/1/coach/distributions")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stage_number"] == 1
@@ -178,7 +178,7 @@ def test_get_stage_distributions(tmp_path: Path) -> None:
 
 def test_get_match_distributions_aggregates(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/coach/distributions")
+    resp = client.get("/api/shooters/me/coach/distributions")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stage_count"] == 1
@@ -195,7 +195,7 @@ def test_get_coach_404_when_no_audit(tmp_path: Path) -> None:
     project.save(root)
     app = create_app(project_root=root, project_name="Empty")
     client = TestClient(app)
-    resp = client.get("/api/stages/1/coach")
+    resp = client.get("/api/shooters/me/stages/1/coach")
     assert resp.status_code == 404
 
 
@@ -207,7 +207,7 @@ def test_get_coach_404_when_no_audit(tmp_path: Path) -> None:
 def test_reclassify_persists_auto_classes(tmp_path: Path) -> None:
     client, audit_file = _bootstrap(tmp_path)
 
-    resp = client.post("/api/stages/1/coach/reclassify")
+    resp = client.post("/api/shooters/me/stages/1/coach/reclassify")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     classes = [s["interval_class"] for s in body["shots"]]
@@ -229,13 +229,13 @@ def test_reclassify_preserves_manual(tmp_path: Path) -> None:
 
     # Set a manual override on shot 4 first.
     resp = client.patch(
-        "/api/stages/1/shots/4/coach",
+        "/api/shooters/me/stages/1/shots/4/coach",
         json={"interval_class": "reload", "interval_class_source": "manual"},
     )
     assert resp.status_code == 200, resp.text
 
     # Reclassify -- should leave shot 4 alone.
-    resp = client.post("/api/stages/1/coach/reclassify")
+    resp = client.post("/api/shooters/me/stages/1/coach/reclassify")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["shots"][3]["interval_class"] == "reload"
@@ -253,7 +253,7 @@ def test_patch_set_class_and_note_and_flag(tmp_path: Path) -> None:
     client, audit_file = _bootstrap(tmp_path)
 
     resp = client.patch(
-        "/api/stages/1/shots/2/coach",
+        "/api/shooters/me/stages/1/shots/2/coach",
         json={
             "interval_class": "split",
             "interval_class_source": "manual",
@@ -278,10 +278,10 @@ def test_patch_set_class_and_note_and_flag(tmp_path: Path) -> None:
 def test_patch_clear_class_drops_pair(tmp_path: Path) -> None:
     client, audit_file = _bootstrap(tmp_path)
     client.patch(
-        "/api/stages/1/shots/2/coach",
+        "/api/shooters/me/stages/1/shots/2/coach",
         json={"interval_class": "reload", "interval_class_source": "manual"},
     )
-    resp = client.patch("/api/stages/1/shots/2/coach", json={"clear_class": True})
+    resp = client.patch("/api/shooters/me/stages/1/shots/2/coach", json={"clear_class": True})
     assert resp.status_code == 200
     body = resp.json()
     assert body["shots"][1]["interval_class"] is None
@@ -291,7 +291,7 @@ def test_patch_clear_class_drops_pair(tmp_path: Path) -> None:
 def test_patch_class_without_source_rejected(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
     resp = client.patch(
-        "/api/stages/1/shots/2/coach",
+        "/api/shooters/me/stages/1/shots/2/coach",
         json={"interval_class": "split"},
     )
     assert resp.status_code == 400
@@ -300,7 +300,7 @@ def test_patch_class_without_source_rejected(tmp_path: Path) -> None:
 def test_patch_unknown_shot_404(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
     resp = client.patch(
-        "/api/stages/1/shots/999/coach",
+        "/api/shooters/me/stages/1/shots/999/coach",
         json={"improvement_flag": True},
     )
     assert resp.status_code == 404
@@ -309,10 +309,10 @@ def test_patch_unknown_shot_404(tmp_path: Path) -> None:
 def test_patch_clear_note(tmp_path: Path) -> None:
     client, _audit = _bootstrap(tmp_path)
     client.patch(
-        "/api/stages/1/shots/2/coach",
+        "/api/shooters/me/stages/1/shots/2/coach",
         json={"coaching_note": "old note"},
     )
-    resp = client.patch("/api/stages/1/shots/2/coach", json={"clear_note": True})
+    resp = client.patch("/api/shooters/me/stages/1/shots/2/coach", json={"clear_note": True})
     assert resp.status_code == 200
     assert resp.json()["shots"][1]["coaching_note"] is None
 
@@ -320,7 +320,7 @@ def test_patch_clear_note(tmp_path: Path) -> None:
 def test_patch_emits_audit_event(tmp_path: Path) -> None:
     client, audit_file = _bootstrap(tmp_path)
     client.patch(
-        "/api/stages/1/shots/2/coach",
+        "/api/shooters/me/stages/1/shots/2/coach",
         json={"improvement_flag": True, "coaching_note": "fix me"},
     )
     saved = _read(audit_file)
@@ -338,7 +338,7 @@ def test_patch_emits_audit_event(tmp_path: Path) -> None:
 def test_stale_after_audit_edit(tmp_path: Path) -> None:
     client, audit_file = _bootstrap(tmp_path)
     # First persist auto classes.
-    client.post("/api/stages/1/coach/reclassify")
+    client.post("/api/shooters/me/stages/1/coach/reclassify")
 
     # Simulate an Audit-side timestamp move: shot 2 drifts from 0.30 -> 0.70 s gap.
     saved = _read(audit_file)
@@ -349,7 +349,7 @@ def test_stale_after_audit_edit(tmp_path: Path) -> None:
 
     # GET surfaces stale=True; the stored class is "split" but the rule
     # would now say "transition".
-    resp = client.get("/api/stages/1/coach")
+    resp = client.get("/api/shooters/me/stages/1/coach")
     assert resp.status_code == 200
     body = resp.json()
     moved = body["shots"][1]
@@ -357,7 +357,7 @@ def test_stale_after_audit_edit(tmp_path: Path) -> None:
     assert moved["stale"] is True
 
     # Reclassify clears stale.
-    resp = client.post("/api/stages/1/coach/reclassify")
+    resp = client.post("/api/shooters/me/stages/1/coach/reclassify")
     body = resp.json()
     moved = body["shots"][1]
     assert moved["interval_class"] == "transition"

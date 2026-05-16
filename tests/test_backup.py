@@ -207,7 +207,7 @@ def test_export_endpoint_streams_archive(tmp_path: Path) -> None:
     app = create_app(project_root=src, project_name="HTTP Match")
     client = TestClient(app)
 
-    resp = client.get("/api/project/export")
+    resp = client.get("/api/shooters/me/project/export")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/gzip"
     assert "match-backup-" in resp.headers.get(
@@ -236,7 +236,7 @@ def test_import_endpoint_extracts_and_optionally_binds(tmp_path: Path) -> None:
 
     with archive.open("rb") as fh:
         resp = client.post(
-            "/api/project/import",
+            "/api/me/projects/import",
             files={"archive": ("backup.tar.gz", fh, "application/gzip")},
             data={"dest_root": str(dest), "bind": "true"},
         )
@@ -263,7 +263,7 @@ def test_import_endpoint_refuses_overwrite(tmp_path: Path) -> None:
     # First import succeeds.
     with archive.open("rb") as fh:
         first = client.post(
-            "/api/project/import",
+            "/api/me/projects/import",
             files={"archive": ("backup.tar.gz", fh, "application/gzip")},
             data={"dest_root": str(dest)},
         )
@@ -272,7 +272,7 @@ def test_import_endpoint_refuses_overwrite(tmp_path: Path) -> None:
     # Second one without overwrite=true is rejected.
     with archive.open("rb") as fh:
         second = client.post(
-            "/api/project/import",
+            "/api/me/projects/import",
             files={"archive": ("backup.tar.gz", fh, "application/gzip")},
             data={"dest_root": str(dest)},
         )
