@@ -378,13 +378,11 @@ export function Compare() {
         {visibleShooters.length === 0 ? (
           <CompareEmptyState
             unfinished={orderedShooters.filter((s) => !s.video_path)}
-            onOpenInAudit={async (slug) => {
-              try {
-                await api.selectActiveShooter(slug);
-              } catch {
-                /* navigation still useful even if the bind blips */
-              }
-              navigate(`/audit/${stageNumber}`);
+            onOpenInAudit={(slug) => {
+              // #353 phase 1: target the slug-scoped audit URL directly.
+              // ShooterScopedRoute handles the rebind before mounting
+              // the page, so we don't need to await it here.
+              navigate(`/audit/${slug}/${stageNumber}`);
             }}
           />
         ) : (

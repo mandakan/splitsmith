@@ -28,7 +28,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -90,7 +90,13 @@ const MAX_UNDO = 50;
 const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
 
 export function Audit() {
-  const { stage: stageParam } = useParams();
+  // ShooterScopedRoute canonicalises every Audit entry to /audit/:slug/:stage
+  // (or /audit/:slug when no stage yet), so slug is always populated by the
+  // time we render. The slug also keys the component remount on switch.
+  const { slug: slugParam, stage: stageParam } = useParams<{
+    slug?: string;
+    stage?: string;
+  }>();
   const navigate = useNavigate();
 
   // Drop button / chip focus after a mouse click so the next Space press
@@ -100,7 +106,9 @@ export function Audit() {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
-  const [switchingShooter, setSwitchingShooter] = useState<string | null>(null);
+  // ShooterScopedRoute remounts this whole component on slug change so we
+  // no longer need explicit switching state -- the URL change is the
+  // single source of truth.
 
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
@@ -235,21 +243,12 @@ export function Audit() {
     };
   }, []);
 
-  // Switching the active shooter rebinds the server's project context.
-  // Audit's local state (project, peaks, audit JSON, markers, video refs,
-  // undo stack...) is deeply tied to the previous shooter, so the safe
-  // move is a full reload after the rebind -- piecewise reset would have
-  // to touch a dozen effects and the wrong order leaves a torn UI.
-  const switchShooter = useCallback(async (slug: string) => {
-    setSwitchingShooter(slug);
-    try {
-      await api.selectActiveShooter(slug);
-      window.location.reload();
-    } catch (err) {
-      setSwitchingShooter(null);
-      setProjectError(err instanceof ApiError ? err.detail : String(err));
-    }
-  }, []);
+  // Switching shooter is a route change now (#353 phase 1). The chip
+  // strip uses <Link to=/audit/:newSlug/:stage>; ShooterScopedRoute
+  // canonicalises the URL and remounts this component with key={slug},
+  // which resets every piece of local state (peaks, audit JSON, markers,
+  // video refs, undo stack) without us having to thread reset logic
+  // through every effect.
 
   const stagesWithPrimary = useMemo(() => {
     if (!project) return [];
@@ -294,8 +293,11 @@ export function Audit() {
   useEffect(() => {
     if (stageNumber != null) return;
     if (stagesWithPrimary.length === 0) return;
-    navigate(`/audit/${stagesWithPrimary[0].stage_number}`, { replace: true });
-  }, [stageNumber, stagesWithPrimary, navigate]);
+    const target = slugParam
+      ? `/audit/${slugParam}/${stagesWithPrimary[0].stage_number}`
+      : `/audit/${stagesWithPrimary[0].stage_number}`;
+    navigate(target, { replace: true });
+  }, [stageNumber, stagesWithPrimary, navigate, slugParam]);
 
   const stage = useMemo(() => {
     if (!project || stageNumber == null) return null;
@@ -967,7 +969,10 @@ export function Audit() {
         // jump immediately after the write returns. Silent saves (the
         // dirty-flush during stage switch) never advance.
         if (opts.advance && nextStageNumberRef.current != null) {
-          navigate(`/audit/${nextStageNumberRef.current}`);
+          const target = slugParam
+            ? `/audit/${slugParam}/${nextStageNumberRef.current}`
+            : `/audit/${nextStageNumberRef.current}`;
+          navigate(target);
         }
         return true;
       } catch (err) {
@@ -976,7 +981,7 @@ export function Audit() {
         return false;
       }
     },
-    [stageNumber, stage, peaks, primary, audit, markers, navigate],
+    [stageNumber, stage, peaks, primary, audit, markers, navigate, slugParam],
   );
 
   // Auto-clear "saved" toast after a short hold so it stops nagging.
@@ -995,9 +1000,10 @@ export function Audit() {
       if (isDirtyRef.current) {
         await performSave({ silent: true });
       }
-      navigate(`/audit/${n}`);
+      const target = slugParam ? `/audit/${slugParam}/${n}` : `/audit/${n}`;
+      navigate(target);
     },
-    [navigate, performSave, stageNumber],
+    [navigate, performSave, stageNumber, slugParam],
   );
 
   // ---- Global keyboard shortcuts -----------------------------------------
@@ -1349,9 +1355,13 @@ export function Audit() {
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    stageNumber != null && navigate(`/coach/${stageNumber}`)
-                  }
+                  onClick={() => {
+                    if (stageNumber == null) return;
+                    const target = slugParam
+                      ? `/coach/${slugParam}/${stageNumber}`
+                      : `/coach/${stageNumber}`;
+                    navigate(target);
+                  }}
                   className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
                 >
                   Coach
@@ -1362,13 +1372,11 @@ export function Audit() {
 
           {/* Shooter switcher: only renders for multi-shooter matches.
               See #350 for the operator-vs-active-shooter discussion --
-              ``is_active`` here is "currently bound", not "this is you". */}
+              ``is_active`` here is "currently bound", not "this is you".
+              Chip is a Link to /audit/:newSlug/:stage; ShooterScopedRoute
+              handles the rebind + remount (#353 phase 1). */}
           {shooters.length > 1 && (
-            <ShooterChipStrip
-              shooters={shooters}
-              switching={switchingShooter}
-              onSwitch={switchShooter}
-            />
+            <ShooterChipStrip shooters={shooters} stage={stageNumber} />
           )}
 
           {/* Toolbar: Save + Undo + status badges + filter chips + zoom */}
@@ -1746,12 +1754,10 @@ function Readout({ label, value }: { label: string; value: string }) {
 
 function ShooterChipStrip({
   shooters,
-  switching,
-  onSwitch,
+  stage,
 }: {
   shooters: ShooterListEntry[];
-  switching: string | null;
-  onSwitch: (slug: string) => void;
+  stage: number | null;
 }) {
   return (
     <div className="-mt-1 mb-3 inline-flex flex-wrap items-center gap-2">
@@ -1760,24 +1766,24 @@ function ShooterChipStrip({
       </span>
       {shooters.map((s) => {
         const isActive = s.is_active;
-        const isSwitching = switching === s.slug;
+        const target = stage != null ? `/audit/${s.slug}/${stage}` : `/audit/${s.slug}`;
         return (
-          <button
+          <Link
             key={s.slug}
-            type="button"
-            onClick={() => !isActive && !switching && onSwitch(s.slug)}
-            disabled={isActive || switching != null}
+            to={target}
+            replace
+            aria-current={isActive ? "page" : undefined}
             title={
               isActive
                 ? `${s.name} -- currently auditing`
                 : `Switch to ${s.name}`
             }
             className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors",
+              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors no-underline",
               isActive
                 ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
                 : "border-rule bg-surface-2 text-ink-2 hover:border-rule-strong hover:bg-surface-3",
-              isSwitching && "opacity-60",
+              isActive && "pointer-events-none",
             )}
           >
             <Avatar
@@ -1792,7 +1798,7 @@ function ShooterChipStrip({
             <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
               {pad2(s.stages_audited)}/{pad2(s.stages_total)}
             </span>
-          </button>
+          </Link>
         );
       })}
     </div>

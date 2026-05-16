@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
 import { ModeProvider } from "@/lib/mode";
+import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Audit } from "@/pages/Audit";
 import { BeepReview } from "@/pages/BeepReview";
 import { Coach } from "@/pages/Coach";
@@ -42,19 +43,69 @@ export function App() {
           <Route path="pick/merge" element={<MergeMatches />} />
           {/* Match-mode surfaces ride under the Shot Timer shell as
               their redesign issues ship. Ingest stays self-shelled
-              (focused-task page, no sidebar). */}
-          <Route path="ingest" element={<Ingest />} />
+              (focused-task page, no sidebar).
+
+              Shooter-scoped routes (#353 phase 1): /audit /export /ingest
+              /coach take an explicit /:slug so the URL alone identifies
+              which shooter is in focus. Legacy slug-less forms remain
+              live as backwards-compat shims; ShooterScopedRoute redirects
+              them to the canonical /<page>/<bound-slug>/[:stage] form.
+              The /:slug routes use the slug as the React Router key so a
+              switch (chip-strip click -> Link -> URL change) remounts the
+              page cleanly instead of forcing a window.location.reload.
+
+              /compare /shooters /beep-review stay slug-less: compare is
+              inherently multi-shooter, /shooters is the shooter manager
+              itself, beep-review is a cross-shooter queue. */}
+          <Route
+            path="ingest"
+            element={<ShooterScopedRoute page="ingest" element={<Ingest />} />}
+          />
+          <Route
+            path="ingest/:slugOrStage"
+            element={<ShooterScopedRoute page="ingest" element={<Ingest />} />}
+          />
           <Route element={<MatchShell />}>
             <Route index element={<Home />} />
-            <Route path="audit" element={<Audit />} />
-            <Route path="audit/:stage" element={<Audit />} />
+            <Route
+              path="audit"
+              element={<ShooterScopedRoute page="audit" element={<Audit />} />}
+            />
+            <Route
+              path="audit/:slugOrStage"
+              element={<ShooterScopedRoute page="audit" element={<Audit />} />}
+            />
+            <Route
+              path="audit/:slug/:stage"
+              element={<ShooterScopedRoute page="audit" element={<Audit />} />}
+            />
             <Route path="compare/:stage" element={<Compare />} />
-            <Route path="coach" element={<Coach />} />
-            <Route path="coach/:stage" element={<Coach />} />
+            <Route
+              path="coach"
+              element={<ShooterScopedRoute page="coach" element={<Coach />} />}
+            />
+            <Route
+              path="coach/:slugOrStage"
+              element={<ShooterScopedRoute page="coach" element={<Coach />} />}
+            />
+            <Route
+              path="coach/:slug/:stage"
+              element={<ShooterScopedRoute page="coach" element={<Coach />} />}
+            />
             <Route path="shooters" element={<Shooters />} />
             <Route path="beep-review" element={<BeepReview />} />
-            <Route path="export" element={<Export />} />
-            <Route path="export/:stage" element={<Export />} />
+            <Route
+              path="export"
+              element={<ShooterScopedRoute page="export" element={<Export />} />}
+            />
+            <Route
+              path="export/:slugOrStage"
+              element={<ShooterScopedRoute page="export" element={<Export />} />}
+            />
+            <Route
+              path="export/:slug/:stage"
+              element={<ShooterScopedRoute page="export" element={<Export />} />}
+            />
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
               retired Lab + fixture-editor surfaces sit under the

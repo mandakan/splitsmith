@@ -85,15 +85,21 @@ function splitBucket(s: number): { label: string; color: string } {
 }
 
 export function Coach() {
-  const { stage: stageParam } = useParams();
+  // Slug carried by ShooterScopedRoute (#353 phase 1) -- present whenever
+  // we render. Threaded into nav so jumps between stages / tabs keep the
+  // shooter in the URL.
+  const { slug: slugParam, stage: stageParam } = useParams<{
+    slug?: string;
+    stage?: string;
+  }>();
   if (stageParam) {
     const n = Number(stageParam);
     if (!Number.isFinite(n)) {
       return <div className="px-7 py-8 text-sm text-muted">Bad stage.</div>;
     }
-    return <CoachStage key={n} stage={n} />;
+    return <CoachStage key={`${slugParam ?? ""}-${n}`} stage={n} slug={slugParam} />;
   }
-  return <CoachMatch />;
+  return <CoachMatch slug={slugParam} />;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -113,8 +119,10 @@ interface PerStageAggregate {
   flagged_count: number;
 }
 
-function CoachMatch() {
+function CoachMatch({ slug }: { slug?: string }) {
   const navigate = useNavigate();
+  const stagePrefix = slug ? `/coach/${slug}` : "/coach";
+  const auditPrefix = slug ? `/audit/${slug}` : "/audit";
   const [project, setProject] = useState<MatchProject | null>(null);
   const [perStage, setPerStage] = useState<PerStageAggregate[]>([]);
   const [distributions, setDistributions] =
@@ -365,8 +373,8 @@ function CoachMatch() {
           <PerStageRow
             key={s.stage_number}
             row={s}
-            onOpen={() => s.audited && navigate(`/audit/${s.stage_number}`)}
-            onCoach={() => s.audited && navigate(`/coach/${s.stage_number}`)}
+            onOpen={() => s.audited && navigate(`${auditPrefix}/${s.stage_number}`)}
+            onCoach={() => s.audited && navigate(`${stagePrefix}/${s.stage_number}`)}
           />
         ))}
       </section>
@@ -378,7 +386,7 @@ function CoachMatch() {
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
         <RecommendationsCard distributions={distributions} />
-        <AnnotationsCard annotations={annotations} />
+        <AnnotationsCard annotations={annotations} stagePrefix={stagePrefix} />
       </div>
     </div>
   );
@@ -865,6 +873,7 @@ function buildRecommendations(
 
 function AnnotationsCard({
   annotations,
+  stagePrefix,
 }: {
   annotations: {
     stage_number: number;
@@ -875,6 +884,7 @@ function AnnotationsCard({
     note: string;
     flagged: boolean;
   }[];
+  stagePrefix: string;
 }) {
   const navigate = useNavigate();
   return (
@@ -895,7 +905,7 @@ function AnnotationsCard({
           <button
             key={i}
             type="button"
-            onClick={() => navigate(`/coach/${a.stage_number}`)}
+            onClick={() => navigate(`${stagePrefix}/${a.stage_number}`)}
             className="grid w-full grid-cols-[40px_1fr_24px] items-start gap-3 border-b border-rule px-5 py-3 text-left last:border-b-0 hover:bg-surface-2"
           >
             <span className="inline-flex size-7 items-center justify-center rounded-md border border-rule-strong bg-surface-3 font-mono text-[0.6875rem] font-bold tabular-nums text-ink-2">
@@ -936,8 +946,10 @@ function AnnotationsCard({
 /* Per-stage view                                                             */
 /* -------------------------------------------------------------------------- */
 
-function CoachStage({ stage }: { stage: number }) {
+function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const navigate = useNavigate();
+  const coachPrefix = slug ? `/coach/${slug}` : "/coach";
+  const auditPrefix = slug ? `/audit/${slug}` : "/audit";
   const [project, setProject] = useState<MatchProject | null>(null);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1118,7 +1130,7 @@ function CoachStage({ stage }: { stage: number }) {
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => prevStage != null && navigate(`/coach/${prevStage}`)}
+            onClick={() => prevStage != null && navigate(`${coachPrefix}/${prevStage}`)}
             disabled={prevStage == null}
             aria-label="Previous stage"
             className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
@@ -1127,7 +1139,7 @@ function CoachStage({ stage }: { stage: number }) {
           </button>
           <button
             type="button"
-            onClick={() => nextStage != null && navigate(`/coach/${nextStage}`)}
+            onClick={() => nextStage != null && navigate(`${coachPrefix}/${nextStage}`)}
             disabled={nextStage == null}
             aria-label="Next stage"
             className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
@@ -1146,7 +1158,7 @@ function CoachStage({ stage }: { stage: number }) {
         >
           <button
             type="button"
-            onClick={() => navigate(`/audit/${stage}`)}
+            onClick={() => navigate(`${auditPrefix}/${stage}`)}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Audit
