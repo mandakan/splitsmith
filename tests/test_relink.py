@@ -36,9 +36,7 @@ def _project_with_videos(root: Path, names: list[str]) -> MatchProject:
         link = raw / name
         link.symlink_to(original)
         videos.append(StageVideo(path=Path("raw") / name, role="primary"))
-    project.stages = [
-        StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=videos)
-    ]
+    project.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=videos)]
     project.save(root)
     return project
 

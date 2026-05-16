@@ -729,9 +729,7 @@ def run_eval(
             ensemble_config=ec,
         )
         cand_times = np.array([c.time for c in result.candidates], dtype=np.float64)
-        labels, matched, truth_times = _label_truth(
-            cand_times, audit.get("shots", []), cfg.tolerance_ms
-        )
+        labels, matched, truth_times = _label_truth(cand_times, audit.get("shots", []), cfg.tolerance_ms)
         reason_by_time, subclass_entries = _load_labels_from_audit(audit)
         candidates = [
             EvalCandidate(
@@ -821,9 +819,7 @@ def relabel_run(run: EvalRun) -> EvalRun:
             for c in fix.candidates
         ]
         metrics = _metrics(fix.truth_times, new_candidates)
-        new_fixtures.append(
-            fix.model_copy(update={"candidates": new_candidates, "metrics": metrics})
-        )
+        new_fixtures.append(fix.model_copy(update={"candidates": new_candidates, "metrics": metrics}))
 
     new_universe = run.universe.model_copy(update={"fixtures": new_fixtures})
     summary = _summary(new_fixtures)
@@ -844,9 +840,7 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
     (or the override). No model calls; sub-100 ms for the full set.
     """
     a_floor = (
-        config.voter_a_floor_override
-        if config.voter_a_floor_override is not None
-        else universe.voter_a_floor
+        config.voter_a_floor_override if config.voter_a_floor_override is not None else universe.voter_a_floor
     )
     b_thr = (
         config.voter_b_threshold_override

@@ -356,12 +356,8 @@ def test_export_stage_trims_secondaries_and_records_paths(
         beep_time_in_source=10.0,
         config=Config(),
         secondaries=[
-            exports_mod.SecondaryExport(
-                video_id="aaaaaa", source_path=cam_a_src, beep_time_in_source=11.0
-            ),
-            exports_mod.SecondaryExport(
-                video_id="bbbbbb", source_path=cam_b_src, beep_time_in_source=9.5
-            ),
+            exports_mod.SecondaryExport(video_id="aaaaaa", source_path=cam_a_src, beep_time_in_source=11.0),
+            exports_mod.SecondaryExport(video_id="bbbbbb", source_path=cam_b_src, beep_time_in_source=9.5),
         ],
     )
 

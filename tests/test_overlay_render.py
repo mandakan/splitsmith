@@ -502,9 +502,7 @@ def _write_audit(tmp_path: Path) -> Path:
     return audit
 
 
-def test_codec_hevc_alpha_emits_videotoolbox_cmd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_codec_hevc_alpha_emits_videotoolbox_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Asking for ``hevc-alpha`` produces a ``hevc_videotoolbox`` cmd
     with ``hvc1`` tagging and yuva420p (the only alpha pix-fmt the
     encoder accepts)."""
@@ -523,9 +521,7 @@ def test_codec_hevc_alpha_emits_videotoolbox_cmd(
     assert "prores_ks" not in cmd
 
 
-def test_codec_auto_falls_back_to_prores_off_darwin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_codec_auto_falls_back_to_prores_off_darwin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``auto`` resolves to ``prores-4444`` when the host isn't macOS,
     so non-Mac CI doesn't try to call ``hevc_videotoolbox``."""
     monkeypatch.setattr(overlay_render.platform, "system", lambda: "Linux")
@@ -582,9 +578,7 @@ def test_max_height_downscales_canvas_aspect_preserved(
     """Capping height shrinks the canvas (and therefore the bytes piped
     to ffmpeg) while keeping the aspect ratio."""
     # 1920x1080 source -> cap at 720 -> 1280x720.
-    probe = VideoMetadata(
-        width=1920, height=1080, duration_seconds=0.1, frame_rate_num=30, frame_rate_den=1
-    )
+    probe = VideoMetadata(width=1920, height=1080, duration_seconds=0.1, frame_rate_num=30, frame_rate_den=1)
     cmd, byte_count = _capture_render_cmd(
         monkeypatch,
         audit_path=_write_audit(tmp_path),
@@ -616,9 +610,7 @@ def test_max_height_above_source_is_noop(tmp_path: Path, monkeypatch: pytest.Mon
 
 def test_max_fps_caps_frame_count_and_rate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Capping fps drops the frame count and quotes the rate as a rational."""
-    probe = VideoMetadata(
-        width=320, height=180, duration_seconds=1.0, frame_rate_num=60, frame_rate_den=1
-    )
+    probe = VideoMetadata(width=320, height=180, duration_seconds=1.0, frame_rate_num=60, frame_rate_den=1)
     cmd, byte_count = _capture_render_cmd(
         monkeypatch,
         audit_path=_write_audit(tmp_path),

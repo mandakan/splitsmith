@@ -38,9 +38,7 @@ def _setup_project(tmp_path: Path, names: list[str]) -> tuple[Path, dict[str, st
         sv = StageVideo(path=Path("raw") / name, role="primary")
         videos.append(sv)
         ids[name] = sv.video_id
-    project.stages = [
-        StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=videos)
-    ]
+    project.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=videos)]
     project.save(root)
     return root, ids
 
@@ -70,7 +68,10 @@ def test_relink_scan_reports_unique_candidate(tmp_path: Path) -> None:
     share.mkdir(parents=True)
     (share / "a.mp4").write_bytes(b"")
     client = TestClient(create_app(project_root=root, project_name="x"))
-    resp = client.post("/api/shooters/me/videos/relink/scan", json={"search_root": str(tmp_path / "share")})
+    resp = client.post(
+        "/api/shooters/me/videos/relink/scan",
+        json={"search_root": str(tmp_path / "share")},
+    )
     assert resp.status_code == 200
     body = resp.json()
     [entry] = body["entries"]
@@ -88,9 +89,10 @@ def test_relink_scan_reports_ambiguous_candidates(tmp_path: Path) -> None:
     (share / "x" / "a.mp4").write_bytes(b"")
     (share / "y" / "a.mp4").write_bytes(b"")
     client = TestClient(create_app(project_root=root, project_name="x"))
-    [entry] = client.post("/api/shooters/me/videos/relink/scan", json={"search_root": str(share)}).json()[
-        "entries"
-    ]
+    [entry] = client.post(
+        "/api/shooters/me/videos/relink/scan",
+        json={"search_root": str(share)},
+    ).json()["entries"]
     assert entry["ambiguous"]
     assert entry["chosen_path"] is None
     assert len(entry["candidates"]) == 2
@@ -99,7 +101,10 @@ def test_relink_scan_reports_ambiguous_candidates(tmp_path: Path) -> None:
 def test_relink_scan_400_on_missing_root(tmp_path: Path) -> None:
     root, _ = _setup_project(tmp_path, ["a.mp4"])
     client = TestClient(create_app(project_root=root, project_name="x"))
-    resp = client.post("/api/shooters/me/videos/relink/scan", json={"search_root": str(tmp_path / "nope")})
+    resp = client.post(
+        "/api/shooters/me/videos/relink/scan",
+        json={"search_root": str(tmp_path / "nope")},
+    )
     assert resp.status_code == 400
 
 

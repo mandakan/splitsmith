@@ -161,9 +161,7 @@ def test_apply_handles_missing_files(tmp_path: Path) -> None:
     assert result.bytes_freed == 256
 
 
-def test_apply_records_failures_without_raising(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_apply_records_failures_without_raising(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project, root = _project(tmp_path)
     audio = project.audio_path(root)
     audio.mkdir(parents=True, exist_ok=True)

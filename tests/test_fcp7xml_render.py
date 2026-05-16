@@ -109,9 +109,7 @@ def _render(stages: list[StageComposition], tmp_path: Path) -> ET.Element:
         (24000, 1001, 24, True),
     ],
 )
-def test_fcp7_rate_conversion(
-    num: int, den: int, expected_timebase: int, expected_ntsc: bool
-) -> None:
+def test_fcp7_rate_conversion(num: int, den: int, expected_timebase: int, expected_ntsc: bool) -> None:
     timebase, ntsc = fcp7xml_render._fcp7_rate(num, den)
     assert timebase == expected_timebase
     assert ntsc is expected_ntsc
@@ -437,9 +435,7 @@ def test_pip_y_axis_flips_for_bottom_corners(tmp_path: Path) -> None:
         )
     ]
     root = _render(stages, tmp_path)
-    vert = root.find(
-        ".//track[2]/clipitem/filter/effect/parameter[parameterid='center']/value/vert"
-    )
+    vert = root.find(".//track[2]/clipitem/filter/effect/parameter[parameterid='center']/value/vert")
     assert vert is not None
     assert float(vert.text) > 0  # type: ignore[arg-type]
 

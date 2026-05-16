@@ -97,9 +97,7 @@ def _load_splitsmith() -> OverlayTheme:
         ):
             data = json.load(fh)
     except (FileNotFoundError, OSError) as exc:
-        raise OverlayThemeError(
-            "overlay_theme.json missing; run scripts/build_overlay_theme.py"
-        ) from exc
+        raise OverlayThemeError("overlay_theme.json missing; run scripts/build_overlay_theme.py") from exc
     except json.JSONDecodeError as exc:
         raise OverlayThemeError(f"overlay_theme.json is not valid JSON: {exc}") from exc
 

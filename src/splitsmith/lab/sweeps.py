@@ -31,9 +31,7 @@ class SweepRunSummary(BaseModel):
 
     run_id: str
     signals_build_id: str
-    swept_keys: list[str] = Field(
-        description="Names of parameters that actually varied across this run."
-    )
+    swept_keys: list[str] = Field(description="Names of parameters that actually varied across this run.")
     n_combos: int
     n_fixtures: int
     best_f1: float

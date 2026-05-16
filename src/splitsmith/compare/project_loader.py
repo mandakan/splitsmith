@@ -133,9 +133,7 @@ def _trim_path_for_shooter_stage(
 ) -> Path:
     """Same naming as :func:`trim_path_for_stage` but rooted at a shooter dir."""
     base = f"stage{stage_number}_{_slugify(stage_name)}"
-    exports = (
-        Path(shooter.exports_dir).expanduser() if shooter.exports_dir else shooter_root / "exports"
-    )
+    exports = Path(shooter.exports_dir).expanduser() if shooter.exports_dir else shooter_root / "exports"
     if not exports.is_absolute():
         exports = shooter_root / exports
     return exports / f"{base}_trimmed.mp4"

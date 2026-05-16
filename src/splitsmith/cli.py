@@ -293,9 +293,7 @@ def process(
 
     competitor_stages = _load_stage_json(stages)
     video_paths = sorted(_iter_video_files(videos))
-    match = video_match.match_videos_to_stages(
-        video_paths, competitor_stages.stages, config.video_match
-    )
+    match = video_match.match_videos_to_stages(video_paths, competitor_stages.stages, config.video_match)
 
     if match.unmatched_stages or match.ambiguous_stages or match.orphan_videos:
         _print_match_diagnostics(match)
@@ -596,9 +594,7 @@ def audit_prep(
         )
 
     fixture_json_data = {
-        "source": (
-            f"{video.name} stage {stage_number} '{stage_name}' " "(audio extracted at 48 kHz mono)"
-        ),
+        "source": (f"{video.name} stage {stage_number} '{stage_name}' " "(audio extracted at 48 kHz mono)"),
         # Structured absolute path to the source video. Lets the
         # Lab UI's Re-label button hop straight to /review with the
         # video bound, instead of needing the CLI ``--video`` flag.
@@ -693,15 +689,12 @@ def audit_apply(
     candidates: Path = typer.Option(
         ..., "--candidates", help="The audited candidates CSV (must contain audit_keep column)."
     ),
-    fixture: Path = typer.Option(
-        ..., "--fixture", help="The corresponding fixture JSON to update in place."
-    ),
+    fixture: Path = typer.Option(..., "--fixture", help="The corresponding fixture JSON to update in place."),
 ) -> None:
     """Merge audit_keep-marked rows from a candidates CSV into a fixture JSON's shots[]."""
     n = audit.apply_audit_to_fixture(candidates, fixture)
     console.print(
-        f"[green]Wrote {n} audited shots[/] to {fixture} "
-        f"(from {candidates.name}, audit_keep column)."
+        f"[green]Wrote {n} audited shots[/] to {fixture} " f"(from {candidates.name}, audit_keep column)."
     )
 
 
@@ -784,9 +777,7 @@ def clean(
 
     result = cleanup_mod.apply_cleanup(plan, root=project)
     freed_mb = result.bytes_freed / (1024 * 1024)
-    console.print(
-        f"\n[green]Deleted {len(result.deleted)} file(s)[/], freed [bold]{freed_mb:.1f} MB[/]."
-    )
+    console.print(f"\n[green]Deleted {len(result.deleted)} file(s)[/], freed [bold]{freed_mb:.1f} MB[/].")
     if result.failed:
         console.print(f"[yellow]{len(result.failed)} failed:[/]")
         for path, err in result.failed[:10]:
@@ -839,9 +830,7 @@ def overlay(
     audit_path: Path = typer.Option(
         ..., "--audit", help="Audited stage JSON (e.g. <project>/audit/stage<N>.json)."
     ),
-    video: Path = typer.Option(
-        ..., "--video", help="Trimmed video the overlay must mirror frame-for-frame."
-    ),
+    video: Path = typer.Option(..., "--video", help="Trimmed video the overlay must mirror frame-for-frame."),
     output: Path = typer.Option(..., "--output", help="Output overlay MOV (alpha)."),
     beep_offset: float = typer.Option(
         5.0, "--beep-offset", help="Seconds from start of trimmed video to the beep."
@@ -885,13 +874,9 @@ def overlay(
     mirrors the trimmed clip's resolution / fps / duration unless capped.
     """
     if codec not in overlay_render.OVERLAY_CODECS:
-        raise typer.BadParameter(
-            f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}"
-        )
+        raise typer.BadParameter(f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}")
     if theme not in overlay_theme.THEME_NAMES:
-        raise typer.BadParameter(
-            f"--theme must be one of {overlay_theme.THEME_NAMES}, got {theme!r}"
-        )
+        raise typer.BadParameter(f"--theme must be one of {overlay_theme.THEME_NAMES}, got {theme!r}")
     overlay_render.render_overlay(
         audit_path=audit_path,
         trimmed_video_path=video,
@@ -998,9 +983,7 @@ def _process_one(
     )
 
     if auto_detect_shots:
-        shots = shot_detect.detect_shots(
-            audio, sr, beep.time, stage.time_seconds, config.shot_detect
-        )
+        shots = shot_detect.detect_shots(audio, sr, beep.time, stage.time_seconds, config.shot_detect)
         shots, refine_diffs = _refine_shot_times(audio, sr, shots, beep.time, config)
         if refine_diffs:
             console.print(

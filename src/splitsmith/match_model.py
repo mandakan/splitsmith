@@ -257,9 +257,7 @@ class Match(BaseModel):
         collides with an existing slug.
         """
         if shooter.slug in self.shooters:
-            raise ValueError(
-                f"shooter slug {shooter.slug!r} already registered on match {self.name!r}"
-            )
+            raise ValueError(f"shooter slug {shooter.slug!r} already registered on match {self.name!r}")
         shooter_root = self.shooter_root(match_root, shooter.slug)
         shooter_root.mkdir(parents=True, exist_ok=True)
         for sub in SHOOTER_SUBDIRS:
@@ -306,9 +304,7 @@ def from_path(path: Path) -> tuple[str, Path]:
         return "match", path
     if is_legacy_project_folder(path):
         return "legacy", path
-    raise FileNotFoundError(
-        f"{path} has neither {MATCH_FILE} nor {PROJECT_FILE}; not a splitsmith project"
-    )
+    raise FileNotFoundError(f"{path} has neither {MATCH_FILE} nor {PROJECT_FILE}; not a splitsmith project")
 
 
 def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
@@ -387,7 +383,7 @@ def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
 # ---------------------------------------------------------------------------
 
 
-def _legacy_view_slug(project: "MatchProject") -> str:
+def _legacy_view_slug(project: MatchProject) -> str:
     """Deterministic opaque slug for the synthetic view over a legacy
     single-shooter project. The legacy disk layout has no
     ``shooters/<slug>/`` dir so the slug is purely a routing token; we
@@ -507,34 +503,24 @@ def plan_merge(
     projects: list[tuple[Path, MatchProject]] = []
     for src in inputs:
         if not is_legacy_project_folder(src):
-            raise MergeConflictError(
-                f"{src} is not a legacy single-shooter project (no {PROJECT_FILE})"
-            )
+            raise MergeConflictError(f"{src} is not a legacy single-shooter project (no {PROJECT_FILE})")
         projects.append((src, MatchProject.load(src)))
 
     # Validate identity.
     scoreboard_ids = {p.scoreboard_match_id for _, p in projects if p.scoreboard_match_id}
     if len(scoreboard_ids) > 1:
-        raise MergeConflictError(
-            f"inputs disagree on scoreboard_match_id: {sorted(scoreboard_ids)}"
-        )
+        raise MergeConflictError(f"inputs disagree on scoreboard_match_id: {sorted(scoreboard_ids)}")
     sb_id = next(iter(scoreboard_ids), None)
 
-    content_types = {
-        p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None
-    }
+    content_types = {p.scoreboard_content_type for _, p in projects if p.scoreboard_content_type is not None}
     if len(content_types) > 1:
-        raise MergeConflictError(
-            f"inputs disagree on scoreboard_content_type: {sorted(content_types)}"
-        )
+        raise MergeConflictError(f"inputs disagree on scoreboard_content_type: {sorted(content_types)}")
     sb_ct = next(iter(content_types), None)
 
     names = {p.name for _, p in projects}
     if name is None:
         if len(names) > 1:
-            raise MergeConflictError(
-                f"inputs have different names {sorted(names)}; pass --name explicitly"
-            )
+            raise MergeConflictError(f"inputs have different names {sorted(names)}; pass --name explicitly")
         name = next(iter(names))
 
     dates = {p.match_date for _, p in projects if p.match_date}
@@ -573,9 +559,7 @@ def plan_merge(
                 and candidate.stage_rounds is not None
                 and existing.stage_rounds != candidate.stage_rounds
             ):
-                raise MergeConflictError(
-                    f"stage {s.stage_number}: stage_rounds disagreement (in {src})"
-                )
+                raise MergeConflictError(f"stage {s.stage_number}: stage_rounds disagreement (in {src})")
             # Prefer the one that has stage_rounds populated.
             if existing.stage_rounds is None and candidate.stage_rounds is not None:
                 stages_by_number[s.stage_number] = candidate
@@ -629,9 +613,7 @@ def execute_merge(
     import shutil
 
     if (plan.output_root / MATCH_FILE).exists():
-        raise FileExistsError(
-            f"{plan.output_root} already contains {MATCH_FILE}; refusing to overwrite"
-        )
+        raise FileExistsError(f"{plan.output_root} already contains {MATCH_FILE}; refusing to overwrite")
 
     plan.output_root.mkdir(parents=True, exist_ok=True)
     for sub in MATCH_SUBDIRS:

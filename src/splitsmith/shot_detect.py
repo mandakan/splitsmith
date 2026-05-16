@@ -153,18 +153,13 @@ def detect_shots(
     if onset_frames.size == 0:
         return []
 
-    onset_times_segment = librosa.frames_to_time(
-        onset_frames, sr=sample_rate, hop_length=_HOP_LENGTH
-    )
+    onset_times_segment = librosa.frames_to_time(onset_frames, sr=sample_rate, hop_length=_HOP_LENGTH)
     onset_times_absolute = onset_times_segment + search_lo / sample_rate
 
     onset_strengths = onset_env[onset_frames]
     peak_win_samples = int(round(sample_rate * _PEAK_WIN_MS / 1000.0))
     onset_peaks = np.array(
-        [
-            _peak_amplitude(audio, float(t), sample_rate, peak_win_samples)
-            for t in onset_times_absolute
-        ],
+        [_peak_amplitude(audio, float(t), sample_rate, peak_win_samples) for t in onset_times_absolute],
         dtype=np.float32,
     )
 
@@ -232,9 +227,7 @@ def detect_shots(
 
     shots: list[Shot] = []
     prev_t = beep_time
-    for t_abs, strength, peak, hf_lf in zip(
-        kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True
-    ):
+    for t_abs, strength, peak, hf_lf in zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True):
         s_norm = strength / max_kept_strength if max_kept_strength > 0 else 0.0
         p_norm = peak / max_kept_peak if max_kept_peak > 0 else 0.0
         hf_norm = hf_lf / max_kept_hf_lf if max_kept_hf_lf > 0 else 0.0

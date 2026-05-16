@@ -347,9 +347,7 @@ def detect_beep(
     )
 
 
-def _rise_foot_leading_edge(
-    env: np.ndarray, run_start: int, run_end: int, noise_floor: float
-) -> int:
+def _rise_foot_leading_edge(env: np.ndarray, run_start: int, run_end: int, noise_floor: float) -> int:
     """Rise-foot of the tone: walk backward from the envelope peak (within the
     strong run) while the envelope stays at or above ``max(peak *
     RISE_FOOT_FRAC, noise_floor * RISE_FOOT_NOISE_FACTOR)``. The earliest

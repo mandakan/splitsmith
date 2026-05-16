@@ -113,15 +113,9 @@ def test_audited_filter_drops_zero_shot_fixtures(tmp_path: Path) -> None:
 
 
 def test_filters_by_mount_and_shooter(tmp_path: Path, monkeypatch) -> None:
-    _write_audit(
-        tmp_path, "stage-shots-m-2026-stage1-saaaa1111", mount="head", shooter_id="saaaa1111"
-    )
-    _write_audit(
-        tmp_path, "stage-shots-m-2026-stage2-saaaa1111", mount="hand", shooter_id="saaaa1111"
-    )
-    _write_audit(
-        tmp_path, "stage-shots-m-2026-stage3-sbbbb2222", mount="head", shooter_id="sbbbb2222"
-    )
+    _write_audit(tmp_path, "stage-shots-m-2026-stage1-saaaa1111", mount="head", shooter_id="saaaa1111")
+    _write_audit(tmp_path, "stage-shots-m-2026-stage2-saaaa1111", mount="hand", shooter_id="saaaa1111")
+    _write_audit(tmp_path, "stage-shots-m-2026-stage3-sbbbb2222", mount="head", shooter_id="sbbbb2222")
     monkeypatch.setattr(registry, "FIXTURES_DIR", tmp_path)
     registry.all_fixtures.cache_clear()
 

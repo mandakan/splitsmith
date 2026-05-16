@@ -189,9 +189,7 @@ def test_plan_stage_negative_effective_raises(tmp_path: Path) -> None:
 def test_build_stage_command_minimal(tmp_path: Path) -> None:
     stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
     comp, plan = _build_plan(stage)
-    cmd = mp4_render._build_stage_command(
-        plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
-    )
+    cmd = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4")
     # Sanity: the trim window matches the plan; the only video input is
     # the primary; no filter graph branch for cams or overlay.
     assert "-ss" in cmd and "-t" in cmd
@@ -213,9 +211,7 @@ def test_build_stage_command_pip_secondary(tmp_path: Path) -> None:
     )
     stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", secondaries=(sec,))
     comp, plan = _build_plan(stage)
-    cmd = mp4_render._build_stage_command(
-        plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
-    )
+    cmd = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4")
     fg = cmd[cmd.index("-filter_complex") + 1]
     # Cam scaled to 30% of 1920x1080 -> 576x324.
     assert "scale=576:324" in fg
@@ -230,9 +226,7 @@ def test_build_stage_command_overlay_emits_top_overlay(tmp_path: Path) -> None:
     overlay = _make_video(tmp_path, "overlay.mov")
     stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", overlay_path=overlay)
     comp, plan = _build_plan(stage)
-    cmd = mp4_render._build_stage_command(
-        plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
-    )
+    cmd = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4")
     fg = cmd[cmd.index("-filter_complex") + 1]
     # The overlay input lives at index 1 (no cams) and lands as the
     # final layer at (0,0) with full-frame coverage.
@@ -252,9 +246,7 @@ def test_build_stage_command_pip_full_frame_when_no_transform(tmp_path: Path) ->
     )
     stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", secondaries=(sec,))
     comp, plan = _build_plan(stage)
-    cmd = mp4_render._build_stage_command(
-        plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
-    )
+    cmd = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4")
     fg = cmd[cmd.index("-filter_complex") + 1]
     assert "overlay=x=0:y=0" in fg
     # No ``scale=`` filter when the cam runs at native size (default
@@ -326,9 +318,7 @@ def test_render_mp4_propagates_ffmpeg_error(tmp_path: Path) -> None:
     comp = composition.from_stage_compositions([stage], project_name="m")
 
     def fail(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
-        raise subprocess.CalledProcessError(
-            returncode=1, cmd=args[0], stderr="boom: invalid argument"
-        )
+        raise subprocess.CalledProcessError(returncode=1, cmd=args[0], stderr="boom: invalid argument")
 
     with pytest.raises(mp4_render.FFmpegError, match="boom"):
         mp4_render.render_mp4(
@@ -375,9 +365,7 @@ def test_default_encode_args_match_today(tmp_path: Path) -> None:
     consumers."""
     stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
     comp, plan = _build_plan(stage)
-    cmd = mp4_render._build_stage_command(
-        plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4"
-    )
+    cmd = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "stage.mp4")
     assert "-crf" in cmd and cmd[cmd.index("-crf") + 1] == "20"
     assert "-preset" in cmd and cmd[cmd.index("-preset") + 1] == "fast"
     assert cmd[cmd.index("-b:a") + 1] == "192k"

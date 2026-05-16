@@ -447,8 +447,7 @@ def _build_stage_filter_graph(
         end_time = align.cam_spine_start + align.cam_visible_seconds
         enable = f"between(t,{align.cam_spine_start:g},{end_time:g})"
         parts.append(
-            f"[{base_label}][{scaled_label}]"
-            f"overlay=x={x:g}:y={y:g}:enable='{enable}'[{out_label}]"
+            f"[{base_label}][{scaled_label}]" f"overlay=x={x:g}:y={y:g}:enable='{enable}'[{out_label}]"
         )
         base_label = out_label
 

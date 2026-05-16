@@ -226,9 +226,7 @@ def stage_distributions(
     classes: tuple[IntervalClass, ...] = DEFAULT_HISTOGRAM_CLASSES,
 ) -> StageDistributionsResponse:
     grouped, first_shot_s = _gaps_by_class_for_stage(shots, config)
-    distributions = [
-        _build_distribution(cls, [g for _, g in grouped.get(cls, [])]) for cls in classes
-    ]
+    distributions = [_build_distribution(cls, [g for _, g in grouped.get(cls, [])]) for cls in classes]
     return StageDistributionsResponse(
         stage_number=stage_number,
         stage_name=stage_name,

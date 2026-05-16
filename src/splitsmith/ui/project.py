@@ -976,8 +976,7 @@ class MatchProject(BaseModel):
         real = [s for s in self.stages if not s.placeholder]
         if real:
             raise ScoreboardImportConflictError(
-                "project already has scoreboard-backed stages; "
-                "clear them or import via overwrite first"
+                "project already has scoreboard-backed stages; " "clear them or import via overwrite first"
             )
         # Move any videos out of existing placeholders -- the new placeholder
         # layout might have a different stage count.
@@ -1370,13 +1369,9 @@ class MatchProject(BaseModel):
 
         # Detach from current location.
         if current_stage is None:
-            self.unassigned_videos = [
-                v for v in self.unassigned_videos if str(v.path) != str(video.path)
-            ]
+            self.unassigned_videos = [v for v in self.unassigned_videos if str(v.path) != str(video.path)]
         else:
-            current_stage.videos = [
-                v for v in current_stage.videos if str(v.path) != str(video.path)
-            ]
+            current_stage.videos = [v for v in current_stage.videos if str(v.path) != str(video.path)]
 
         # Reattach.
         if to_stage_number is None:
@@ -1517,13 +1512,9 @@ class MatchProject(BaseModel):
         stage_number = current_stage.stage_number if current_stage else None
 
         if current_stage is None:
-            self.unassigned_videos = [
-                v for v in self.unassigned_videos if str(v.path) != str(video.path)
-            ]
+            self.unassigned_videos = [v for v in self.unassigned_videos if str(v.path) != str(video.path)]
         else:
-            current_stage.videos = [
-                v for v in current_stage.videos if str(v.path) != str(video.path)
-            ]
+            current_stage.videos = [v for v in current_stage.videos if str(v.path) != str(video.path)]
 
         raw_link = self.resolve_video_path(root, video.path)
 

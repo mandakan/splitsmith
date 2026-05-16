@@ -206,8 +206,6 @@ def trim_video(
     except FileNotFoundError as exc:
         raise FFmpegError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:
-        raise FFmpegError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
+        raise FFmpegError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
 
     return TrimResult(output_path=output_path, start_time=start, end_time=end)

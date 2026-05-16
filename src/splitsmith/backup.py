@@ -138,9 +138,7 @@ def export_project(
                 skipped.append(SkippedDir(name=name, reason="missing"))
                 continue
             if not src_resolved.exists():
-                skipped.append(
-                    SkippedDir(name=name, reason="missing", resolved_path=str(src_resolved))
-                )
+                skipped.append(SkippedDir(name=name, reason="missing", resolved_path=str(src_resolved)))
                 continue
             if not _is_inside(src_resolved, project_root):
                 skipped.append(

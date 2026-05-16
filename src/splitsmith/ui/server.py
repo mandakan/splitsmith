@@ -285,9 +285,7 @@ def _ensure_ui_built() -> None:
 
     npm = shutil.which("npm")
     if npm is None:
-        logger.warning(
-            "ui_static/dist appears stale but npm is not on PATH; serving whatever is in dist/"
-        )
+        logger.warning("ui_static/dist appears stale but npm is not on PATH; serving whatever is in dist/")
         return
 
     logger.info(
@@ -1667,8 +1665,7 @@ def _bind_project_to_state(
                 detail={
                     "code": "match_empty",
                     "message": (
-                        f"Match {resolved} has no shooters yet. "
-                        "Add a shooter or recreate the match."
+                        f"Match {resolved} has no shooters yet. " "Add a shooter or recreate the match."
                     ),
                 },
             )
@@ -1750,9 +1747,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                 audited_total += sum(1 for s in shooter.stages if s.time_seconds > 0 or s.skipped)
                 shooter_names.append(shooter.name or slug)
             detail.shooter_names = shooter_names
-            detail.stages_audited = (
-                audited_total // max(len(match.shooters), 1) if match.shooters else 0
-            )
+            detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
             metadata_path = path / match_model.MATCH_FILE
         else:
             project = MatchProject.load(path)
@@ -1762,9 +1757,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.stage_count = len(project.stages)
             detail.match_date = project.match_date.isoformat() if project.match_date else None
             detail.manual = project.scoreboard_match_id is None
-            detail.stages_audited = sum(
-                1 for s in project.stages if s.time_seconds > 0 or s.skipped
-            )
+            detail.stages_audited = sum(1 for s in project.stages if s.time_seconds > 0 or s.skipped)
             if project.competitor_name:
                 detail.shooter_names = [project.competitor_name]
             metadata_path = path / "project.json"
@@ -1967,9 +1960,7 @@ def create_app(
             shutil.rmtree(tmp, ignore_errors=True)
 
         if bind:
-            _bind_project_to_state(
-                state, result.project_root, fallback_name=result.project_name
-            )
+            _bind_project_to_state(state, result.project_root, fallback_name=result.project_name)
 
         return JSONResponse(
             {
@@ -2091,11 +2082,7 @@ def create_app(
                     }
                 )
                 continue
-            if (
-                primary.beep_source == "auto"
-                and primary.beep_time is not None
-                and not primary.beep_reviewed
-            ):
+            if primary.beep_source == "auto" and primary.beep_time is not None and not primary.beep_reviewed:
                 # Either confidence is below the threshold OR the field
                 # predates layer 3a (None) -- both warrant review.
                 items.append(
@@ -2400,8 +2387,7 @@ def create_app(
                 detail={
                     "code": "competitor_not_in_match",
                     "message": (
-                        f"competitor {req.competitor_id} isn't in this match. "
-                        "Pick a different shooter."
+                        f"competitor {req.competitor_id} isn't in this match. " "Pick a different shooter."
                     ),
                 },
             )
@@ -2650,9 +2636,7 @@ def create_app(
                     video_id=entry.video_id,
                     name=entry.name,
                     link_path=str(entry.link_path),
-                    current_target=(
-                        str(entry.current_target) if entry.current_target is not None else None
-                    ),
+                    current_target=(str(entry.current_target) if entry.current_target is not None else None),
                     current_status=entry.current_status,
                     candidates=[str(p) for p in entry.candidates],
                     chosen_path=str(entry.chosen_path) if entry.chosen_path is not None else None,
@@ -2676,9 +2660,7 @@ def create_app(
         if not req.decisions:
             raise HTTPException(status_code=400, detail="decisions must be non-empty")
         project = state.shooter_project(slug)
-        infos = {
-            info.video_id: info for info in relink_mod.inspect_links(project, state.shooter_root(slug))
-        }
+        infos = {info.video_id: info for info in relink_mod.inspect_links(project, state.shooter_root(slug))}
         decisions: list[tuple[Path, Path]] = []
         id_for_link: dict[Path, str] = {}
         for video_id, target_str in req.decisions.items():
@@ -2887,12 +2869,8 @@ def create_app(
         primary = stage.primary()
         if primary is None or primary.beep_time is None:
             return None
-        primary_audio_path = audio_helpers.primary_audio_path(
-            root, stage.stage_number, project=proj
-        )
-        secondary_audio_path = audio_helpers.video_audio_path(
-            root, stage.stage_number, video, project=proj
-        )
+        primary_audio_path = audio_helpers.primary_audio_path(root, stage.stage_number, project=proj)
+        secondary_audio_path = audio_helpers.video_audio_path(root, stage.stage_number, video, project=proj)
         if not primary_audio_path.exists() or not secondary_audio_path.exists():
             # Either side missing means the user hasn't run beep-detect on
             # the primary yet, or the secondary's own audio extract failed
@@ -2920,9 +2898,7 @@ def create_app(
             return None
         return result
 
-    def _run_detect_beep_for_video(
-        handle: JobHandle, slug: str, stage_number: int, video_id: str
-    ) -> None:
+    def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker: detect ``video``'s beep, then auto-chain trim.
 
         Generic over role:
@@ -2992,9 +2968,7 @@ def create_app(
             if aligned is not None and aligned.confidence >= _align_confidence_floor:
                 handle.update(
                     progress=0.55,
-                    message=(
-                        f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"
-                    ),
+                    message=(f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"),
                 )
                 video.beep_time = aligned.secondary_beep_time
                 video.beep_source = "aligned"
@@ -3146,9 +3120,7 @@ def create_app(
                 )
         handle.update(progress=1.0, message="Done")
 
-    def _submit_detect_beep(
-        slug: str, stage_number: int, video: StageVideo
-    ) -> JSONResponse:
+    def _submit_detect_beep(slug: str, stage_number: int, video: StageVideo) -> JSONResponse:
         """Validate + dedupe + queue a detect-beep job for ``video``.
 
         Shared by the per-video endpoint and the primary-only legacy
@@ -3219,8 +3191,7 @@ def create_app(
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/detect-beep")
     def detect_beep_for_video(
-        slug: str,
-        stage_number: int, video_id: str, force: bool = False
+        slug: str, stage_number: int, video_id: str, force: bool = False
     ) -> JSONResponse:
         """Submit a beep-detection job for ``video_id`` on ``stage_number``.
 
@@ -3329,16 +3300,14 @@ def create_app(
                     "scoreboard or set the stage time before trimming"
                 ),
             )
-        existing = state.jobs.find_active(
-            kind="trim", stage_number=stage_number, video_id=video.video_id
-        )
+        existing = state.jobs.find_active(kind="trim", stage_number=stage_number, video_id=video.video_id)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = state.jobs.submit(
             kind="trim",
             stage_number=stage_number,
             video_id=video.video_id,
-            fn=lambda h, sl=slug, n=stage_number, vid=video.video_id: _run_trim_for_video(h, sl, n, vid),
+            fn=lambda h, sl=slug, n=stage_number, vid=video.video_id: (_run_trim_for_video(h, sl, n, vid)),
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -3348,9 +3317,7 @@ def create_app(
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         return _submit_trim(slug, stage_number, stage, video, project)
 
-    def _run_trim_for_video(
-        handle: JobHandle, slug: str, stage_number: int, video_id: str
-    ) -> None:
+    def _run_trim_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker for the audit-mode trim of a specific video.
 
         Auto-chains shot detection only when the trimmed video is the
@@ -3474,9 +3441,7 @@ def create_app(
             raise RuntimeError(f"stage {stage_number} has no primary mid-flight")
         _run_trim_for_video(handle, slug, stage_number, primary.video_id)
 
-    def _run_shot_detect(
-        handle: JobHandle, slug: str, stage_number: int, reset: bool = False
-    ) -> None:
+    def _run_shot_detect(handle: JobHandle, slug: str, stage_number: int, reset: bool = False) -> None:
         """Worker that runs the 4-voter ensemble on the stage's audit clip.
 
         Reads the trimmed clip's WAV (extracting it on demand if needed),
@@ -3582,9 +3547,7 @@ def create_app(
         # detection after a scoreboard refresh should pick up the new
         # round count without manual edits.
         if stg.stage_rounds is not None:
-            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(
-                mode="json", exclude_none=True
-            )
+            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
         expected_rounds: int | None = None
         sr_block = existing_json.get("stage_rounds")
         if isinstance(sr_block, dict):
@@ -3922,9 +3885,7 @@ def create_app(
         if video.beep_time is None or stage.time_seconds <= 0:
             return
         if (
-            state.jobs.find_active(
-                kind="trim", stage_number=stage.stage_number, video_id=video.video_id
-            )
+            state.jobs.find_active(kind="trim", stage_number=stage.stage_number, video_id=video.video_id)
             is not None
         ):
             return
@@ -3932,7 +3893,9 @@ def create_app(
             kind="trim",
             stage_number=stage.stage_number,
             video_id=video.video_id,
-            fn=lambda h, sl=slug, n=stage.stage_number, vid=video.video_id: _run_trim_for_video(h, sl, n, vid),
+            fn=lambda h, sl=slug, n=stage.stage_number, vid=video.video_id: (
+                _run_trim_for_video(h, sl, n, vid)
+            ),
         )
 
     def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
@@ -3982,8 +3945,7 @@ def create_app(
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep")
     def override_beep_for_video(
-        slug: str,
-        stage_number: int, video_id: str, req: BeepOverrideRequest
+        slug: str, stage_number: int, video_id: str, req: BeepOverrideRequest
     ) -> JSONResponse:
         """Manually set or clear ``video``'s beep timestamp.
 
@@ -4057,7 +4019,9 @@ def create_app(
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/snap")
-    def snap_beep_for_video(slug: str, stage_number: int, video_id: str, req: BeepSnapRequest) -> JSONResponse:
+    def snap_beep_for_video(
+        slug: str, stage_number: int, video_id: str, req: BeepSnapRequest
+    ) -> JSONResponse:
         """Refine a user-placed beep marker by snapping it to the strongest
         tone in a tight window around the hint.
 
@@ -4150,8 +4114,7 @@ def create_app(
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/select")
     def select_beep_candidate_for_video(
-        slug: str,
-        stage_number: int, video_id: str, req: BeepSelectRequest
+        slug: str, stage_number: int, video_id: str, req: BeepSelectRequest
     ) -> JSONResponse:
         """Promote one of ``video``'s ranked candidates as authoritative."""
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
@@ -4164,7 +4127,9 @@ def create_app(
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
-    def set_beep_reviewed(slug: str, stage_number: int, video_id: str, req: BeepReviewRequest) -> JSONResponse:
+    def set_beep_reviewed(
+        slug: str, stage_number: int, video_id: str, req: BeepReviewRequest
+    ) -> JSONResponse:
         """Flip ``video.beep_reviewed`` (issue #71).
 
         Setting True requires ``beep_time`` to be set; setting False is
@@ -4204,7 +4169,9 @@ def create_app(
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.patch("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/camera-mount")
-    def set_camera_mount(slug: str, stage_number: int, video_id: str, req: CameraMountRequest) -> JSONResponse:
+    def set_camera_mount(
+        slug: str, stage_number: int, video_id: str, req: CameraMountRequest
+    ) -> JSONResponse:
         """Override the heuristic ``camera_mount`` (issue #143).
 
         Validated against the fixture-schema ``CameraMount`` enum so
@@ -4231,7 +4198,9 @@ def create_app(
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.patch("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/camera-model")
-    def set_camera_model(slug: str, stage_number: int, video_id: str, req: CameraModelRequest) -> JSONResponse:
+    def set_camera_model(
+        slug: str, stage_number: int, video_id: str, req: CameraModelRequest
+    ) -> JSONResponse:
         """Override the ffprobed camera make + model (#303-followup).
 
         Used when ffprobe couldn't read the QuickTime tag (e.g. Meta
@@ -4281,9 +4250,7 @@ def create_app(
                 {
                     "key": key,
                     "make": meta.get("make", key.split(" ", 1)[0].title()),
-                    "model": meta.get(
-                        "model", key.split(" ", 1)[1].title() if " " in key else key.title()
-                    ),
+                    "model": meta.get("model", key.split(" ", 1)[1].title() if " " in key else key.title()),
                     "amp_floor": float(floor),
                 }
             )
@@ -4417,8 +4384,7 @@ def create_app(
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-preview")
     def video_beep_preview(
-        slug: str,
-        stage_number: int, video_id: str, t: float | None = None
+        slug: str, stage_number: int, video_id: str, t: float | None = None
     ) -> FileResponse:
         """Serve a ~1 s MP4 around ``video``'s beep (or override ``t``)."""
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
@@ -4622,9 +4588,7 @@ def create_app(
 
         prim = stg.primary()
         beep_time = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
-        shots = export_helpers.audit_shots_to_engine_shots(
-            audit_payload, beep_time_in_source=beep_time
-        )
+        shots = export_helpers.audit_shots_to_engine_shots(audit_payload, beep_time_in_source=beep_time)
         anomalies = report.detect_anomalies_structured(shots, beep_time, stg.time_seconds)
         return JSONResponse({"anomalies": [a.model_dump() for a in anomalies]})
 
@@ -4857,11 +4821,7 @@ def create_app(
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
         target = next(
-            (
-                s
-                for s in shots
-                if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number
-            ),
+            (s for s in shots if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number),
             None,
         )
         if target is None:
@@ -5102,9 +5062,7 @@ def create_app(
             # Per-video short-GOP trim is keyed per role: each angle has
             # its own scrub clip cut around its own beep, so dragging
             # the audit playhead doesn't stall on a 4K MOV from a phone.
-            trimmed = audio_helpers.trimmed_video_path(
-                root, stage.stage_number, video, project=project
-            )
+            trimmed = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
         if served_path is None:
@@ -5118,9 +5076,7 @@ def create_app(
             # the SPA's "reconnect external storage" surface is uniform.
             _ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
-        media_type = (
-            "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
-        )
+        media_type = "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(served_path, media_type=media_type, filename=served_path.name)
 
     @app.get("/api/shooters/{slug}/fs/list", response_model=FsListing)
@@ -5179,7 +5135,7 @@ def create_app(
                     if is_video:
                         duration, thumbnail_url = _video_metadata_for(
                             child,
-            slug=slug,
+                            slug=slug,
                             probes_dir=probes_dir,
                             thumbs_dir=thumbs_dir,
                             allow_new=probe and time.monotonic() < budget_deadline,
@@ -5538,8 +5494,7 @@ def create_app(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"stage {stage_number} is a placeholder; import a real "
-                    "scoreboard before exporting"
+                    f"stage {stage_number} is a placeholder; import a real " "scoreboard before exporting"
                 ),
             )
         # Source-reachability surfaces as a structured 424 so the SPA
@@ -5826,8 +5781,7 @@ def create_app(
                     if sv.role == "secondary" and sv.beep_time is not None:
                         wanted_secondary_ids.add(sv.video_id)
             secondary_trims_present = all(
-                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists()
-                for vid in wanted_secondary_ids
+                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
             )
             # Treat any non-default overlay format option as "force re-render"
             # so the dialog's codec / max-height / max-fps choices actually
@@ -5843,15 +5797,11 @@ def create_app(
                 not overlay_target.exists() or overlay_format_overridden
             )
 
-            needs_per_stage = (
-                not trimmed_path.exists() or not secondary_trims_present or overlay_missing
-            )
+            needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
             if needs_per_stage:
                 handle.update(
                     progress=0.02 + idx * per_stage_share,
-                    message=(
-                        f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."
-                    ),
+                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
                 )
                 # Build the secondaries list for the per-stage exporter --
                 # mirrors the single-stage endpoint's logic.
@@ -5905,10 +5855,7 @@ def create_app(
             else:
                 handle.update(
                     progress=0.02 + idx * per_stage_share,
-                    message=(
-                        f"Stage {stage_number} ({idx + 1} of {n}): "
-                        "trim already present; skipping"
-                    ),
+                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"),
                 )
 
         handle.check_cancel()
@@ -5993,10 +5940,7 @@ def create_app(
         anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
         handle.update(
             progress=1.0,
-            message=(
-                f"Done: {result.stage_count} stages, "
-                f"{result.duration_seconds:.1f}s{anom_suffix}"
-            ),
+            message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
     @app.post("/api/files/reveal")
@@ -6031,9 +5975,7 @@ def create_app(
                 parent = resolved.parent if resolved.is_file() else resolved
                 subprocess.run(["xdg-open", str(parent)], check=False)
         except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"failed to launch file manager: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
         return JSONResponse({"revealed": str(resolved)})
 
     @app.post("/api/shooters/{slug}/videos/reveal")
@@ -6067,9 +6009,7 @@ def create_app(
                 parent = resolved.parent if resolved.is_file() else resolved
                 subprocess.run(["xdg-open", str(parent)], check=False)
         except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"failed to launch file manager: {exc}"
-            ) from exc
+            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
         return JSONResponse({"revealed": str(resolved)})
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/skip")
@@ -6210,10 +6150,7 @@ def create_app(
         shooter = match_model.Shooter(
             slug=shooter_slug,
             name=req.primary_shooter.name,
-            stages=[
-                match_model.ShooterStageData(stage_number=draft.stage_number)
-                for draft in req.stages
-            ],
+            stages=[match_model.ShooterStageData(stage_number=draft.stage_number) for draft in req.stages],
         )
         try:
             match.add_shooter(target, shooter)
@@ -6341,9 +6278,7 @@ def create_app(
                     continue
             except Exception:  # noqa: BLE001 -- defensive
                 continue
-            cache = audio_helpers.trimmed_video_path(
-                shooter_root, s.stage_number, prim, project=legacy
-            )
+            cache = audio_helpers.trimmed_video_path(shooter_root, s.stage_number, prim, project=legacy)
             if not cache.exists():
                 stages_missing_trim += 1
         # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
@@ -6412,9 +6347,7 @@ def create_app(
                 MergePlanStage(
                     stage_number=s.stage_number,
                     stage_name=s.stage_name,
-                    expected_rounds=(
-                        s.stage_rounds.expected if s.stage_rounds is not None else None
-                    ),
+                    expected_rounds=(s.stage_rounds.expected if s.stage_rounds is not None else None),
                     placeholder=s.placeholder,
                 )
                 for s in plan.stages
@@ -6542,9 +6475,7 @@ def create_app(
         shooter = match_model.Shooter(
             slug=slug,
             name=req.name,
-            stages=[
-                match_model.ShooterStageData(stage_number=s.stage_number) for s in match.stages
-            ],
+            stages=[match_model.ShooterStageData(stage_number=s.stage_number) for s in match.stages],
         )
         try:
             match.add_shooter(match_root, shooter)
@@ -6632,9 +6563,7 @@ def create_app(
             if not source.exists():
                 skipped.append({"stage": stage.stage_number, "reason": "source_missing"})
                 continue
-            cache = audio_helpers.trimmed_video_path(
-                shooter_root, stage.stage_number, primary, project=proj
-            )
+            cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, primary, project=proj)
             if cache.exists():
                 skipped.append({"stage": stage.stage_number, "reason": "already_cached"})
                 continue
@@ -6703,9 +6632,7 @@ def create_app(
                 None,
             )
             primary = (
-                next((v for v in stage.videos if v.role == "primary"), None)
-                if stage is not None
-                else None
+                next((v for v in stage.videos if v.role == "primary"), None) if stage is not None else None
             )
 
             beep_offset: float | None = None
@@ -6723,25 +6650,19 @@ def create_app(
                 stage_name = stage_def.stage_name
                 base = f"stage{stage_number}_{match_export_helpers._slugify(stage_name)}"
                 exports = (
-                    Path(legacy.exports_dir).expanduser()
-                    if legacy.exports_dir
-                    else shooter_root / "exports"
+                    Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
                 )
                 if not exports.is_absolute():
                     exports = shooter_root / exports
                 trimmed = (
-                    Path(legacy.trimmed_dir).expanduser()
-                    if legacy.trimmed_dir
-                    else shooter_root / "trimmed"
+                    Path(legacy.trimmed_dir).expanduser() if legacy.trimmed_dir else shooter_root / "trimmed"
                 )
                 if not trimmed.is_absolute():
                     trimmed = shooter_root / trimmed
                 lossless = exports / f"{base}_trimmed.mp4"
                 audit_cache = trimmed / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
                 resolved_trim = (
-                    lossless
-                    if lossless.exists()
-                    else (audit_cache if audit_cache.exists() else None)
+                    lossless if lossless.exists() else (audit_cache if audit_cache.exists() else None)
                 )
                 if resolved_trim is not None:
                     video_path = str(resolved_trim)
@@ -6771,9 +6692,7 @@ def create_app(
                                 CompareShotPoint(
                                     shot_number=int(shot.get("shot_number", 0)),
                                     time_after_beep=float(t) - float(audit_beep),
-                                    source=(
-                                        "manual" if shot.get("source") == "manual" else "detected"
-                                    ),
+                                    source=("manual" if shot.get("source") == "manual" else "detected"),
                                 )
                             )
 
@@ -7238,16 +7157,12 @@ def create_app(
             if stage_time_seconds is None:
                 raise HTTPException(
                     status_code=409,
-                    detail=(
-                        f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."
-                    ),
+                    detail=(f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."),
                 )
             source_video_path = project.resolve_video_path(state.shooter_root(slug), primary.path)
             trim_start = max(0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds))
             trim_end = (
-                float(primary.beep_time)
-                + float(stage_time_seconds)
-                + float(project.trim_post_buffer_seconds)
+                float(primary.beep_time) + float(stage_time_seconds) + float(project.trim_post_buffer_seconds)
             )
             # Camera make/model (#303): use the values cached on the
             # StageVideo at register time -- those came from ffprobe and
@@ -7545,8 +7460,7 @@ def create_app(
                 fixtures_root.mkdir(parents=True, exist_ok=True)
                 tmp = target_json.with_suffix(".json.tmp")
                 tmp.write_text(
-                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
                 tmp.replace(target_json)
@@ -7556,8 +7470,7 @@ def create_app(
 
                 report_path = fixtures_root / f"{body.slug}-promotion-report.json"
                 report_path.write_text(
-                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
 
@@ -7595,9 +7508,7 @@ def create_app(
             try:
                 data = __import__("json").loads(report_path.read_text(encoding="utf-8"))
             except Exception as exc:
-                raise HTTPException(
-                    status_code=500, detail=f"failed to read report: {exc}"
-                ) from exc
+                raise HTTPException(status_code=500, detail=f"failed to read report: {exc}") from exc
             return JSONResponse(data)
 
         @app.delete("/api/lab/fixture")
@@ -7617,9 +7528,7 @@ def create_app(
             try:
                 payload = __import__("json").loads(json_path.read_text(encoding="utf-8"))
             except Exception as exc:
-                raise HTTPException(
-                    status_code=500, detail=f"failed to read fixture: {exc}"
-                ) from exc
+                raise HTTPException(status_code=500, detail=f"failed to read fixture: {exc}") from exc
             anchor_block = payload.get("anchor")
             if not isinstance(anchor_block, dict) or not anchor_block.get("fixture_slug"):
                 raise HTTPException(
@@ -7660,6 +7569,7 @@ def create_app(
 
         @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/promote-secondary")
         def promote_secondary(
+            slug: str,
             stage_number: int,
             video_id: str,
             body: PromoteSecondaryBody = Body(...),  # noqa: B008
@@ -7690,15 +7600,11 @@ def create_app(
             if project.selected_shooter_id is None:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        "this project has no SSI shooter pinned; "
-                        "cannot resolve anchor fixture slug."
-                    ),
+                    detail=("this project has no SSI shooter pinned; " "cannot resolve anchor fixture slug."),
                 )
             anchor_token = lab_module.shooter_token(project.selected_shooter_id)
             primary_slug = (
-                f"stage-shots-{export_helpers._slugify(project.name)}-stage{stage_number}"
-                f"-{anchor_token}"
+                f"stage-shots-{export_helpers._slugify(project.name)}-stage{stage_number}" f"-{anchor_token}"
             )
             fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
             anchor_path = fixtures_root / f"{primary_slug}.json"
@@ -7728,24 +7634,22 @@ def create_app(
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
             probe = probe_camera_metadata(source)
-            camera_id = (
-                body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}"
-            ).strip()
+            camera_id = (body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}").strip()
             if not camera_id:
                 raise HTTPException(
                     status_code=400,
                     detail="camera_id could not be derived; please supply one",
                 )
 
-            slug = (body.slug or f"{primary_slug}-{camera_id}").strip()
-            target_json = fixtures_root / f"{slug}.json"
+            # ``slug`` (URL path param) names the shooter; ``fixture_slug``
+            # below names the derived fixture being written. Same string
+            # convention but different identities -- don't rebind ``slug``.
+            fixture_slug = (body.slug or f"{primary_slug}-{camera_id}").strip()
+            target_json = fixtures_root / f"{fixture_slug}.json"
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=(
-                        f"fixture already exists: {target_json.name}"
-                        " (set overwrite=true to replace)"
-                    ),
+                    detail=(f"fixture already exists: {target_json.name}" " (set overwrite=true to replace)"),
                 )
 
             try:
@@ -7791,7 +7695,7 @@ def create_app(
                         secondary_sr=secondary_sr,
                         secondary_source_desc=secondary_source_desc,
                         camera=camera,
-                        slug=slug,
+                        slug=fixture_slug,
                         snap_window_ms=body.snap_window_ms,
                         min_spacing_ms=body.min_spacing_ms,
                         secondary_beep_time=known_secondary_beep,
@@ -7813,9 +7717,7 @@ def create_app(
                 fixture_data = dict(result.fixture_data)
                 secondary_beep = float(fixture_data.get("beep_time") or 0.0)
                 shot_times = [
-                    float(s["time"])
-                    for s in fixture_data.get("shots", [])
-                    if s.get("time") is not None
+                    float(s["time"]) for s in fixture_data.get("shots", []) if s.get("time") is not None
                 ]
                 trim_buffer = 5.0
                 trim_tail = 5.0
@@ -7825,7 +7727,7 @@ def create_app(
                 clip_end = max(clip_end, clip_end_floor)
 
                 fixtures_root.mkdir(parents=True, exist_ok=True)
-                target_wav = fixtures_root / f"{slug}.wav"
+                target_wav = fixtures_root / f"{fixture_slug}.wav"
                 handle.update(progress=0.88, message="trimming clip audio...")
                 _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
 
@@ -7862,10 +7764,9 @@ def create_app(
                 )
                 tmp.replace(target_json)
 
-                report_path = fixtures_root / f"{slug}-promotion-report.json"
+                report_path = fixtures_root / f"{fixture_slug}-promotion-report.json"
                 report_path.write_text(
-                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True)
-                    + "\n",
+                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
 
@@ -7883,7 +7784,7 @@ def create_app(
                     "job": job.model_dump(mode="json"),
                     "fixture_path": str(target_json),
                     "anchor_path": str(anchor_path),
-                    "slug": slug,
+                    "slug": fixture_slug,
                     "camera_id": camera_id,
                     "anchor_slug": primary_slug,
                 }
@@ -7897,9 +7798,7 @@ def create_app(
         # in-project primary required, any video on the stage works.
         # ------------------------------------------------------------------
 
-        @app.post(
-            "/api/lab/projects/{slug}/{stage_number}/videos/{video_id}/promote-against-fixture"
-        )
+        @app.post("/api/lab/projects/{slug}/{stage_number}/videos/{video_id}/promote-against-fixture")
         def lab_promote_against_fixture(
             slug: str,
             stage_number: int,
@@ -7950,9 +7849,7 @@ def create_app(
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
             probe = probe_camera_metadata(source)
-            camera_id = (
-                body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}"
-            ).strip()
+            camera_id = (body.camera_id or probe.suggested_id or f"cam-{video.video_id[:8]}").strip()
             if not camera_id:
                 raise HTTPException(
                     status_code=400,
@@ -7964,10 +7861,7 @@ def create_app(
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=(
-                        f"fixture already exists: {target_json.name}"
-                        " (set overwrite=true to replace)"
-                    ),
+                    detail=(f"fixture already exists: {target_json.name}" " (set overwrite=true to replace)"),
                 )
 
             try:
@@ -8025,9 +7919,7 @@ def create_app(
                 fixture_data = dict(result.fixture_data)
                 secondary_beep = float(fixture_data.get("beep_time") or 0.0)
                 shot_times = [
-                    float(s["time"])
-                    for s in fixture_data.get("shots", [])
-                    if s.get("time") is not None
+                    float(s["time"]) for s in fixture_data.get("shots", []) if s.get("time") is not None
                 ]
                 trim_buffer = 5.0
                 trim_tail = 5.0
@@ -8171,11 +8063,7 @@ def create_app(
     def _shooter_from_slug(slug: str) -> str | None:
         # Shooter is encoded as ``s<8-hex-chars>`` (the slug hash).
         for tok in slug.split("-"):
-            if (
-                len(tok) == 9
-                and tok.startswith("s")
-                and all(c in "0123456789abcdef" for c in tok[1:])
-            ):
+            if len(tok) == 9 and tok.startswith("s") and all(c in "0123456789abcdef" for c in tok[1:]):
                 return tok
         return None
 
@@ -8769,8 +8657,7 @@ def _print_active_jobs(app: FastAPI) -> None:
         print("Shutting down (no background jobs running).", file=sys.stderr, flush=True)
         return
     print(
-        f"Shutting down -- waiting for {len(active)} background job"
-        f"{'' if len(active) == 1 else 's'}:",
+        f"Shutting down -- waiting for {len(active)} background job" f"{'' if len(active) == 1 else 's'}:",
         file=sys.stderr,
         flush=True,
     )

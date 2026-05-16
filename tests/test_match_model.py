@@ -300,9 +300,7 @@ def test_plan_merge_rejects_stage_name_disagreement(tmp_path: Path):
 
 def test_plan_merge_tolerates_placeholder_loss(tmp_path: Path):
     # One project has a placeholder stage; the other has the real name.
-    proj_a = _make_legacy(
-        tmp_path / "a", name="X", competitor="A", stage_names=["Stage 1", "S2", "S3"]
-    )
+    proj_a = _make_legacy(tmp_path / "a", name="X", competitor="A", stage_names=["Stage 1", "S2", "S3"])
     proj_a.stages[0].placeholder = True
     proj_a.save(tmp_path / "a")
     _make_legacy(tmp_path / "b", name="X", competitor="B", stage_names=["Egg Grab", "S2", "S3"])
@@ -404,9 +402,7 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
     # User data carried across.
     raw_file = out / SHOOTERS_DIR / anton_slug / "raw" / "fake.mp4"
     assert raw_file.read_bytes() == b"raw-anton"
-    assert (
-        out / SHOOTERS_DIR / anton_slug / "audit" / "stage1.json"
-    ).read_text() == '{"shots": []}'
+    assert (out / SHOOTERS_DIR / anton_slug / "audit" / "stage1.json").read_text() == '{"shots": []}'
 
     # Sources untouched (copy mode).
     assert (tmp_path / "anton" / "raw" / "fake.mp4").exists()
@@ -457,9 +453,7 @@ def test_execute_merge_shooter_json_has_no_match_fields(tmp_path: Path):
     plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
     execute_merge(plan, move=False)
 
-    anton_slug = next(
-        m.slug for m in plan.shooter_moves if m.source_root == tmp_path / "anton"
-    )
+    anton_slug = next(m.slug for m in plan.shooter_moves if m.source_root == tmp_path / "anton")
     shooter_json = json.loads((out / SHOOTERS_DIR / anton_slug / SHOOTER_FILE).read_text())
     for forbidden in ("name", "scoreboard_match_id", "scoreboard_content_type", "match_date"):
         # ``name`` IS a Shooter field (the human-readable shooter name), so

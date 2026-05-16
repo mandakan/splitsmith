@@ -167,9 +167,7 @@ def within_stage_amp_veto(
     if n_kept < min_kept_for_filter:
         return keep_mask
     kept_amps = peak_amps[kept_idx]
-    anchor = within_stage_amp_anchor(
-        kept_amps, expected_rounds, fallback_percentile=fallback_percentile
-    )
+    anchor = within_stage_amp_anchor(kept_amps, expected_rounds, fallback_percentile=fallback_percentile)
     if anchor <= 0.0:
         return keep_mask
     cutoff = floor_ratio * anchor

@@ -53,9 +53,7 @@ _NON_AUDIT_SUFFIXES = (
     ".peaks-1500.json",
 )
 
-_MATCH_STAGE_RE = re.compile(
-    r"^stage-shots-(?P<match>.+?-\d{4})-stage(?P<stage>\d+)(?:-(?P<rest>.+))?$"
-)
+_MATCH_STAGE_RE = re.compile(r"^stage-shots-(?P<match>.+?-\d{4})-stage(?P<stage>\d+)(?:-(?P<rest>.+))?$")
 
 
 @dataclass(frozen=True)

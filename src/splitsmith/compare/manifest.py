@@ -62,8 +62,7 @@ class CompareManifest(BaseModel):
         labels = {s.label for s in self.shooters}
         if self.audio_from not in labels:
             raise ValueError(
-                f"audio_from={self.audio_from!r} does not match any shooter label "
-                f"({sorted(labels)})"
+                f"audio_from={self.audio_from!r} does not match any shooter label " f"({sorted(labels)})"
             )
         return self
 
@@ -88,7 +87,5 @@ def load_manifest(path: Path) -> CompareManifest:
     def _resolve(p: Path) -> Path:
         return p if p.is_absolute() else (base / p).resolve()
 
-    resolved_shooters = [
-        s.model_copy(update={"project": _resolve(s.project)}) for s in manifest.shooters
-    ]
+    resolved_shooters = [s.model_copy(update={"project": _resolve(s.project)}) for s in manifest.shooters]
     return manifest.model_copy(update={"shooters": resolved_shooters})

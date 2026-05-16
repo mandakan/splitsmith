@@ -158,9 +158,7 @@ class LocalJsonScoreboard:
             "carries a single match's competitor list, not cross-match aggregates"
         )
 
-    def get_stage_times(
-        self, content_type: int, match_id: int, competitor_id: int
-    ) -> CompetitorStageResults:
+    def get_stage_times(self, content_type: int, match_id: int, competitor_id: int) -> CompetitorStageResults:
         if (
             self._content_type is not None
             and self._match_id is not None
@@ -355,9 +353,7 @@ def _from_combined_v1(
         if not isinstance(cid, int):
             continue
         results = [
-            CompetitorStageResult.model_validate(r)
-            for r in entry.get("stages", [])
-            if isinstance(r, dict)
+            CompetitorStageResult.model_validate(r) for r in entry.get("stages", []) if isinstance(r, dict)
         ]
         out[cid] = results
     return out

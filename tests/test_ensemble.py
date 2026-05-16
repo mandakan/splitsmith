@@ -115,19 +115,15 @@ def test_vote_c_adaptive_confidence_override_recovers_high_scoring_outsiders() -
     # stable argsort), so the override doesn't add anything new here.
     # The cleaner functional check: a sub-K confidence_override floor
     # below all scores keeps everyone.
-    out_zero = vote_c_adaptive(
-        probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=0.0
-    )
+    out_zero = vote_c_adaptive(probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=0.0)
     assert int(out_zero.sum()) == probs.size
     # And confidence_override above the max keeps only top-(K+slack).
-    out_high = vote_c_adaptive(
-        probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=2.0
-    )
+    out_high = vote_c_adaptive(probs, expected_rounds=2, slack_min=0, slack_frac=0.0, confidence_override=2.0)
     assert int(out_high.sum()) == 2
     # The two outputs are bitwise consistent in the always-in-top-K case.
-    assert np.array_equal(out_with_override, out_no_override) or int(
-        out_with_override.sum()
-    ) >= int(out_no_override.sum())
+    assert np.array_equal(out_with_override, out_no_override) or int(out_with_override.sum()) >= int(
+        out_no_override.sum()
+    )
 
 
 def test_vote_c_adaptive_zero_rounds_returns_all_zero() -> None:
@@ -467,9 +463,7 @@ def test_detect_shots_ensemble_full_universe_with_stubs(monkeypatch) -> None:
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -529,9 +523,7 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.zeros(
-            (len(times), len(CLAP_PROMPTS)), dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.zeros((len(times), len(CLAP_PROMPTS)), dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -586,9 +578,7 @@ def test_detect_shots_ensemble_within_stage_amp_floor_drops_quiet_headcam(
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -639,9 +629,7 @@ def test_detect_shots_ensemble_within_stage_amp_floor_skipped_on_handheld(
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -701,9 +689,7 @@ def test_detect_shots_ensemble_within_stage_amp_floor_uses_per_model_override(
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -782,9 +768,7 @@ def test_detect_shots_ensemble_skips_voter_e_when_disabled(monkeypatch) -> None:
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -851,9 +835,7 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -864,9 +846,7 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
     monkeypatch.setattr(
         ensemble_visual,
         "compute_visual_features",
-        lambda video_path, source_times, runtime, **_: np.zeros(
-            (len(source_times), 1), dtype=np.float32
-        ),
+        lambda video_path, source_times, runtime, **_: np.zeros((len(source_times), 1), dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -878,9 +858,7 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
         beep_time=5.0,
         stage_time=10.0,
         runtime=runtime,
-        ensemble_config=EnsembleConfig(
-            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=None
-        ),
+        ensemble_config=EnsembleConfig(enable_voter_e=True, e_required=True, e_audio_strong_min_votes=None),
         video_path=fake_video,
         source_beep_time=5.0,
     )
@@ -937,9 +915,7 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -949,9 +925,7 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
     monkeypatch.setattr(
         ensemble_visual,
         "compute_visual_features",
-        lambda video_path, source_times, runtime, **_: np.zeros(
-            (len(source_times), 1), dtype=np.float32
-        ),
+        lambda video_path, source_times, runtime, **_: np.zeros((len(source_times), 1), dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -967,9 +941,7 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
         beep_time=5.0,
         stage_time=10.0,
         runtime=runtime,
-        ensemble_config=EnsembleConfig(
-            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=3
-        ),
+        ensemble_config=EnsembleConfig(enable_voter_e=True, e_required=True, e_audio_strong_min_votes=3),
         video_path=fake_video,
         source_beep_time=5.0,
     )
@@ -986,9 +958,7 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
         beep_time=5.0,
         stage_time=10.0,
         runtime=runtime,
-        ensemble_config=EnsembleConfig(
-            enable_voter_e=True, e_required=True, e_audio_strong_min_votes=4
-        ),
+        ensemble_config=EnsembleConfig(enable_voter_e=True, e_required=True, e_audio_strong_min_votes=4),
         video_path=fake_video,
         source_beep_time=5.0,
     )
@@ -1197,9 +1167,7 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
     monkeypatch.setattr(
         ensemble_features,
         "compute_clap_similarities",
-        lambda audio, sr, times, runtime: np.full(
-            (len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32
-        ),
+        lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_features,
@@ -1210,9 +1178,7 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
     audio = np.zeros(48_000 * 20, dtype=np.float32)
 
     # Headcam class (default): floor 0.05 -> confidence 0.07 passes voter A.
-    result_head = detect_shots_ensemble(
-        audio, 48_000, beep_time=5.0, stage_time=10.0, runtime=runtime
-    )
+    result_head = detect_shots_ensemble(audio, 48_000, beep_time=5.0, stage_time=10.0, runtime=runtime)
     assert result_head.candidates[0].vote_a == 1
 
     # Handheld class: floor 0.20 -> 0.07 rejected by voter A.

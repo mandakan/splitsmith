@@ -171,13 +171,9 @@ def rescore(
 
 @app.command("promote")
 def promote(
-    audit_json: Path = typer.Option(
-        ..., "--audit-json", help="Path to <project>/audit/stage<N>.json."
-    ),
+    audit_json: Path = typer.Option(..., "--audit-json", help="Path to <project>/audit/stage<N>.json."),
     audit_wav: Path = typer.Option(..., "--audit-wav", help="Path to the stage's audit-clip WAV."),
-    slug: str = typer.Option(
-        ..., "--slug", help="Target fixture stem (e.g. stage-shots-foo-2026-stage4)."
-    ),
+    slug: str = typer.Option(..., "--slug", help="Target fixture stem (e.g. stage-shots-foo-2026-stage4)."),
     fixtures_root: Path | None = typer.Option(None, "--fixtures-root"),
     overwrite: bool = typer.Option(False, "--overwrite"),
     pretty: bool = typer.Option(True, "--pretty/--no-pretty"),
@@ -208,18 +204,14 @@ def promote(
 
 @app.command("save-config")
 def save_config(
-    name: str = typer.Option(
-        ..., "--name", help="Slug for the YAML file (configs/ensemble.<slug>.yaml)."
-    ),
+    name: str = typer.Option(..., "--name", help="Slug for the YAML file (configs/ensemble.<slug>.yaml)."),
     universe_path: Path = typer.Option(
         Path("build/lab/runs/latest.json"),
         "--universe",
         help="Run JSON whose config + summary will be captured (defaults to latest run).",
     ),
     output_dir: Path = typer.Option(Path("configs"), "--output-dir"),
-    note: str | None = typer.Option(
-        None, "--note", help="Free-text note saved alongside provenance."
-    ),
+    note: str | None = typer.Option(None, "--note", help="Free-text note saved alongside provenance."),
     overwrite: bool = typer.Option(False, "--overwrite"),
 ) -> None:
     """Capture a run's config + headline metrics as committable YAML."""
@@ -494,9 +486,7 @@ def measure_snap(
 
 @app.command("promote-from-anchor")
 def promote_from_anchor_cmd(
-    anchor: Path = typer.Option(
-        ..., "--anchor", help="Audited headcam fixture JSON (ground truth source)."
-    ),
+    anchor: Path = typer.Option(..., "--anchor", help="Audited headcam fixture JSON (ground truth source)."),
     secondary: Path | None = typer.Option(
         None,
         "--secondary",
@@ -507,9 +497,7 @@ def promote_from_anchor_cmd(
         "--secondary-wav",
         help="Pre-extracted secondary audio WAV. Mutually exclusive with --secondary.",
     ),
-    slug: str = typer.Option(
-        ..., "--slug", help="Target fixture slug (e.g. tallmilan-2026-stage5-phone)."
-    ),
+    slug: str = typer.Option(..., "--slug", help="Target fixture slug (e.g. tallmilan-2026-stage5-phone)."),
     camera_id: str = typer.Option(
         ...,
         "--camera-id",
@@ -540,9 +528,7 @@ def promote_from_anchor_cmd(
         80.0, "--min-spacing-ms", min=0.0, help="Min gap between adjacent snapped shots."
     ),
     sample_rate: int = typer.Option(48000, "--sample-rate", min=8000),
-    anchor_wav: Path | None = typer.Option(
-        None, "--anchor-wav", help="Override anchor sibling WAV."
-    ),
+    anchor_wav: Path | None = typer.Option(None, "--anchor-wav", help="Override anchor sibling WAV."),
     report_only: bool = typer.Option(
         False,
         "--report-only",
@@ -576,9 +562,7 @@ def promote_from_anchor_cmd(
     target_json = root / f"{slug}.json"
     target_wav = root / f"{slug}.wav"
     if not report_only and target_json.exists() and not overwrite:
-        raise typer.BadParameter(
-            f"fixture already exists: {target_json}  (use --overwrite to replace)"
-        )
+        raise typer.BadParameter(f"fixture already exists: {target_json}  (use --overwrite to replace)")
 
     anchor_data = json.loads(anchor_path.read_text(encoding="utf-8"))
     primary_audio, primary_sr = beep_detect.load_audio(wav_path)

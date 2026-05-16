@@ -39,9 +39,7 @@ class ScoreboardClient(Protocol):
         """Cross-match dashboard; mirrors ``GET /api/v1/shooter/{shooterId}``."""
         ...
 
-    def get_stage_times(
-        self, content_type: int, match_id: int, competitor_id: int
-    ) -> CompetitorStageResults:
+    def get_stage_times(self, content_type: int, match_id: int, competitor_id: int) -> CompetitorStageResults:
         """Per-competitor, per-stage results for one (match, competitor) pair.
 
         Mirrors the proposed ``GET /api/v1/match/{ct}/{id}/competitor/

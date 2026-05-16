@@ -52,9 +52,7 @@ def test_automation_settings_malformed_yaml_falls_back(tmp_path: Path) -> None:
     assert loaded.shot_detect_on_beep_verified is True
 
 
-def test_automation_settings_env_var_overrides_yaml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_automation_settings_env_var_overrides_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``SPLITSMITH_AUTOMATION_*`` env vars trump the YAML default
     (pydantic-settings precedence). Env init args we pass in
     (the YAML block) lose to environment by design."""
@@ -121,9 +119,7 @@ def test_resolve_project_override_with_none_field_falls_through() -> None:
     assert resolved.provenance["shot_detect_on_beep_verified"].source == "global"
 
 
-def test_resolve_no_args_loads_global_from_disk(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_no_args_loads_global_from_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Without ``global_settings`` the resolver loads from the
     user-config directory. SPLITSMITH_HOME points to a tmp dir so the
     test doesn't read the real user's config."""

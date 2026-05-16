@@ -80,7 +80,14 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 100
+# 110, not 100, to give black's conservative wrapping room. Black's
+# line-length policy is "soft" -- it won't split a call that has a long
+# string literal arg even if the line ends up at 100-110 chars. Aligning
+# ruff's E501 to 110 stops it from firing on lines black already accepts.
+# When a line crosses 110, the magic-trailing-comma convention is the
+# canonical fix: add a trailing comma to the argument list and black
+# auto-wraps one-arg-per-line.
+line-length = 110
 target-version = "py311"
 
 [tool.ruff.lint]
@@ -108,7 +115,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PTH"]
 "src/splitsmith/ui/scoreboard/http.py" = ["N818"]
 
 [tool.black]
-line-length = 100
+line-length = 110
 target-version = ["py311"]
 
 [tool.pytest.ini_options]

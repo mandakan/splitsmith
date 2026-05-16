@@ -122,9 +122,7 @@ def test_run_ffmpeg_extract_builds_mono_48k_command(tmp_path: Path) -> None:
     assert "-y" in cmd  # overwrite=True
 
 
-def test_extract_one_writes_sidecar_with_window(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_extract_one_writes_sidecar_with_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fixtures_dir = tmp_path / "fixtures"
     full_dir = fixtures_dir / "full"
     fixtures_dir.mkdir()
@@ -143,9 +141,7 @@ def test_extract_one_writes_sidecar_with_window(
     src.write_bytes(b"")
     sources = {"video_dir": str(tmp_path), "fixtures": {"stage-shots-x": "VID_X.mp4"}}
 
-    monkeypatch.setattr(
-        extractor, "probe", lambda path, cache_dir: type("R", (), {"duration": 180.0})()
-    )
+    monkeypatch.setattr(extractor, "probe", lambda path, cache_dir: type("R", (), {"duration": 180.0})())
     runner = _RecordingRunner()
     sidecar = extractor.extract_one(
         "stage-shots-x",

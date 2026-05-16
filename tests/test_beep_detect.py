@@ -75,9 +75,7 @@ def test_detect_beep_returns_ranked_candidates() -> None:
     def _stamp(at_s: float, amp: float, dur_s: float = 0.300) -> None:
         n = int(sr * dur_s)
         t = np.arange(n) / sr
-        audio[int(sr * at_s) : int(sr * at_s) + n] += amp * np.sin(2 * np.pi * 3000 * t).astype(
-            np.float32
-        )
+        audio[int(sr * at_s) : int(sr * at_s) + n] += amp * np.sin(2 * np.pi * 3000 * t).astype(np.float32)
 
     _stamp(1.0, 0.6)  # the "real" beep -- preceded by ~1 s of silence
     _stamp(3.0, 0.4)  # competing transient further into the clip

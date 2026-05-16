@@ -173,9 +173,7 @@ def promote_from_anchor(
         runtime=runtime,
         expected_rounds=expected_rounds,
     )
-    voter_a_candidates = [
-        (c.time, c.confidence) for c in ensemble_result.candidates if c.vote_a >= 1
-    ]
+    voter_a_candidates = [(c.time, c.confidence) for c in ensemble_result.candidates if c.vote_a >= 1]
 
     # 3. Snap. Two paths:
     #    - Trusted-prior (project flow with known beep): guided snap in
@@ -204,9 +202,7 @@ def promote_from_anchor(
         )
         first_pass_drift_per_minute = _estimate_drift(first_pass)
         drift_ms_per_s = (
-            (first_pass_drift_per_minute or 0.0) / 60.0
-            if first_pass_drift_per_minute is not None
-            else 0.0
+            (first_pass_drift_per_minute or 0.0) / 60.0 if first_pass_drift_per_minute is not None else 0.0
         )
         snaps = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
@@ -512,8 +508,7 @@ def _build_report(
         )
     if snap_rate < 0.6:
         quality_warnings.append(
-            f"only {len(snapped)}/{len(snaps)} shots snapped; "
-            "verify that this clip covers the right stage"
+            f"only {len(snapped)}/{len(snaps)} shots snapped; " "verify that this clip covers the right stage"
         )
 
     return {
@@ -524,9 +519,7 @@ def _build_report(
             "method": align.method,
             "secondary_beep_time": round(align.secondary_beep_time, 4),
             "offset_seconds": round(align.lag_seconds, 4),
-            "confidence": (
-                None if align.confidence == float("inf") else round(align.confidence, 3)
-            ),
+            "confidence": (None if align.confidence == float("inf") else round(align.confidence, 3)),
             "peak_correlation": round(align.peak_correlation, 4),
         },
         "snap_window_ms": snap_window_ms,

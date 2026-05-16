@@ -87,9 +87,7 @@ def test_resolve_project_root_rejects_non_directory(tmp_path: Path) -> None:
         resolve_project_root(f)
 
 
-def test_resolve_project_root_honours_sandbox(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_resolve_project_root_honours_sandbox(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Sandbox enforcement runs BEFORE the project.json check, so an
     out-of-sandbox project root errors with SandboxError, not a
     misleading FileNotFoundError pointing at project.json."""

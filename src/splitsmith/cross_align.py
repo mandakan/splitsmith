@@ -133,8 +133,7 @@ def align_secondary_to_primary(
     primary_dur = primary_audio.size / primary_sr
     if primary_beep_time > primary_dur:
         raise CrossAlignError(
-            f"primary_beep_time {primary_beep_time:.3f}s exceeds primary duration "
-            f"{primary_dur:.3f}s"
+            f"primary_beep_time {primary_beep_time:.3f}s exceeds primary duration " f"{primary_dur:.3f}s"
         )
 
     landmark_start = primary_beep_time - landmark_pre_s

@@ -167,9 +167,7 @@ def _tight_rise_foot(
     if win_hi - win_lo < 8:
         return RefinedShot(approx_time, approx_time, confidence, True, "envelope-tight")
     smooth_n = max(1, int(round(sr * _ENV_SMOOTH_S)))
-    env = maximum_filter1d(
-        np.abs(audio[win_lo:win_hi]).astype(np.float32), size=smooth_n, mode="nearest"
-    )
+    env = maximum_filter1d(np.abs(audio[win_lo:win_hi]).astype(np.float32), size=smooth_n, mode="nearest")
     peak_local = int(np.argmax(env))
     peak = float(env[peak_local])
     if peak <= 0.0:

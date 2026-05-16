@@ -325,9 +325,7 @@ def from_stage_compositions(
         overlay: ConnectedClip | None = None
         if stage_comp.overlay_path is not None:
             overlay_meta = (
-                stage_comp.overlay_video
-                if stage_comp.overlay_video is not None
-                else stage_comp.video
+                stage_comp.overlay_video if stage_comp.overlay_video is not None else stage_comp.video
             )
             overlay = ConnectedClip(
                 asset=Asset(path=stage_comp.overlay_path, metadata=overlay_meta),
@@ -389,9 +387,7 @@ def to_stage_compositions(
         secondaries: list[fcpxml_gen.SecondaryClip] = []
         for sec in stage.secondaries:
             pip = (
-                _transform_to_pip(sec.transform, composition.sequence)
-                if sec.transform is not None
-                else None
+                _transform_to_pip(sec.transform, composition.sequence) if sec.transform is not None else None
             )
             assert sec.beep_offset_seconds is not None  # cam role guarantees this
             secondaries.append(

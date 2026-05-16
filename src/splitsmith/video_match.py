@@ -38,9 +38,7 @@ from .config import StageData, VideoMatchConfig, VideoMatchResult, VideoStageMat
 VideoClassification = Literal["in_window", "contested", "orphan", "no_timestamp"]
 
 
-def match_window(
-    scorecard_updated_at: datetime, tolerance_minutes: int
-) -> tuple[datetime, datetime]:
+def match_window(scorecard_updated_at: datetime, tolerance_minutes: int) -> tuple[datetime, datetime]:
     """Return ``(lower, upper)`` for a stage's match window.
 
     Asymmetric: the upper bound is ``scorecard_updated_at`` itself because the
@@ -104,9 +102,7 @@ def match_videos_to_stages(
     candidates_per_stage: dict[int, list[Path]] = {}
     for stage in stages:
         lower, upper = match_window(stage.scorecard_updated_at, config.tolerance_minutes)
-        candidates_per_stage[stage.stage_number] = [
-            p for p, ts in timestamps.items() if lower <= ts <= upper
-        ]
+        candidates_per_stage[stage.stage_number] = [p for p, ts in timestamps.items() if lower <= ts <= upper]
 
     # And inversely, which stages does each video belong to?
     stages_per_video: dict[Path, list[int]] = defaultdict(list)

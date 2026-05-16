@@ -300,9 +300,7 @@ def detect_shots_ensemble(
     shots = detect_shots(audio, sample_rate, beep_time, stage_time, detector_cfg)
     n = len(shots)
     if n == 0:
-        return EnsembleResult(
-            candidates=[], consensus=cfg.consensus, expected_rounds=expected_rounds
-        )
+        return EnsembleResult(candidates=[], consensus=cfg.consensus, expected_rounds=expected_rounds)
 
     times = np.array([s.time_absolute for s in shots], dtype=np.float64)
     confidences = np.array([s.confidence for s in shots], dtype=np.float64)
@@ -345,11 +343,7 @@ def detect_shots_ensemble(
             audit_beep_in_clip=beep_time,
             source_beep_time=float(source_beep_time),
         )
-        offsets = (
-            tuple(cal.voter_e_frame_offsets)
-            if cal.voter_e_frame_offsets
-            else vis.DEFAULT_FRAME_OFFSETS
-        )
+        offsets = tuple(cal.voter_e_frame_offsets) if cal.voter_e_frame_offsets else vis.DEFAULT_FRAME_OFFSETS
         features = vis.compute_visual_features(
             Path(video_path), source_times, runtime.visual, frame_offsets=offsets
         )

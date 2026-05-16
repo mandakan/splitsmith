@@ -53,9 +53,7 @@ def _stage_audio(
         if 0 <= s < n:
             e = min(e, n)
             envelope = np.exp(-np.linspace(0, 5, e - s)).astype(np.float32)
-            audio[s:e] += (
-                shot_amp * envelope * rng.choice([-1.0, 1.0], size=e - s).astype(np.float32)
-            )
+            audio[s:e] += shot_amp * envelope * rng.choice([-1.0, 1.0], size=e - s).astype(np.float32)
     return audio
 
 
@@ -65,9 +63,7 @@ def test_aligner_recovers_known_offset_within_5ms() -> None:
     sr = 48000
     primary_beep_t = 5.0
     shift = 3.7
-    primary = _stage_audio(
-        sr, duration_s=15.0, beep_at=primary_beep_t, shots_at=[6.5, 7.0, 7.6, 8.3], seed=1
-    )
+    primary = _stage_audio(sr, duration_s=15.0, beep_at=primary_beep_t, shots_at=[6.5, 7.0, 7.6, 8.3], seed=1)
     secondary = _stage_audio(
         sr,
         duration_s=20.0,

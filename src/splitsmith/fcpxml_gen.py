@@ -164,9 +164,7 @@ def _pip_transform_attrs(
     ``scale`` stays a unit-less ratio (1.0 == native size); only
     position needs the conversion.
     """
-    scale, (x_px, y_px) = pip.resolve(
-        sequence_width=sequence_width, sequence_height=sequence_height
-    )
+    scale, (x_px, y_px) = pip.resolve(sequence_width=sequence_width, sequence_height=sequence_height)
     unit_per_px = 100.0 / sequence_height
     x = x_px * unit_per_px
     y = y_px * unit_per_px
@@ -238,9 +236,7 @@ def _attach_pip_transform(
     """
     if pip is None:
         return
-    attrs = _pip_transform_attrs(
-        pip, sequence_width=sequence_width, sequence_height=sequence_height
-    )
+    attrs = _pip_transform_attrs(pip, sequence_width=sequence_width, sequence_height=sequence_height)
     transform = ET.Element("adjust-transform", attrs)
     asset_clip.insert(0, transform)
 
@@ -280,9 +276,7 @@ def probe_video(
     except FileNotFoundError as exc:
         raise FFprobeError(f"ffprobe binary not found: {ffprobe_binary}") from exc
     except subprocess.CalledProcessError as exc:
-        raise FFprobeError(
-            f"ffprobe failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
+        raise FFprobeError(f"ffprobe failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
 
     try:
         data = json.loads(proc.stdout)
@@ -373,9 +367,7 @@ def generate_fcpxml(
     usable_secondaries = [s for s in (secondaries or []) if s.video_path.exists()]
     use_overlay = overlay_path is not None and overlay_path.exists()
     overlay_meta_for_format = overlay_video if overlay_video is not None else video
-    overlay_uses_own_format = use_overlay and _overlay_format_differs(
-        video, overlay_meta_for_format
-    )
+    overlay_uses_own_format = use_overlay and _overlay_format_differs(video, overlay_meta_for_format)
     next_id = 3 + len(usable_secondaries)
     overlay_format_id: str | None = None
     if overlay_uses_own_format:
@@ -443,9 +435,7 @@ def generate_fcpxml(
         # so the source rate is preserved -- if they differ, FCP will round
         # on import (acceptable for a connected cam) but the spec for
         # multi-rate timelines is out of scope here.
-        sec_duration_in_parent_frames = int(
-            round(sec.video.duration_seconds / float(frame_duration))
-        )
+        sec_duration_in_parent_frames = int(round(sec.video.duration_seconds / float(frame_duration)))
         sec_duration_parent_str = _frame_aligned_str(sec_duration_in_parent_frames, fd_num, fd_den)
         sec_asset = ET.SubElement(
             resources,
@@ -564,9 +554,7 @@ def generate_fcpxml(
     #   - sb >  pb: head sits at parent t=0; skip ``sb - pb`` frames of the
     #     cam so the beep still lines up.
     fd_seconds_for_align = float(frame_duration)
-    for lane_idx, (sec, sec_id, sec_duration_parent_str) in enumerate(
-        secondary_asset_entries, start=1
-    ):
+    for lane_idx, (sec, sec_id, sec_duration_parent_str) in enumerate(secondary_asset_entries, start=1):
         delta_frames = round((beep_offset_seconds - sec.beep_offset_seconds) / fd_seconds_for_align)
         if delta_frames >= 0:
             sec_offset_str = _frame_aligned_str(delta_frames, fd_num, fd_den)
@@ -636,9 +624,7 @@ def generate_fcpxml(
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
     # Inject the FCPXML DOCTYPE (ElementTree does not emit it).
     decl_end = tree_bytes.index(b"?>") + 2
-    output_path.write_bytes(
-        tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :]
-    )
+    output_path.write_bytes(tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :])
     _tag_source_application(output_path)
 
 
@@ -882,8 +868,7 @@ def generate_match_fcpxml(
             )
         if ti.duration_seconds <= 0:
             raise ValueError(
-                f"title for stage {ti.stage_index} has non-positive "
-                f"duration ({ti.duration_seconds:g}s)"
+                f"title for stage {ti.stage_index} has non-positive " f"duration ({ti.duration_seconds:g}s)"
             )
         seen_title_indices.add(ti.stage_index)
     has_slate = any(ti.style == "slate" for ti in titles)
@@ -1098,9 +1083,7 @@ def generate_match_fcpxml(
                         int(
                             round(
                                 sec.video.duration_seconds
-                                / float(
-                                    Fraction(sec.video.frame_rate_den, sec.video.frame_rate_num)
-                                )
+                                / float(Fraction(sec.video.frame_rate_den, sec.video.frame_rate_num))
                             )
                         ),
                         sec.video.frame_rate_den,
@@ -1393,8 +1376,7 @@ def generate_match_fcpxml(
             plan.usable_secondaries, start=1
         ):
             delta_frames = round(
-                ((stage.beep_offset_seconds - head_trim_seconds) - sec.beep_offset_seconds)
-                / fd_seconds
+                ((stage.beep_offset_seconds - head_trim_seconds) - sec.beep_offset_seconds) / fd_seconds
             )
             if delta_frames >= 0:
                 sec_offset_frames = plan.head_trim_frames + delta_frames
@@ -1489,9 +1471,7 @@ def generate_match_fcpxml(
             parent_offset_str = _asset_grid_str(head_trim_seconds, stage.video)
             assert plan.overlay_format_id is not None  # set whenever overlay_asset_id is
             overlay_meta = (
-                plan.stage.overlay_video
-                if plan.stage.overlay_video is not None
-                else plan.stage.video
+                plan.stage.overlay_video if plan.stage.overlay_video is not None else plan.stage.video
             )
             ET.SubElement(
                 primary_clip,
@@ -1630,9 +1610,7 @@ def generate_match_fcpxml(
     ET.indent(fcpxml, space="    ")
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
     decl_end = tree_bytes.index(b"?>") + 2
-    output_path.write_bytes(
-        tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :]
-    )
+    output_path.write_bytes(tree_bytes[:decl_end] + b"\n<!DOCTYPE fcpxml>\n" + tree_bytes[decl_end + 1 :])
     _tag_source_application(output_path)
 
 

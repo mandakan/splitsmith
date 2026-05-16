@@ -62,9 +62,7 @@ def render_fcp7xml(
     seq = composition.sequence
     timebase, ntsc = _fcp7_rate(seq.frame_rate_num, seq.frame_rate_den)
 
-    plans = [
-        _plan_stage(stage, seq.frame_rate_num, seq.frame_rate_den) for stage in composition.stages
-    ]
+    plans = [_plan_stage(stage, seq.frame_rate_num, seq.frame_rate_den) for stage in composition.stages]
     total_frames = sum(p.effective_duration_frames for p in plans)
     max_secondaries = max((len(stage.secondaries) for stage in composition.stages), default=0)
     has_overlay = any(stage.overlay is not None for stage in composition.stages)
@@ -150,9 +148,7 @@ def render_fcp7xml(
     ET.indent(xmeml, space="    ")
     tree_bytes = ET.tostring(xmeml, encoding="utf-8", xml_declaration=True)
     decl_end = tree_bytes.index(b"?>") + 2
-    output_path.write_bytes(
-        tree_bytes[:decl_end] + b"\n<!DOCTYPE xmeml>\n" + tree_bytes[decl_end + 1 :]
-    )
+    output_path.write_bytes(tree_bytes[:decl_end] + b"\n<!DOCTYPE xmeml>\n" + tree_bytes[decl_end + 1 :])
 
 
 # --- planning -------------------------------------------------------------
@@ -363,10 +359,7 @@ def _emit_primary_clipitem(
         # FCP7 markers ride inside the clipitem and use source-frame
         # coordinates (same as our ``in`` value), so no spine math here.
         frame = round(marker.time_seconds / fd_seconds)
-        if (
-            frame < plan.head_trim_frames
-            or frame >= plan.head_trim_frames + plan.effective_duration_frames
-        ):
+        if frame < plan.head_trim_frames or frame >= plan.head_trim_frames + plan.effective_duration_frames:
             continue
         _emit_marker(clip, frame=frame, label=_marker_label(marker))
 
@@ -392,8 +385,7 @@ def _emit_secondary_clipitem(
     sec_duration_frames = round(sec_meta.duration_seconds / fd_seconds)
     assert secondary.beep_offset_seconds is not None  # cam role guarantees this
     delta_frames = round(
-        ((stage.beep_offset_seconds - plan.head_trim_seconds) - secondary.beep_offset_seconds)
-        / fd_seconds
+        ((stage.beep_offset_seconds - plan.head_trim_seconds) - secondary.beep_offset_seconds) / fd_seconds
     )
     if delta_frames >= 0:
         cam_spine_offset = spine_offset_frames + delta_frames

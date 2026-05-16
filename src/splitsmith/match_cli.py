@@ -204,7 +204,7 @@ def rename_shooter_slugs(
         file_okay=False,
         dir_okay=True,
         readable=True,
-        help="Match folder (with match.json) whose shooter slugs should be replaced with opaque ids.",
+        help=("Match folder (with match.json) whose shooter slugs should be " "replaced with opaque ids."),
     ),
     dry_run: bool = typer.Option(
         False,
@@ -223,8 +223,7 @@ def rename_shooter_slugs(
     """
     if not is_match_folder(path):
         console.print(
-            f"[red]Not a match folder:[/] {path}\n"
-            f"Expected {MATCH_FILE} alongside a shooters/ subdir."
+            f"[red]Not a match folder:[/] {path}\n" f"Expected {MATCH_FILE} alongside a shooters/ subdir."
         )
         raise typer.Exit(code=2)
 

@@ -107,9 +107,7 @@ HAND_FEATURE_DIM: int = len(_HAND_FEATURE_NAMES)
 # (api.py / voter_c_feature_matrix).
 CAMERA_CLASS_FEATURE_NAMES: tuple[str, ...] = ("headcam", "handheld")
 CAMERA_CLASS_FEATURE_DIM: int = len(CAMERA_CLASS_FEATURE_NAMES)
-_CAMERA_CLASS_TO_INDEX: dict[str, int] = {
-    name: idx for idx, name in enumerate(CAMERA_CLASS_FEATURE_NAMES)
-}
+_CAMERA_CLASS_TO_INDEX: dict[str, int] = {name: idx for idx, name in enumerate(CAMERA_CLASS_FEATURE_NAMES)}
 
 # +1 for clap_diff, +1 for gunshot_prob (folded in from voter D).
 VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM
@@ -241,9 +239,7 @@ def compute_hand_features(
         pre_lo, pre_hi = max(0, idx - win), idx
         post_lo, post_hi = idx, min(n, idx + win)
         rms_pre = (
-            float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2)))
-            if pre_hi > pre_lo
-            else 0.0
+            float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2))) if pre_hi > pre_lo else 0.0
         )
         rms_post = (
             float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2)))
@@ -265,9 +261,7 @@ def compute_hand_features(
         psearch_hi = min(n, idx + peak_search_n)
         if abs_audio is None:
             abs_audio = np.abs(audio.astype(np.float64))
-        peak_local_idx = (
-            idx + int(np.argmax(abs_audio[idx:psearch_hi])) if psearch_hi > idx else idx
-        )
+        peak_local_idx = idx + int(np.argmax(abs_audio[idx:psearch_hi])) if psearch_hi > idx else idx
         tail_lo = min(n, peak_local_idx + int(0.050 * sample_rate))
         tail_hi = min(n, peak_local_idx + int(0.200 * sample_rate))
         tail_amp = float(abs_audio[tail_lo:tail_hi].mean()) if tail_hi > tail_lo else 0.0
@@ -348,9 +342,7 @@ def compute_clap_similarities(
     if not len(candidate_times):
         return np.zeros((0, len(CLAP_PROMPTS)), dtype=np.float32)
     if sample_rate != CLAP_SR:
-        clap_audio = librosa.resample(
-            audio.astype(np.float32), orig_sr=sample_rate, target_sr=CLAP_SR
-        )
+        clap_audio = librosa.resample(audio.astype(np.float32), orig_sr=sample_rate, target_sr=CLAP_SR)
     else:
         clap_audio = audio.astype(np.float32)
 
@@ -401,9 +393,7 @@ def compute_pann_gunshot_probs(
     if not len(candidate_times):
         return np.zeros(0, dtype=np.float32)
     if sample_rate != PANN_SR:
-        pann_audio = librosa.resample(
-            audio.astype(np.float32), orig_sr=sample_rate, target_sr=PANN_SR
-        )
+        pann_audio = librosa.resample(audio.astype(np.float32), orig_sr=sample_rate, target_sr=PANN_SR)
     else:
         pann_audio = audio.astype(np.float32)
     batch = np.stack(

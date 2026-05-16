@@ -108,9 +108,7 @@ class CachingScoreboardClient:
     def is_cached(self, content_type: int, match_id: int) -> bool:
         return self._match_cache_path(content_type, match_id).exists()
 
-    def get_stage_times(
-        self, content_type: int, match_id: int, competitor_id: int
-    ) -> CompetitorStageResults:
+    def get_stage_times(self, content_type: int, match_id: int, competitor_id: int) -> CompetitorStageResults:
         cache_path = self._stage_times_cache_path(content_type, match_id, competitor_id)
         cached = _read_envelope(cache_path)
         if cached is not None and not cached.get("in_progress", False):
@@ -175,14 +173,9 @@ class CachingScoreboardClient:
             "match_id": match_id,
             "competitor_id": competitor_id,
         }
-        return (
-            self._cache_dir
-            / f"stage_times_{match_prefix}_{_param_hash('stage_times', params)}.json"
-        )
+        return self._cache_dir / f"stage_times_{match_prefix}_{_param_hash('stage_times', params)}.json"
 
-    def _sibling_match_in_progress(
-        self, content_type: int, match_id: int, *, default: bool
-    ) -> bool:
+    def _sibling_match_in_progress(self, content_type: int, match_id: int, *, default: bool) -> bool:
         envelope = _read_envelope(self._match_cache_path(content_type, match_id))
         if envelope is None:
             return default

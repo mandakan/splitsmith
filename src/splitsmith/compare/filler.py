@@ -24,10 +24,7 @@ def filler_filename(
     sub-millisecond rounding.
     """
     duration_ms = int(round(duration_seconds * 1000))
-    return (
-        f"_compare_filler_{width}x{height}_{frame_rate_num}-{frame_rate_den}"
-        f"_{duration_ms}ms.mp4"
-    )
+    return f"_compare_filler_{width}x{height}_{frame_rate_num}-{frame_rate_den}" f"_{duration_ms}ms.mp4"
 
 
 def ensure_filler(

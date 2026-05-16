@@ -190,11 +190,7 @@ def get_hitl_queue(project_root: str) -> dict[str, Any]:
                 }
             )
             continue
-        if (
-            primary.beep_source == "auto"
-            and primary.beep_time is not None
-            and not primary.beep_reviewed
-        ):
+        if primary.beep_source == "auto" and primary.beep_time is not None and not primary.beep_reviewed:
             items.append(
                 {
                     "kind": "beep_low_confidence",

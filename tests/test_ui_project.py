@@ -1165,9 +1165,7 @@ def test_swap_primary_warns_when_shots_audited(tmp_path: Path) -> None:
             {
                 "stage_number": 1,
                 "stage_name": "S1",
-                "shots": [
-                    {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
-                ],
+                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
             }
         )
     )
@@ -1218,16 +1216,12 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
             {
                 "stage_number": 1,
                 "stage_name": "S1",
-                "shots": [
-                    {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
-                ],
+                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
             }
         )
     )
 
-    new_primary = project.swap_primary(
-        Path("raw/b.mp4"), root=root, stage_number=1, backup_audit=True
-    )
+    new_primary = project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1, backup_audit=True)
 
     assert new_primary.role == "primary"
     assert new_primary.path == Path("raw/b.mp4")

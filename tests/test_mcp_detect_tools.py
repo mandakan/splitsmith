@@ -89,9 +89,7 @@ def _stage_with_primary(
     )
 
 
-def _fake_detection(
-    *, time: float = 5.5, confidence: float = 0.9, candidates: int = 2
-) -> BeepDetection:
+def _fake_detection(*, time: float = 5.5, confidence: float = 0.9, candidates: int = 2) -> BeepDetection:
     cands = [
         BeepCandidate(
             time=time + 0.5 * i,
@@ -249,9 +247,7 @@ def test_detect_beep_force_reruns(tmp_path: Path) -> None:
     with patch(
         "splitsmith.mcp.detect_tools.audio_helpers.detect_video_beep", return_value=fake
     ) as mock_detect:
-        detect_tools.detect_beep_for_video(
-            str(root), stage_number=1, video_id=primary_id, force=True
-        )
+        detect_tools.detect_beep_for_video(str(root), stage_number=1, video_id=primary_id, force=True)
 
     mock_detect.assert_called_once()
     after = MatchProject.load(root).stages[0].videos[0]

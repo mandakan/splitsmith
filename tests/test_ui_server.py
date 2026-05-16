@@ -197,9 +197,7 @@ def _load_v1_match_fixture() -> dict:
     """Read the SSI v1 match fixture used by ``test_scoreboard_*``."""
     import json
 
-    return json.loads(
-        (_SCOREBOARD_FIXTURES_DIR / "match_22_27190.json").read_text(encoding="utf-8")
-    )
+    return json.loads((_SCOREBOARD_FIXTURES_DIR / "match_22_27190.json").read_text(encoding="utf-8"))
 
 
 def test_scoreboard_loads_token_from_project_env_local(
@@ -215,18 +213,14 @@ def test_scoreboard_loads_token_from_project_env_local(
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     project_root = tmp_path / "match"
     project_root.mkdir(parents=True)
-    (project_root / ".env.local").write_text(
-        "SPLITSMITH_SSI_TOKEN=token-from-env-local\n", encoding="utf-8"
-    )
+    (project_root / ".env.local").write_text("SPLITSMITH_SSI_TOKEN=token-from-env-local\n", encoding="utf-8")
     app = create_app(project_root=project_root, project_name="x")
     client = TestClient(app)
     src = client.get("/api/shooters/me/scoreboard/source").json()
     assert src["http_token_set"] is True
 
 
-def test_scoreboard_loads_token_from_cwd_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_scoreboard_loads_token_from_cwd_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An ``.env`` next to where the user *launched* the server (typically
     the repo root) is the most common spot. It must work even when the
     project lives somewhere else entirely."""
@@ -296,7 +290,8 @@ def test_scoreboard_search_uses_local_when_match_json_present(tmp_path: Path) ->
     client = TestClient(app)
 
     fixture = _load_v1_match_fixture()
-    assert client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture}).status_code == 200
+    upload = client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
+    assert upload.status_code == 200
 
     # No SPLITSMITH_SSI_TOKEN env var; must still work because the local
     # JSON path doesn't go through SsiHttpClient.
@@ -335,9 +330,7 @@ def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Pat
     project_root = tmp_path / "match"
     app = create_app(project_root=project_root, project_name="x")
     client = TestClient(app)
-    legacy = _json.loads(
-        (_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8")
-    )
+    legacy = _json.loads((_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8"))
     resp = client.post("/api/shooters/me/scoreboard/upload", json={"data": legacy})
     assert resp.status_code == 200
     body = resp.json()
@@ -416,9 +409,7 @@ def test_scoreboard_refresh_times_re_merges(tmp_path: Path) -> None:
     project_root = tmp_path / "match"
     app = create_app(project_root=project_root, project_name="x")
     client = TestClient(app)
-    legacy = _json.loads(
-        (_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8")
-    )
+    legacy = _json.loads((_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8"))
     client.post("/api/shooters/me/scoreboard/upload", json={"data": legacy})
     resp = client.post("/api/shooters/me/scoreboard/refresh-times")
     assert resp.status_code == 200
@@ -719,7 +710,10 @@ def test_scan_videos_registers_and_auto_assigns(tmp_path: Path) -> None:
 def test_scan_videos_400_on_missing_dir(tmp_path: Path) -> None:
     app = create_app(project_root=tmp_path / "match", project_name="x")
     client = TestClient(app)
-    resp = client.post("/api/shooters/me/videos/scan", json={"source_dir": str(tmp_path / "does-not-exist")})
+    resp = client.post(
+        "/api/shooters/me/videos/scan",
+        json={"source_dir": str(tmp_path / "does-not-exist")},
+    )
     assert resp.status_code == 400
 
 
@@ -1589,7 +1583,10 @@ def test_video_peaks_endpoint_serves_secondary_full_wav(tmp_path: Path, monkeypa
     monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure_video)
 
     # Set a beep_time on the secondary so beep_time is reflected in the payload.
-    proj = client.post(f"/api/shooters/me/stages/1/videos/{sec_id}/beep", json={"beep_time": 0.42}).json()
+    proj = client.post(
+        f"/api/shooters/me/stages/1/videos/{sec_id}/beep",
+        json={"beep_time": 0.42},
+    ).json()
     assert next(v for v in proj["stages"][0]["videos"] if v["video_id"] == sec_id)[
         "beep_time"
     ] == pytest.approx(0.42)
@@ -1879,9 +1876,7 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     assert trim_calls[0]["stage_time"] == pytest.approx(12.0)
 
 
-def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Path, monkeypatch) -> None:
     """confidence >= threshold flips beep_reviewed to True without a click (#219)."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
@@ -1909,9 +1904,7 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(
     monkeypatch.setattr(
         trim,
         "trim_video",
-        lambda **kw: trim.TrimResult(
-            output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0
-        ),
+        lambda **kw: trim.TrimResult(output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0),
     )
     Path(project_root / "trimmed").mkdir(parents=True, exist_ok=True)
 
@@ -1951,9 +1944,7 @@ def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeyp
     monkeypatch.setattr(
         trim,
         "trim_video",
-        lambda **kw: trim.TrimResult(
-            output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0
-        ),
+        lambda **kw: trim.TrimResult(output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0),
     )
     Path(project_root / "trimmed").mkdir(parents=True, exist_ok=True)
 
@@ -2134,9 +2125,7 @@ def test_trim_partial_filename_keeps_mp4_extension(tmp_path: Path, monkeypatch) 
     assert ".partial" in captured[0].stem
 
 
-def test_trim_endpoint_returns_existing_job_when_one_is_running(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_trim_endpoint_returns_existing_job_when_one_is_running(tmp_path: Path, monkeypatch) -> None:
     """A second submit while the first is still running adopts the existing
     job instead of spawning a parallel ffmpeg that races on the partial
     file. Symptom we're guarding against: clicking "Trim now" twice (or
@@ -2412,9 +2401,7 @@ def test_shot_detect_endpoint_ensures_trim_before_detection(tmp_path: Path, monk
     assert proj_after["stages"][0]["videos"][0]["processed"].get("trim") is True
 
 
-def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(tmp_path: Path, monkeypatch) -> None:
     """Issue #143: ``StageVideo.camera_mount`` flows through ``camera_class_from_mount``
     into ``detect_shots_ensemble``. Verifies the wiring without exercising
     the actual ensemble (which is monkeypatched).
@@ -2468,9 +2455,7 @@ def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(
     assert captured.get("camera_class") == "handheld"
 
 
-def test_shot_detect_endpoint_passes_default_class_when_mount_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_shot_detect_endpoint_passes_default_class_when_mount_missing(tmp_path: Path, monkeypatch) -> None:
     """``camera_mount=None`` -> default class (``headcam``) reaches the ensemble."""
     import numpy as np
     import soundfile as sf
@@ -2603,9 +2588,7 @@ def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, mon
         _wait_for_job(client, j["id"])
 
 
-def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(tmp_path: Path, monkeypatch) -> None:
     """Stage's ``stage_rounds`` (from scoreboard import) lands in the audit
     JSON and reaches the ensemble as ``expected_rounds``.
 
@@ -2679,17 +2662,26 @@ def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
     video_id = primary.video_id
 
     # Override.
-    resp = client.patch(f"/api/shooters/me/stages/1/videos/{video_id}/camera-mount", json={"mount": "hand"})
+    resp = client.patch(
+        f"/api/shooters/me/stages/1/videos/{video_id}/camera-mount",
+        json={"mount": "hand"},
+    )
     assert resp.status_code == 200, resp.text
     refreshed = MatchProject.load(project_root)
     assert refreshed.stages[0].primary().camera_mount == "hand"
 
     # Bad value rejected.
-    resp = client.patch(f"/api/shooters/me/stages/1/videos/{video_id}/camera-mount", json={"mount": "shoulder"})
+    resp = client.patch(
+        f"/api/shooters/me/stages/1/videos/{video_id}/camera-mount",
+        json={"mount": "shoulder"},
+    )
     assert resp.status_code == 400, resp.text
 
     # Clear back to None.
-    resp = client.patch(f"/api/shooters/me/stages/1/videos/{video_id}/camera-mount", json={"mount": None})
+    resp = client.patch(
+        f"/api/shooters/me/stages/1/videos/{video_id}/camera-mount",
+        json={"mount": None},
+    )
     assert resp.status_code == 200
     refreshed = MatchProject.load(project_root)
     assert refreshed.stages[0].primary().camera_mount is None
@@ -3075,9 +3067,7 @@ def test_put_stage_audit_writes_payload_and_returns_it(tmp_path: Path) -> None:
                 "source": "detected",
             }
         ],
-        "audit_events": [
-            {"ts": "2026-05-02T12:00:00Z", "kind": "marker_kept", "payload": {"id": "cand-4"}}
-        ],
+        "audit_events": [{"ts": "2026-05-02T12:00:00Z", "kind": "marker_kept", "payload": {"id": "cand-4"}}],
     }
     resp = client.put("/api/shooters/me/stages/1/audit", json=payload)
     assert resp.status_code == 200
@@ -4127,9 +4117,7 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
     assert secondary["beep_alignment_confidence"] == pytest.approx(1.05)
 
 
-def test_secondary_in_stream_success_runs_cross_align_sanity_check(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_secondary_in_stream_success_runs_cross_align_sanity_check(tmp_path: Path, monkeypatch) -> None:
     """When in-stream beep_detect succeeds on a secondary, cross-correlation
     still runs as a sanity check. When the two methods agree (small delta),
     the in-stream result wins, ``beep_source`` stays ``"auto"``, but the
@@ -4182,9 +4170,7 @@ def test_secondary_in_stream_success_runs_cross_align_sanity_check(
     assert secondary["beep_alignment_delta_ms"] == pytest.approx(-15.0)
 
 
-def test_secondary_in_stream_disagreement_flagged_not_overridden(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_secondary_in_stream_disagreement_flagged_not_overridden(tmp_path: Path, monkeypatch) -> None:
     """When in-stream and cross-align disagree by hundreds of ms (typical
     of a steel-strike mistaken for the buzzer), the in-stream result is
     KEPT as ``beep_time`` -- in-stream has frequency-domain info
@@ -4253,7 +4239,10 @@ def test_secondary_soft_fail_clears_on_manual_override(tmp_path: Path, monkeypat
     )
     assert final["status"] == "succeeded"
 
-    proj = client.post(f"/api/shooters/me/stages/1/videos/{sec_id}/beep", json={"beep_time": 2.5}).json()
+    proj = client.post(
+        f"/api/shooters/me/stages/1/videos/{sec_id}/beep",
+        json={"beep_time": 2.5},
+    ).json()
     secondary = next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
     assert secondary["beep_time"] == pytest.approx(2.5)
     assert secondary["beep_source"] == "manual"
@@ -4708,11 +4697,17 @@ def test_beep_review_endpoint_flips_flag(tmp_path: Path, monkeypatch) -> None:
     video_id = primary["video_id"]
     assert primary["beep_reviewed"] is False
 
-    resp = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    resp = client.post(
+        f"/api/shooters/me/stages/1/videos/{video_id}/beep/review",
+        json={"reviewed": True},
+    )
     assert resp.status_code == 200
     assert resp.json()["stages"][0]["videos"][0]["beep_reviewed"] is True
 
-    resp = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/beep/review", json={"reviewed": False})
+    resp = client.post(
+        f"/api/shooters/me/stages/1/videos/{video_id}/beep/review",
+        json={"reviewed": False},
+    )
     assert resp.status_code == 200
     assert resp.json()["stages"][0]["videos"][0]["beep_reviewed"] is False
 
@@ -4725,7 +4720,10 @@ def test_beep_review_400_when_no_beep_yet(tmp_path: Path) -> None:
     primary = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]
     video_id = primary["video_id"]
 
-    resp = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    resp = client.post(
+        f"/api/shooters/me/stages/1/videos/{video_id}/beep/review",
+        json={"reviewed": True},
+    )
     assert resp.status_code == 400
 
 
@@ -4787,9 +4785,7 @@ def test_shot_detect_gated_on_beep_review(tmp_path: Path, monkeypatch) -> None:
     # No shot_detect job queued -- the chain stops at trim until the
     # user confirms.
     jobs = client.get("/api/me/jobs").json()
-    assert not any(j["kind"] == "shot_detect" for j in jobs), [
-        (j["kind"], j["status"]) for j in jobs
-    ]
+    assert not any(j["kind"] == "shot_detect" for j in jobs), [(j["kind"], j["status"]) for j in jobs]
 
 
 def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> None:
@@ -4818,7 +4814,10 @@ def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> 
     jobs_before = client.get("/api/me/jobs").json()
     assert not any(j["kind"] == "shot_detect" for j in jobs_before)
 
-    resp = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    resp = client.post(
+        f"/api/shooters/me/stages/1/videos/{video_id}/beep/review",
+        json={"reviewed": True},
+    )
     assert resp.status_code == 200
     jobs_after = client.get("/api/me/jobs").json()
     assert any(j["kind"] == "shot_detect" for j in jobs_after)
@@ -4947,9 +4946,7 @@ def test_bind_recent_project_404_when_path_missing(tmp_path: Path, _user_config_
     assert resp.json()["detail"]["code"] == "project_path_missing"
 
 
-def test_bind_recent_project_create_scaffolds_new_dir(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_bind_recent_project_create_scaffolds_new_dir(tmp_path: Path, _user_config_home: Path) -> None:
     """``create=true`` mkdirs the destination and scaffolds project.json so
     the picker's "Create new project" flow can target a fresh folder.
     """
@@ -4969,9 +4966,7 @@ def test_bind_recent_project_create_scaffolds_new_dir(
     assert (target / "project.json").exists()
 
 
-def test_bind_recent_project_scaffolds_empty_existing_folder(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_bind_recent_project_scaffolds_empty_existing_folder(tmp_path: Path, _user_config_home: Path) -> None:
     """An existing folder without project.json is scaffolded in place; the
     Pick page's updated copy promises this works."""
     app = create_app()
@@ -5134,9 +5129,7 @@ def test_create_match_manual_scaffolds_match_and_binds_shooter(
     assert kinds == ["match"]
 
 
-def test_create_match_manual_refuses_existing_match_folder(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_create_match_manual_refuses_existing_match_folder(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import match_model
 
     target = tmp_path / "occupied"
@@ -5179,9 +5172,7 @@ def test_bind_match_folder_binds_match_root(tmp_path: Path, _user_config_home: P
     assert body["project_root"] == str(target.resolve())
 
 
-def test_list_match_shooters_returns_active_and_others(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_config_home: Path) -> None:
     """The shooters endpoint surfaces every registered shooter and flags
     which is currently active. (#324)
     """
@@ -5289,9 +5280,7 @@ def test_user_config_disable_flag_makes_endpoints_safe(
     assert cleared.json() is None
 
 
-def test_load_env_files_picks_up_user_config_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_env_files_picks_up_user_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The SSI token (and any other ``SPLITSMITH_*`` var) can live in
     ``~/.splitsmith/.env`` -- it's per-user, not per-project. Project /
     cwd files still win because they're loaded earlier with
@@ -5388,9 +5377,7 @@ def _seed_match_export_project(tmp_path: Path, *, stage_count: int = 2) -> tuple
     project = MatchProject.load(project_root)
     project.stages = []
     for n in range(1, stage_count + 1):
-        project.stages.append(
-            StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=10.0)
-        )
+        project.stages.append(StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=10.0))
         src = project_root / "raw" / f"VID{n}.mp4"
         src.parent.mkdir(parents=True, exist_ok=True)
         src.write_bytes(b"\x00")
@@ -5440,9 +5427,7 @@ def _stub_match_export_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fcpxml_mod, "probe_video", fake)
 
 
-def test_match_export_endpoint_writes_fcpxml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_match_export_endpoint_writes_fcpxml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client, _ = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
 
@@ -5551,7 +5536,10 @@ def _seed_cleanup_project(tmp_path: Path) -> tuple[TestClient, Path]:
 
 def test_cleanup_plan_returns_per_category_totals(tmp_path: Path) -> None:
     client, _ = _seed_cleanup_project(tmp_path)
-    resp = client.get("/api/shooters/me/project/cleanup/plan", params={"categories": "audio,exports-overlays"})
+    resp = client.get(
+        "/api/shooters/me/project/cleanup/plan",
+        params={"categories": "audio,exports-overlays"},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_file_count"] == 2
@@ -5649,7 +5637,11 @@ def test_cleanup_endpoints_409_when_no_project_bound(tmp_path: Path) -> None:
     app = create_app()  # unbound
     client = TestClient(app)
     assert client.get("/api/shooters/me/project/cleanup/plan?categories=audio").status_code == 409
-    assert client.post("/api/shooters/me/project/cleanup", json={"categories": ["audio"]}).status_code == 409
+    cleanup_resp = client.post(
+        "/api/shooters/me/project/cleanup",
+        json={"categories": ["audio"]},
+    )
+    assert cleanup_resp.status_code == 409
 
 
 # --- automation settings (#216) ---------------------------------------------
@@ -5809,9 +5801,7 @@ def _build_project_with_primary(
         beep_reviewed=beep_reviewed,
         beep_auto_detect_failed=beep_auto_detect_failed,
     )
-    project.stages = [
-        StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.0, videos=[primary])
-    ]
+    project.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.0, videos=[primary])]
     project.save(root)
     return project
 
@@ -5913,9 +5903,7 @@ def test_hitl_queue_orders_by_stage_number(tmp_path: Path) -> None:
             beep_confidence=0.4,
             beep_reviewed=False,
         )
-        project.stages.append(
-            StageEntry(stage_number=n, stage_name=f"S{n}", time_seconds=12.0, videos=[v])
-        )
+        project.stages.append(StageEntry(stage_number=n, stage_name=f"S{n}", time_seconds=12.0, videos=[v]))
     project.save(root)
     app = create_app(project_root=root, project_name="ignored")
     client = TestClient(app)
