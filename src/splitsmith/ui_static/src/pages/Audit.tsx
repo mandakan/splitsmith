@@ -426,14 +426,31 @@ export function Audit() {
   const primaryBeep = primary?.beep_time ?? null;
 
   // Per-cam buzzer sync state, surfaced as the CamSyncPill on each tile
-  // inside the PipBay. Threshold matches the HITL queue's "needs review"
-  // gate; manual overrides outrank confidence.
+  // inside the PipBay.
+  //
+  //   no_beep          -- never detected anything
+  //   manual           -- operator overrode the buzzer time
+  //   low_confidence   -- auto-detected, confidence < LOW_CONF, AND the
+  //                       operator hasn't acked it yet (beep_reviewed
+  //                       === false). Reviewed low-confidence beeps
+  //                       are treated as synced -- the operator has
+  //                       eyeballed and confirmed.
+  //   synced           -- everything else.
+  //
+  // LOW_CONF is a local default. The HITL queue uses an automation
+  // setting (beep_low_confidence_threshold, default 0.95); wiring the
+  // pill to the same setting is a follow-up so the two gates can't
+  // drift apart.
   const camSyncStates = useMemo<CamSyncState[]>(() => {
     const LOW_CONF = 0.7;
     return videos.map((v) => {
       if (v.beep_time == null) return "no_beep";
       if (v.beep_source === "manual") return "manual";
-      if (v.beep_confidence != null && v.beep_confidence < LOW_CONF) {
+      if (
+        v.beep_confidence != null &&
+        v.beep_confidence < LOW_CONF &&
+        !v.beep_reviewed
+      ) {
         return "low_confidence";
       }
       return "synced";
@@ -1253,6 +1270,32 @@ export function Audit() {
     }
   }, [syncMode, syncCandidate, slug, stageNumber]);
 
+  // "Looks right" -- keeps the current buzzer time but flips
+  // beep_reviewed so the pill drops the "needs sync" flag. No
+  // detection or trim chain is queued. Mirrors the BeepReview page's
+  // ack action but lives next to the cam it applies to.
+  const markSyncReviewed = useCallback(async () => {
+    if (syncMode == null || stageNumber == null || syncMode.beep_time == null) {
+      return;
+    }
+    setSyncBusy(true);
+    try {
+      const updated = await api.setBeepReviewed(
+        slug,
+        stageNumber,
+        syncMode.video_id,
+        true,
+      );
+      setProject(updated);
+      setSyncMode(null);
+      setSyncCandidate(null);
+    } catch (e) {
+      setProjectError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setSyncBusy(false);
+    }
+  }, [syncMode, slug, stageNumber]);
+
   // ---- Global keyboard shortcuts -----------------------------------------
 
   useEffect(() => {
@@ -1824,6 +1867,11 @@ export function Audit() {
                   candidateTime={syncCandidate}
                   onCancel={cancelSync}
                   onApply={() => void applySync()}
+                  onMarkReviewed={
+                    syncMode.beep_time != null && !syncMode.beep_reviewed
+                      ? () => void markSyncReviewed()
+                      : undefined
+                  }
                   busy={syncBusy}
                 />
               ) : (

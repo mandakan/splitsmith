@@ -6,7 +6,11 @@ export interface SyncBannerProps {
   candidateTime: number | null;
   onCancel: () => void;
   onApply: () => void;
-  /** When true, Apply is in flight -- disable both buttons. */
+  /** "Looks right" -- mark the existing beep as reviewed without
+   *  changing it. Only shown when a beep exists and hasn't yet been
+   *  reviewed. When omitted, the button is hidden. */
+  onMarkReviewed?: () => void;
+  /** When true, Apply / Mark reviewed are in flight -- disable both. */
   busy?: boolean;
 }
 
@@ -22,6 +26,7 @@ export function SyncBanner({
   candidateTime,
   onCancel,
   onApply,
+  onMarkReviewed,
   busy = false,
 }: SyncBannerProps) {
   const delta =
@@ -76,6 +81,17 @@ export function SyncBanner({
       >
         Cancel
       </button>
+      {onMarkReviewed ? (
+        <button
+          type="button"
+          onClick={onMarkReviewed}
+          disabled={busy}
+          title="Keep the current buzzer; acknowledge it looks right"
+          className="inline-flex items-center rounded-md border border-done/40 bg-done/10 px-3.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-done transition-colors hover:bg-done/20 disabled:opacity-50"
+        >
+          Looks right
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onApply}
