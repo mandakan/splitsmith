@@ -1,0 +1,94 @@
+import { cn } from "@/lib/utils";
+
+export interface SyncBannerProps {
+  camLabel: string;
+  oldBeepTime: number | null;
+  candidateTime: number | null;
+  onCancel: () => void;
+  onApply: () => void;
+  /** When true, Apply is in flight -- disable both buttons. */
+  busy?: boolean;
+}
+
+/**
+ * Replaces the anomaly chips row above the waveform while the operator
+ * is re-picking the buzzer for a specific cam. Matches the design's
+ * ARSyncBanner: live-amber surround, old/new/delta readout, Cancel +
+ * Apply actions.
+ */
+export function SyncBanner({
+  camLabel,
+  oldBeepTime,
+  candidateTime,
+  onCancel,
+  onApply,
+  busy = false,
+}: SyncBannerProps) {
+  const delta =
+    candidateTime != null && oldBeepTime != null
+      ? candidateTime - oldBeepTime
+      : null;
+  const applyDisabled = busy || candidateTime == null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-wrap items-center gap-3 rounded-2xl border border-live/40 bg-live/10 px-4 py-3 shadow-[0_0_0_1px_var(--color-rule)_inset,0_0_24px_rgba(251,191,36,0.22)]"
+    >
+      <span
+        aria-hidden
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-live font-mono text-sm font-extrabold leading-none text-bg"
+      >
+        !
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-display text-[0.8125rem] font-bold uppercase tracking-[0.06em] text-live">
+          Picking buzzer for {camLabel}
+        </div>
+        <div className="mt-0.5 text-[0.8125rem] leading-snug text-ink-2">
+          Click a transient on the waveform below.{" "}
+          <span className="text-muted">Was</span>{" "}
+          <b className="font-mono tabular-nums text-ink">
+            {oldBeepTime != null ? `${oldBeepTime.toFixed(3)}s` : "—"}
+          </b>
+          {candidateTime != null ? (
+            <>
+              {" "}
+              <span className="text-muted">· pick</span>{" "}
+              <b className="font-mono tabular-nums text-ink">
+                {candidateTime.toFixed(3)}s
+              </b>
+              {delta != null ? (
+                <span className="ml-1 font-mono tabular-nums text-muted">
+                  ({delta >= 0 ? "+" : ""}
+                  {(delta * 1000).toFixed(0)}ms)
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={busy}
+        className="inline-flex items-center rounded-md border border-rule-strong bg-surface-2 px-3.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:bg-surface-3 disabled:opacity-50"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        onClick={onApply}
+        disabled={applyDisabled}
+        className={cn(
+          "inline-flex items-center rounded-md border-0 px-3.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] transition-colors",
+          applyDisabled
+            ? "cursor-not-allowed bg-surface-3 text-subtle"
+            : "bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_14px_var(--color-led-glow)] hover:bg-led-soft",
+        )}
+      >
+        Apply new buzzer
+      </button>
+    </div>
+  );
+}

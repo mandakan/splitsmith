@@ -58,6 +58,10 @@ interface VideoPanelProps {
    *  The PiPBay supplies its own chrome and the bay IS the grid layout --
    *  surfacing a "Grid/Single" toggle inside it would be nested UI. */
   showHeader?: boolean;
+  /** Optional per-cam overlay rendered absolutely in each grid cell.
+   *  PiPBay uses this slot to attach the CamSyncPill so the per-cam
+   *  buzzer state surfaces next to the cam it applies to. */
+  renderCamOverlay?: (video: StageVideo, index: number) => React.ReactNode;
 }
 
 // ---- SecondarySlot ----------------------------------------------------------
@@ -70,9 +74,12 @@ interface SecondarySlotProps {
   src: string;
   onRef: (el: HTMLVideoElement | null) => void;
   onBuffering: (buffering: boolean) => void;
+  /** Absolute-positioned overlay (e.g. CamSyncPill) anchored top-right
+   *  of the slot. The parent decides what to render. */
+  overlay?: React.ReactNode;
 }
 
-function SecondarySlot({ label, src, onRef, onBuffering }: SecondarySlotProps) {
+function SecondarySlot({ label, src, onRef, onBuffering, overlay }: SecondarySlotProps) {
   // Stable refs so the video ref callback and event handlers never change
   // identity, avoiding spurious mount/unmount cycles on parent re-renders.
   const onRefLatest = useRef(onRef);
@@ -149,6 +156,9 @@ function SecondarySlot({ label, src, onRef, onBuffering }: SecondarySlotProps) {
       <div className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-0.5 text-xs text-white/80">
         {label}
       </div>
+      {overlay ? (
+        <div className="absolute right-2 top-2 z-10">{overlay}</div>
+      ) : null}
       <video
         ref={setRef}
         src={src}
@@ -208,6 +218,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       onPrimaryTimeUpdate,
       className,
       showHeader = true,
+      renderCamOverlay,
     },
     ref,
   ) {
@@ -410,6 +421,11 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 Primary
               </div>
             ) : null}
+            {renderCamOverlay && videos[0] ? (
+              <div className="absolute right-2 top-2 z-10">
+                {renderCamOverlay(videos[0], 0)}
+              </div>
+            ) : null}
             <video
               key={videoSrc}
               ref={setVideoEl}
@@ -476,6 +492,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                   src={`/api/videos/stream?path=${encodeURIComponent(v.path)}`}
                   onRef={(el) => onSecondaryRef(v.path, el)}
                   onBuffering={(b) => onSecondaryBuffering(v.path, b)}
+                  overlay={renderCamOverlay ? renderCamOverlay(v, i + 1) : null}
                 />
               ))
             : null}

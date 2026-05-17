@@ -35,6 +35,11 @@ export interface PipBayProps {
   corner: PipCorner;
   size: PipSize;
   camCount: number;
+  /** Number of cams whose buzzer needs operator attention -- shown as
+   *  the header CTA "{n} NEEDS SYNC" when > 0. Click invokes
+   *  `onNeedsSyncClick` (typically opens sync mode for the first one). */
+  needsSyncCount?: number;
+  onNeedsSyncClick?: () => void;
   onHide: () => void;
   onCycleSize: () => void;
   onCycleCorner: () => void;
@@ -45,6 +50,8 @@ export function PipBay({
   corner,
   size,
   camCount,
+  needsSyncCount = 0,
+  onNeedsSyncClick,
   onHide,
   onCycleSize,
   onCycleCorner,
@@ -83,6 +90,22 @@ export function PipBay({
         <span className="flex-1 truncate font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink-2">
           {camCount} cam{camCount === 1 ? "" : "s"}
         </span>
+        {needsSyncCount > 0 ? (
+          <button
+            type="button"
+            onClick={onNeedsSyncClick}
+            title={`${needsSyncCount} cam${needsSyncCount === 1 ? "" : "s"} need sync`}
+            className="mr-1 inline-flex items-center gap-1 rounded-full border border-live/40 bg-live/10 px-2 py-0.5 font-display text-[0.5625rem] font-bold uppercase tracking-[0.08em] text-live shadow-[0_0_8px_var(--color-live-glow)]"
+          >
+            <span
+              aria-hidden
+              className="inline-flex size-3 items-center justify-center rounded-full bg-live text-[0.5625rem] font-extrabold leading-none text-bg"
+            >
+              !
+            </span>
+            {needsSyncCount} need{needsSyncCount === 1 ? "s" : ""} sync
+          </button>
+        ) : null}
         <PipHeaderButton onClick={onCycleSize} title="Cycle size (⌥V)">
           <Maximize2 className="size-3" aria-hidden />
         </PipHeaderButton>
