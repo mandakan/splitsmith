@@ -11,16 +11,19 @@
  * background work is visible across every match surface.
  */
 
-import { Bell, HelpCircle, Repeat, Settings } from "lucide-react";
+import { HelpCircle, Repeat, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, Outlet, useNavigate, useParams } from "react-router-dom";
+import {
+  Navigate,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 import { JobsPanel } from "@/components/JobsPanel";
-import {
-  Brand,
-  IconButton,
-  ModeSwitch,
-} from "@/components/ui";
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
+import { Brand, IconButton } from "@/components/ui";
 import {
   MatchSidebar,
   type MatchSidebarStage,
@@ -31,6 +34,7 @@ import {
   type MatchProject,
   type ScoreboardIdentity,
   type ServerHealth,
+  type ShooterListEntry,
 } from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
@@ -38,6 +42,7 @@ import { cn } from "@/lib/utils";
 export interface MatchShellOutletContext {
   project: MatchProject | null;
   health: ServerHealth | null;
+  shooters: ShooterListEntry[];
   refresh: () => void;
 }
 
@@ -49,7 +54,22 @@ export function MatchShell() {
   // project so the sidebar reflects their progress; otherwise the sidebar
   // shows match-level info without per-stage status.
   const { slug } = useParams<{ slug?: string }>();
+  const { pathname } = useLocation();
   const { mode, setMode } = useMode();
+  // Trailing breadcrumb segment ("AUDIT" / "COACH" / ...) derived from the
+  // current URL. The current-view label is the only segment shown in LED
+  // red; everything else stays in the muted breadcrumb tone.
+  const viewLabel = useMemo<string | null>(() => {
+    if (pathname.startsWith("/audit")) return "Audit";
+    if (pathname.startsWith("/coach")) return "Coach";
+    if (pathname.startsWith("/compare")) return "Compare";
+    if (pathname.startsWith("/export")) return "Export";
+    if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
+      return "Videos";
+    if (pathname.startsWith("/beep-review")) return "Beep review";
+    if (pathname.startsWith("/shooters")) return "Shooters";
+    return null;
+  }, [pathname]);
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
     if (!didInitMode) {
@@ -66,9 +86,10 @@ export function MatchShell() {
 
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
-  const [shooterCount, setShooterCount] = useState<number | undefined>(undefined);
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const shooterCount = shooters.length || undefined;
 
   useEffect(() => {
     let alive = true;
@@ -125,12 +146,12 @@ export function MatchShell() {
           api
             .listMatchShooters()
             .then((r) => {
-              if (alive) setShooterCount(r.shooters.length);
+              if (alive) setShooters(r.shooters);
             })
             .catch(() => {
               // 409 no_match when the bound project is a standalone legacy
-              // single-shooter project (not a Match). Fall back to 1.
-              if (alive) setShooterCount(1);
+              // single-shooter project (not a Match). Leave empty.
+              if (alive) setShooters([]);
             });
         }
       })
@@ -194,28 +215,52 @@ export function MatchShell() {
             opacity: 0.55,
           }}
         />
-        <div className="flex items-center gap-7 px-7 py-3.5">
-          <Brand
-            variant="compact"
-            serial={
-              health?.bound && (
-                <>
-                  SS &middot; SESSION
-                  <br />
-                  <b className="font-semibold text-ink-2">
-                    {health.project_name ?? ""}
-                  </b>
-                </>
-              )
-            }
-          />
-          <ModeSwitch size="sm" />
+        <div className="flex flex-wrap items-center gap-4 px-7 py-3">
+          <Brand variant="compact" />
+          <nav
+            aria-label="Breadcrumb"
+            className="inline-flex items-center gap-2 font-display text-[0.8125rem] font-bold uppercase tracking-[0.06em]"
+          >
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                // Replace so that picking a different match in /pick
+                // and hitting back doesn't return to a stage URL whose
+                // data now belongs to a different project (confusing).
+                navigate("/pick", { replace: true });
+              }}
+              className="text-ink-2 transition-colors hover:text-ink"
+            >
+              Matches
+            </a>
+            <span aria-hidden className="text-rule-strong">
+              /
+            </span>
+            <span className="text-ink-2">
+              {health?.project_name ?? "..."}
+            </span>
+            {viewLabel ? (
+              <>
+                <span aria-hidden className="text-rule-strong">
+                  /
+                </span>
+                <span className="text-led">{viewLabel}</span>
+              </>
+            ) : null}
+          </nav>
+          {shooters.length > 1 ? (
+            <ShooterChipStrip
+              shooters={shooters}
+              activeSlug={slug}
+              urlBase={breadcrumbUrlBase(pathname)}
+              label={null}
+              variant="inline"
+            />
+          ) : null}
           <div className="flex-1" />
           <IconButton variant="subtle" size="md" label="Help">
             <HelpCircle className="size-[18px]" />
-          </IconButton>
-          <IconButton variant="subtle" size="md" label="Notifications">
-            <Bell className="size-[18px]" />
           </IconButton>
           <IconButton variant="subtle" size="md" label="Settings">
             <Settings className="size-[18px]" />
@@ -244,36 +289,9 @@ export function MatchShell() {
             <Repeat className="size-3.5 text-subtle" />
           </button>
         </div>
-        <div className="border-t border-rule bg-bg">
-          <div className="flex items-center gap-3 px-7 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
-            <a
-              href="#"
-              onClick={(e) => {
-                e.preventDefault();
-                // Replace so that picking a different match in /pick
-                // and hitting back doesn't return to a stage URL whose
-                // data now belongs to a different project (confusing).
-                navigate("/pick", { replace: true });
-              }}
-              className="text-subtle hover:text-ink-2"
-            >
-              Matches
-            </a>
-            <span className="text-whisper">/</span>
-            <span className="font-bold text-ink">
-              {health?.project_name ?? "..."}
-            </span>
-            <div className="ml-auto inline-flex items-center gap-4 text-[0.625rem] tracking-[0.14em] text-subtle">
-              <span>
-                Worker{" "}
-                <b className="font-bold text-done">&#9679;</b> Local
-              </span>
-            </div>
-          </div>
-        </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-86px)]">
+      <div className="flex min-h-[calc(100vh-64px)]">
         <MatchSidebar
           matchName={project?.name ?? health?.project_name ?? "..."}
           matchSubtitle={renderMatchSubtitle(project)}
@@ -293,6 +311,7 @@ export function MatchShell() {
             context={{
               project,
               health,
+              shooters,
               refresh: () => setRefreshKey((k) => k + 1),
             }}
           />
@@ -323,6 +342,19 @@ function renderMatchSubtitle(project: MatchProject | null) {
     bits.push(formatDateShort(project.match_date));
   }
   return bits.length > 0 ? <span>{bits.join(" · ")}</span> : null;
+}
+
+/** Map the current pathname to the route prefix the inline ShooterChipStrip
+ *  should link to. Strips ahead of the slug + stage so flipping shooters
+ *  keeps the operator on the same view. */
+function breadcrumbUrlBase(
+  pathname: string,
+): "audit" | "ingest" | "coach" | "export" {
+  if (pathname.startsWith("/coach")) return "coach";
+  if (pathname.startsWith("/export")) return "export";
+  if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
+    return "ingest";
+  return "audit";
 }
 
 function userInitials(name: string): string {

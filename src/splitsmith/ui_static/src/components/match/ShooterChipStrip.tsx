@@ -31,14 +31,18 @@ interface Props {
    *  ``/<urlBase>/<slug>``. Audit + Coach + Export all support both
    *  forms; Ingest is per-shooter (no stage), so callers pass null. */
   stage?: number | null;
-  /** Verb label shown to the left of the chips. Each page picks one:
-   *  ``"Auditing"``, ``"Adding videos for"``, ``"Coaching"``,
-   *  ``"Exporting"``. */
-  label: string;
+  /** Verb label shown to the left of the chips, or `null` for the inline
+   *  variant (which sits in a breadcrumb row and skips the label). */
+  label: string | null;
   /** Per-chip secondary count format. Defaults to "audited/total"; pages
    *  that surface a different metric (e.g. raw video count on Ingest)
    *  pass a custom formatter. ``null`` hides the count. */
   count?: ((s: ShooterListEntry) => string | null) | null;
+  /** Layout variant. `block` (default) renders with the verb label and a
+   *  bottom margin so it sits as its own row. `inline` is for the
+   *  MatchShell breadcrumb row -- no label, no margin, the host
+   *  controls spacing. */
+  variant?: "block" | "inline";
 }
 
 const defaultCount = (s: ShooterListEntry): string =>
@@ -51,13 +55,22 @@ export function ShooterChipStrip({
   stage = null,
   label,
   count = defaultCount,
+  variant = "block",
 }: Props) {
   if (shooters.length <= 1) return null;
+  const isInline = variant === "inline";
   return (
-    <div className="-mt-1 mb-3 inline-flex flex-wrap items-center gap-2">
-      <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-subtle">
-        {label}
-      </span>
+    <div
+      className={cn(
+        "inline-flex flex-wrap items-center gap-2",
+        !isInline && "-mt-1 mb-3",
+      )}
+    >
+      {label != null && !isInline ? (
+        <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-subtle">
+          {label}
+        </span>
+      ) : null}
       {shooters.map((s) => {
         const isActive = s.slug === activeSlug;
         const target =
