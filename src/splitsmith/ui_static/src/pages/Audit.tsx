@@ -337,6 +337,29 @@ export function Audit() {
     };
   }, []);
 
+  // Resolved automation: feeds the CamSyncPill's "needs sync" gate so it
+  // reads from the same threshold the HITL queue uses. Server-resolved
+  // (CLI > project > global > default); we only consume the result.
+  // Falls back to the in-code AutomationSettings default (0.95) until
+  // the request lands.
+  const [beepLowConfThreshold, setBeepLowConfThreshold] = useState(0.95);
+  useEffect(() => {
+    let alive = true;
+    api
+      .getAutomation(slug)
+      .then((r) => {
+        if (alive) {
+          setBeepLowConfThreshold(r.settings.beep_low_confidence_threshold);
+        }
+      })
+      .catch(() => {
+        /* keep default -- automation endpoint failures aren't fatal */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // Switching shooter is a route change now (#353 phase 1). The chip
   // strip uses <Link to=/audit/:newSlug/:stage>; ShooterScopedRoute
   // canonicalises the URL and remounts this component with key={slug},
@@ -430,32 +453,29 @@ export function Audit() {
   //
   //   no_beep          -- never detected anything
   //   manual           -- operator overrode the buzzer time
-  //   low_confidence   -- auto-detected, confidence < LOW_CONF, AND the
-  //                       operator hasn't acked it yet (beep_reviewed
-  //                       === false). Reviewed low-confidence beeps
-  //                       are treated as synced -- the operator has
-  //                       eyeballed and confirmed.
+  //   low_confidence   -- auto-detected, confidence below the
+  //                       beep_low_confidence_threshold automation
+  //                       setting (same gate the HITL queue uses),
+  //                       AND the operator hasn't acked it yet
+  //                       (beep_reviewed === false). Reviewed
+  //                       low-confidence beeps are treated as
+  //                       synced -- the operator has eyeballed and
+  //                       confirmed.
   //   synced           -- everything else.
-  //
-  // LOW_CONF is a local default. The HITL queue uses an automation
-  // setting (beep_low_confidence_threshold, default 0.95); wiring the
-  // pill to the same setting is a follow-up so the two gates can't
-  // drift apart.
   const camSyncStates = useMemo<CamSyncState[]>(() => {
-    const LOW_CONF = 0.7;
     return videos.map((v) => {
       if (v.beep_time == null) return "no_beep";
       if (v.beep_source === "manual") return "manual";
       if (
         v.beep_confidence != null &&
-        v.beep_confidence < LOW_CONF &&
+        v.beep_confidence < beepLowConfThreshold &&
         !v.beep_reviewed
       ) {
         return "low_confidence";
       }
       return "synced";
     });
-  }, [videos]);
+  }, [videos, beepLowConfThreshold]);
   const camsNeedingSync = camSyncStates.filter(
     (s) => s === "low_confidence" || s === "no_beep",
   ).length;
