@@ -107,7 +107,14 @@ export function ShooterChipStrip({
               {s.name}
             </span>
             {secondary ? (
-              <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+              <span
+                className={cn(
+                  "font-mono text-[0.625rem] uppercase tracking-[0.06em]",
+                  s.stages_total > 0 && s.stages_audited >= s.stages_total
+                    ? "text-done"
+                    : "text-muted",
+                )}
+              >
                 {secondary}
               </span>
             ) : null}

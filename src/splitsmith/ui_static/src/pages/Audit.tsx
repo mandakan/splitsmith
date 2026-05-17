@@ -35,12 +35,12 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import {
-  ChevronsRight,
   Crosshair,
   Eye,
   HelpCircle,
   ListChecks,
   Loader2,
+  MoreHorizontal,
   Pause,
   Play,
   Repeat,
@@ -79,6 +79,7 @@ import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/Kbd";
 import {
   Card,
   CardContent,
@@ -1695,21 +1696,6 @@ export function Audit() {
                 }}
               />
             ) : null}
-            {peaks && peaks.trimmed ? (
-              <DetectShotsBadge
-                slug={slug}
-                stageNumber={stage.stage_number}
-                hasBeep={primary.beep_time != null}
-                hasStageTime={stage.time_seconds > 0}
-                hasCandidates={markers.length > 0}
-                onComplete={async () => {
-                  if (stageNumber == null) return;
-                  const a = await api.getStageAudit(slug, stageNumber);
-                  setAudit(a);
-                  setMarkers(deriveMarkers(a));
-                }}
-              />
-            ) : null}
             {peaks ? (
               <FilterBar
                 filters={filters}
@@ -1741,14 +1727,19 @@ export function Audit() {
                     : "Auto-advance on K is off"
                 }
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] transition-colors",
-                  kAutoProgress
-                    ? "border-led bg-led/10 text-led"
-                    : "border-rule bg-surface-2 text-muted hover:bg-surface-3 hover:text-ink",
+                  "inline-flex items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] transition-colors hover:bg-surface-3",
+                  kAutoProgress ? "text-ink" : "text-muted hover:text-ink",
                 )}
               >
-                <ChevronsRight className="size-3.5" aria-hidden />
-                K → next
+                <Kbd size="sm">K</Kbd>
+                <span aria-hidden className="text-rule-strong">→</span>
+                <span>next</span>
+                {kAutoProgress ? (
+                  <span
+                    aria-hidden
+                    className="ml-0.5 inline-block size-1.5 rounded-full bg-led shadow-[0_0_4px_var(--color-led-glow)]"
+                  />
+                ) : null}
               </button>
               {pipLayout.hidden ? (
                 <button
@@ -1785,6 +1776,21 @@ export function Audit() {
               >
                 <HelpCircle className="size-4" />
               </button>
+              {peaks && peaks.trimmed ? (
+                <DetectShotsBadge
+                  slug={slug}
+                  stageNumber={stage.stage_number}
+                  hasBeep={primary.beep_time != null}
+                  hasStageTime={stage.time_seconds > 0}
+                  hasCandidates={markers.length > 0}
+                  onComplete={async () => {
+                    if (stageNumber == null) return;
+                    const a = await api.getStageAudit(slug, stageNumber);
+                    setAudit(a);
+                    setMarkers(deriveMarkers(a));
+                  }}
+                />
+              ) : null}
             </div>
           </div>
 
@@ -2087,6 +2093,7 @@ export function Audit() {
             activeStage={stageNumber}
             stages={stageRailItems.map((s) => ({
               stageNumber: s.stageNumber,
+              stageName: s.stageName,
               status: s.status,
             }))}
             step={computeAuditNextStep({
@@ -2381,48 +2388,163 @@ function DetectShotsBadge({
 
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
-  const idleLabel = hasCandidates ? "Re-run detection" : "Detect shots";
-  return (
-    <span className="flex items-center gap-2">
-      {hasCandidates ? null : (
+  // While a job is running we always surface progress inline so the
+  // operator sees what's happening. When idle, behaviour depends on
+  // whether candidates exist: no candidates = inline action-required
+  // button; candidates = collapsed "..." overflow menu (the design's
+  // intended utility placement).
+  if (running) {
+    return (
+      <span
+        role="status"
+        title={`Shot detection ${pct != null ? `(${pct}%)` : "running"}`}
+        className="inline-flex items-center gap-1.5 rounded-md border border-led-deep bg-led-tint px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-led-soft"
+      >
+        <Loader2 className="size-3 animate-spin" aria-hidden />
+        <span className="tabular-nums">
+          Detecting
+          {pct != null ? ` ${pct.toString().padStart(2, " ")}%` : "..."}
+        </span>
+      </span>
+    );
+  }
+
+  if (!hasCandidates) {
+    return (
+      <span className="flex items-center gap-2">
         <Badge variant="secondary" title="No candidates yet -- run shot detection">
           no candidates
         </Badge>
-      )}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={onClick}
-        disabled={running || blocked}
-        // Fixed width: progress text shouldn't reflow the row mid-poll.
-        className="min-w-[12rem] justify-center"
-        title={
-          reason ??
-          (hasCandidates
-            ? "Re-run shot detection (refreshes candidates; kept shots are preserved)"
-            : "Run splitsmith.shot_detect on the audit clip")
-        }
-      >
-        {running ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-        <span className="tabular-nums">
-          {running ? "Detecting..." : idleLabel}
-          {running && pct != null ? ` (${pct.toString().padStart(2, " ")}%)` : null}
-        </span>
-      </Button>
-      {hasCandidates ? (
         <Button
           size="sm"
-          variant="ghost"
-          onClick={onResetClick}
-          disabled={running || blocked}
-          title="Reset & re-detect: wipes kept / rejected decisions and starts over"
-          className="text-destructive hover:text-destructive"
+          variant="outline"
+          onClick={onClick}
+          disabled={blocked}
+          title={reason ?? "Run splitsmith.shot_detect on the audit clip"}
         >
-          Reset
+          Detect shots
         </Button>
+        {error ? <span className="text-xs text-destructive">{error}</span> : null}
+      </span>
+    );
+  }
+
+  return (
+    <DetectShotsMenu
+      blocked={blocked}
+      reason={reason}
+      onRerun={onClick}
+      onReset={onResetClick}
+      error={error}
+    />
+  );
+}
+
+interface DetectShotsMenuProps {
+  blocked: boolean;
+  reason: string | null;
+  onRerun: () => void;
+  onReset: () => void;
+  error: string | null;
+}
+
+function DetectShotsMenu({
+  blocked,
+  reason,
+  onRerun,
+  onReset,
+  error,
+}: DetectShotsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={wrapperRef} className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Detection utilities"
+        title={reason ?? "Detection utilities"}
+        className={cn(
+          "inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-ink",
+          open && "border-rule-strong bg-surface-3 text-ink",
+        )}
+      >
+        <MoreHorizontal className="size-4" aria-hidden />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-[calc(100%+6px)] z-40 w-64 overflow-hidden rounded-md border border-rule-strong bg-surface-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.7)]"
+        >
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onRerun();
+            }}
+            disabled={blocked}
+            className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <div className="min-w-0">
+              <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em]">
+                Re-run detection
+              </div>
+              <div className="mt-0.5 text-[0.6875rem] text-muted">
+                Refresh candidates; kept shots are preserved.
+              </div>
+            </div>
+          </button>
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onReset();
+            }}
+            disabled={blocked}
+            className="flex w-full items-start gap-2 border-t border-rule px-3 py-2.5 text-left text-[0.8125rem] text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <div className="min-w-0">
+              <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em]">
+                Reset & re-detect
+              </div>
+              <div className="mt-0.5 text-[0.6875rem] text-destructive/80">
+                Wipes kept / rejected decisions and starts over.
+              </div>
+            </div>
+          </button>
+          {reason ? (
+            <div className="border-t border-rule px-3 py-2 text-[0.6875rem] text-muted">
+              {reason}
+            </div>
+          ) : null}
+          {error ? (
+            <div className="border-t border-rule px-3 py-2 text-[0.6875rem] text-destructive">
+              {error}
+            </div>
+          ) : null}
+        </div>
       ) : null}
-      {error ? <span className="text-xs text-destructive">{error}</span> : null}
-    </span>
+    </div>
   );
 }
 

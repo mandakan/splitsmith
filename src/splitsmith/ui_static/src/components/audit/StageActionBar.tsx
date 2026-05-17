@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 export interface StageActionBarStage {
   stageNumber: number;
+  stageName: string;
   status: "done" | "active" | "todo";
 }
 
@@ -56,6 +57,7 @@ export function StageActionBar({
   const shooter = shooterIdx >= 0 ? shooters[shooterIdx] : null;
   const stage = stageIdx >= 0 ? stages[stageIdx] : null;
   const isFinish = step.kind === "finish";
+  const isReview = stage?.status === "done";
 
   return (
     <div
@@ -66,12 +68,18 @@ export function StageActionBar({
       {/* Left -- progress block */}
       <div className="flex min-w-0 flex-1 items-center gap-4">
         <div className="flex min-w-0 flex-col gap-1">
-          <div className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-subtle">
+          <div
+            className={cn(
+              "font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em]",
+              isReview ? "text-done" : "text-subtle",
+            )}
+          >
             {stage != null && shooters.length > 0
               ? `Stage ${stageIdx + 1} of ${stages.length} · Shooter ${shooterIdx + 1} of ${shooters.length}`
               : stage != null
                 ? `Stage ${stageIdx + 1} of ${stages.length}`
                 : ""}
+            {isReview ? <span className="ml-1.5">· Review</span> : null}
           </div>
           <div className="inline-flex items-center gap-2.5 overflow-hidden whitespace-nowrap font-display text-base font-bold uppercase tracking-[-0.01em] text-ink">
             {shooter != null && shooters.length > 1 ? (
@@ -87,10 +95,13 @@ export function StageActionBar({
               </>
             ) : null}
             {stage != null && activeStage != null ? (
-              <span className="truncate text-ink-2">
-                {pad2(activeStage)}
+              <span className="inline-flex min-w-0 items-center gap-2 truncate text-ink-2">
+                <span className="tabular-nums">{pad2(activeStage)}</span>
+                {stage.stageName ? (
+                  <span className="truncate text-ink-2/80">{stage.stageName}</span>
+                ) : null}
                 {stage.status === "done" ? (
-                  <span className="ml-1 text-done">·</span>
+                  <span aria-hidden className="text-done">·</span>
                 ) : null}
               </span>
             ) : null}
