@@ -54,6 +54,10 @@ interface VideoPanelProps {
   onSecondaryBuffering: (path: string, buffering: boolean) => void;
   onPrimaryTimeUpdate?: () => void;
   className?: string;
+  /** Hide VideoPanel's own header row (tab switcher + Grid/Single toggle).
+   *  The PiPBay supplies its own chrome and the bay IS the grid layout --
+   *  surfacing a "Grid/Single" toggle inside it would be nested UI. */
+  showHeader?: boolean;
 }
 
 // ---- SecondarySlot ----------------------------------------------------------
@@ -203,6 +207,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       onSecondaryBuffering,
       onPrimaryTimeUpdate,
       className,
+      showHeader = true,
     },
     ref,
   ) {
@@ -307,7 +312,10 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
 
     return (
       <div className={cn("space-y-3", className)}>
-        {/* Header: tabs in single mode, or "Grid view" label + toggle */}
+        {/* Header: tabs in single mode, or "Grid view" label + toggle.
+         *  Hidden when the parent (PiPBay) supplies its own chrome --
+         *  the bay's own header IS the layout selector. */}
+        {showHeader ? (
         <div className="flex flex-wrap items-center gap-2">
           {!gridMode && videos.length > 1 ? (
             <div role="tablist" aria-label="Viewing angle" className="flex flex-wrap gap-2">
@@ -378,6 +386,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
             </button>
           ) : null}
         </div>
+        ) : null}
 
         {/*
          * Video area. The primary <video> element is always the first child of

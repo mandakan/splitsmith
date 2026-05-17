@@ -38,6 +38,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useLocation } from "react-router-dom";
 
 import { ApiError, api, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -85,6 +86,11 @@ export function JobsPanel() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Pages that ship the sticky StageActionBar (currently just /audit/...)
+  // need the FAB lifted clear of the bar; otherwise the FAB lands on top
+  // of the action bar's primary CTA.
+  const { pathname } = useLocation();
+  const liftAboveActionBar = pathname.startsWith("/audit");
 
   const fetchJobs = useCallback(async () => {
     abortRef.current?.abort();
@@ -176,7 +182,10 @@ export function JobsPanel() {
         aria-expanded={open}
         aria-controls="jobs-drawer"
         className={cn(
-          "fixed bottom-7 right-7 z-40 inline-flex items-center gap-3 rounded-full border bg-gradient-to-br from-surface to-surface-2 px-4 py-2.5 font-display text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-ink shadow-[0_18px_36px_-12px_rgba(0,0,0,0.7)] transition-all hover:-translate-y-0.5",
+          "fixed right-7 z-40 inline-flex items-center gap-3 rounded-full border bg-gradient-to-br from-surface to-surface-2 px-4 py-2.5 font-display text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-ink shadow-[0_18px_36px_-12px_rgba(0,0,0,0.7)] transition-[bottom] duration-150 hover:-translate-y-0.5",
+          // Lift above the audit action bar (height ~64 + 16 gap); other
+          // pages keep the original anchor right at the corner.
+          liftAboveActionBar ? "bottom-[5.5rem]" : "bottom-7",
           anyActive
             ? "border-beep shadow-[0_0_0_1px_var(--color-beep),0_0_24px_var(--color-beep-glow),0_18px_36px_-12px_rgba(0,0,0,0.7)]"
             : unackedFailures > 0
