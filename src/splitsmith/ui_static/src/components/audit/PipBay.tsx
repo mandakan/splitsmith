@@ -15,12 +15,19 @@ const TILE: Record<PipSize, { width: number; height: number }> = {
   L: { width: 420, height: 264 },
 };
 const HEADER_HEIGHT = 28;
+const TRANSPORT_HEIGHT = 36;
 const MAX_TILES_VISIBLE = 2;
 
 export function pipBayDims(size: PipSize, camCount: number) {
   const t = TILE[size];
   const tiles = Math.min(Math.max(camCount, 1), MAX_TILES_VISIBLE);
-  return { width: t.width * tiles, height: t.height + HEADER_HEIGHT };
+  // Always reserve room for the transport row -- the design's bay ships
+  // playback controls inline, and the page no longer hosts a separate
+  // transport bar.
+  return {
+    width: t.width * tiles,
+    height: t.height + HEADER_HEIGHT + TRANSPORT_HEIGHT,
+  };
 }
 
 /** Padding from the viewport edge. Top corners are pushed down to clear
@@ -43,6 +50,11 @@ export interface PipBayProps {
   onHide: () => void;
   onCycleSize: () => void;
   onCycleCorner: () => void;
+  /** Optional shared-transport row rendered at the bottom of the bay
+   *  (play, time readout, loop, step-frame -- per design). Per design
+   *  the page no longer ships its own transport bar; playback controls
+   *  live inside the bay so the only audio source is the bay's video. */
+  transport?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -55,6 +67,7 @@ export function PipBay({
   onHide,
   onCycleSize,
   onCycleCorner,
+  transport,
   children,
 }: PipBayProps) {
   const { width, height } = pipBayDims(size, camCount);
@@ -121,6 +134,16 @@ export function PipBay({
           claims all remaining vertical room; min-h-0 lets nested grids
           shrink instead of overflowing. */}
       <div className="relative min-h-0 flex-1 overflow-hidden">{children}</div>
+
+      {/* Shared transport row -- the page no longer hosts its own. */}
+      {transport ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-t border-rule bg-surface-2 px-3 py-1.5"
+          style={{ height: 36 }}
+        >
+          {transport}
+        </div>
+      ) : null}
     </div>
   );
 }

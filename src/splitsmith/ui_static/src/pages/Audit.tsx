@@ -1663,6 +1663,29 @@ export function Audit() {
               />
             ) : null}
             <div className="ml-auto inline-flex items-center gap-2">
+              {/* K-auto-progress toggle. The transport bar is gone but
+                  this is a behaviour preference, not a transport
+                  control -- keep it visible so the operator who relies
+                  on "mark and advance" doesn't lose it. */}
+              <button
+                type="button"
+                onClick={() => setKAutoProgress((v) => !v)}
+                aria-pressed={kAutoProgress}
+                title={
+                  kAutoProgress
+                    ? "Auto-advance on K is on"
+                    : "Auto-advance on K is off"
+                }
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] transition-colors",
+                  kAutoProgress
+                    ? "border-led bg-led/10 text-led"
+                    : "border-rule bg-surface-2 text-muted hover:bg-surface-3 hover:text-ink",
+                )}
+              >
+                <ChevronsRight className="size-3.5" aria-hidden />
+                K → next
+              </button>
               {pipLayout.hidden ? (
                 <button
                   type="button"
@@ -1720,6 +1743,25 @@ export function Audit() {
               onHide={togglePipHidden}
               onCycleSize={cyclePipSize}
               onCycleCorner={cyclePipCorner}
+              transport={
+                peaks ? (
+                  <BayTransport
+                    isPlaying={isPlaying}
+                    loopMode={loopMode}
+                    currentTime={currentTime}
+                    duration={peaks.duration}
+                    onTogglePlay={togglePlay}
+                    onToggleLoop={() => setLoopMode((v) => !v)}
+                    onStepFrame={(dir) => {
+                      const v = videoRef.current;
+                      if (!v) return;
+                      const t = v.currentTime - beepOffset;
+                      const dur = peaks.duration;
+                      handleScrub(Math.min(dur, Math.max(0, t + dir * 0.025)));
+                    }}
+                  />
+                ) : null
+              }
             >
               <VideoPanel
                 ref={videoRef}
@@ -1760,82 +1802,12 @@ export function Audit() {
 
           {peaks ? (
             <>
-              {/* Transport bar */}
-              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rule bg-surface-2 px-4 py-3">
-                <button
-                  type="button"
-                  onClick={togglePlay}
-                  aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
-                  title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-                  className="inline-flex size-11 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
-                >
-                  {isPlaying ? (
-                    <Pause className="size-5" />
-                  ) : (
-                    <Play className="size-5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLoopMode((v) => !v)}
-                  aria-pressed={loopMode}
-                  title="Loop the audit clip (R)"
-                  aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
-                  className={cn(
-                    "inline-flex size-9 items-center justify-center rounded-md border transition-colors",
-                    loopMode
-                      ? "border-led bg-led/10 text-led shadow-[0_0_10px_var(--color-led-glow)]"
-                      : "border-rule bg-surface-3 text-muted hover:bg-surface-4 hover:text-ink",
-                  )}
-                >
-                  <Repeat className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setKAutoProgress((v) => !v)}
-                  aria-pressed={kAutoProgress}
-                  title={
-                    kAutoProgress
-                      ? "Auto-advance on K is on"
-                      : "Auto-advance on K is off"
-                  }
-                  className={cn(
-                    "inline-flex size-9 items-center justify-center rounded-md border transition-colors",
-                    kAutoProgress
-                      ? "border-led bg-led/10 text-led"
-                      : "border-rule bg-surface-3 text-muted hover:bg-surface-4 hover:text-ink",
-                  )}
-                >
-                  <ChevronsRight className="size-4" />
-                </button>
-                <div className="ml-2 flex items-center gap-5 font-mono tabular-nums">
-                  <Readout
-                    label="Position"
-                    value={formatTime(currentTime)}
-                  />
-                  <Readout
-                    label="Clip"
-                    value={formatTime(peaks.duration)}
-                  />
-                  {stage.time_seconds > 0 && (
-                    <Readout
-                      label="Stage"
-                      value={`${stage.time_seconds.toFixed(3)}s`}
-                    />
-                  )}
-                </div>
-                <div className="ml-auto flex items-center gap-4 font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted tabular-nums">
-                  <span>
-                    <b className="font-bold text-done">{detectedCount}</b> kept
-                  </span>
-                  <span>
-                    <b className="font-bold text-muted">{rejectedCount}</b> rejected
-                  </span>
-                  <span>
-                    <b className="font-bold text-manual">{manualCount}</b> manual
-                  </span>
-                </div>
-              </div>
+              {/* Transport bar removed -- playback (play/pause/loop/step
+                  frame) lives in the PipBay's shared transport row per
+                  design. Position/clip readouts also live in the bay;
+                  stage time is in the bottom action bar's kicker.
+                  Kept/rejected/manual counts are covered by the filter
+                  chips in the toolbar. */}
 
               {/* Anomaly chips OR sync banner. When the operator is
                   re-picking a buzzer for a cam, the chips swap out for
@@ -1974,12 +1946,9 @@ export function Audit() {
                     </span>
                   ))}
                 </div>
-                {beepOffset !== 0 ? (
-                  <div className="border-t border-rule px-5 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle tabular-nums">
-                    cam offset {beepOffset >= 0 ? "+" : ""}
-                    {beepOffset.toFixed(3)}s applied to active camera
-                  </div>
-                ) : null}
+                {/* Cam offset readout moved onto each secondary's
+                    CamSyncPill -- the offset surfaces next to the cam
+                    it applies to instead of as a separate footer. */}
               </div>
 
               {/* Shot stepper. When the PiP bay is anchored to a
@@ -2071,16 +2040,84 @@ export function Audit() {
   );
 }
 
-function Readout({ label, value }: { label: string; value: string }) {
+/** Shared transport row inside the PipBay: play/pause, time readout,
+ *  loop toggle, frame-step buttons. Per design, the page no longer
+ *  ships its own transport bar; this is the single source of playback
+ *  truth for the operator. */
+function BayTransport({
+  isPlaying,
+  loopMode,
+  currentTime,
+  duration,
+  onTogglePlay,
+  onToggleLoop,
+  onStepFrame,
+}: {
+  isPlaying: boolean;
+  loopMode: boolean;
+  currentTime: number;
+  duration: number;
+  onTogglePlay: () => void;
+  onToggleLoop: () => void;
+  onStepFrame: (dir: -1 | 1) => void;
+}) {
   return (
-    <div className="flex flex-col items-start gap-0.5">
-      <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-        {label}
+    <>
+      <button
+        type="button"
+        onClick={onTogglePlay}
+        title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+        aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
+        className="inline-flex size-6 items-center justify-center rounded-full border-0 bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+      >
+        {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
+      </button>
+      <span className="font-mono text-[0.6875rem] tabular-nums text-ink-2">
+        {currentTime.toFixed(3)}
+        <span className="text-subtle">/{duration.toFixed(2)}s</span>
       </span>
-      <span className="font-mono text-base font-bold leading-none text-ink">
-        {value}
+      <span
+        aria-hidden
+        className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-subtle"
+      >
+        shared transport
       </span>
-    </div>
+      <div className="ml-auto inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onToggleLoop}
+          aria-pressed={loopMode}
+          title="Loop (R)"
+          aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
+          className={cn(
+            "inline-flex size-[22px] items-center justify-center rounded-sm border transition-colors",
+            loopMode
+              ? "border-led bg-led/10 text-led shadow-[0_0_8px_var(--color-led-glow)]"
+              : "border-rule bg-transparent text-muted hover:border-rule-strong hover:text-ink-2",
+          )}
+        >
+          <Repeat className="size-3" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={() => onStepFrame(-1)}
+          title="Step frame back (Shift+←)"
+          aria-label="Step frame back"
+          className="inline-flex size-[22px] items-center justify-center rounded-sm border border-rule font-mono text-[0.625rem] font-bold text-muted transition-colors hover:border-rule-strong hover:text-ink-2"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          onClick={() => onStepFrame(1)}
+          title="Step frame forward (Shift+→)"
+          aria-label="Step frame forward"
+          className="inline-flex size-[22px] items-center justify-center rounded-sm border border-rule font-mono text-[0.625rem] font-bold text-muted transition-colors hover:border-rule-strong hover:text-ink-2"
+        >
+          ›
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -2477,11 +2514,4 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
   return markers;
 }
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00.000";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
-  return `${m}:${s.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
-}
 
