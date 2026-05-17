@@ -1558,29 +1558,30 @@ export function Audit() {
   // finish state (no more stages, no more shooters). The StageActionBar
   // swaps for the SessionSummary card so the operator gets a clear
   // finish line instead of a stranded CTA.
+  //
+  // Plain const (not useMemo) on purpose -- this lives *after* the
+  // early returns (projectError / !project / no stages with primary),
+  // and a conditionally-called hook trips React error #310.
   const sessionDone = doneParam === "1";
   const activeShooter = shooters.find((s) => s.slug === slugParam) ?? null;
-  const summaryStats = useMemo(() => {
-    const stats: { label: string; value: string; sub?: string }[] = [];
-    if (activeShooter) {
-      stats.push({
-        label: "Stages audited",
-        value: String(activeShooter.stages_audited),
-        sub: `of ${activeShooter.stages_total}`,
-      });
-    }
-    stats.push({
-      label: "Shots on this stage",
-      value: String(detectedCount + manualCount),
-      sub: `${rejectedCount} rejected · ${manualCount} manual`,
+  const summaryStats: { label: string; value: string; sub?: string }[] = [];
+  if (activeShooter) {
+    summaryStats.push({
+      label: "Stages audited",
+      value: String(activeShooter.stages_audited),
+      sub: `of ${activeShooter.stages_total}`,
     });
-    stats.push({
-      label: "Anomalies",
-      value: String(anomalies.length),
-      sub: anomalies.length === 0 ? "clean" : "open",
-    });
-    return stats;
-  }, [activeShooter, detectedCount, manualCount, rejectedCount, anomalies]);
+  }
+  summaryStats.push({
+    label: "Shots on this stage",
+    value: String(detectedCount + manualCount),
+    sub: `${rejectedCount} rejected · ${manualCount} manual`,
+  });
+  summaryStats.push({
+    label: "Anomalies",
+    value: String(anomalies.length),
+    sub: anomalies.length === 0 ? "clean" : "open",
+  });
 
   return (
     <div className="flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
