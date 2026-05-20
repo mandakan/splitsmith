@@ -48,6 +48,8 @@ import {
 
 import { AnomalyChips } from "@/components/audit/AnomalyChips";
 import { AnomalyPins } from "@/components/audit/AnomalyPins";
+import { BeepStatusChip } from "@/components/audit/BeepStatusChip";
+import { PrereqGate } from "@/components/audit/PrereqGate";
 import {
   CamSyncPill,
   type CamSyncState,
@@ -98,11 +100,7 @@ import {
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
-import {
-  detectAnomalies,
-  keptShotsFromMarkers,
-  type Anomaly,
-} from "@/lib/anomalies";
+import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { cn } from "@/lib/utils";
@@ -1028,21 +1026,12 @@ export function Audit() {
     return null;
   }, [keptShots, auditBeep, stage]);
 
-  // Anomaly chips shown above the waveform. The structured anomalies
-  // from `detectAnomalies` ride alongside a synthetic "beep looks wrong"
-  // chip when the diagnostic heuristic fires -- one row, one mental
-  // model for "things that look off about this stage" (per design).
-  const anomalyChips = useMemo<Anomaly[]>(() => {
-    if (!beepDiagnostic) return anomalies;
-    const synth: Anomaly = {
-      kind: "long_pause",
-      severity: "warn",
-      message: `Beep looks wrong -- ${beepDiagnostic.reason}`,
-      shot_number: null,
-      time: null,
-    };
-    return [synth, ...anomalies];
-  }, [anomalies, beepDiagnostic]);
+  // Anomaly chips shown above the waveform. The "beep looks wrong"
+  // diagnostic used to ride along as a synthetic warn chip here; it now
+  // lives on BeepStatusChip directly (tooltip + amber tone), so the
+  // anomaly row reflects only the structured shot-level anomalies. One
+  // signal, one home, attached to its trigger.
+  const anomalyChips = anomalies;
 
   // Whenever the kept-shot list shrinks (reject / delete), keep the index
   // in range. Don't change otherwise -- the user's position is sticky.
@@ -1647,6 +1636,23 @@ export function Audit() {
     sub: anomalies.length === 0 ? "clean" : "open",
   });
 
+  // Blocking pre-audit state. When a stage hasn't met the prerequisites
+  // for audit -- the trim isn't built yet, or detection hasn't run --
+  // the audit canvas is replaced by PrereqGate. The toolbar's
+  // TrimNowBadge / DetectShotsBadge are suppressed in that case so the
+  // affordance lives in exactly one place (the gate).
+  //
+  // Only fires once peaks have loaded so we don't flash the gate while
+  // we're still figuring out whether the trim exists.
+  const prereqKind: "trim" | "detect" | null = peaks
+    ? !peaks.trimmed
+      ? "trim"
+      : markers.length === 0
+        ? "detect"
+        : null
+    : null;
+  const prereqActive = prereqKind != null && stage != null && primary != null;
+
   return (
     <div className="flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
       {stage && primary ? (
@@ -1667,19 +1673,22 @@ export function Audit() {
               sticky bottom action bar; shooter switcher lives in the
               MatchShell breadcrumb. */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {primary.beep_time != null ? (
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-beep/40 bg-beep-tint px-2 py-1 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.06em] tabular-nums text-beep">
-                beep at {primary.beep_time.toFixed(3)}s
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-led/40 bg-led-tint px-2 py-1 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.06em] text-led">
-                no beep yet
-              </span>
-            )}
+            {/* Confidence-aware beep status -- absorbs the old
+                "BeepDiagnostic" banner into a chip tooltip + tone shift
+                so the diagnostic lives next to its trigger. Re-pick beep
+                opens sync mode on the primary cam; it also remains
+                available on the per-cam CamSyncPill inside the PipBay
+                for secondaries. */}
+            <BeepStatusChip
+              beepTime={primary.beep_time}
+              confidence={primary.beep_confidence ?? null}
+              diagnostic={beepDiagnostic?.reason ?? null}
+              onRePick={() => startSync(primary)}
+            />
             {/* Re-pick beep affordance is now the primary cam's
                 CamSyncPill inside the PipBay. Click the pill to enter
                 sync mode for that cam (or any secondary). */}
-            {peaks && !peaks.trimmed ? (
+            {peaks && !peaks.trimmed && !prereqActive ? (
               <TrimNowBadge
                 slug={slug}
                 stageNumber={stage.stage_number}
@@ -1713,33 +1722,39 @@ export function Audit() {
               />
             ) : null}
             <div className="ml-auto inline-flex items-center gap-2">
-              {/* K-auto-progress toggle. The transport bar is gone but
-                  this is a behaviour preference, not a transport
-                  control -- keep it visible so the operator who relies
-                  on "mark and advance" doesn't lose it. */}
+              {/* K-auto-step toggle. The transport bar is gone but this
+                  is a behaviour preference, not a transport control --
+                  keep it visible so the operator who relies on "mark
+                  and advance" doesn't lose it. Quiet pill per design
+                  spec: a *preference toggle* shouldn't read as a
+                  primary action. */}
               <button
                 type="button"
                 onClick={() => setKAutoProgress((v) => !v)}
                 aria-pressed={kAutoProgress}
                 title={
                   kAutoProgress
-                    ? "Auto-advance on K is on"
-                    : "Auto-advance on K is off"
+                    ? "Auto-step to next shot on accept (K to toggle)"
+                    : "Stay on shot after accept (K to toggle)"
                 }
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] transition-colors hover:bg-surface-3",
-                  kAutoProgress ? "text-ink" : "text-muted hover:text-ink",
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.06em] transition-colors",
+                  kAutoProgress
+                    ? "border-led/35 bg-led-tint text-ink"
+                    : "border-rule bg-surface-2 text-muted hover:border-rule-strong hover:bg-surface-3 hover:text-ink",
                 )}
               >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "inline-block size-1.5 rounded-full",
+                    kAutoProgress
+                      ? "bg-led shadow-[0_0_6px_var(--color-led-glow)]"
+                      : "bg-rule-strong",
+                  )}
+                />
                 <Kbd size="sm">K</Kbd>
-                <span aria-hidden className="text-rule-strong">→</span>
-                <span>next</span>
-                {kAutoProgress ? (
-                  <span
-                    aria-hidden
-                    className="ml-0.5 inline-block size-1.5 rounded-full bg-led shadow-[0_0_4px_var(--color-led-glow)]"
-                  />
-                ) : null}
+                <span>Auto-step</span>
               </button>
               {pipLayout.hidden ? (
                 <button
@@ -1776,7 +1791,7 @@ export function Audit() {
               >
                 <HelpCircle className="size-4" />
               </button>
-              {peaks && peaks.trimmed ? (
+              {peaks && peaks.trimmed && !prereqActive ? (
                 <DetectShotsBadge
                   slug={slug}
                   stageNumber={stage.stage_number}
@@ -1794,11 +1809,53 @@ export function Audit() {
             </div>
           </div>
 
+          {/* When the stage isn't ready to audit (trim missing, or no
+              candidates yet), the entire canvas is replaced by
+              PrereqGate. The toolbar's beep / filter chips stay
+              visible (those are status, not actions), but PiP bay,
+              waveform, shot stepper, and bottom action bar all
+              suspend until prerequisites pass. */}
+          {prereqActive && stage && primary ? (
+            <PrereqGate
+              kind={prereqKind!}
+              slug={slug}
+              stageNumber={stage.stage_number}
+              stage={stage}
+              blocked={primary.beep_time == null || stage.time_seconds <= 0}
+              blockedReason={
+                primary.beep_time == null
+                  ? "Detect or set the beep first."
+                  : stage.time_seconds <= 0
+                    ? "Import a scoreboard so the stage time is known."
+                    : null
+              }
+              hasSource
+              hasStageTime={stage.time_seconds > 0}
+              hasBeep={primary.beep_time != null}
+              hasTrim={!!peaks?.trimmed}
+              onProjectUpdate={(p) => {
+                setProject(p);
+                if (stageNumber != null) {
+                  api
+                    .getStagePeaks(slug, stageNumber, PEAK_BINS)
+                    .then((np) => setPeaks(np))
+                    .catch(() => {});
+                }
+              }}
+              onAuditRefresh={async () => {
+                if (stageNumber == null) return;
+                const a = await api.getStageAudit(slug, stageNumber);
+                setAudit(a);
+                setMarkers(deriveMarkers(a));
+              }}
+            />
+          ) : null}
+
           {/* Video lives in a floating PiP bay (replaces the legacy
               inline instrument frame). The bay anchors to a viewport
               corner so the waveform owns full page width, and the page
               flow no longer reserves vertical room for the video. */}
-          {!pipLayout.hidden ? (
+          {!prereqActive && !pipLayout.hidden ? (
             <PipBay
               corner={pipLayout.corner}
               size={pipLayout.size}
@@ -1870,7 +1927,7 @@ export function Audit() {
             </PipBay>
           ) : null}
 
-          {peaks ? (
+          {peaks && !prereqActive ? (
             <>
               {/* Transport bar removed -- playback (play/pause/loop/step
                   frame) lives in the PipBay's shared transport row per
@@ -2075,7 +2132,7 @@ export function Audit() {
         onClose={() => setShowHelp(false)}
         mode="audit"
       />
-      {stagesWithPrimary.length > 0 ? (
+      {stagesWithPrimary.length > 0 && !prereqActive ? (
         sessionDone ? (
           <div className="fixed inset-x-0 bottom-0 z-30 border-t border-rule-strong bg-bg/95 px-5 py-3 backdrop-blur">
             <SessionSummary
@@ -2386,6 +2443,27 @@ function DetectShotsBadge({
     void runDetect(true);
   }, [runDetect]);
 
+  // CSV-only re-run. Reuses the existing exportStage job (the server
+  // supports write_csv with everything else off, see ui/exports.py). The
+  // JobsPanel surfaces progress + the result path; we just kick it off
+  // and clear errors here.
+  const onExportShotsClick = useCallback(() => {
+    setError(null);
+    void (async () => {
+      try {
+        await api.exportStage(slug, stageNumber, {
+          write_trim: false,
+          write_csv: true,
+          write_fcpxml: false,
+          write_report: false,
+          write_overlay: false,
+        });
+      } catch (err) {
+        setError(err instanceof ApiError ? err.detail : String(err));
+      }
+    })();
+  }, [slug, stageNumber]);
+
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
   // While a job is running we always surface progress inline so the
@@ -2435,6 +2513,7 @@ function DetectShotsBadge({
       reason={reason}
       onRerun={onClick}
       onReset={onResetClick}
+      onExportShots={onExportShotsClick}
       error={error}
     />
   );
@@ -2445,6 +2524,7 @@ interface DetectShotsMenuProps {
   reason: string | null;
   onRerun: () => void;
   onReset: () => void;
+  onExportShots: () => void;
   error: string | null;
 }
 
@@ -2453,6 +2533,7 @@ function DetectShotsMenu({
   reason,
   onRerun,
   onReset,
+  onExportShots,
   error,
 }: DetectShotsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -2510,6 +2591,24 @@ function DetectShotsMenu({
               </div>
               <div className="mt-0.5 text-[0.6875rem] text-muted">
                 Refresh candidates; kept shots are preserved.
+              </div>
+            </div>
+          </button>
+          <button
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onExportShots();
+            }}
+            className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            <div className="min-w-0">
+              <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em]">
+                Export shot table
+              </div>
+              <div className="mt-0.5 text-[0.6875rem] text-muted">
+                CSV · all confirmed shots in this stage.
               </div>
             </div>
           </button>
