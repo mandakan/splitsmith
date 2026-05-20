@@ -157,6 +157,7 @@ export function Audit() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const doneParam = searchParams.get("done");
+  const nextShooterParam = searchParams.get("next");
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -1185,10 +1186,13 @@ export function Audit() {
         // dirty-flush during stage switch) never advance.
         //
         // The conveyor chains across shooters: at the last stage of the
-        // current shooter, advance to the next shooter that still has
-        // work remaining; when nothing's left, land in a finish state
-        // (?done=1 query param so the bottom action bar swaps the CTA
-        // for the session-summary card -- phase 5).
+        // current shooter, land in a shooter-complete interstitial that
+        // names the next shooter and offers an explicit CTA (Variant D
+        // in the design bundle); at the last stage of the last shooter,
+        // land in the match-complete finish state. ?done=1 swaps the
+        // StageActionBar for SessionSummary either way; ?next=<slug>
+        // distinguishes shooter-complete from match-complete and names
+        // the next shooter's pickup target.
         if (opts.advance) {
           const step = computeAuditNextStep({
             shooters,
@@ -1198,11 +1202,11 @@ export function Audit() {
           });
           if (step.kind === "stage") {
             navigate(`/audit/${step.nextSlug}/${step.nextStage}`);
-          } else if (step.kind === "shooter") {
-            // ShooterScopedRoute + the stage-index redirect (see effect
-            // around line 307) land us on the first stage-with-primary
-            // for the new shooter; no need to pin a stage number here.
-            navigate(`/audit/${step.nextSlug}`);
+          } else if (step.kind === "shooter" && slugParam != null && stageNumber != null) {
+            navigate(
+              `/audit/${slugParam}/${stageNumber}?done=1&next=${encodeURIComponent(step.nextSlug)}`,
+              { replace: true },
+            );
           } else if (slugParam != null && stageNumber != null) {
             navigate(`/audit/${slugParam}/${stageNumber}?done=1`, { replace: true });
           }
@@ -2141,6 +2145,17 @@ export function Audit() {
               }
               stats={summaryStats}
               onJumpToOverview={() => navigate("/shooters")}
+              nextShooterLabel={
+                nextShooterParam
+                  ? (shooters.find((s) => s.slug === nextShooterParam)?.name ??
+                    null)
+                  : null
+              }
+              onAuditNextShooter={
+                nextShooterParam
+                  ? () => navigate(`/audit/${nextShooterParam}`)
+                  : undefined
+              }
             />
           </div>
         ) : (
