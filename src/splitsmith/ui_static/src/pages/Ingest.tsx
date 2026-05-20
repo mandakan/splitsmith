@@ -35,7 +35,6 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { FolderPicker } from "@/components/FolderPicker";
 import { RelinkDialog } from "@/components/RelinkDialog";
-import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,7 +43,6 @@ import {
   type CameraMount,
   type MatchProject,
   type ServerHealth,
-  type ShooterListEntry,
   type StageEntry,
   type StageVideo,
   type VideoRole,
@@ -63,7 +61,6 @@ function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
-  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -71,24 +68,6 @@ function IngestInner({ slug }: { slug: string }) {
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
-
-  // Match-level shooter list drives the chip-strip switcher. 409
-  // (legacy single-shooter project) collapses to an empty list, which
-  // hides the strip without surfacing as an error to the user.
-  useEffect(() => {
-    let alive = true;
-    api
-      .listMatchShooters()
-      .then((r) => {
-        if (alive) setShooters(r.shooters);
-      })
-      .catch(() => {
-        if (alive) setShooters([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   async function reload() {
     setError(null);
@@ -236,22 +215,6 @@ function IngestInner({ slug }: { slug: string }) {
               ? "Drop a folder of videos. Splitsmith auto-matches each video to a stage by recording timestamp."
               : "Auto-matched to stages by recording timestamp. Review the assignments and confirm to start processing."}
           </p>
-        </div>
-
-        {/* Switch which shooter you're managing videos for. Same chip
-         *  pattern as Audit / Coach / Export so the user has one mental
-         *  model for moving between shooters. Hides itself in
-         *  single-shooter matches and legacy projects. */}
-        <div className="mb-5">
-          <ShooterChipStrip
-            shooters={shooters}
-            activeSlug={slug}
-            urlBase="ingest"
-            label="Adding footage for"
-            count={(s) =>
-              `${s.video_count} video${s.video_count === 1 ? "" : "s"}`
-            }
-          />
         </div>
 
         {/* Top-level actions. The relink dialog handles the "I moved my

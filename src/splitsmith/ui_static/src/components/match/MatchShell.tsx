@@ -70,6 +70,18 @@ export function MatchShell() {
     if (pathname.startsWith("/shooters")) return "Shooters";
     return null;
   }, [pathname]);
+  // activeMeaning kicker for the shell-level shooter strip. Names what
+  // "active" means on this page: "Editing" on Audit / Ingest / Export,
+  // "Coaching" on Coach. Per Shell - Active shooter.html in the design
+  // bundle: "the kicker is the entire IA decision in 7 chars".
+  const shooterStripLabel = useMemo<string | null>(() => {
+    if (pathname.startsWith("/coach")) return "Coaching";
+    if (pathname.startsWith("/audit")) return "Editing";
+    if (pathname.startsWith("/export")) return "Editing";
+    if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
+      return "Editing";
+    return null;
+  }, [pathname]);
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
     if (!didInitMode) {
@@ -254,7 +266,7 @@ export function MatchShell() {
               shooters={shooters}
               activeSlug={slug}
               urlBase={breadcrumbUrlBase(pathname)}
-              label={null}
+              label={shooterStripLabel}
               variant="inline"
             />
           ) : null}

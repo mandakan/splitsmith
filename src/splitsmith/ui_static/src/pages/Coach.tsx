@@ -41,7 +41,6 @@ import {
 } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +51,6 @@ import {
   type CoachShot,
   type CoachStageResponse,
   type MatchProject,
-  type ShooterListEntry,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -132,7 +130,6 @@ function CoachMatch({ slug }: { slug?: string }) {
   const stagePrefix = `/coach/${slug}`;
   const auditPrefix = `/audit/${slug}`;
   const [project, setProject] = useState<MatchProject | null>(null);
-  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [perStage, setPerStage] = useState<PerStageAggregate[]>([]);
   const [distributions, setDistributions] =
     useState<CoachMatchDistributions | null>(null);
@@ -149,17 +146,6 @@ function CoachMatch({ slug }: { slug?: string }) {
       flagged: boolean;
     }[]
   >([]);
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .listMatchShooters()
-      .then((r) => alive && setShooters(r.shooters))
-      .catch(() => alive && setShooters([]));
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -303,12 +289,6 @@ function CoachMatch({ slug }: { slug?: string }) {
 
   return (
     <div className="flex flex-col gap-5 px-7 py-5">
-      <ShooterChipStrip
-        shooters={shooters}
-        activeSlug={slug}
-        urlBase="coach"
-        label="Coaching"
-      />
       <div>
         <Kicker className="mb-2">Match analysis</Kicker>
         <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
@@ -980,7 +960,6 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const coachPrefix = `/coach/${slug}`;
   const auditPrefix = `/audit/${slug}`;
   const [project, setProject] = useState<MatchProject | null>(null);
-  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
@@ -990,17 +969,6 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const [noteDraft, setNoteDraft] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shotListRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    api
-      .listMatchShooters()
-      .then((r) => alive && setShooters(r.shooters))
-      .catch(() => alive && setShooters([]));
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -1166,13 +1134,6 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
 
   return (
     <div className="flex flex-col gap-4 px-7 py-5">
-      <ShooterChipStrip
-        shooters={shooters}
-        activeSlug={slug}
-        urlBase="coach"
-        stage={stage}
-        label="Coaching"
-      />
       {/* Compact stage header */}
       <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
         <div className="flex items-center gap-1.5">

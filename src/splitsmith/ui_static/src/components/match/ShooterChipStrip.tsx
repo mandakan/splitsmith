@@ -31,8 +31,12 @@ interface Props {
    *  ``/<urlBase>/<slug>``. Audit + Coach + Export all support both
    *  forms; Ingest is per-shooter (no stage), so callers pass null. */
   stage?: number | null;
-  /** Verb label shown to the left of the chips, or `null` for the inline
-   *  variant (which sits in a breadcrumb row and skips the label). */
+  /** Verb label shown to the left of the chips. Pure-UI cue that names
+   *  what "active" *means* on the current page -- "Editing" on Audit /
+   *  Ingest / Export, "Coaching" on Coach, "Focus" on match-level
+   *  pages, "Audio source" on Export-compare. The design system calls
+   *  this the activeMeaning kicker -- the IA decision in 7 chars.
+   *  Pass `null` to hide it. */
   label: string | null;
   /** Per-chip secondary count format. Defaults to "audited/total"; pages
    *  that surface a different metric (e.g. raw video count on Ingest)
@@ -64,10 +68,16 @@ export function ShooterChipStrip({
       className={cn(
         "inline-flex flex-wrap items-center gap-2",
         !isInline && "-mt-1 mb-3",
+        isInline && "gap-2.5",
       )}
     >
-      {label != null && !isInline ? (
-        <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-subtle">
+      {label != null ? (
+        <span
+          className={cn(
+            "font-mono font-bold uppercase tracking-[0.14em] text-subtle",
+            isInline ? "text-[0.5625rem]" : "text-[0.625rem]",
+          )}
+        >
           {label}
         </span>
       ) : null}
