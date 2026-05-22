@@ -19,13 +19,21 @@ import {
   Film,
   LayoutGrid,
   Users,
+  Volume2,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
+import { type StageStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export type StageStatus = "done" | "partial" | "flagged" | "todo";
+// The sidebar consumes the canonical :type:`StageStatus` from the
+// backend. The previous local narrow union ("done" | "partial" |
+// "flagged" | "todo") drifted into a tone, not a status, and got
+// duplicated wherever the home / chip-strip / sidebar needed to
+// classify stages. Status lives in one place now; visual tone is
+// derived from it inside ``StageDot``.
+export type { StageStatus };
 
 export interface MatchSidebarStage {
   stage_number: number;
@@ -41,6 +49,11 @@ interface MatchSidebarProps {
   stages: MatchSidebarStage[];
   /** Optional shooter count to render in the Shooters nav row. */
   shooterCount?: number;
+  /** Beeps still awaiting confirm/adjust across all shooters. Drives the
+   *  badge on the Beep review nav row -- when it's > 0 the row gains a
+   *  count chip so the operator can see at a glance that there's work
+   *  there. */
+  beepReviewPendingCount?: number;
   /** When true the sidebar renders the "no footage yet" sub for the stage
    *  list (matches polished/17). Defaults to false. */
   awaiting?: boolean;
@@ -63,12 +76,18 @@ export function MatchSidebar({
   matchKicker = "Active match",
   stages,
   shooterCount,
+  beepReviewPendingCount,
   awaiting = false,
   onStageClick,
   shooterSlug,
   className,
 }: MatchSidebarProps) {
-  const audited = stages.filter((s) => s.status === "done").length;
+  // Sidebar header shows audited / total. Skipped stages count as
+  // closed out (operator made a decision) but read as audited in the
+  // tally; this matches the Home progress bar.
+  const audited = stages.filter(
+    (s) => s.status === "audited" || s.status === "skipped",
+  ).length;
   const total = stages.length;
 
   return (
@@ -124,6 +143,13 @@ export function MatchSidebar({
           icon={<Film className="size-[15px]" />}
         >
           Videos
+        </SidebarLink>
+        <SidebarLink
+          to="/beep-review"
+          icon={<Volume2 className="size-[15px]" />}
+          count={beepReviewPendingCount ? beepReviewPendingCount : undefined}
+        >
+          Beep review
         </SidebarLink>
         <SidebarLink
           to={shooterSlug ? `/export/${shooterSlug}` : "/shooters"}
@@ -255,40 +281,79 @@ function SidebarLink({
 }
 
 function StageDot({ status }: { status: StageStatus }) {
-  if (status === "todo") {
-    return (
-      <span
-        aria-label="Not started"
-        className="size-3 rounded-full border border-rule-strong bg-transparent"
-      />
-    );
+  // ``audited`` and ``skipped`` are both terminal -- audited gets the
+  // green check, skipped gets a hollow grey ring so the operator can
+  // tell at a glance which stages they actively closed out vs which
+  // they finished. ``in_progress`` (detection ran, save not hit) and
+  // ``partial`` (no stage time) and ``ready`` (set up, nothing run)
+  // each get their own dot so the sidebar tells the truth.
+  switch (status) {
+    case "audited":
+      return (
+        <span
+          aria-label="Audited"
+          className="inline-flex size-3 items-center justify-center rounded-full bg-done text-bg shadow-[0_0_5px_var(--color-done-glow)]"
+        >
+          <svg
+            width="7"
+            height="7"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="4"
+          >
+            <path d="M5 12l5 5L20 7" />
+          </svg>
+        </span>
+      );
+    case "skipped":
+      return (
+        <span
+          aria-label="Skipped"
+          className="inline-flex size-3 items-center justify-center rounded-full border border-rule-strong bg-surface-3 text-subtle"
+        >
+          <svg
+            width="7"
+            height="7"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="4"
+          >
+            <path d="M6 12h12" />
+          </svg>
+        </span>
+      );
+    case "in_progress":
+      return (
+        <span
+          aria-label="In progress"
+          className="size-3 rounded-full bg-live shadow-[0_0_5px_var(--color-live-glow)]"
+        />
+      );
+    case "ready":
+      return (
+        <span
+          aria-label="Ready to audit"
+          className="size-3 rounded-full border border-led bg-led-tint"
+        />
+      );
+    case "partial":
+      return (
+        <span
+          aria-label="Stage time missing"
+          className="size-3 rounded-full border-2 border-dashed border-live bg-transparent"
+        />
+      );
+    case "todo":
+    default:
+      return (
+        <span
+          aria-label="Not started"
+          className="size-3 rounded-full border border-rule-strong bg-transparent"
+        />
+      );
   }
-  if (status === "partial") {
-    return (
-      <span
-        aria-label="In progress"
-        className="size-3 rounded-full bg-live shadow-[0_0_5px_var(--color-live-glow)]"
-      />
-    );
-  }
-  if (status === "flagged") {
-    return (
-      <span
-        aria-label="Flagged"
-        className="size-3 rounded-full bg-led shadow-[0_0_5px_var(--color-led-glow)]"
-      />
-    );
-  }
-  return (
-    <span
-      aria-label="Done"
-      className="inline-flex size-3 items-center justify-center rounded-full bg-done text-bg shadow-[0_0_5px_var(--color-done-glow)]"
-    >
-      <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
-        <path d="M5 12l5 5L20 7" />
-      </svg>
-    </span>
-  );
 }
 
 function pad2(n: number): string {

@@ -262,14 +262,18 @@ export function Audit() {
   const [syncMode, setSyncMode] = useState<StageVideo | null>(null);
   const [syncCandidate, setSyncCandidate] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncSnapping, setSyncSnapping] = useState(false);
+  const [syncSnapError, setSyncSnapError] = useState<string | null>(null);
   const startSync = useCallback((cam: StageVideo) => {
     setSyncMode(cam);
     setSyncCandidate(null);
+    setSyncSnapError(null);
   }, []);
   const cancelSync = useCallback(() => {
     setSyncMode(null);
     setSyncCandidate(null);
     setSyncBusy(false);
+    setSyncSnapError(null);
   }, []);
   // Anchor for loop-to-start semantics: the audit-timeline position
   // playback last started from (or where the user last scrubbed). On
@@ -729,6 +733,18 @@ export function Audit() {
     [beepOffset],
   );
 
+  // Park the playhead at the existing beep when sync mode opens. Without
+  // this the operator drops into sync at t=0 with no context for what
+  // they're correcting -- they can't press play to hear the detector's
+  // pick, then drag to where it should have been. ``syncMode?.video_id``
+  // in the dep array keeps this from re-seeking on every re-render
+  // while the same cam is in sync.
+  useEffect(() => {
+    if (syncMode?.beep_time == null) return;
+    handleScrub(syncMode.beep_time);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncMode?.video_id]);
+
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -1180,6 +1196,12 @@ export function Audit() {
         sessionEventsRef.current = [];
         isDirtyRef.current = false;
         setSaveStatus({ kind: "saved", at: Date.now() });
+        // Nudge the MatchShell to re-fetch the project so the sidebar's
+        // status dots transition this stage to ``audited`` immediately.
+        // Without this the sidebar would keep showing ``in_progress``
+        // until the next navigation -- the bug the user flagged as
+        // "the state change isn't obvious".
+        outletCtx?.refresh?.();
         // Auto-advance on explicit Save (Cmd+S or the Save button): the
         // common audit loop is "run detect -> Save -> next stage", so we
         // jump immediately after the write returns. Silent saves (the
@@ -1283,6 +1305,42 @@ export function Audit() {
       setSyncBusy(false);
     }
   }, [syncMode, syncCandidate, slug, stageNumber]);
+
+  // Snap-to-beep: the operator drops a marker near where the buzzer
+  // sounds, then hits Snap to refine it to the rise-foot of the
+  // strongest tone in a +/-1.5s window. Same backend the legacy
+  // BeepSection uses; reusing it keeps the snap behavior consistent
+  // across surfaces. On success we update the candidate AND seek the
+  // playhead to the snapped time so the operator can immediately hear
+  // / see the refinement.
+  const snapSync = useCallback(async () => {
+    if (syncMode == null || stageNumber == null) return;
+    const hint = syncCandidate ?? syncMode.beep_time;
+    if (hint == null) return;
+    setSyncSnapping(true);
+    setSyncSnapError(null);
+    try {
+      const result = await api.snapBeepForVideo(
+        slug,
+        stageNumber,
+        syncMode.video_id,
+        hint,
+        1.5,
+      );
+      setSyncCandidate(result.snapped_time);
+      handleScrub(result.snapped_time);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        setSyncSnapError(
+          "No beep candidate within +/-1.5s. Drag the marker closer to the buzzer and try again.",
+        );
+      } else {
+        setSyncSnapError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setSyncSnapping(false);
+    }
+  }, [syncMode, syncCandidate, slug, stageNumber, handleScrub]);
 
   // "Looks right" -- keeps the current buzzer time but flips
   // beep_reviewed so the pill drops the "needs sync" flag. No
@@ -1656,15 +1714,72 @@ export function Audit() {
         : null
     : null;
   const prereqActive = prereqKind != null && stage != null && primary != null;
+  // Sync mode (Re-pick beep) needs to take precedence over the prereq
+  // gate -- otherwise clicking Re-pick from inside the gate's amber
+  // beep row sets ``syncMode`` but the sync overlay never renders
+  // because every waveform/PIP/sync condition uses ``!prereqActive``.
+  // Treat the gate as "wants to show, unless we're actively re-picking
+  // the beep" so the operator's click has somewhere to land.
+  const prereqShouldShow = prereqActive && syncMode == null;
+  const syncing = syncMode != null;
 
   return (
-    <div className="flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
+    <div
+      className={cn(
+        "relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink transition-colors",
+        // Sync-mode skin: the whole audit canvas adopts a subtle live-
+        // amber background wash so the operator can't mistake which
+        // mode they're in. The actual interactive surfaces below tone
+        // up or down independently; this is just the ambient frame.
+        // (Strawman -- pending designer review.)
+        syncing && "bg-[radial-gradient(900px_300px_at_50%_-80px,rgba(251,191,36,0.06),transparent_60%)]",
+      )}
+    >
+      {/* Persistent mode chrome -- amber rails on the left + right edges
+          of the canvas + a "PICKING BUZZER" mode label centered at the
+          top, so even mid-scrub you can't lose track of what state
+          you're in. pointer-events-none so clicks fall through to the
+          waveform / controls behind. */}
+      {syncing && (
+        <>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 w-[3px] animate-pulse bg-live shadow-[0_0_12px_var(--color-live-glow)]"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-[3px] animate-pulse bg-live shadow-[0_0_12px_var(--color-live-glow)]"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 translate-y-0"
+          >
+            <span className="inline-flex items-center gap-2 rounded-b-md border border-t-0 border-live/60 bg-live-tint px-3 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.14em] text-live shadow-[0_4px_18px_var(--color-live-glow)]">
+              <span
+                className="inline-block size-1.5 animate-pulse rounded-full bg-live"
+                aria-hidden
+              />
+              Picking buzzer
+            </span>
+          </div>
+        </>
+      )}
+
       {stage && primary ? (
         <>
           {/* Stage chip rail. The Audit / Compare / Coach view switcher
               isn't on this page per design -- those views are reached
-              from the sidebar (cross-view nav is shell-level). */}
-          <div className="border-b border-rule pb-3">
+              from the sidebar (cross-view nav is shell-level).
+              In sync mode it dims back so the focus stays on the
+              re-pick task; navigation away still works (existing
+              dirty-flush handles unsaved audit shots; sync candidate
+              state is intentionally discarded). */}
+          <div
+            className={cn(
+              "border-b border-rule pb-3 transition-opacity",
+              syncing && "pointer-events-none opacity-40",
+            )}
+          >
             <StageChipRail
               stages={stageRailItems}
               activeStage={stageNumber ?? null}
@@ -1709,21 +1824,32 @@ export function Audit() {
                 }}
               />
             ) : null}
-            {peaks ? (
-              <FilterBar
-                filters={filters}
-                counts={{
-                  detected: detectedCount,
-                  rejected: rejectedCount,
-                  manual: manualCount,
-                  // The audit waveform anchors on the primary; the beep
-                  // marker reflects ``auditBeep`` (= peaks.beep_time
-                  // falling back to primary.beep_time). 0 when the
-                  // primary has no beep yet.
-                  beep: auditBeep != null ? 1 : 0,
-                }}
-                onChange={setFilters}
-              />
+            {peaks && !prereqShouldShow ? (
+              <div
+                className={cn(
+                  "transition-opacity",
+                  // FilterBar manages shot-marker visibility; while
+                  // re-picking the buzzer it's noise. Dim it back so
+                  // the eye knows where the actual task lives. Still
+                  // clickable in case the operator wants to peek.
+                  syncing && "opacity-40",
+                )}
+              >
+                <FilterBar
+                  filters={filters}
+                  counts={{
+                    detected: detectedCount,
+                    rejected: rejectedCount,
+                    manual: manualCount,
+                    // The audit waveform anchors on the primary; the beep
+                    // marker reflects ``auditBeep`` (= peaks.beep_time
+                    // falling back to primary.beep_time). 0 when the
+                    // primary has no beep yet.
+                    beep: auditBeep != null ? 1 : 0,
+                  }}
+                  onChange={setFilters}
+                />
+              </div>
             ) : null}
             <div className="ml-auto inline-flex items-center gap-2">
               {/* K-auto-step toggle. The transport bar is gone but this
@@ -1819,7 +1945,7 @@ export function Audit() {
               visible (those are status, not actions), but PiP bay,
               waveform, shot stepper, and bottom action bar all
               suspend until prerequisites pass. */}
-          {prereqActive && stage && primary ? (
+          {prereqShouldShow && stage && primary ? (
             <PrereqGate
               kind={prereqKind!}
               slug={slug}
@@ -1836,6 +1962,10 @@ export function Audit() {
               hasSource
               hasStageTime={stage.time_seconds > 0}
               hasBeep={primary.beep_time != null}
+              beepConfidence={primary.beep_confidence ?? null}
+              beepDiagnostic={beepDiagnostic?.reason ?? null}
+              beepLowConfThreshold={beepLowConfThreshold}
+              onRePickBeep={() => startSync(primary)}
               hasTrim={!!peaks?.trimmed}
               onProjectUpdate={(p) => {
                 setProject(p);
@@ -1859,7 +1989,7 @@ export function Audit() {
               inline instrument frame). The bay anchors to a viewport
               corner so the waveform owns full page width, and the page
               flow no longer reserves vertical room for the video. */}
-          {!prereqActive && !pipLayout.hidden ? (
+          {!prereqShouldShow && !pipLayout.hidden ? (
             <PipBay
               corner={pipLayout.corner}
               size={pipLayout.size}
@@ -1931,7 +2061,7 @@ export function Audit() {
             </PipBay>
           ) : null}
 
-          {peaks && !prereqActive ? (
+          {peaks && !prereqShouldShow ? (
             <>
               {/* Transport bar removed -- playback (play/pause/loop/step
                   frame) lives in the PipBay's shared transport row per
@@ -1960,6 +2090,9 @@ export function Audit() {
                       : undefined
                   }
                   busy={syncBusy}
+                  onSnap={() => void snapSync()}
+                  snapping={syncSnapping}
+                  snapError={syncSnapError}
                 />
               ) : (
                 <AnomalyChips
@@ -1985,13 +2118,36 @@ export function Audit() {
                     : "border-rule-strong",
                 )}
               >
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface-2 px-4 py-2.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
+                <div
+                  className={cn(
+                    "flex flex-wrap items-center justify-between gap-3 border-b border-rule px-4 py-2.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle",
+                    // Header turns subtly amber in sync so the
+                    // instrument panel reads as a single re-pick task
+                    // rather than "normal audit with a banner stuck
+                    // on top".
+                    syncing
+                      ? "bg-[linear-gradient(to_right,color-mix(in_srgb,var(--color-live)_8%,var(--color-surface-2)),var(--color-surface-2))]"
+                      : "bg-surface-2",
+                  )}
+                >
                   <span className="inline-flex items-center gap-1.5 tabular-nums">
                     <span
                       aria-hidden
-                      className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_6px_var(--color-led-glow)]"
+                      className={cn(
+                        "inline-block size-1.5 rounded-full",
+                        syncing
+                          ? "animate-pulse bg-live shadow-[0_0_6px_var(--color-live-glow)]"
+                          : "bg-led shadow-[0_0_6px_var(--color-led-glow)]",
+                      )}
                     />
-                    <b className="font-bold text-led-soft">Primary</b>
+                    <b
+                      className={cn(
+                        "font-bold",
+                        syncing ? "text-live" : "text-led-soft",
+                      )}
+                    >
+                      Primary
+                    </b>
                     <span aria-hidden className="text-rule-strong">
                       ·
                     </span>
@@ -2012,7 +2168,9 @@ export function Audit() {
                       </span>
                     ) : null}
                     <span className="text-whisper">
-                      scrub or double-click to add marker
+                      {syncing
+                        ? "drag to place the buzzer · play to verify · snap to refine"
+                        : "scrub or double-click to add marker"}
                     </span>
                   </span>
                 </div>
@@ -2020,11 +2178,14 @@ export function Audit() {
                   <Waveform
                     peaks={peaks.peaks}
                     duration={peaks.duration}
-                    currentTime={
-                      syncMode != null && syncCandidate != null
-                        ? syncCandidate
-                        : currentTime
-                    }
+                    // Always reflect the playhead, even in sync mode --
+                    // otherwise pressing play after picking a candidate
+                    // shows playback stuck on the candidate marker
+                    // (because the playhead used to be pinned there)
+                    // and the operator can't see what they're playing
+                    // through. The candidate marker lives on beepTime
+                    // below, so it stays visible independently.
+                    currentTime={currentTime}
                     beepTime={
                       syncMode != null
                         ? (syncCandidate ?? syncMode.beep_time)
@@ -2034,7 +2195,16 @@ export function Audit() {
                     }
                     pixelsPerSecond={pixelsPerSecond}
                     onScrub={
-                      syncMode != null ? (t) => setSyncCandidate(t) : handleScrub
+                      syncMode != null
+                        ? (t) => {
+                            // Setting the candidate marker AND seeking
+                            // the video/audio is what makes verification
+                            // possible: pick a position, press play,
+                            // hear+see what's actually there.
+                            setSyncCandidate(t);
+                            handleScrub(t);
+                          }
+                        : handleScrub
                     }
                     onDoubleClick={syncMode != null ? undefined : handleAddManual}
                     height={180}

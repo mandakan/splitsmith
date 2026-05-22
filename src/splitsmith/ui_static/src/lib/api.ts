@@ -164,6 +164,17 @@ export const CAMERA_MOUNTS: readonly CameraMount[] = [
   "gimbal",
 ] as const;
 
+/** Per-stage lifecycle state, mirror of :class:`splitsmith.ui.project.StageStatus`.
+ *  Computed by the backend on every GET project payload; the SPA never
+ *  recomputes this -- see ``lib/stageStatus.ts`` for display mapping. */
+export type StageStatus =
+  | "todo"
+  | "partial"
+  | "ready"
+  | "in_progress"
+  | "audited"
+  | "skipped";
+
 export interface StageEntry {
   stage_number: number;
   stage_name: string;
@@ -176,6 +187,10 @@ export interface StageEntry {
    *  rather than imported from a scoreboard. Preserved across scoreboard
    *  syncs so a manual value isn't clobbered. */
   time_seconds_manual: boolean;
+  /** Lifecycle status computed by the backend (see :class:`StageStatus`).
+   *  Optional in the type because legacy responses may omit it; callers
+   *  should fall back via :func:`deriveStageStatus` when missing. */
+  status?: StageStatus;
 }
 
 export interface MatchProject {
@@ -1160,13 +1175,24 @@ export interface CreateMatchManualBody {
   primary_shooter: { name: string; division?: string | null };
 }
 
+/** One competitor pulled from a scoreboard match's roster, ready to be
+ *  materialised as a shooter when the match is created. No "primary" /
+ *  "me" flag -- the operator running the app may be coaching and not in
+ *  the roster at all (issue #350). Mirrors :class:`CreateMatchCompetitorPick`
+ *  in the backend. */
+export interface CreateMatchCompetitorPick {
+  name: string;
+  division?: string | null;
+  selected_shooter_id?: number | null;
+  selected_competitor_id: number;
+}
+
 export interface CreateMatchScoreboardBody {
   project_folder: string;
   name: string;
   match_id: number;
   content_type: number;
-  primary_shooter_name: string;
-  primary_shooter_division?: string | null;
+  competitors: CreateMatchCompetitorPick[];
 }
 
 /** One camera inside a shooter (#324). */
@@ -1419,6 +1445,14 @@ export const api = {
     );
   },
 
+  /** Directory-only listing without a bound project (#322). Used by the
+   * create-match folder picker -- the create flow runs before any project
+   * exists, so the shooter-scoped fs/list endpoint isn't reachable. */
+  listFolderUnbound: (path?: string) => {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+    return request<FsListing>(`/api/fs/list-dirs${qs}`);
+  },
+
   probeFile: (slug: string, path: string) =>
     request<FsProbeResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/fs/probe?path=${encodeURIComponent(path)}`,
@@ -1506,6 +1540,14 @@ export const api = {
   /** Resolve the current source's ``MatchData``. The SPA uses this to map
    *  a picked ``shooterId`` to a per-match ``competitor_id`` before
    *  pinning. 404 when the project has no match loaded. */
+  /** Fetch full match data (incl. competitor list) without a bound
+   *  shooter (#322). Used by the create-from-scoreboard flow to populate
+   *  the multi-shooter picker before any project exists. */
+  getScoreboardMatchDataUnbound: (contentType: number, matchId: number) =>
+    request<ScoreboardMatchData>(
+      `/api/scoreboard/matches/${contentType}/${matchId}`,
+    ),
+
   getScoreboardMatchData: (slug: string) =>
     request<ScoreboardMatchData>(
       `/api/shooters/${encodeURIComponent(slug)}/scoreboard/match-data`,

@@ -52,6 +52,17 @@ interface FolderPickerProps {
    * files are selected. The callback receives the selected files with their
    * filesystem mtime so the parent can pre-fill date hints. */
   onSelectFiles?: (files: { path: string; mtime: number | null }[]) => void;
+  /** When true, file checkboxes auto-commit on every toggle: the picker
+   *  calls :prop:`onFolderFilesChange` with the current folder and the
+   *  current selection (including empty selections) each time. The
+   *  "Use N files" footer button is hidden because commit is implicit.
+   *  Used by the Add-Footage modal where the picker feeds a queue
+   *  instead of a one-shot import. */
+  autoCommitFiles?: boolean;
+  /** Callback for the auto-commit mode. Fires on every selection
+   *  change, including empty -> the caller maintains one queue entry
+   *  per folder and removes it when ``files`` is empty. */
+  onFolderFilesChange?: (folder: string, files: { path: string; mtime: number | null }[]) => void;
   onCancel?: () => void;
   /** Render mode: inline (e.g. inside a card) vs. compact. */
   mode?: "inline" | "compact";
@@ -78,6 +89,8 @@ export function FolderPicker({
   initialPath,
   onSelect,
   onSelectFiles,
+  autoCommitFiles = false,
+  onFolderFilesChange,
   onCancel,
   mode = "inline",
   matchWindow = null,
@@ -170,6 +183,23 @@ export function FolderPicker({
       .map((e) => ({ path: joinPath(path, e.name), mtime: e.mtime }));
     onSelectFiles!(files);
   };
+
+  // Auto-commit mode: surface every selection change to the parent so a
+  // queue-style UI (Add-Footage modal) updates in lock-step with the
+  // user's clicks. Including the empty-selection case is important --
+  // unchecking the last box has to remove the per-folder queue entry,
+  // otherwise the user "deselects" but the queue still says it's there.
+  useEffect(() => {
+    if (!autoCommitFiles || !onFolderFilesChange || !path) return;
+    const files = videoEntries
+      .filter((e) => selectedFiles.has(e.name))
+      .map((e) => ({ path: joinPath(path, e.name), mtime: e.mtime }));
+    onFolderFilesChange(path, files);
+    // ``videoEntries`` isn't a dep because it derives from ``listing``;
+    // listing-driven changes go through the ``load`` reset of
+    // selectedFiles, which retriggers this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFiles, path, autoCommitFiles]);
 
   return (
     <div
@@ -309,6 +339,8 @@ export function FolderPicker({
               <Film className="size-3" />
               {videosHere} video{videosHere === 1 ? "" : "s"} in this folder
             </span>
+          ) : allowEmptyFolder ? (
+            <span>No videos directly here -- subfolders will be scanned.</span>
           ) : (
             <span>No videos directly here. Drill into a subfolder.</span>
           )}
@@ -340,7 +372,7 @@ export function FolderPicker({
               Cancel
             </Button>
           ) : null}
-          {multiFileMode && selectedCount > 0 ? (
+          {multiFileMode && selectedCount > 0 && !autoCommitFiles ? (
             <Button type="button" disabled={busy} onClick={confirmFiles}>
               <FolderOpen />
               Use {selectedCount} file{selectedCount === 1 ? "" : "s"}

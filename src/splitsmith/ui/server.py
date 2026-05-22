@@ -308,9 +308,14 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _load_env_files(project_root: Path) -> list[Path]:
+def _load_env_files(project_root: Path | None = None) -> list[Path]:
     """Pick up ``.env.local`` then ``.env`` from the project root, the cwd
     the user launched the server from, and the global user-config dir.
+
+    ``project_root`` is optional so the unbound boot path (picker /
+    create-match flow) can still pull ``SPLITSMITH_SSI_TOKEN`` from
+    ``<cwd>/.env.local`` or ``<user_config_dir>/.env.local`` -- the
+    scoreboard search endpoint needs it before any project exists.
 
     ``SPLITSMITH_SSI_TOKEN`` (and any other ``SPLITSMITH_*`` env var) lives
     in one of these files for typical setups; without this hook the token
@@ -341,7 +346,10 @@ def _load_env_files(project_root: Path) -> list[Path]:
 
     candidates: list[Path] = []
     seen: set[Path] = set()
-    bases: list[Path] = [project_root.resolve(), Path.cwd().resolve()]
+    bases: list[Path] = []
+    if project_root is not None:
+        bases.append(project_root.resolve())
+    bases.append(Path.cwd().resolve())
     if not user_config.is_disabled():
         bases.append(user_config.user_config_dir())
     for base in bases:
@@ -830,23 +838,38 @@ class CreateMatchManualRequest(BaseModel):
     primary_shooter: CreateMatchPrimaryShooter
 
 
+class CreateMatchCompetitorPick(BaseModel):
+    """One competitor the user is bringing into the new match (#322).
+
+    ``selected_competitor_id`` is the per-match id (needed for the
+    stage-times lookup). ``selected_shooter_id`` is the global stable
+    SSI id; both are kept so refresh-by-name works later. Picks are
+    treated equally -- there is no "me" or "primary" flag because the
+    operator running the app may be coaching and not a shooter at all
+    (see issue #350 / ``feedback_operator_vs_shooter``).
+    """
+
+    name: str
+    division: str | None = None
+    selected_shooter_id: int | None = None
+    selected_competitor_id: int
+
+
 class CreateMatchScoreboardRequest(BaseModel):
     """Body for POST /api/match/create-from-scoreboard (#322).
 
-    A thin convenience wrapper: scaffolds a Match folder named after the
-    upstream match and binds the primary shooter's project root. The
-    actual scoreboard import (stage names, expected rounds, ``selected_*``
-    pins) happens after binding via the existing ``/api/scoreboard/fetch``
-    + ``/api/scoreboard/select-shooter`` endpoints. The SPA chains these
-    calls so the user sees one progress indicator.
+    Scaffolds a Match folder named after the upstream match, creates
+    one shooter per :class:`CreateMatchCompetitorPick`, populates
+    stage definitions from the upstream ``MatchData``, pins each
+    competitor, and merges stage times -- all in one round trip so
+    the create flow lands the user on a fully-populated match.
     """
 
     project_folder: str
     name: str
     match_id: int
     content_type: int
-    primary_shooter_name: str
-    primary_shooter_division: str | None = None
+    competitors: list[CreateMatchCompetitorPick]
 
 
 class ShooterCameraInfo(BaseModel):
@@ -1735,16 +1758,25 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.stage_count = len(match.stages)
             detail.match_date = match.match_date.isoformat() if match.match_date else None
             detail.manual = match.scoreboard_match_id is None
-            # Audited = sum of audited stages across shooters / shooter_count.
+            # Audited = average audited-stage count across shooters.
+            # "Audited" comes from :func:`stage_audit_status` -- the
+            # operator has to hit Save & next at least once on the
+            # stage for it to count. Skipped stages don't qualify.
             audited_total = 0
             shooter_names: list[str] = []
             for slug in match.shooters:
+                shooter_root = match_model.Match.shooter_root(path, slug)
                 try:
                     shooter = match.load_shooter(path, slug)
                 except (FileNotFoundError, KeyError):
                     shooter_names.append(slug)
                     continue
-                audited_total += sum(1 for s in shooter.stages if s.time_seconds > 0 or s.skipped)
+                try:
+                    legacy = MatchProject.load(shooter_root)
+                except FileNotFoundError:
+                    shooter_names.append(shooter.name or slug)
+                    continue
+                audited_total += legacy.audited_count(shooter_root)
                 shooter_names.append(shooter.name or slug)
             detail.shooter_names = shooter_names
             detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
@@ -1757,7 +1789,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.stage_count = len(project.stages)
             detail.match_date = project.match_date.isoformat() if project.match_date else None
             detail.manual = project.scoreboard_match_id is None
-            detail.stages_audited = sum(1 for s in project.stages if s.time_seconds > 0 or s.skipped)
+            detail.stages_audited = project.audited_count(path)
             if project.competitor_name:
                 detail.shooter_names = [project.competitor_name]
             metadata_path = path / "project.json"
@@ -1807,6 +1839,12 @@ def create_app(
     nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
     """
     state = AppState()
+    # Load .env / .env.local before binding so SPLITSMITH_SSI_TOKEN (and
+    # friends) are available on the unbound boot path too -- the
+    # create-match-from-scoreboard flow needs the token before any
+    # project exists. Bound binds re-call this with their project root
+    # so per-project overrides still win.
+    _load_env_files(project_root)
     if project_root is not None:
         _bind_project_to_state(
             state,
@@ -1885,7 +1923,23 @@ def create_app(
 
     @app.get("/api/shooters/{slug}/project")
     def get_project(slug: str) -> JSONResponse:
-        return JSONResponse(state.shooter_project(slug).model_dump(mode="json"))
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        statuses = project.stage_statuses(root)
+        payload = project.model_dump(mode="json")
+        # Enrich each stage's serialized dict with its computed status
+        # so the SPA never recomputes "is this audited?" client-side.
+        # The status field is read-only (not on the StageEntry model);
+        # PUTting it back is a no-op since model parsing ignores
+        # unknown keys via Pydantic v2's default behavior.
+        for stage_dict in payload.get("stages", []):
+            n = stage_dict.get("stage_number")
+            if n is None:
+                continue
+            status = statuses.get(int(n))
+            if status is not None:
+                stage_dict["status"] = status.value
+        return JSONResponse(payload)
 
     @app.get("/api/shooters/{slug}/project/export")
     def export_project_endpoint(
@@ -2234,6 +2288,52 @@ def create_app(
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
         return JSONResponse([ref.model_dump(mode="json") for ref in refs])
+
+    @app.get("/api/scoreboard/search")
+    def scoreboard_search_unbound(q: str = Query("", min_length=0)) -> JSONResponse:
+        """Search the live scoreboard without a bound shooter (#322).
+
+        The create-match-from-scoreboard flow runs *before* a project
+        exists, so there is no shooter root to scope a cache to. Search
+        results aren't cached anyway -- ``CachingScoreboardClient`` only
+        memoises ``get_match`` -- so we skip the cache wrapper entirely
+        and go straight to the HTTP client.
+        """
+        try:
+            client = SsiHttpClient()
+        except ScoreboardAuthError as exc:
+            _raise_scoreboard_http(exc)
+        with client:
+            try:
+                refs = client.search_matches(q)
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        return JSONResponse([ref.model_dump(mode="json") for ref in refs])
+
+    @app.get("/api/scoreboard/matches/{content_type}/{match_id}")
+    def scoreboard_match_data_unbound(content_type: int, match_id: int) -> JSONResponse:
+        """Fetch full match data (incl. competitor list) without binding.
+
+        The create-from-scoreboard flow needs the competitor roster
+        *before* a project exists so the user can pick multiple
+        shooters in one step. Mirrors the unbound search endpoint:
+        skip the per-project cache and call the HTTP client directly.
+        Hitting this twice for the same match in the same session is
+        cheap on scoreboard.urdr.dev (CDN-cached) and avoids hauling
+        a per-session in-memory cache around just for this flow.
+        """
+        try:
+            client = SsiHttpClient()
+        except ScoreboardAuthError as exc:
+            _raise_scoreboard_http(exc)
+        with client:
+            try:
+                data = client.get_match(content_type, match_id)
+            except MatchNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+        return JSONResponse(data.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/scoreboard/fetch")
     def scoreboard_fetch(slug: str, req: ScoreboardFetchRequest) -> JSONResponse:
@@ -5166,6 +5266,54 @@ def create_app(
             suggested_starts=suggested,
         )
 
+    @app.get("/api/fs/list-dirs", response_model=FsListing)
+    def fs_list_dirs(path: str | None = Query(default=None)) -> FsListing:
+        """List a directory's child directories without a bound project.
+
+        Used by the create-match folder picker, which needs to browse
+        the filesystem *before* any project exists (so the shooter-
+        scoped ``/api/shooters/{slug}/fs/list`` isn't reachable). The
+        response shape mirrors :class:`FsListing` so the SPA can share
+        rendering code, but ``entries`` is directories only -- no video
+        probing, no thumbnails -- because this picker selects a *parent*
+        folder for a new project, not media to ingest.
+
+        Hidden entries (dot-prefixed) and broken symlinks are skipped.
+        Permission errors surface as 403.
+        """
+        target = Path(path).expanduser() if path else _default_start(None)
+        try:
+            target = target.resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=404, detail=f"path not found: {target}") from exc
+        if not target.is_dir():
+            raise HTTPException(status_code=400, detail=f"not a directory: {target}")
+
+        try:
+            children = sorted(target.iterdir(), key=lambda p: p.name.lower())
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+        entries: list[FsEntry] = []
+        for child in children:
+            if child.name.startswith("."):
+                continue
+            try:
+                if not child.is_dir():
+                    continue
+            except (PermissionError, OSError):
+                continue
+            entries.append(FsEntry(name=child.name, kind="dir"))
+
+        parent = str(target.parent) if target.parent != target else None
+        suggested = _suggested_starts(None)
+        return FsListing(
+            path=str(target),
+            parent=parent,
+            entries=entries,
+            suggested_starts=suggested,
+        )
+
     @app.get("/api/shooters/{slug}/fs/probe")
     def fs_probe(slug: str, path: str = Query(...)) -> JSONResponse:
         """Probe a single video file on demand: ffprobe + thumbnail extraction.
@@ -6197,15 +6345,30 @@ def create_app(
     ) -> HealthResponse:
         """Scaffold a Match folder for a scoreboard-imported match (#322).
 
-        Creates the folder + primary shooter, binds the shooter's
-        directory, and stashes ``(match_id, content_type)`` on the
-        ``MatchProject`` so the SPA can chain
-        ``/api/scoreboard/fetch`` + ``/api/scoreboard/select-shooter``
-        to pull stages and pin the primary competitor. Keeping the
-        scoreboard fetch out of this endpoint means the user sees the
-        same progress UI whether they're creating a match or refreshing
-        an existing one.
+        Creates the folder, fetches the upstream ``MatchData`` once, and
+        materialises one shooter per :class:`CreateMatchCompetitorPick`:
+        each gets a populated legacy ``MatchProject`` with stage shells
+        from the match, the competitor pinned, and stage times merged.
+        Then binds the match. The user lands on a match where every
+        shooter is already ready for the audit/ingest flow.
         """
+        if not req.competitors:
+            raise HTTPException(
+                status_code=400,
+                detail="at least one competitor must be selected",
+            )
+        comp_ids_seen: set[int] = set()
+        for pick in req.competitors:
+            if pick.selected_competitor_id in comp_ids_seen:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"duplicate competitor {pick.selected_competitor_id} "
+                        "in picks"
+                    ),
+                )
+            comp_ids_seen.add(pick.selected_competitor_id)
+
         target = Path(req.project_folder).expanduser()
         if (target / match_model.MATCH_FILE).exists():
             raise HTTPException(
@@ -6225,24 +6388,72 @@ def create_app(
         match.scoreboard_content_type = req.content_type
         match.save(target)
 
-        shooter_slug = match_model.mint_shooter_slug()
-        shooter = match_model.Shooter(
-            slug=shooter_slug,
-            name=req.primary_shooter_name,
-        )
-        try:
-            match.add_shooter(target, shooter)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Fetch the match shell once -- we'll reuse it for every shooter
+        # via the project-local cache so subsequent get_match calls hit
+        # disk rather than the network.
+        with _resolve_scoreboard_client(target) as client:
+            try:
+                match_data = client.get_match(req.content_type, req.match_id)
+            except MatchNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
 
-        shooter_root = match_model.Match.shooter_root(target, shooter_slug)
-        legacy = MatchProject.init(shooter_root, name=req.name)
-        legacy.competitor_name = req.primary_shooter_name
-        legacy.scoreboard_match_id = str(req.match_id)
-        legacy.scoreboard_content_type = req.content_type
-        legacy.save(shooter_root)
+        # Stable alphabetical materialisation so reruns / re-imports
+        # land in the same shooter order. No "primary" shooter -- the
+        # operator may not be in the roster at all (#350).
+        ordered = sorted(req.competitors, key=lambda c: c.name.lower())
+        for pick in ordered:
+            shooter_slug = match_model.mint_shooter_slug(taken=set(match.shooters))
+            shooter = match_model.Shooter(
+                slug=shooter_slug,
+                name=pick.name,
+                selected_shooter_id=pick.selected_shooter_id,
+                selected_competitor_id=pick.selected_competitor_id,
+            )
+            try:
+                match.add_shooter(target, shooter)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        # See create_match_manual: bind via the match folder, not the
+            shooter_root = match_model.Match.shooter_root(target, shooter_slug)
+            legacy = MatchProject.init(shooter_root, name=req.name)
+            legacy.competitor_name = pick.name
+            legacy.scoreboard_match_id = str(req.match_id)
+            legacy.scoreboard_content_type = req.content_type
+            legacy.selected_shooter_id = pick.selected_shooter_id
+            legacy.selected_competitor_id = pick.selected_competitor_id
+            try:
+                legacy.populate_from_match_data(match_data, overwrite=False)
+            except ScoreboardImportConflictError as exc:
+                # Fresh project -- shouldn't happen, but surface clearly.
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            legacy.save(shooter_root)
+
+            # Pull stage times. Failures here aren't fatal -- the user
+            # can refresh later from the shooters page -- but we record
+            # the failure on the per-shooter project so the caller knows
+            # which ones came up short.
+            try:
+                _fetch_and_merge_stage_times(
+                    shooter_root,
+                    legacy,
+                    req.content_type,
+                    req.match_id,
+                    pick.selected_competitor_id,
+                )
+            except HTTPException as exc:
+                # Don't abort the whole create on one shooter's stage
+                # times failing -- log and continue. The user can hit
+                # "refresh times" once the upstream issue resolves.
+                logger.warning(
+                    "stage-times merge failed for %s (%s): %s",
+                    pick.name,
+                    shooter_slug,
+                    exc.detail,
+                )
+
+        # See create_match_manual: bind via the match folder, not a
         # shooter dir, so recent-projects only gets a kind="match" entry.
         try:
             recorded = _bind_project_to_state(state, target, fallback_name=req.name)
@@ -6266,7 +6477,10 @@ def create_app(
     def _classify_shooter(shooter_root: Path, match: match_model.Match) -> ShooterListEntry:
         """Build a list entry for a single shooter directory."""
         legacy = MatchProject.load(shooter_root)
-        stages_audited = sum(1 for s in legacy.stages if s.time_seconds > 0 or s.skipped)
+        # ``audited`` requires the operator to have hit Save & next on
+        # the stage (see :func:`stage_audit_status`). Set-up-but-not-
+        # touched stages used to count here; they no longer do.
+        stages_audited = legacy.audited_count(shooter_root)
         stages_missing_trim = 0
         for s in legacy.stages:
             prim = next((v for v in s.videos if v.role == "primary"), None)

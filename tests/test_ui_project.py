@@ -24,8 +24,10 @@ from splitsmith.ui.project import (
     VIDEO_EXTENSIONS,
     MatchProject,
     StageEntry,
+    StageStatus,
     StageVideo,
     atomic_write_json,
+    stage_audit_status,
 )
 
 
@@ -312,6 +314,187 @@ def test_project_file_ends_with_newline(tmp_path: Path) -> None:
     project.save(root)
     contents = (root / PROJECT_FILE).read_text()
     assert contents.endswith("\n")
+
+
+def _bare_project(tmp_path: Path) -> tuple[Path, MatchProject]:
+    """Helper for stage-status tests: empty project with 1 stage."""
+    root = tmp_path / "match-status"
+    project = MatchProject.init(root, name="Status Match")
+    project.stages.append(
+        StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0)
+    )
+    project.save(root)
+    return root, project
+
+
+def test_stage_status_todo_when_no_primary_video(tmp_path: Path) -> None:
+    """Fresh stage with no video assigned is ``todo`` -- nothing to do."""
+    root, project = _bare_project(tmp_path)
+    assert (
+        stage_audit_status(project.stages[0], project.audit_path(root))
+        == StageStatus.todo
+    )
+
+
+def test_stage_status_partial_when_video_but_no_time(tmp_path: Path) -> None:
+    """Primary video assigned but no stage time imported = ``partial``."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(
+        StageVideo(path=Path("raw/v.mp4"), role="primary")
+    )
+    assert (
+        stage_audit_status(project.stages[0], project.audit_path(root))
+        == StageStatus.partial
+    )
+
+
+def test_stage_status_ready_when_prereqs_met_but_no_detection(
+    tmp_path: Path,
+) -> None:
+    """Video + stage time but no audit file = ``ready``. The Audit page's
+    PrereqGate handles the in-page beep/trim sub-states; this status
+    just means "set up to audit, detection hasn't run yet"."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(
+        StageVideo(path=Path("raw/v.mp4"), role="primary")
+    )
+    project.stages[0].time_seconds = 12.5
+    assert (
+        stage_audit_status(project.stages[0], project.audit_path(root))
+        == StageStatus.ready
+    )
+
+
+def test_stage_status_in_progress_when_detection_run_but_no_save(
+    tmp_path: Path,
+) -> None:
+    """Audit JSON exists with a shot_detect_run event but no save event
+    means detection ran and the operator hasn't committed yet."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(
+        StageVideo(path=Path("raw/v.mp4"), role="primary")
+    )
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "shots": [],
+                "audit_events": [
+                    {"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        stage_audit_status(project.stages[0], audit_dir)
+        == StageStatus.in_progress
+    )
+
+
+def test_stage_status_audited_when_save_event_present(tmp_path: Path) -> None:
+    """One ``save`` event in audit_events is enough: that's the operator
+    explicitly committing the stage."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(
+        StageVideo(path=Path("raw/v.mp4"), role="primary")
+    )
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "shots": [],
+                "audit_events": [
+                    {"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"},
+                    {"ts": "2026-05-22T12:01:00Z", "kind": "save"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        stage_audit_status(project.stages[0], audit_dir)
+        == StageStatus.audited
+    )
+
+
+def test_stage_status_skipped_overrides_everything(tmp_path: Path) -> None:
+    """``skipped`` is terminal; we never fall through to other checks even
+    if the stage has audit data. Skipped is operator intent."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].skipped = True
+    # Add audit data that would otherwise read as audited.
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "audit_events": [{"ts": "2026-05-22T12:01:00Z", "kind": "save"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        stage_audit_status(project.stages[0], audit_dir) == StageStatus.skipped
+    )
+
+
+def test_stage_status_ready_on_corrupt_audit_json(tmp_path: Path) -> None:
+    """Garbage in the audit JSON shouldn't lock the stage into a wrong
+    state. Treat as ``ready`` so the operator can re-run detection;
+    the Audit page surfaces the read error in-page."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(
+        StageVideo(path=Path("raw/v.mp4"), role="primary")
+    )
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text("not json {", encoding="utf-8")
+    assert (
+        stage_audit_status(project.stages[0], audit_dir) == StageStatus.ready
+    )
+
+
+def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
+    """``MatchProject.audited_count`` is the single source of truth the
+    shooter-list / project-detail endpoints use. Skipped + in_progress
+    + ready stages must NOT count."""
+    root = tmp_path / "match-counts"
+    project = MatchProject.init(root, name="Counts")
+    project.stages = [
+        StageEntry(stage_number=i, stage_name=f"S{i}", time_seconds=10.0)
+        for i in range(1, 6)
+    ]
+    for s in project.stages:
+        s.videos.append(StageVideo(path=Path(f"raw/v{s.stage_number}.mp4"), role="primary"))
+    # Stage 5: skipped (not audited).
+    project.stages[4].skipped = True
+    # Stage 4: time still zero -> partial (not audited).
+    project.stages[3].time_seconds = 0.0
+    project.save(root)
+
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    # Stage 1: saved (audited).
+    (audit_dir / "stage1.json").write_text(
+        json.dumps({"audit_events": [{"kind": "save"}]}), encoding="utf-8"
+    )
+    # Stage 2: detection ran but no save (in_progress).
+    (audit_dir / "stage2.json").write_text(
+        json.dumps({"audit_events": [{"kind": "shot_detect_run"}]}),
+        encoding="utf-8",
+    )
+    # Stage 3: ready, no audit file at all.
+
+    assert project.audited_count(root) == 1
 
 
 def test_import_scoreboard_populates_stages(tmp_path: Path) -> None:

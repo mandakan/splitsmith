@@ -17,11 +17,9 @@
  */
 
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Camera,
-  Check,
   Clock,
   Folder,
   Info,
@@ -33,7 +31,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { FolderPicker } from "@/components/FolderPicker";
+import { AddFootageModal } from "@/components/AddFootageModal";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -62,12 +60,18 @@ function IngestInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Default storage mode for the ingest modal. Stays on the page state
+  // so flipping it between two ingests doesn't get lost when the modal
+  // closes; the modal seeds its own picker from this value.
   const [storage, setStorage] = useState<StorageMode>("symlink");
-  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [showAddFootage, setShowAddFootage] = useState(false);
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
-  const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
+  // Beep-review pending count -- drives the "Review N beeps" CTA in the
+  // review state header so the operator has a clear next step from the
+  // videos page (no more digging for /beep-review by URL).
+  const [beepPending, setBeepPending] = useState<number>(0);
 
   async function reload() {
     setError(null);
@@ -82,6 +86,14 @@ function IngestInner({ slug }: { slug: string }) {
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
     }
+    // Refresh the beep-queue summary in parallel; errors here are silent
+    // (the CTA just hides when the count is zero or unknown).
+    try {
+      const q = await api.getBeepQueue();
+      setBeepPending(q.pending_count);
+    } catch {
+      setBeepPending(0);
+    }
   }
 
   useEffect(() => {
@@ -92,34 +104,24 @@ function IngestInner({ slug }: { slug: string }) {
     if (!project) return 0;
     return project.stages.reduce((sum, s) => sum + (s.videos?.length ?? 0), 0);
   }, [project]);
-  const isEmpty = (project?.stages.length ?? 0) === 0 || assignedCount === 0;
+  // Count unassigned too -- a successful import where nothing auto-
+  // matched a stage still produces visible work for the user (the
+  // unassigned tray in ReviewState). Without this the page sits on
+  // the EmptyState placeholder and reads as "nothing happened" after
+  // the modal closes.
+  const unassignedCount = project?.unassigned_videos?.length ?? 0;
+  const isEmpty =
+    (project?.stages.length ?? 0) === 0 ||
+    assignedCount + unassignedCount === 0;
 
-  async function scanFolder(path: string) {
-    setShowFolderPicker(false);
-    setScanning(true);
+  async function afterImport(_imported: number) {
+    // Reload regardless of count -- partial successes also need a refresh
+    // for the user's stage tray to reflect the new videos.
     setError(null);
     try {
-      await api.scanVideos(slug, path, true, storage);
-      setLastScannedDir(path);
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  async function scanFiles(files: { path: string }[]) {
-    setShowFolderPicker(false);
-    setScanning(true);
-    setError(null);
-    try {
-      await api.scanFiles(slug, files.map((f) => f.path), true, storage);
-      await reload();
-    } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setScanning(false);
     }
   }
 
@@ -255,52 +257,38 @@ function IngestInner({ slug }: { slug: string }) {
           </div>
         )}
 
-        {showFolderPicker && (
-          <div className="mb-5 rounded-2xl border border-rule-strong bg-surface p-4">
-            <FolderPicker
-              slug={slug}
-              initialPath={lastScannedDir ?? undefined}
-              onSelect={(path) => void scanFolder(path)}
-              onSelectFiles={(files) => void scanFiles(files)}
-              onCancel={() => setShowFolderPicker(false)}
-              mode="inline"
-            />
-          </div>
-        )}
-
-        {scanning ? (
-          <div className="rounded-2xl border border-rule-strong bg-surface px-10 py-14 text-center">
-            <div className="mb-3 inline-block size-9 animate-spin rounded-full border-[3px] border-rule-strong border-t-led shadow-[0_0_8px_var(--color-led-glow)]" />
-            <div className="font-display text-lg font-bold uppercase tracking-tight text-ink">
-              Scanning...
-            </div>
-            <p className="mt-2 text-xs text-muted">
-              Probing video metadata and matching to stages.
-            </p>
-          </div>
-        ) : isEmpty ? (
+        {isEmpty ? (
           <EmptyState
-            storage={storage}
-            onStorageChange={setStorage}
-            onPickFolder={() => setShowFolderPicker(true)}
-            project={project}
+            onPickFolder={() => setShowAddFootage(true)}
             lastScannedDir={lastScannedDir}
           />
         ) : project ? (
           <ReviewState
             slug={slug}
             project={project}
-            storage={storage}
-            onStorageChange={setStorage}
-            onAddMore={() => setShowFolderPicker(true)}
+            onAddMore={() => setShowAddFootage(true)}
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
             onConfirm={() => navigate("/", { replace: true })}
             busy={busy}
             lastScannedDir={lastScannedDir}
             onError={setError}
+            beepPending={beepPending}
           />
         ) : null}
+
+        {showAddFootage && (
+          <AddFootageModal
+            slug={slug}
+            initialStorage={storage}
+            initialPath={lastScannedDir}
+            onClose={() => setShowAddFootage(false)}
+            onImported={(imported) => {
+              void afterImport(imported);
+            }}
+            onStorageChange={setStorage}
+          />
+        )}
       </main>
     </div>
   );
@@ -311,27 +299,15 @@ function IngestInner({ slug }: { slug: string }) {
 /* -------------------------------------------------------------------------- */
 
 function EmptyState({
-  storage,
-  onStorageChange,
   onPickFolder,
-  project,
   lastScannedDir,
 }: {
-  storage: StorageMode;
-  onStorageChange: (s: StorageMode) => void;
   onPickFolder: () => void;
-  project: MatchProject | null;
   lastScannedDir: string | null;
 }) {
   return (
     <>
       <DropZone onPickFolder={onPickFolder} />
-      <StorageChoice
-        storage={storage}
-        onChange={onStorageChange}
-        project={project}
-        variant="block"
-      />
       {lastScannedDir && (
         <RecentSources
           items={[
@@ -510,192 +486,12 @@ function TipCard({
 }
 
 /* -------------------------------------------------------------------------- */
-/* Storage choice                                                             */
-/* -------------------------------------------------------------------------- */
-
-function StorageChoice({
-  storage,
-  onChange,
-  project,
-  variant = "block",
-}: {
-  storage: StorageMode;
-  onChange: (s: StorageMode) => void;
-  project: MatchProject | null;
-  variant?: "block" | "inline";
-}) {
-  const targetPath = project?.raw_dir
-    ? project.raw_dir
-    : "<project>/raw/";
-
-  return (
-    <div
-      className={cn(
-        "mb-5 overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]",
-        variant === "inline" && "mb-0",
-      )}
-    >
-      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
-        <div className="inline-flex items-center gap-2.5 font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
-          <Package className="size-4 text-led" />
-          {variant === "inline"
-            ? "How should these videos be stored?"
-            : "Storage for this ingest"}
-        </div>
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          {variant === "inline"
-            ? "Override per video later"
-            : "Choose before dropping"}
-        </span>
-      </div>
-      <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
-        <StorageOption
-          selected={storage === "symlink"}
-          onClick={() => onChange("symlink")}
-          title="Reference in place"
-          badge="Default"
-          desc="Keep originals where they are. Splitsmith only stores links."
-          pros={[
-            <>
-              No extra disk space &middot; <b className="text-ink">0 GB added</b>
-            </>,
-            <>Faster -- no copy step before processing</>,
-          ]}
-          warns={[
-            <>If sources move or unmount, the project will need re-linking</>,
-          ]}
-        />
-        <StorageOption
-          selected={storage === "copy"}
-          onClick={() => onChange("copy")}
-          title="Copy into project folder"
-          desc="Self-contained project. Originals can be removed afterwards."
-          pros={[
-            <>Project is portable &middot; backup includes raw footage</>,
-            <>Survives unmounting source media</>,
-          ]}
-          warns={[<>Adds disk usage &middot; copy step before processing</>]}
-          footer={
-            <>
-              Target:{" "}
-              <span className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 font-mono text-[0.6875rem] text-ink-2">
-                {targetPath}
-              </span>
-            </>
-          }
-        />
-      </div>
-    </div>
-  );
-}
-
-function StorageOption({
-  selected,
-  onClick,
-  title,
-  badge,
-  desc,
-  pros,
-  warns,
-  footer,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  title: string;
-  badge?: string;
-  desc: string;
-  pros: React.ReactNode[];
-  warns: React.ReactNode[];
-  footer?: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className={cn(
-        "relative flex items-start gap-3.5 overflow-hidden rounded-xl border-[1.5px] p-4 text-left transition-all",
-        selected
-          ? "border-led bg-led/10 shadow-[0_0_0_1px_var(--color-led-deep),0_0_18px_var(--color-led-glow)]"
-          : "border-rule-strong bg-bg-glow hover:border-ink-2",
-      )}
-    >
-      {selected && (
-        <span
-          aria-hidden
-          className="absolute inset-y-0 left-0 w-[3px] bg-led shadow-[0_0_12px_var(--color-led-glow)]"
-        />
-      )}
-      <span
-        aria-hidden
-        className={cn(
-          "relative mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px]",
-          selected
-            ? "border-led-deep bg-led-fill shadow-[0_0_10px_var(--color-led-glow)]"
-            : "border-rule-strong bg-surface",
-        )}
-      >
-        {selected && <span className="size-2 rounded-full bg-bg" />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "mb-2 inline-flex items-center gap-2.5 font-display text-sm font-bold uppercase tracking-[0.04em]",
-            selected ? "text-led" : "text-ink",
-          )}
-        >
-          {title}
-          {badge && (
-            <span className="rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
-              {badge}
-            </span>
-          )}
-        </div>
-        <p className="mb-3 text-[0.8125rem] leading-relaxed text-muted">
-          {desc}
-        </p>
-        <div className="flex flex-col gap-1.5">
-          {pros.map((p, i) => (
-            <div
-              key={`p${i}`}
-              className="flex items-start gap-2 font-mono text-[0.6875rem] leading-relaxed text-muted"
-            >
-              <Check className="mt-0.5 size-3 shrink-0 text-done" strokeWidth={3} />
-              <span>{p}</span>
-            </div>
-          ))}
-          {warns.map((w, i) => (
-            <div
-              key={`w${i}`}
-              className="flex items-start gap-2 font-mono text-[0.6875rem] leading-relaxed text-muted"
-            >
-              <AlertTriangle
-                className="mt-0.5 size-3 shrink-0 text-live"
-                strokeWidth={2}
-              />
-              <span>{w}</span>
-            </div>
-          ))}
-          {footer && (
-            <div className="ml-5 mt-1 font-mono text-[0.6875rem] text-muted">
-              {footer}
-            </div>
-          )}
-        </div>
-      </div>
-    </button>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 /* Review state                                                               */
 /* -------------------------------------------------------------------------- */
 
 function ReviewState({
   slug,
   project,
-  storage,
-  onStorageChange,
   onAddMore,
   onMoveAssignment,
   onRemoveVideo,
@@ -703,11 +499,10 @@ function ReviewState({
   busy,
   lastScannedDir,
   onError,
+  beepPending,
 }: {
   slug: string;
   project: MatchProject;
-  storage: StorageMode;
-  onStorageChange: (s: StorageMode) => void;
   onAddMore: () => void;
   onMoveAssignment: (
     videoPath: string,
@@ -719,6 +514,7 @@ function ReviewState({
   busy: boolean;
   lastScannedDir: string | null;
   onError: (msg: string | null) => void;
+  beepPending: number;
 }) {
   const assignedVideos: { video: StageVideo; stage: StageEntry }[] = useMemo(
     () =>
@@ -775,15 +571,32 @@ function ReviewState({
           </button>
         </div>
 
-        {/* Storage choice (inline variant) */}
-        <div className="border-b border-rule p-0">
-          <StorageChoice
-            storage={storage}
-            onChange={onStorageChange}
-            project={project}
-            variant="inline"
-          />
-        </div>
+        {/* Beep review CTA. Auto-detection runs after ingest and parks
+            uncertain beeps on /beep-review for confirm/adjust. Surfacing
+            it from the videos page is the missing handoff -- without
+            this row the user lands on Audit and sees the chip warn
+            "likely wrong" with nowhere obvious to fix it. */}
+        {beepPending > 0 && (
+          <Link
+            to="/beep-review"
+            className="flex items-center gap-3.5 border-b border-rule bg-gradient-to-r from-live/10 to-transparent px-6 py-3 font-mono text-[0.75rem] uppercase tracking-[0.06em] text-ink-2 transition-colors hover:bg-live/15"
+          >
+            <span className="inline-flex size-7 items-center justify-center rounded-full border border-live/40 bg-live-tint text-live shadow-[0_0_10px_var(--color-live-glow)]">
+              <Video className="size-3.5" />
+            </span>
+            <span className="flex-1">
+              <b className="font-bold text-live">{beepPending}</b>{" "}
+              beep{beepPending === 1 ? "" : "s"} need
+              {beepPending === 1 ? "s" : ""} confirmation &middot;{" "}
+              <span className="text-muted">
+                detect found candidates but isn't sure
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-led">
+              Review beeps <ArrowRight className="size-3" />
+            </span>
+          </Link>
+        )}
 
         {/* Cameras */}
         {cameras.length > 0 && (

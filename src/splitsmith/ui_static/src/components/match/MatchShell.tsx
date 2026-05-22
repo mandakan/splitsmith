@@ -27,7 +27,6 @@ import { Brand, IconButton } from "@/components/ui";
 import {
   MatchSidebar,
   type MatchSidebarStage,
-  type StageStatus,
 } from "@/components/match/MatchSidebar";
 import {
   api,
@@ -37,6 +36,7 @@ import {
   type ShooterListEntry,
 } from "@/lib/api";
 import { useMode } from "@/lib/mode";
+import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
 export interface MatchShellOutletContext {
@@ -101,6 +101,7 @@ export function MatchShell() {
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
   const shooterCount = shooters.length || undefined;
 
   useEffect(() => {
@@ -165,6 +166,17 @@ export function MatchShell() {
               // single-shooter project (not a Match). Leave empty.
               if (alive) setShooters([]);
             });
+          // Beep-review pending count drives the sidebar badge so the
+          // operator can spot pending beep work without opening the
+          // page. Cheap GET; refresh on every shell load.
+          api
+            .getBeepQueue()
+            .then((q) => {
+              if (alive) setBeepReviewPending(q.pending_count);
+            })
+            .catch(() => {
+              if (alive) setBeepReviewPending(0);
+            });
         }
       })
       .catch(() => {
@@ -177,15 +189,17 @@ export function MatchShell() {
 
   const stages: MatchSidebarStage[] = useMemo(() => {
     if (!project) return [];
-    // Find the "next up" stage: first stage with no time but not skipped,
-    // or first partial. Mirrors the polished design's intent.
+    // Status comes from the backend (single source of truth). Pick
+    // "next up" as the first non-terminal stage so the sidebar's
+    // next-up highlight tracks audit progress -- audited and skipped
+    // stages are closed out, everything else is fair game.
     const stagesWithStatus = project.stages.map((s) => ({
       stage_number: s.stage_number,
       stage_name: s.stage_name || `Stage ${s.stage_number}`,
-      status: classifyStage(s),
+      status: deriveStageStatus(s),
     }));
-    const nextIdx = stagesWithStatus.findIndex(
-      (s) => s.status === "partial" || s.status === "todo",
+    const nextIdx = stagesWithStatus.findIndex((s) =>
+      isNextUpCandidate(s.status),
     );
     return stagesWithStatus.map((s, i) => ({
       ...s,
@@ -309,6 +323,7 @@ export function MatchShell() {
           matchSubtitle={renderMatchSubtitle(project)}
           stages={stages}
           shooterCount={shooterCount}
+          beepReviewPendingCount={beepReviewPending}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
@@ -333,18 +348,6 @@ export function MatchShell() {
       <JobsPanel />
     </div>
   );
-}
-
-function classifyStage(s: {
-  time_seconds: number;
-  videos: { role: string }[];
-  skipped: boolean;
-}): StageStatus {
-  if (s.skipped) return "done";
-  const hasVideos = (s.videos ?? []).some((v) => v.role === "primary");
-  if (!hasVideos) return "todo";
-  if (s.time_seconds > 0) return "done";
-  return "partial";
 }
 
 function renderMatchSubtitle(project: MatchProject | null) {

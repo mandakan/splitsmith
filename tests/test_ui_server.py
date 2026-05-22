@@ -92,6 +92,51 @@ def test_get_project_returns_full_dump(tmp_path: Path) -> None:
     assert body["competitor_name"] == "API Tester"
     assert len(body["stages"]) == 1
     assert body["stages"][0]["videos"][0]["role"] == "primary"
+    # The stage is set up (video + time) but no audit JSON exists, so
+    # the SPA should see ``ready`` -- not ``audited`` like the old
+    # heuristic claimed.
+    assert body["stages"][0]["status"] == "ready"
+
+
+def test_get_project_marks_stage_audited_after_save_event(tmp_path: Path) -> None:
+    """End-to-end check that the status enrichment reflects a save event
+    in the audit JSON. The Home / sidebar / shooter chips all read this
+    field, so getting it right at the HTTP layer is the single
+    contract we have to keep."""
+    import json as _json
+
+    root = tmp_path / "match-audited"
+    project = MatchProject.init(root, name="Audited Match")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="S1",
+            time_seconds=10.0,
+            videos=[
+                StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)
+            ],
+        )
+    ]
+    project.save(root)
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        _json.dumps(
+            {
+                "stage_number": 1,
+                "audit_events": [
+                    {"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"},
+                    {"ts": "2026-05-22T12:01:00Z", "kind": "save"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_app(project_root=root, project_name="ignored")
+    client = TestClient(app)
+    body = client.get("/api/shooters/me/project").json()
+    assert body["stages"][0]["status"] == "audited"
 
 
 def test_spa_serves_index_html_when_built(tmp_path: Path) -> None:
@@ -318,6 +363,203 @@ def test_scoreboard_search_returns_401_when_no_token_and_no_local(
     detail = resp.json()["detail"]
     assert detail["code"] == "scoreboard_auth"
     assert detail["env_var"] == "SPLITSMITH_SSI_TOKEN"
+
+
+def test_scoreboard_search_unbound_returns_401_without_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The create-match-from-scoreboard flow searches before a project
+    exists, so /api/scoreboard/search must work without a bound shooter.
+    With no token configured the endpoint surfaces the same 401 the
+    bound variant does so the SPA can route to the offline fallback."""
+    monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+
+    resp = client.get("/api/scoreboard/search", params={"q": "anything"})
+    assert resp.status_code == 401
+    detail = resp.json()["detail"]
+    assert detail["code"] == "scoreboard_auth"
+
+
+def test_scoreboard_search_unbound_works_with_no_bound_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The endpoint must not raise no_project (409) when the server has
+    no bound project -- that's the whole point of the unbound variant."""
+    monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+    app = create_app()  # no project bound
+    client = TestClient(app)
+
+    resp = client.get("/api/scoreboard/search", params={"q": "anything"})
+    assert resp.status_code == 401  # token missing, not no_project (409)
+    assert resp.json()["detail"]["code"] == "scoreboard_auth"
+
+
+def test_scoreboard_match_data_unbound_returns_401_without_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unbound match-data endpoint mirrors the search endpoint's
+    auth contract -- no token configured surfaces 401 ``scoreboard_auth``
+    so the create flow can route the user to set their token before
+    picking shooters."""
+    monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/scoreboard/matches/22/27190")
+    assert resp.status_code == 401
+    assert resp.json()["detail"]["code"] == "scoreboard_auth"
+
+
+def test_fs_list_dirs_unbound_returns_directories(
+    tmp_path: Path,
+) -> None:
+    """The unbound dir browser must not require a bound project (the
+    create-match folder picker runs before any project exists). It
+    should list child *directories* only -- files are deliberately
+    excluded because this picker selects a parent for a new project."""
+    parent = tmp_path / "fs-root"
+    parent.mkdir()
+    (parent / "alpha").mkdir()
+    (parent / "beta").mkdir()
+    (parent / "ignore-me.txt").write_text("not a dir", encoding="utf-8")
+    (parent / ".hidden").mkdir()
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.get("/api/fs/list-dirs", params={"path": str(parent)})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    names = [e["name"] for e in body["entries"]]
+    assert names == ["alpha", "beta"]
+    assert all(e["kind"] == "dir" for e in body["entries"])
+    assert body["path"] == str(parent.resolve())
+
+
+def test_fs_list_dirs_404_for_missing_path(tmp_path: Path) -> None:
+    app = create_app()
+    client = TestClient(app)
+    resp = client.get(
+        "/api/fs/list-dirs", params={"path": str(tmp_path / "nope")}
+    )
+    assert resp.status_code == 404
+
+
+def test_create_from_scoreboard_rejects_empty_competitor_list(
+    tmp_path: Path,
+) -> None:
+    """Multi-shooter create requires at least one competitor; rejecting
+    an empty list early avoids creating an orphan match folder."""
+    app = create_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/match/create-from-scoreboard",
+        json={
+            "project_folder": str(tmp_path / "match"),
+            "name": "Test Match",
+            "match_id": 27190,
+            "content_type": 22,
+            "competitors": [],
+        },
+    )
+    assert resp.status_code == 400
+    assert "at least one competitor" in resp.text
+
+
+def test_create_from_scoreboard_rejects_duplicate_competitor(
+    tmp_path: Path,
+) -> None:
+    """Same competitor twice in the pick list is a caller bug; 400 with
+    a clear message rather than silently de-duping."""
+    app = create_app()
+    client = TestClient(app)
+    body = {
+        "project_folder": str(tmp_path / "match"),
+        "name": "Test Match",
+        "match_id": 27190,
+        "content_type": 22,
+        "competitors": [
+            {"name": "Alice", "selected_competitor_id": 7},
+            {"name": "Alice (typo)", "selected_competitor_id": 7},
+        ],
+    }
+    resp = client.post("/api/match/create-from-scoreboard", json=body)
+    assert resp.status_code == 400
+    assert "duplicate" in resp.text
+    assert not (tmp_path / "match" / "match.json").exists()
+
+
+def test_create_from_scoreboard_creates_n_shooters_from_local(
+    tmp_path: Path,
+) -> None:
+    """End-to-end multi-shooter create using LocalJsonScoreboard:
+    drop the match fixture in a shared local source (no SsiHttpClient
+    needed), pick two competitors, expect two shooters materialised
+    with stages populated."""
+    import json as _json
+
+    fixture = _load_v1_match_fixture()
+    competitors_in_fixture = fixture["competitors"]
+    assert len(competitors_in_fixture) >= 2, "fixture must have >= 2 competitors"
+    alice = competitors_in_fixture[0]
+    bob = competitors_in_fixture[1]
+
+    target = tmp_path / "new-match"
+    # Pre-place the match fixture so _resolve_scoreboard_client picks
+    # LocalJsonScoreboard for the target instead of trying SsiHttpClient.
+    scoreboard_dir = target / "scoreboard"
+    scoreboard_dir.mkdir(parents=True)
+    (scoreboard_dir / "match.json").write_text(
+        _json.dumps(fixture), encoding="utf-8"
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/api/match/create-from-scoreboard",
+        json={
+            "project_folder": str(target),
+            "name": fixture["name"],
+            "match_id": 27190,
+            "content_type": 22,
+            "competitors": [
+                {
+                    "name": alice["name"],
+                    "division": alice.get("division"),
+                    "selected_shooter_id": alice["shooterId"],
+                    "selected_competitor_id": alice["id"],
+                },
+                {
+                    "name": bob["name"],
+                    "division": bob.get("division"),
+                    "selected_shooter_id": bob["shooterId"],
+                    "selected_competitor_id": bob["id"],
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Match file written, two shooter dirs under shooters/.
+    match_json = _json.loads((target / "match.json").read_text(encoding="utf-8"))
+    assert match_json["scoreboard_match_id"] == "27190"
+    assert match_json["scoreboard_content_type"] == 22
+    assert len(match_json["shooters"]) == 2
+
+    shooter_dirs = sorted((target / "shooters").iterdir())
+    assert len(shooter_dirs) == 2
+    # Each shooter has a populated project with stages from the match data.
+    for shooter_dir in shooter_dirs:
+        project = _json.loads(
+            (shooter_dir / "project.json").read_text(encoding="utf-8")
+        )
+        assert project["selected_competitor_id"] in {alice["id"], bob["id"]}
+        assert len(project["stages"]) >= 1
 
 
 def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Path) -> None:

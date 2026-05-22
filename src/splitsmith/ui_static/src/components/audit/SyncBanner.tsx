@@ -1,3 +1,5 @@
+import { Crosshair, Loader2 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 
 export interface SyncBannerProps {
@@ -12,6 +14,19 @@ export interface SyncBannerProps {
   onMarkReviewed?: () => void;
   /** When true, Apply / Mark reviewed are in flight -- disable both. */
   busy?: boolean;
+  /** "Snap" -- refine the current candidate by running the beep
+   *  detector in a tight window around it. When ``candidateTime`` is
+   *  null the button stays visible but disabled; the caller surfaces
+   *  the hint to drop a marker first. Omit this prop to hide the
+   *  button entirely (the BeepReview page reuses this banner without
+   *  the snap affordance). */
+  onSnap?: () => void;
+  /** Snap request is in flight. */
+  snapping?: boolean;
+  /** Last snap error (e.g. "no candidate within +/-1.5s"). Rendered
+   *  inline under the readout so the operator sees why their snap
+   *  attempt failed without leaving the picker. */
+  snapError?: string | null;
 }
 
 /**
@@ -28,6 +43,9 @@ export function SyncBanner({
   onApply,
   onMarkReviewed,
   busy = false,
+  onSnap,
+  snapping = false,
+  snapError = null,
 }: SyncBannerProps) {
   const delta =
     candidateTime != null && oldBeepTime != null
@@ -72,7 +90,32 @@ export function SyncBanner({
             </>
           ) : null}
         </div>
+        {snapError ? (
+          <div className="mt-1 font-mono text-[0.6875rem] text-led">
+            {snapError}
+          </div>
+        ) : null}
       </div>
+      {onSnap ? (
+        <button
+          type="button"
+          onClick={onSnap}
+          disabled={busy || snapping || candidateTime == null}
+          title={
+            candidateTime == null
+              ? "Drop a marker on the waveform first"
+              : "Snap the marker to the strongest beep within +/-1.5s"
+          }
+          className="inline-flex items-center gap-1.5 rounded-md border border-led/40 bg-led-tint px-3.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-led transition-colors hover:bg-led/15 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {snapping ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          ) : (
+            <Crosshair className="size-3.5" aria-hidden />
+          )}
+          Snap to beep
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onCancel}

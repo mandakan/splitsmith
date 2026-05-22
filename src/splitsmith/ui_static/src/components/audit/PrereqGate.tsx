@@ -23,6 +23,21 @@ export interface PrereqGateProps {
   hasStageTime: boolean;
   /** True when the primary cam has a beep time (auto-picked or manual). */
   hasBeep: boolean;
+  /** Detector confidence on the primary cam's beep, or null for manual
+   *  picks / unknown. Combined with ``beepDiagnostic`` to flag the
+   *  "beep exists but is probably wrong" case so the checklist tells
+   *  the same story as the toolbar's BeepStatusChip. */
+  beepConfidence?: number | null;
+  /** Reason the beep looks suspect (e.g. "first shot lands 5.10s after
+   *  the beep..."). Same value the chip's tooltip uses. */
+  beepDiagnostic?: string | null;
+  /** Confidence threshold below which a beep is "likely wrong". Mirrors
+   *  the chip's hardcoded 0.85 default; pass the project's automation
+   *  override to keep them in sync. */
+  beepLowConfThreshold?: number;
+  /** Opens sync mode for the primary cam so the operator can re-pick the
+   *  buzzer. When omitted, the beep row stays informational only. */
+  onRePickBeep?: () => void;
   /** True when the audit clip has been trimmed. */
   hasTrim: boolean;
   /** Refresh the project after a trim completes. Wired only when kind === 'trim'. */
@@ -34,7 +49,13 @@ export interface PrereqGateProps {
 interface ChecklistItem {
   label: string;
   done: boolean;
+  /** Visual tone. "done" = green, "warn" = amber (e.g. low-confidence
+   *  beep), "todo" = neutral dashed circle. */
+  tone?: "done" | "warn" | "todo";
   sub: string;
+  /** Optional in-row action (e.g. "Re-pick"). Rendered as a small button
+   *  on the right when present. */
+  action?: { label: string; onClick: () => void };
 }
 
 /**
@@ -58,6 +79,10 @@ export function PrereqGate({
   hasSource,
   hasStageTime,
   hasBeep,
+  beepConfidence = null,
+  beepDiagnostic = null,
+  beepLowConfThreshold = 0.85,
+  onRePickBeep,
   hasTrim,
   onProjectUpdate,
   onAuditRefresh,
@@ -136,6 +161,44 @@ export function PrereqGate({
 
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
+  // Match BeepStatusChip's reading: a beep that exists but has low
+  // confidence or carries a post-audit diagnostic is "likely wrong",
+  // not "picked". Same threshold + same trigger so the chip and the
+  // checklist never disagree about the same beep.
+  const beepLikelyWrong =
+    hasBeep &&
+    ((beepConfidence != null && beepConfidence < beepLowConfThreshold) ||
+      beepDiagnostic != null);
+  const beepRow: ChecklistItem = !hasBeep
+    ? {
+        label: "Beep position",
+        done: false,
+        tone: "todo",
+        sub: "not yet picked",
+        ...(onRePickBeep
+          ? { action: { label: "Pick beep", onClick: onRePickBeep } }
+          : {}),
+      }
+    : beepLikelyWrong
+      ? {
+          label: "Beep position",
+          // Treat as "done enough" so the run isn't blocked, but tone
+          // it amber and surface the diagnostic so the operator sees
+          // the same warning the chip is showing.
+          done: true,
+          tone: "warn",
+          sub: beepDiagnostic ?? "likely wrong",
+          ...(onRePickBeep
+            ? { action: { label: "Re-pick", onClick: onRePickBeep } }
+            : {}),
+        }
+      : {
+          label: "Beep position",
+          done: true,
+          tone: "done",
+          sub: "picked",
+        };
+
   const checklist: ChecklistItem[] =
     kind === "trim"
       ? [
@@ -144,11 +207,7 @@ export function PrereqGate({
             done: hasSource,
             sub: hasSource ? "available" : "missing",
           },
-          {
-            label: "Beep position",
-            done: hasBeep,
-            sub: hasBeep ? "picked" : "not yet picked",
-          },
+          beepRow,
           {
             label: "Stage time",
             done: hasStageTime,
@@ -161,11 +220,7 @@ export function PrereqGate({
             done: hasTrim,
             sub: hasTrim ? "built" : "not built yet",
           },
-          {
-            label: "Beep position",
-            done: hasBeep,
-            sub: hasBeep ? "picked" : "not yet picked",
-          },
+          beepRow,
           {
             label: "Shot detector",
             done: false,
@@ -173,10 +228,24 @@ export function PrereqGate({
           },
         ];
 
-  const headline =
-    kind === "trim" ? "Trim before audit" : "Detect shots before audit";
-  const body =
-    kind === "trim"
+  // Copy depends on whether a job is in flight. When trim or detect is
+  // running the panel stops reading as a warning ("PREREQUISITES /
+  // TRIM BEFORE AUDIT" with an exclamation glyph) and reads as an
+  // in-progress task ("RUNNING / Rebuilding trim..."). Prevents the
+  // post-resync confusion where everything is green but the headline
+  // still nags the operator to do work that's already underway.
+  const headline = running
+    ? kind === "trim"
+      ? "Rebuilding trim..."
+      : "Detecting shots..."
+    : kind === "trim"
+      ? "Trim before audit"
+      : "Detect shots before audit";
+  const body = running
+    ? kind === "trim"
+      ? "Cropping the source to this stage and aligning to the buzzer. Audit unlocks once the trim cache lands."
+      : "Running the ensemble on the trimmed clip. Audit unlocks once the candidate shots are written."
+    : kind === "trim"
       ? "Audit needs a trimmed clip aligned to the buzzer. Run trim to crop the source down to this stage, then come back here."
       : "Audit reviews shots that detection has already proposed. Run detection on the trimmed clip to populate candidate shots, then come back here.";
   const runLabel = running
@@ -186,7 +255,9 @@ export function PrereqGate({
     : kind === "trim"
       ? "Run trim"
       : "Run detection";
-  const stageLabel = `Stage ${String(stage.stage_number).padStart(2, "0")} · Prerequisites`;
+  const stageLabel = `Stage ${String(stage.stage_number).padStart(2, "0")} · ${
+    running ? "Running" : "Prerequisites"
+  }`;
 
   return (
     <div className="flex flex-1 items-center justify-center px-5 py-10">
@@ -203,9 +274,15 @@ export function PrereqGate({
         <div className="flex items-start gap-5">
           <span
             aria-hidden
-            className="inline-flex size-[52px] shrink-0 items-center justify-center rounded-full border border-live/40 bg-live-tint font-mono text-[1.375rem] font-extrabold text-live shadow-[0_0_20px_var(--color-live-glow)]"
+            className="inline-flex size-[52px] shrink-0 items-center justify-center rounded-full border border-live/40 bg-live-tint text-live shadow-[0_0_20px_var(--color-live-glow)]"
           >
-            !
+            {running ? (
+              <Loader2 className="size-6 animate-spin" aria-hidden />
+            ) : (
+              <span className="font-mono text-[1.375rem] font-extrabold">
+                !
+              </span>
+            )}
           </span>
           <div className="min-w-0 flex-1">
             <div className="font-mono text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-live">
@@ -224,53 +301,83 @@ export function PrereqGate({
         </div>
 
         <ul className="mb-5 mt-[1.375rem] flex list-none flex-col gap-1.5 p-0">
-          {checklist.map((c, i) => (
-            <li
-              key={i}
-              className={cn(
-                "flex items-center gap-2.5 rounded-md border border-rule px-3 py-2.5",
-                c.done
-                  ? "bg-[color-mix(in_srgb,var(--color-done)_5%,var(--color-surface-2))]"
-                  : "bg-surface-2",
-              )}
-            >
-              <span
-                aria-hidden
+          {checklist.map((c, i) => {
+            const tone = c.tone ?? (c.done ? "done" : "todo");
+            return (
+              <li
+                key={i}
                 className={cn(
-                  "inline-flex size-[18px] shrink-0 items-center justify-center rounded-full text-bg",
-                  c.done
-                    ? "border-0 bg-done"
-                    : "border-[1.5px] border-dashed border-rule-strong",
+                  "flex items-center gap-2.5 rounded-md border px-3 py-2.5",
+                  tone === "warn"
+                    ? "border-live/40 bg-live-tint"
+                    : tone === "done"
+                      ? "border-rule bg-[color-mix(in_srgb,var(--color-done)_5%,var(--color-surface-2))]"
+                      : "border-rule bg-surface-2",
                 )}
               >
-                {c.done ? (
-                  <svg
-                    width={10}
-                    height={10}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                <span
+                  aria-hidden
+                  className={cn(
+                    "inline-flex size-[18px] shrink-0 items-center justify-center rounded-full text-bg",
+                    tone === "done"
+                      ? "border-0 bg-done"
+                      : tone === "warn"
+                        ? "border-0 bg-live"
+                        : "border-[1.5px] border-dashed border-rule-strong",
+                  )}
+                >
+                  {tone === "done" ? (
+                    <svg
+                      width={10}
+                      height={10}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : tone === "warn" ? (
+                    <span className="font-mono text-[0.625rem] font-extrabold leading-none">
+                      !
+                    </span>
+                  ) : null}
+                </span>
+                <span
+                  className={cn(
+                    "flex-1 font-display text-[0.75rem] font-bold uppercase tracking-[0.04em]",
+                    tone === "warn" ? "text-live" : c.done ? "text-ink-2" : "text-ink",
+                  )}
+                >
+                  {c.label}
+                </span>
+                <span
+                  className={cn(
+                    "font-mono text-[0.625rem] tabular-nums",
+                    tone === "warn" ? "text-ink-2" : "text-muted",
+                  )}
+                >
+                  {c.sub}
+                </span>
+                {c.action ? (
+                  <button
+                    type="button"
+                    onClick={c.action.onClick}
+                    className={cn(
+                      "ml-1 inline-flex shrink-0 items-center rounded font-display text-[0.625rem] font-bold uppercase tracking-[0.08em] transition-colors",
+                      tone === "warn"
+                        ? "border border-led/70 bg-led-tint px-2.5 py-1 text-led hover:bg-led/20"
+                        : "border border-rule bg-surface-2 px-2.5 py-1 text-ink-2 hover:border-rule-strong hover:bg-surface-3 hover:text-ink",
+                    )}
                   >
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+                    {c.action.label}
+                  </button>
                 ) : null}
-              </span>
-              <span
-                className={cn(
-                  "flex-1 font-display text-[0.75rem] font-bold uppercase tracking-[0.04em]",
-                  c.done ? "text-ink-2" : "text-ink",
-                )}
-              >
-                {c.label}
-              </span>
-              <span className="font-mono text-[0.625rem] tabular-nums text-muted">
-                {c.sub}
-              </span>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
 
         <div className="flex flex-wrap items-center gap-2.5">

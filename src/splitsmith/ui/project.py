@@ -30,6 +30,7 @@ import os
 import shutil
 import tempfile
 from datetime import UTC, date, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -315,6 +316,85 @@ class StageVideo(BaseModel):
         per-video requests without re-implementing the hash client-side.
         """
         return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
+
+
+class StageStatus(str, Enum):
+    """Per-stage lifecycle state, derived from project + audit-file state.
+
+    Single source of truth -- the sidebar, the Home overview cards, the
+    Shooters page, and the per-shooter chip strip all consume the same
+    enum value computed by :func:`stage_audit_status`. Previously three
+    independent classifiers (one Python, two TypeScript) drifted and
+    labeled "stage has time + has primary video" as "audited"; this
+    enum names the real stages so the labels stop lying.
+
+    Order is roughly the workflow order:
+
+    - ``todo``        -- no primary video assigned yet; nothing to do here
+    - ``partial``     -- primary video assigned but no stage time (no
+                         scoreboard import yet)
+    - ``ready``       -- all prerequisites met (video + time + beep + trim
+                         cache) but detection hasn't run
+    - ``in_progress`` -- detection has run; operator hasn't hit Save yet
+                         (the audit JSON has a ``shot_detect_run`` event
+                         but no ``save`` event)
+    - ``audited``     -- operator hit Save & next at least once (the audit
+                         JSON's ``audit_events`` contains a ``save`` event)
+    - ``skipped``     -- explicitly skipped; treated as terminal but
+                         visually distinct from ``audited``
+    """
+
+    todo = "todo"
+    partial = "partial"
+    ready = "ready"
+    in_progress = "in_progress"
+    audited = "audited"
+    skipped = "skipped"
+
+
+def stage_audit_status(
+    stage: "StageEntry",
+    audit_dir: Path,
+    *,
+    has_trim: bool | None = None,
+) -> StageStatus:
+    """Compute the lifecycle status of a single stage.
+
+    ``audit_dir`` is :meth:`MatchProject.audit_path` for the owning
+    project. ``has_trim`` can short-circuit a trim-cache existence check
+    when the caller already knows it (e.g. it just ran trim). When
+    omitted we don't require a trim cache for ``ready`` -- ``ready``
+    only means "all logical prerequisites met"; the absence of a trim
+    cache will surface as the Audit page's PrereqGate, not as a
+    different status here. Keeping this stat-light keeps the overview
+    cheap to render.
+    """
+    if stage.skipped:
+        return StageStatus.skipped
+    primary = stage.primary()
+    if primary is None:
+        return StageStatus.todo
+    if stage.time_seconds <= 0:
+        return StageStatus.partial
+    audit_file = audit_dir / f"stage{stage.stage_number}.json"
+    if not audit_file.exists():
+        # Has primary + has time, but no audit JSON means detection
+        # hasn't run yet. Beep absence falls under "ready" too -- the
+        # PrereqGate handles that distinction in-page.
+        return StageStatus.ready
+    try:
+        payload = json.loads(audit_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # Corrupt audit JSON -- treat as ready so the operator can re-run
+        # detection. The Audit page will surface the read error itself.
+        return StageStatus.ready
+    events = payload.get("audit_events") or []
+    saved = any(
+        isinstance(e, dict) and e.get("kind") == "save" for e in events
+    )
+    if saved:
+        return StageStatus.audited
+    return StageStatus.in_progress
 
 
 class StageEntry(BaseModel):
@@ -704,6 +784,36 @@ class MatchProject(BaseModel):
         # Audit output is always project-local; surface a resolver for the
         # remove-video flow so it can clean up the per-stage JSON.
         return root / "audit"
+
+    def stage_statuses(self, root: Path) -> dict[int, StageStatus]:
+        """Compute :class:`StageStatus` for every stage on this project.
+
+        One-shot dict so the GET project endpoint can enrich every
+        stage's serialized dict with its status without making the
+        client recompute. Reads one audit JSON per stage (cheap; ~12
+        stages typical) -- callers that only need ``audited`` counts
+        can use :meth:`audited_count` instead, which is the same work.
+        """
+        audit_dir = self.audit_path(root)
+        return {
+            s.stage_number: stage_audit_status(s, audit_dir) for s in self.stages
+        }
+
+    def audited_count(self, root: Path) -> int:
+        """Number of stages that are ``audited`` (Save has been hit).
+
+        Backend-side single source of truth for "how many stages did
+        this shooter complete?" -- replaces the old "time_seconds > 0
+        or skipped" heuristic that overcounted every set-up stage.
+        Skipped stages do not count as audited; they're a terminal
+        state but represent operator intent to ignore, not work done.
+        """
+        audit_dir = self.audit_path(root)
+        return sum(
+            1
+            for s in self.stages
+            if stage_audit_status(s, audit_dir) == StageStatus.audited
+        )
 
     # ------------------------------------------------------------------
     # Video registry helpers (Sub 2 / #13)

@@ -38,13 +38,25 @@ import {
   type MatchProject,
   type ShooterListEntry,
   type StageEntry,
+  type StageStatus,
 } from "@/lib/api";
+import {
+  deriveStageStatus,
+  isNextUpCandidate,
+  isTerminal,
+} from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
-type StagePillTone = "done" | "partial" | "flagged" | "todo";
+// Visual tone the home stage card switches on. Derived from the
+// canonical :type:`StageStatus` via :func:`statusTone` -- we don't
+// recompute "audited" client-side. "flagged" is a future visual tier
+// the design system reserves for stages that need attention (e.g.
+// failed detection); no backend status maps to it today.
+type StagePillTone = "done" | "in_progress" | "ready" | "partial" | "flagged" | "todo" | "skipped";
 
 interface StageView {
   stage: StageEntry;
+  status: StageStatus;
   shotCount: number;
   expectedShots: number | null;
   tone: StagePillTone;
@@ -79,46 +91,62 @@ export function Home() {
   const stageViews = useMemo<StageView[]>(() => {
     if (!project) return [];
     const views = project.stages.map<StageView>((s) => {
+      const status = deriveStageStatus(s);
       const hasVideo = (s.videos ?? []).some((v) => v.role === "primary");
-      const tone: StagePillTone = s.skipped
-        ? "done"
-        : !hasVideo
-          ? "todo"
-          : s.time_seconds > 0
-            ? "done"
-            : "partial";
       const expected = expectedShotsFromStage(s);
       return {
         stage: s,
+        status,
+        // Note: shotCount here is a placeholder estimate (stage time in
+        // seconds, floored) until we surface real shot counts from the
+        // audit JSON. The status tells the truth; this number is a
+        // cosmetic value rendered next to the chip.
         shotCount: hasVideo ? Math.max(0, Math.floor(s.time_seconds)) : 0,
         expectedShots: expected,
-        tone,
+        tone: toneForStatus(status),
         isNextUp: false,
       };
     });
-    const nextIdx = views.findIndex(
-      (v) => v.tone === "partial" || v.tone === "todo",
-    );
+    const nextIdx = views.findIndex((v) => isNextUpCandidate(v.status));
     if (nextIdx >= 0) views[nextIdx].isNextUp = true;
     return views;
   }, [project]);
 
-  const totalsByTone = useMemo(() => {
-    const counts = { done: 0, partial: 0, flagged: 0, todo: 0 };
+  // Per-tone counts for the headline stats + progress bar. Initialised
+  // with every key so consumers can index without optional chaining.
+  const totalsByTone = useMemo<Record<StagePillTone, number>>(() => {
+    const counts: Record<StagePillTone, number> = {
+      done: 0,
+      in_progress: 0,
+      ready: 0,
+      partial: 0,
+      flagged: 0,
+      todo: 0,
+      skipped: 0,
+    };
     for (const v of stageViews) counts[v.tone] += 1;
     return counts;
   }, [stageViews]);
 
+  const terminalCount = useMemo(
+    () => stageViews.filter((v) => isTerminal(v.status)).length,
+    [stageViews],
+  );
+
+  // Audited percentage = terminal stages (audited + skipped) / total.
+  // Skipped stages count as closed-out work because the operator made
+  // a deliberate decision to skip them. Stages still in `in_progress`
+  // / `ready` / `partial` / `todo` are pending.
   const auditedPct =
     stageViews.length > 0
-      ? Math.round((totalsByTone.done / stageViews.length) * 100)
+      ? Math.round((terminalCount / stageViews.length) * 100)
       : 0;
 
   const nextUp = stageViews.find((v) => v.isNextUp);
   const isEmpty =
     !project ||
     stageViews.length === 0 ||
-    stageViews.every((v) => v.tone === "todo");
+    stageViews.every((v) => v.status === "todo");
 
   if (!project) {
     return (
@@ -284,17 +312,15 @@ function ActiveVariant({
           <p className="mb-5 max-w-xl text-sm text-ink-2">
             {nextUp ? (
               <>
-                <b className="font-bold text-ink">
-                  {totalsByTone.done}
-                </b>{" "}
-                of <b className="font-bold text-ink">{stageViews.length}</b>{" "}
+                <b className="font-bold text-ink">{totalsByTone.done}</b> of{" "}
+                <b className="font-bold text-ink">{stageViews.length}</b>{" "}
                 stages audited. Resume the next stage to keep moving, or jump
                 to any tile below.
               </>
             ) : (
               <>
-                Every stage has a time recorded. Run an export from match
-                settings, or revisit a stage for a recheck.
+                All stages closed out. Run an export from match settings, or
+                revisit a stage for a recheck.
               </>
             )}
           </p>
@@ -810,10 +836,19 @@ function StageTile({
             <span className="text-subtle">No video yet</span>
           )}
         </span>
-        <span className={cn(tone === "flagged" ? "text-led" : "text-subtle")}>
+        <span
+          className={cn(
+            tone === "flagged" ? "text-led" : "text-subtle",
+            tone === "in_progress" && "text-live",
+            tone === "ready" && "text-led",
+          )}
+        >
           {tone === "todo" && "awaiting"}
-          {tone === "partial" && "in progress"}
+          {tone === "partial" && "stage time missing"}
+          {tone === "ready" && "ready"}
+          {tone === "in_progress" && "in progress"}
           {tone === "done" && "audited"}
+          {tone === "skipped" && "skipped"}
           {tone === "flagged" && "flagged"}
         </span>
       </div>
@@ -857,17 +892,26 @@ function StagePill({ tone }: { tone: StagePillTone }) {
   const label =
     tone === "done"
       ? "Audited"
-      : tone === "partial"
-        ? "In progress"
-        : tone === "flagged"
-          ? "Flagged"
-          : "Not started";
+      : tone === "skipped"
+        ? "Skipped"
+        : tone === "in_progress"
+          ? "In progress"
+          : tone === "ready"
+            ? "Ready"
+            : tone === "partial"
+              ? "Stage time missing"
+              : tone === "flagged"
+                ? "Flagged"
+                : "Not started";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em]",
         tone === "done" && "bg-done/10 text-done",
-        tone === "partial" && "bg-live/10 text-live",
+        tone === "skipped" && "border border-rule bg-surface-3 text-subtle",
+        tone === "in_progress" && "bg-live/10 text-live",
+        tone === "ready" && "border border-led/40 bg-led-tint text-led",
+        tone === "partial" && "border border-dashed border-live bg-live/10 text-live",
         tone === "flagged" && "bg-led/10 text-led",
         tone === "todo" && "border border-rule bg-surface-2 text-subtle",
       )}
@@ -877,6 +921,9 @@ function StagePill({ tone }: { tone: StagePillTone }) {
         className={cn(
           "inline-block size-1 rounded-full",
           tone === "done" && "bg-done shadow-[0_0_4px_var(--color-done-glow)]",
+          tone === "skipped" && "bg-subtle",
+          tone === "in_progress" && "bg-live shadow-[0_0_4px_var(--color-live-glow)]",
+          tone === "ready" && "bg-led shadow-[0_0_4px_var(--color-led-glow)]",
           tone === "partial" && "bg-live shadow-[0_0_4px_var(--color-live-glow)]",
           tone === "flagged" && "bg-led shadow-[0_0_4px_var(--color-led-glow)]",
           tone === "todo" && "border border-subtle bg-transparent",
@@ -885,6 +932,29 @@ function StagePill({ tone }: { tone: StagePillTone }) {
       {label}
     </span>
   );
+}
+
+/** Map a backend ``StageStatus`` to the local ``StagePillTone``. The
+ *  tone IS the visual switch this file uses; the status is the truth.
+ *  audited -> done because "done" is the design system tone for green-
+ *  done, not because audited == complete in any other sense. Skipped
+ *  has its own tone so the visual reads "operator decided to skip" not
+ *  "operator completed". */
+function toneForStatus(status: StageStatus): StagePillTone {
+  switch (status) {
+    case "audited":
+      return "done";
+    case "skipped":
+      return "skipped";
+    case "in_progress":
+      return "in_progress";
+    case "ready":
+      return "ready";
+    case "partial":
+      return "partial";
+    case "todo":
+      return "todo";
+  }
 }
 
 function HelpCard({

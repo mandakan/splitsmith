@@ -25,33 +25,45 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
+  FolderOpen,
   Plus,
   Search,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { DirectoryPickerModal } from "@/components/DirectoryPickerModal";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
   api,
+  type CreateMatchCompetitorPick,
   type CreateMatchStageDraft,
+  type ScoreboardMatchCompetitor,
+  type ScoreboardMatchData,
+  type ScoreboardMatchRef,
 } from "@/lib/api";
+import { slugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
 
 type Variant = "scoreboard" | "manual";
 
-interface ScoreboardSearchResult {
-  match_id: number;
-  content_type: number;
-  name: string;
-  club?: string | null;
-  match_date?: string | null;
-  stage_count?: number | null;
-  competitor_count?: number | null;
-  level?: string | null;
+// Wire shape mirrors ``splitsmith.ui.scoreboard.models.MatchRef`` --
+// reuse the type from api.ts instead of redefining (the previous local
+// interface drifted -- ``match_id``/``match_date``/``club`` -- which
+// made every row look "selected" because every field was undefined).
+type ScoreboardSearchResult = ScoreboardMatchRef;
+
+const DEFAULT_PARENT_DIR = "~/Splitsmith";
+
+/** Resolve a parent dir + project name into the absolute project_folder
+ *  string the backend accepts. Trailing/leading slashes on the parent
+ *  are normalised. */
+function projectFolderPath(parentDir: string, slug: string): string {
+  const trimmed = parentDir.replace(/\/+$/, "");
+  return `${trimmed || "."}/${slug}`;
 }
 
 const DIVISIONS = [
@@ -214,14 +226,73 @@ function ScoreboardVariant({
   const [searching, setSearching] = useState(false);
   const [offline, setOffline] = useState(false);
   const [selected, setSelected] = useState<ScoreboardSearchResult | null>(null);
-  const [projectFolder, setProjectFolder] = useState("");
-  const [shooterName, setShooterName] = useState("");
+  const [matchData, setMatchData] = useState<ScoreboardMatchData | null>(null);
+  const [loadingRoster, setLoadingRoster] = useState(false);
+  const [competitorFilter, setCompetitorFilter] = useState("");
+  // competitor.id -> checked. No "me" / operator concept here -- the
+  // operator running the app may be coaching and not a shooter at all
+  // (see issue #350).
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [parentDir, setParentDir] = useState<string>(DEFAULT_PARENT_DIR);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const step2Ref = useRef<HTMLDivElement | null>(null);
 
-  // Debounced search. The /api/scoreboard/search endpoint requires a bound
-  // project today, so a real client-only path needs a backend hook (#323+).
-  // For now: ENTER triggers a search; the offline-graceful path returns a
-  // structured error which we render as a fallback CTA.
+  // Scroll step 2 into view when the user picks a match (the detail
+  // panel renders below the results list, which can land off-screen).
+  useEffect(() => {
+    if (selected && step2Ref.current) {
+      step2Ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selected?.id]);
+
+  // Auto-load the match roster when the user picks a match. Reset
+  // step-2 state so re-picking a different match doesn't carry stale
+  // selections.
+  useEffect(() => {
+    if (!selected) {
+      setMatchData(null);
+      setChecked(new Set());
+      return;
+    }
+    setMatchData(null);
+    setChecked(new Set());
+    setLoadingRoster(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.getScoreboardMatchDataUnbound(
+          selected.content_type,
+          selected.id,
+        );
+        if (cancelled) return;
+        setMatchData(data);
+      } catch (e) {
+        if (!cancelled) {
+          onError(e instanceof ApiError ? e.detail : String(e));
+        }
+      } finally {
+        if (!cancelled) setLoadingRoster(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id, selected?.content_type, onError]);
+
+  const slug = useMemo(
+    () => (selected ? slugify(selected.name) : ""),
+    [selected],
+  );
+  const projectFolder = useMemo(
+    () => (slug ? projectFolderPath(parentDir, slug) : ""),
+    [parentDir, slug],
+  );
+
+  // ENTER triggers a search against the unbound /api/scoreboard/search
+  // endpoint. Any backend failure (no SSI token, scoreboard down, rate
+  // limited) routes through the same fallback CTA so the user can pivot
+  // to manual setup without leaving the page.
   async function runSearch() {
     if (!query.trim()) {
       setResults([]);
@@ -231,15 +302,11 @@ function ScoreboardVariant({
     setOffline(false);
     onError(null);
     try {
-      // Until the unbound-search endpoint lands we ask the user to use
-      // manual; this surface stays in the UI so the redesign mockup
-      // is honored even when the backing API isn't ready.
-      // (Calling /api/scoreboard/search unbound returns 409 no_project.)
       const resp = await fetch(
         `/api/scoreboard/search?q=${encodeURIComponent(query)}`,
         { headers: { Accept: "application/json" } },
       );
-      if (resp.status === 409) {
+      if (resp.status === 401 || resp.status === 429 || resp.status === 502) {
         setOffline(true);
         setResults([]);
         return;
@@ -258,21 +325,57 @@ function ScoreboardVariant({
     }
   }
 
+  function toggleChecked(id: number) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const competitors = matchData?.competitors ?? [];
+  const filteredCompetitors = useMemo(() => {
+    const q = competitorFilter.trim().toLowerCase();
+    if (!q) return competitors;
+    return competitors.filter((c) => {
+      const hay = `${c.name} ${c.club ?? ""} ${c.division ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [competitors, competitorFilter]);
+
+  const canCreate =
+    !!selected &&
+    !!matchData &&
+    checked.size > 0 &&
+    parentDir.trim().length > 0 &&
+    !creating;
+
   async function create() {
-    if (!selected) return;
-    if (!projectFolder.trim() || !shooterName.trim()) {
-      onError("Project folder and your name are required.");
+    if (!selected || !matchData) return;
+    const picks: CreateMatchCompetitorPick[] = [];
+    for (const c of matchData.competitors) {
+      if (!checked.has(c.id)) continue;
+      picks.push({
+        name: c.name,
+        division: c.division,
+        selected_shooter_id: c.shooterId,
+        selected_competitor_id: c.id,
+      });
+    }
+    if (picks.length === 0) {
+      onError("Pick at least one shooter to add.");
       return;
     }
     setCreating(true);
     onError(null);
     try {
       await api.createMatchFromScoreboard({
-        project_folder: projectFolder.trim(),
+        project_folder: projectFolder,
         name: selected.name,
-        match_id: selected.match_id,
+        match_id: selected.id,
         content_type: selected.content_type,
-        primary_shooter_name: shooterName.trim(),
+        competitors: picks,
       });
       navigate("/", { replace: true });
     } catch (e) {
@@ -314,8 +417,8 @@ function ScoreboardVariant({
               Scoreboard unavailable
             </div>
             <p className="text-[0.8125rem] text-muted">
-              The scoreboard search needs a bound project (or comes back
-              when the unbound search lands in a follow-up). You can
+              The scoreboard isn't reachable right now -- check the
+              SPLITSMITH_SSI_TOKEN env var or your network. You can
               still create the match by{" "}
               <button
                 type="button"
@@ -347,9 +450,12 @@ function ScoreboardVariant({
             <div className="overflow-hidden rounded-[10px] border border-rule bg-bg-glow">
               {results.map((r) => (
                 <ResultRow
-                  key={`${r.content_type}-${r.match_id}`}
+                  key={`${r.content_type}-${r.id}`}
                   result={r}
-                  selected={selected?.match_id === r.match_id}
+                  selected={
+                    selected?.id === r.id &&
+                    selected?.content_type === r.content_type
+                  }
                   onSelect={() => setSelected(r)}
                 />
               ))}
@@ -363,72 +469,139 @@ function ScoreboardVariant({
           </div>
         )}
 
-        {selected && (
-          <div className="relative mt-5 overflow-hidden rounded-xl border border-rule-strong bg-surface-2 px-5 py-5">
-            <span
-              aria-hidden
-              className="absolute inset-y-0 left-0 w-0.5 bg-led shadow-[0_0_12px_var(--color-led-glow)]"
-            />
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-rule pb-3">
-              <div>
-                <div className="font-display text-base font-bold uppercase tracking-tight text-ink">
-                  {selected.name}
-                  {selected.level && (
-                    <span className="ml-2 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-led">
-                      &middot; {selected.level}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-                  {[
-                    selected.match_date,
-                    selected.club,
-                    selected.stage_count
-                      ? `${selected.stage_count} stages`
-                      : null,
-                    selected.competitor_count
-                      ? `${selected.competitor_count} competitors`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-              </div>
-            </div>
-
-            <FormField label="Your name" required>
-              <input
-                type="text"
-                value={shooterName}
-                onChange={(e) => setShooterName(e.target.value)}
-                placeholder="Mathias Axell"
-                className="w-full rounded-lg border border-rule bg-surface-3 px-3.5 py-2.5 text-sm text-ink outline-none focus:border-led focus:bg-bg-glow focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
-              />
-            </FormField>
-            <FormField label="Project folder" required>
-              <input
-                type="text"
-                value={projectFolder}
-                onChange={(e) => setProjectFolder(e.target.value)}
-                placeholder="~/Splitsmith/vads-easter-shoot-2026/"
-                className="w-full rounded-lg border border-rule bg-surface-3 px-3.5 py-2.5 font-mono text-[0.8125rem] tabular-nums text-ink outline-none focus:border-led focus:bg-bg-glow focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
-              />
-            </FormField>
-          </div>
-        )}
       </Section>
 
       {selected && (
-        <>
+        <div ref={step2Ref}>
+          <Section
+            eyebrow="Step 2 · pick shooters"
+            title={`Add shooters from ${selected.name}`}
+          >
+            <p className="-mt-1 mb-4 max-w-2xl text-[0.8125rem] text-muted">
+              Pick every shooter to include in this match. Stage times are
+              fetched for each selected shooter on create.
+            </p>
+
+            <label className="flex min-h-10 items-center gap-2.5 rounded-lg border border-rule bg-surface-3 px-3.5 py-2 transition-colors focus-within:border-led focus-within:bg-bg-glow focus-within:shadow-[0_0_0_3px_var(--color-led-tint)]">
+              <Search aria-hidden className="size-4 text-subtle" />
+              <input
+                type="text"
+                value={competitorFilter}
+                onChange={(e) => setCompetitorFilter(e.target.value)}
+                placeholder="Filter by name, club, or division..."
+                className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-subtle"
+              />
+              {competitorFilter && (
+                <button
+                  type="button"
+                  onClick={() => setCompetitorFilter("")}
+                  className="rounded p-0.5 text-subtle hover:bg-surface-2 hover:text-ink"
+                  aria-label="Clear filter"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </label>
+
+            <div className="mt-3 flex items-center justify-between font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-subtle">
+              <span>
+                {loadingRoster ? (
+                  <span>Loading roster...</span>
+                ) : (
+                  <>
+                    <b className="font-bold text-ink-2">{checked.size}</b> of{" "}
+                    {competitors.length} selected
+                  </>
+                )}
+              </span>
+              {competitors.length > 0 && (
+                <span>
+                  {filteredCompetitors.length === competitors.length
+                    ? `${competitors.length} shooters`
+                    : `${filteredCompetitors.length} match · ${competitors.length} total`}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-2 max-h-80 overflow-y-auto rounded-[10px] border border-rule bg-bg-glow">
+              {loadingRoster ? (
+                <div className="px-4 py-8 text-center font-mono text-xs uppercase tracking-[0.08em] text-muted">
+                  Loading roster from scoreboard...
+                </div>
+              ) : filteredCompetitors.length === 0 ? (
+                <div className="px-4 py-8 text-center font-mono text-xs uppercase tracking-[0.08em] text-muted">
+                  {competitors.length === 0
+                    ? "No competitors on this match yet."
+                    : "No shooters match that filter."}
+                </div>
+              ) : (
+                filteredCompetitors.map((c) => (
+                  <CompetitorRow
+                    key={c.id}
+                    competitor={c}
+                    checked={checked.has(c.id)}
+                    onToggle={() => toggleChecked(c.id)}
+                  />
+                ))
+              )}
+            </div>
+          </Section>
+
+          <Section eyebrow="Step 3 · project folder" title="Where to save this match">
+            <p className="-mt-1 mb-4 max-w-2xl text-[0.8125rem] text-muted">
+              The match folder will be created as a new directory inside
+              the parent you pick. The leaf is generated from the match
+              name.
+            </p>
+
+            <div className="flex flex-col gap-3 rounded-lg border border-rule bg-surface-3 px-4 py-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
+                    Parent folder
+                  </div>
+                  <div className="mt-0.5 truncate font-mono text-[0.8125rem] tabular-nums text-ink-2">
+                    {parentDir}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-3 py-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led"
+                >
+                  <FolderOpen className="size-3.5" />
+                  Change...
+                </button>
+              </div>
+              <div className="border-t border-rule pt-3">
+                <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
+                  Will create
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[0.8125rem] tabular-nums text-ink">
+                  {projectFolder}/
+                </div>
+              </div>
+            </div>
+          </Section>
+
           <Section eyebrow="Preview">
-            <div className="flex items-center gap-3.5 rounded-[10px] border border-done bg-gradient-to-r from-done/10 to-done/[0.02] px-4 py-3 font-mono text-xs uppercase tracking-[0.06em] text-ink-2">
+            <div className="flex flex-wrap items-center gap-3.5 rounded-[10px] border border-done bg-gradient-to-r from-done/10 to-done/[0.02] px-4 py-3 font-mono text-xs uppercase tracking-[0.06em] text-ink-2">
               <span className="inline-flex size-6 items-center justify-center rounded-full bg-done text-bg shadow-[0_0_10px_var(--color-done-glow)]">
                 <Check className="size-3.5" strokeWidth={3} />
               </span>
               <span>
-                Ready to create &middot; primary shooter{" "}
-                <b className="font-bold text-done">{shooterName || "(set above)"}</b>{" "}
-                &middot; stages will be fetched after binding
+                {canCreate ? (
+                  <>
+                    Ready to create &middot;{" "}
+                    <b className="font-bold text-done">{checked.size}</b>{" "}
+                    shooter{checked.size === 1 ? "" : "s"} &middot; stage times will
+                    be fetched for each
+                  </>
+                ) : (
+                  <span className="text-muted">
+                    Pick at least one shooter above.
+                  </span>
+                )}
               </span>
             </div>
           </Section>
@@ -439,9 +612,7 @@ function ScoreboardVariant({
               <Button
                 type="button"
                 onClick={() => void create()}
-                disabled={
-                  creating || !shooterName.trim() || !projectFolder.trim()
-                }
+                disabled={!canCreate}
                 className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led hover:text-ink"
               >
                 <span className="font-display uppercase tracking-[0.08em]">
@@ -451,9 +622,67 @@ function ScoreboardVariant({
               </Button>
             }
           />
-        </>
+        </div>
+      )}
+
+      {pickerOpen && (
+        <DirectoryPickerModal
+          initialPath={parentDir.startsWith("~") ? null : parentDir}
+          onSelect={(picked) => {
+            setParentDir(picked);
+            setPickerOpen(false);
+          }}
+          onCancel={() => setPickerOpen(false)}
+        />
       )}
     </div>
+  );
+}
+
+function CompetitorRow({
+  competitor,
+  checked,
+  onToggle,
+}: {
+  competitor: ScoreboardMatchCompetitor;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <label
+      className={cn(
+        "grid w-full cursor-pointer items-center gap-3 border-b border-rule px-4 py-2.5 transition-colors last:border-b-0",
+        checked ? "bg-led-tint/40" : "hover:bg-surface-2",
+      )}
+      style={{ gridTemplateColumns: "24px 1fr" }}
+    >
+      <span className="flex items-center justify-center">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onToggle}
+          aria-label={`Add ${competitor.name}`}
+          className="size-4 cursor-pointer accent-led"
+        />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-ink">
+          {competitor.name}
+        </span>
+        <span className="mt-0.5 flex flex-wrap gap-x-2 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+          {[competitor.club, competitor.division]
+            .filter(Boolean)
+            .map((s, i, arr) => (
+              <span key={i}>
+                {s}
+                {i < arr.length - 1 && (
+                  <span className="ml-2 text-whisper">&middot;</span>
+                )}
+              </span>
+            ))}
+        </span>
+      </span>
+    </label>
   );
 }
 
@@ -466,15 +695,20 @@ function ResultRow({
   selected: boolean;
   onSelect: () => void;
 }) {
+  // Per the design system: LED red is an *accent* (dots, hairlines, halos,
+  // focus rings), not a body-text color. Keep the match name in `text-ink`
+  // in both states; communicate selection with the LED strip + filled
+  // check + tinted row background so contrast stays high.
   return (
     <button
       type="button"
       onClick={onSelect}
+      aria-pressed={selected}
       className={cn(
-        "relative grid w-full items-center gap-4 border-b border-rule px-4 py-3.5 text-left transition-colors last:border-b-0 hover:bg-surface-2",
-        selected && "bg-led/10",
+        "relative grid w-full items-center gap-4 border-b border-rule px-4 py-3.5 text-left transition-colors last:border-b-0 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2",
+        selected && "bg-led-tint",
       )}
-      style={{ gridTemplateColumns: "32px 1fr 110px 90px 24px" }}
+      style={{ gridTemplateColumns: "28px 1fr 110px 90px 24px" }}
     >
       {selected && (
         <span
@@ -483,16 +717,17 @@ function ResultRow({
         />
       )}
       <span
+        aria-hidden
         className={cn(
-          "inline-flex size-7 items-center justify-center rounded-md",
+          "inline-flex size-6 items-center justify-center rounded-md border transition-colors",
           selected
-            ? "bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
-            : "bg-surface-3 text-muted",
+            ? "border-led bg-led-tint text-led"
+            : "border-rule bg-surface-3 text-subtle",
         )}
       >
         <svg
-          width="14"
-          height="14"
+          width="12"
+          height="12"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -502,22 +737,11 @@ function ResultRow({
         </svg>
       </span>
       <div>
-        <div
-          className={cn(
-            "font-display text-[0.9375rem] font-bold uppercase tracking-tight",
-            selected ? "text-led" : "text-ink",
-          )}
-        >
+        <div className="font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
           {result.name}
         </div>
         <div className="mt-1 flex flex-wrap gap-x-2 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-          {[
-            result.club,
-            result.stage_count ? `${result.stage_count} stages` : null,
-            result.competitor_count
-              ? `${result.competitor_count} competitors`
-              : null,
-          ]
+          {[result.venue, result.region, result.discipline]
             .filter(Boolean)
             .map((s, i, arr) => (
               <span key={i}>
@@ -528,16 +752,14 @@ function ResultRow({
         </div>
       </div>
       <div className="text-right font-mono text-xs tabular-nums text-ink-2">
-        {result.match_date ?? ""}
+        {result.date ?? ""}
       </div>
       <div>
         {result.level && (
           <span
             className={cn(
               "inline-block rounded px-2 py-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em]",
-              result.level === "Club"
-                ? "border border-rule-strong bg-surface-3 text-ink-2"
-                : "border border-led-deep bg-led/10 text-led",
+              "border border-rule-strong bg-surface-3 text-ink-2",
             )}
           >
             {result.level}
@@ -545,7 +767,10 @@ function ResultRow({
         )}
       </div>
       {selected ? (
-        <span className="inline-flex size-5 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]">
+        <span
+          aria-label="selected"
+          className="inline-flex size-5 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
+        >
           <Check className="size-3" strokeWidth={3} />
         </span>
       ) : (
@@ -629,7 +854,7 @@ function ManualVariant({
 
   async function submit() {
     if (!name.trim() || !folder.trim() || !shooterName.trim()) {
-      onError("Match name, project folder, and your name are required.");
+      onError("Match name, project folder, and shooter name are required.");
       return;
     }
     if (stages.length === 0) {
@@ -801,16 +1026,17 @@ function ManualVariant({
         </p>
       </Section>
 
-      <Section eyebrow="Step 3 · primary shooter" title="Shooter (you)">
+      <Section eyebrow="Step 3 · first shooter" title="Add a shooter">
         <p className="-mt-1 mb-4 text-[0.8125rem] text-muted">
-          You can add more shooters after the match is created.
+          Manual matches need at least one shooter to start. More can be
+          added from the shooters page later.
         </p>
         <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-          <FormField label="Your name" required>
+          <FormField label="Shooter name" required>
             <TextInput
               value={shooterName}
               onChange={setShooterName}
-              placeholder="Mathias Axell"
+              placeholder="Full name"
             />
           </FormField>
           <FormField label="Division">
