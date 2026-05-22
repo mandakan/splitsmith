@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
 import { type StageStatus } from "@/lib/api";
+import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
 
 // The sidebar consumes the canonical :type:`StageStatus` from the
@@ -135,6 +136,7 @@ export function MatchSidebar({
           to="/shooters"
           icon={<Users className="size-[15px]" />}
           count={shooterCount}
+          badgeKind="count"
         >
           Shooters
         </SidebarLink>
@@ -147,7 +149,8 @@ export function MatchSidebar({
         <SidebarLink
           to="/beep-review"
           icon={<Volume2 className="size-[15px]" />}
-          count={beepReviewPendingCount ? beepReviewPendingCount : undefined}
+          count={beepReviewPendingCount}
+          badgeKind="pending"
         >
           Beep review
         </SidebarLink>
@@ -162,7 +165,10 @@ export function MatchSidebar({
       {/* Stages */}
       <div className="mt-2 flex items-center justify-between px-2 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
         Stages
-        <span className="inline-flex items-center rounded border border-rule bg-surface-2 px-1.5 py-0.5 font-bold tabular-nums text-ink-2">
+        <span
+          className="badge-count"
+          title={`${audited} of ${total} audited or skipped`}
+        >
           {pad2(audited)} / {pad2(total)}
         </span>
       </div>
@@ -233,12 +239,17 @@ function SidebarLink({
   to,
   icon,
   count,
+  badgeKind = "count",
   end,
   children,
 }: {
   to: string;
   icon: ReactNode;
   count?: number;
+  /** ``count`` -- entity tally (Shooters), square neutral badge, always
+   *  visible while ``count`` is defined. ``pending`` -- positive work
+   *  queue (Beep review), cyan pill+dot, hides at zero. */
+  badgeKind?: "count" | "pending";
   end?: boolean;
   children: ReactNode;
 }) {
@@ -246,6 +257,9 @@ function SidebarLink({
   // NavLink's "end" handles the index case; for nested matches like
   // /audit/3 we still want /audit to be active.
   const isActive = end ? pathname === to : pathname.startsWith(to);
+  // Pending badges hide at zero; count badges only render when defined.
+  const showBadge =
+    typeof count === "number" && (badgeKind === "pending" ? count > 0 : true);
   return (
     <NavLink
       to={to}
@@ -266,94 +280,18 @@ function SidebarLink({
         {icon}
       </span>
       <span>{children}</span>
-      {typeof count === "number" && count > 0 && (
+      {showBadge && (
         <span
           className={cn(
-            "ml-auto font-mono text-[0.625rem] font-bold tabular-nums",
-            isActive ? "text-led" : "text-subtle",
+            "ml-auto",
+            badgeKind === "pending" ? "badge-pending" : "badge-count",
           )}
         >
-          {pad2(count)}
+          {pad2(count!)}
         </span>
       )}
     </NavLink>
   );
-}
-
-function StageDot({ status }: { status: StageStatus }) {
-  // ``audited`` and ``skipped`` are both terminal -- audited gets the
-  // green check, skipped gets a hollow grey ring so the operator can
-  // tell at a glance which stages they actively closed out vs which
-  // they finished. ``in_progress`` (detection ran, save not hit) and
-  // ``partial`` (no stage time) and ``ready`` (set up, nothing run)
-  // each get their own dot so the sidebar tells the truth.
-  switch (status) {
-    case "audited":
-      return (
-        <span
-          aria-label="Audited"
-          className="inline-flex size-3 items-center justify-center rounded-full bg-done text-bg shadow-[0_0_5px_var(--color-done-glow)]"
-        >
-          <svg
-            width="7"
-            height="7"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="4"
-          >
-            <path d="M5 12l5 5L20 7" />
-          </svg>
-        </span>
-      );
-    case "skipped":
-      return (
-        <span
-          aria-label="Skipped"
-          className="inline-flex size-3 items-center justify-center rounded-full border border-rule-strong bg-surface-3 text-subtle"
-        >
-          <svg
-            width="7"
-            height="7"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="4"
-          >
-            <path d="M6 12h12" />
-          </svg>
-        </span>
-      );
-    case "in_progress":
-      return (
-        <span
-          aria-label="In progress"
-          className="size-3 rounded-full bg-live shadow-[0_0_5px_var(--color-live-glow)]"
-        />
-      );
-    case "ready":
-      return (
-        <span
-          aria-label="Ready to audit"
-          className="size-3 rounded-full border border-led bg-led-tint"
-        />
-      );
-    case "partial":
-      return (
-        <span
-          aria-label="Stage time missing"
-          className="size-3 rounded-full border-2 border-dashed border-live bg-transparent"
-        />
-      );
-    case "todo":
-    default:
-      return (
-        <span
-          aria-label="Not started"
-          className="size-3 rounded-full border border-rule-strong bg-transparent"
-        />
-      );
-  }
 }
 
 function pad2(n: number): string {

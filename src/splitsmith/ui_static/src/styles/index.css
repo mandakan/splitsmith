@@ -73,6 +73,33 @@
   --color-led-fill:     #DC2626;
   --color-led-glow:     rgba(255, 45, 45, 0.30);
   --color-led-tint:     rgba(255, 45, 45, 0.10);
+  /* Body-size red text. 10-12px caps, mono digits inside --color-led-tint
+   * pills, outline-button labels. Reserves --color-led for accents and
+   * large display only -- the saturated identity red is too thin for
+   * 10-12px running text.
+   *
+   * Three reds, three roles (post-b3531b5 colour discipline):
+   *
+   *   --color-led          Identity accent. Dots, focus rings, brand mark,
+   *                        hairlines, glow halos. Tier-1 .btn-led-fill
+   *                        canonical CTA (one per page).
+   *   --color-led-text     Body-size red text (10-14px). Outline-button
+   *                        labels (.btn-led-outline), small mono labels
+   *                        in led-tint pills, inline error strings, slug
+   *                        validation errors. Where --color-led at small
+   *                        sizes would carry too little pixel mass.
+   *   --color-destructive  Error / "missing thing" semantics. Empty
+   *                        detection state, "no beep found", failed jobs.
+   *                        Currently aliased to --color-led but the alias
+   *                        exists so a future designer can differentiate
+   *                        identity from danger with one token swap.
+   *
+   * Same triage for --color-live: in-flight chrome (work in progress)
+   * vs warning (something is wrong). Currently the same token; if the
+   * design system splits them, the running-state surfaces (PrereqGate
+   * running, job progress) move to a neutral and the warning-state
+   * surfaces (low-confidence beep, prereq blocked) keep amber. */
+  --color-led-text:     #FFB4B4;
 
   /* Status */
   --color-live:         #FBBF24;
@@ -88,6 +115,16 @@
   --color-manual:       #A78BFA;
   --color-manual-glow:  rgba(167, 139, 250, 0.30);
   --color-manual-tint:  rgba(167, 139, 250, 0.10);
+
+  /* Stage status taxonomy -- six tiers, aliased to the existing palette so
+   * the meaning is encoded in the token name (not the underlying color).
+   * Used by MatchSidebar StageDot, StageChipRail, Home stage pills. */
+  --color-status-todo:     #3A4049;   /* hollow ring (--rule-strong) */
+  --color-status-partial:  #FBBF24;   /* dashed amber (--live) */
+  --color-status-ready:    #FF2D2D;   /* LED halo, no fill (--led) */
+  --color-status-progress: #FBBF24;   /* filled amber, pulse (--live) */
+  --color-status-audited:  #4ADE80;   /* filled green + check (--done) */
+  --color-status-skipped:  #8E939B;   /* hollow + horizontal bar (--muted) */
 
   /* Per-shooter identity (see 06-design-system.md 1.2.1) */
   --color-shooter-ma:        #FF2D2D;
@@ -392,6 +429,104 @@
     box-shadow:
       0 0 0 1px var(--color-led-fill),
       0 0 8px var(--color-led-glow);
+  }
+
+  /* Tier-2 commit action -- the "preferred next" button that sits alongside
+   * the Tier-1 .btn-led-fill on a page. Re-pick beep, Skip stage, etc.
+   * LED border + tint background + --color-led-text label, so it reads as
+   * "red action" without competing with the canonical filled CTA. The doc
+   * comment rule: one Tier-1 LED-fill per page; Tier-2 outlines may sit
+   * alongside; everything else is .btn-secondary or smaller. */
+  .btn-led-outline {
+    background: var(--color-led-tint);
+    color: var(--color-led-text);
+    font-family: var(--font-display);
+    font-size: 0.8125rem;       /* 13px -- one notch under btn-led-fill */
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid color-mix(in srgb, var(--color-led) 45%, transparent);
+    box-shadow: inset 0 0 0 1px rgba(255, 45, 45, 0.05);
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  }
+  .btn-led-outline:hover {
+    background: color-mix(in srgb, var(--color-led) 18%, transparent);
+    border-color: color-mix(in srgb, var(--color-led) 65%, transparent);
+    color: var(--color-ink);
+  }
+
+  /* Sidebar badges -- two distinct shapes for two distinct meanings.
+   *
+   * .badge-count    Entity counts (Shooters 04, Stages 12). Square mono
+   *                 numerals on a neutral surface. Always visible, never
+   *                 escalates.
+   *
+   * .badge-pending  Positive pending work (Beep review 12, Ingest queue 3).
+   *                 Pill with a beep-cyan dot. Hides at zero. Add
+   *                 .is-urgent to escalate to live-amber + pulse for
+   *                 stale/overdue queues. */
+  .badge-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--color-surface-3);
+    color: var(--color-ink-2);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    letter-spacing: 0.02em;
+  }
+
+  .badge-pending {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 18px;
+    padding: 0 8px 0 6px;
+    border-radius: 9999px;
+    background: var(--color-beep-tint);
+    border: 1px solid color-mix(in srgb, var(--color-beep) 35%, transparent);
+    color: var(--color-beep);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    letter-spacing: 0.04em;
+  }
+  .badge-pending::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-beep);
+    box-shadow: 0 0 6px var(--color-beep-glow);
+    flex-shrink: 0;
+  }
+  .badge-pending.is-urgent {
+    background: var(--color-live-tint);
+    border-color: color-mix(in srgb, var(--color-live) 45%, transparent);
+    color: var(--color-live);
+    animation: splitsmith-badge-pulse 1.6s ease-in-out infinite;
+  }
+  .badge-pending.is-urgent::before {
+    background: var(--color-live);
+    box-shadow: 0 0 8px var(--color-live-glow);
+  }
+  @keyframes splitsmith-badge-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.7; }
+  }
+
+  /* Stage in-progress dot pulse -- used by .stage-dot--in_progress in
+   * the StageDot primitive (six-tier taxonomy). */
+  @keyframes splitsmith-stage-progress-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.78; transform: scale(0.92); }
   }
 
   /* Inline red link affordance ("Manage shooters →" etc). Same Antonio

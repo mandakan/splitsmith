@@ -91,7 +91,11 @@ export function SyncBanner({
           ) : null}
         </div>
         {snapError ? (
-          <div className="mt-1 font-mono text-[0.6875rem] text-led">
+          // Body-size LED text uses --color-led-text (lighter pink) so
+          // the 11px message reads against the dark bg; the saturated
+          // --color-led is reserved for accents and large display per
+          // the post-b3531b5 colour-discipline rule.
+          <div className="mt-1 font-mono text-[0.6875rem] text-led-text">
             {snapError}
           </div>
         ) : null}

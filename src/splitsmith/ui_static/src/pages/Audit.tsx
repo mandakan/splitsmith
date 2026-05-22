@@ -48,7 +48,7 @@ import {
 
 import { AnomalyChips } from "@/components/audit/AnomalyChips";
 import { AnomalyPins } from "@/components/audit/AnomalyPins";
-import { BeepStatusChip } from "@/components/audit/BeepStatusChip";
+import { BeepStatusChip, type BeepStatusChipHandle } from "@/components/audit/BeepStatusChip";
 import { PrereqGate } from "@/components/audit/PrereqGate";
 import {
   CamSyncPill,
@@ -103,6 +103,7 @@ import {
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
+import { deriveStageStatus } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -196,6 +197,12 @@ export function Audit() {
   const sessionEventsRef = useRef<AuditEvent[]>([]);
   const isDirtyRef = useRef(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
+
+  // Ping handle for the toolbar's BeepStatusChip. PrereqGate's beep row
+  // (and any future surface that wants to point at "the beep") calls
+  // flash() here -- the chip owns beep state, so re-pick affordances
+  // never duplicate.
+  const beepChipRef = useRef<BeepStatusChipHandle>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -377,32 +384,20 @@ export function Audit() {
   }, [project]);
 
   // Stable identity for memoisation: a fresh array each render churns
-  // any consumer that keys on the items.
+  // any consumer that keys on the items. The status field carries the
+  // backend's per-stage lifecycle so the chip rail's trailing dot reads
+  // the truth instead of falling back to "todo".
   const stageSelectorOptions = useMemo(
     () =>
       stagesWithPrimary.map((s) => ({
         stageNumber: s.stage_number,
         stageName: s.stage_name,
+        status: deriveStageStatus(s),
       })),
     [stagesWithPrimary],
   );
 
-  // Stage rail items carry the active flag; per-stage done state needs a
-  // server endpoint we don't have yet (stages_audited is a count, not a
-  // set), so completed stages render as "todo" for now. Tracked as a
-  // follow-up to phase 2 of the audit redesign.
-  const stageRailItems = useMemo(
-    () =>
-      stageSelectorOptions.map((s) => ({
-        stageNumber: s.stageNumber,
-        stageName: s.stageName,
-        status: (s.stageNumber === stageNumber ? "active" : "todo") as
-          | "done"
-          | "active"
-          | "todo",
-      })),
-    [stageSelectorOptions, stageNumber],
-  );
+  const stageRailItems = stageSelectorOptions;
 
   // Neighbour stage numbers for prev/next nav. `null` at the boundaries
   // so the header buttons disable instead of wrapping -- accidental wrap
@@ -1724,66 +1719,44 @@ export function Audit() {
   const syncing = syncMode != null;
 
   return (
-    <div
-      className={cn(
-        "relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink transition-colors",
-        // Sync-mode skin: the whole audit canvas adopts a subtle live-
-        // amber background wash so the operator can't mistake which
-        // mode they're in. The actual interactive surfaces below tone
-        // up or down independently; this is just the ambient frame.
-        // (Strawman -- pending designer review.)
-        syncing && "bg-[radial-gradient(900px_300px_at_50%_-80px,rgba(251,191,36,0.06),transparent_60%)]",
-      )}
-    >
-      {/* Persistent mode chrome -- amber rails on the left + right edges
-          of the canvas + a "PICKING BUZZER" mode label centered at the
-          top, so even mid-scrub you can't lose track of what state
-          you're in. pointer-events-none so clicks fall through to the
-          waveform / controls behind. */}
-      {syncing && (
-        <>
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-0 w-[3px] animate-pulse bg-live shadow-[0_0_12px_var(--color-live-glow)]"
-          />
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 w-[3px] animate-pulse bg-live shadow-[0_0_12px_var(--color-live-glow)]"
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 translate-y-0"
-          >
-            <span className="inline-flex items-center gap-2 rounded-b-md border border-t-0 border-live/60 bg-live-tint px-3 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.14em] text-live shadow-[0_4px_18px_var(--color-live-glow)]">
-              <span
-                className="inline-block size-1.5 animate-pulse rounded-full bg-live"
-                aria-hidden
-              />
-              Picking buzzer
-            </span>
-          </div>
-        </>
-      )}
+    <div className="relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
+      {/* Sync mode is now signposted by the SyncBanner above the
+          waveform (the readout owns the mode chip), the amber halo on
+          the waveform card border, and the dimmed chip rail. The page-
+          edge rails, radial wash and floating canvas chip were dropped
+          per designer review -- five amber surfaces became three, all
+          anchored to the target instead of the page geometry. */}
 
       {stage && primary ? (
         <>
           {/* Stage chip rail. The Audit / Compare / Coach view switcher
               isn't on this page per design -- those views are reached
               from the sidebar (cross-view nav is shell-level).
-              In sync mode it dims back so the focus stays on the
-              re-pick task; navigation away still works (existing
-              dirty-flush handles unsaved audit shots; sync candidate
-              state is intentionally discarded). */}
+              In sync mode the rail dims to ~55% (per designer review)
+              so focus stays on the re-pick task. Clicks still work,
+              but we intercept with a confirm so the operator isn't
+              silently dropped from sync mode mid-pick. Silent ignore
+              is worse than an interrupt. */}
           <div
             className={cn(
               "border-b border-rule pb-3 transition-opacity",
-              syncing && "pointer-events-none opacity-40",
+              syncing && "opacity-55",
             )}
           >
             <StageChipRail
               stages={stageRailItems}
               activeStage={stageNumber ?? null}
-              onPick={(n) => void navigateToStage(n)}
+              onPick={(n) => {
+                if (syncing) {
+                  const ok = window.confirm(
+                    "Exit sync without applying? Your unsaved buzzer pick will be discarded.",
+                  );
+                  if (!ok) return;
+                  setSyncMode(null);
+                  setSyncCandidate(null);
+                }
+                void navigateToStage(n);
+              }}
             />
           </div>
 
@@ -1799,6 +1772,7 @@ export function Audit() {
                 available on the per-cam CamSyncPill inside the PipBay
                 for secondaries. */}
             <BeepStatusChip
+              ref={beepChipRef}
               beepTime={primary.beep_time}
               confidence={primary.beep_confidence ?? null}
               diagnostic={beepDiagnostic?.reason ?? null}
@@ -1965,7 +1939,7 @@ export function Audit() {
               beepConfidence={primary.beep_confidence ?? null}
               beepDiagnostic={beepDiagnostic?.reason ?? null}
               beepLowConfThreshold={beepLowConfThreshold}
-              onRePickBeep={() => startSync(primary)}
+              onPingBeepChip={() => beepChipRef.current?.flash()}
               hasTrim={!!peaks?.trimmed}
               onProjectUpdate={(p) => {
                 setProject(p);

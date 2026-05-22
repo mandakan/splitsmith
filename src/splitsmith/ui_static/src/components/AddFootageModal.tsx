@@ -92,6 +92,20 @@ export function AddFootageModal({
   const [showPicker, setShowPicker] = useState(true);
   const [phase, setPhase] = useState<"queue" | "running" | "result">("queue");
   const [scanStates, setScanStates] = useState<ScanState[]>([]);
+  // Track the FolderPicker's current path so we can compute mutex flags
+  // (folder-check vs file-check) per the design's "prevent double-import
+  // semantics" rule. ``null`` until the picker reports its first load.
+  const [pickerPath, setPickerPath] = useState<string | null>(null);
+  // True when the current picker path is already queued as a "whole
+  // folder". Disables file checkboxes inside it so the operator can't
+  // also queue specific files at the same level.
+  const pickerFolderAlreadyWhole =
+    pickerPath != null && queue.some((q) => q.kind === "folder" && q.path === pickerPath);
+  // True when the current picker path has files queued inside it.
+  // Disables the "Use this folder" button so the operator can't also
+  // queue the whole folder at the same level.
+  const pickerFolderHasFileChecks =
+    pickerPath != null && queue.some((q) => q.kind === "files" && q.folder === pickerPath);
 
   // Esc closes the modal -- but only while in the "queue" phase. Once
   // a scan starts we don't want a stray keystroke to abandon it.
@@ -222,19 +236,56 @@ export function AddFootageModal({
           )}
         </header>
 
+        {/* Dense storage subheader -- storage is a one-time decision so
+            it doesn't deserve hero placement inside the queue body. A
+            40px row directly under the title surfaces the active mode
+            with one-click toggles; the body below gets the full
+            remaining height for the queue + sources picker. */}
+        {phase === "queue" && (
+          <div className="flex h-10 items-center gap-3 border-b border-rule bg-surface-2 px-5">
+            <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+              Storage
+            </span>
+            <div
+              role="radiogroup"
+              aria-label="Storage mode"
+              className="inline-flex rounded-full border border-rule bg-surface p-0.5"
+            >
+              <StorageTab
+                checked={storage === "symlink"}
+                onClick={() => setStorage("symlink")}
+              >
+                Reference in place
+              </StorageTab>
+              <StorageTab
+                checked={storage === "copy"}
+                onClick={() => setStorage("copy")}
+              >
+                Copy into project
+              </StorageTab>
+            </div>
+            <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+              {storage === "symlink"
+                ? "originals stay where they are -- zero extra disk"
+                : "self-contained -- survives unmounting source media"}
+            </span>
+          </div>
+        )}
+
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {phase === "queue" && (
             <QueueView
               slug={slug}
               queue={queue}
-              storage={storage}
               showPicker={showPicker}
               initialPath={initialPath ?? undefined}
+              pickerFolderAlreadyWhole={pickerFolderAlreadyWhole}
+              pickerFolderHasFileChecks={pickerFolderHasFileChecks}
               onAddFolder={addFolder}
               onFolderFilesChange={syncFolderFiles}
               onRemove={removeItem}
               onTogglePicker={() => setShowPicker((p) => !p)}
-              onStorageChange={setStorage}
+              onPickerPathChange={setPickerPath}
             />
           )}
           {(phase === "running" || phase === "result") && (
@@ -312,50 +363,37 @@ export function AddFootageModal({
 function QueueView({
   slug,
   queue,
-  storage,
   showPicker,
   initialPath,
+  pickerFolderAlreadyWhole,
+  pickerFolderHasFileChecks,
   onAddFolder,
   onFolderFilesChange,
   onRemove,
   onTogglePicker,
-  onStorageChange,
+  onPickerPathChange,
 }: {
   slug: string;
   queue: QueueItem[];
-  storage: StorageMode;
   showPicker: boolean;
   initialPath?: string;
+  /** The current picker folder is already queued as a whole-folder
+   *  source. File checkboxes inside it should be disabled to prevent
+   *  double-import semantics. */
+  pickerFolderAlreadyWhole: boolean;
+  /** The current picker folder has file checks queued. The
+   *  "Add whole folder" affordance should be disabled. */
+  pickerFolderHasFileChecks: boolean;
   onAddFolder: (path: string) => void;
   onFolderFilesChange: (folder: string, files: { path: string; mtime: number | null }[]) => void;
   onRemove: (index: number) => void;
   onTogglePicker: () => void;
-  onStorageChange: (m: StorageMode) => void;
+  onPickerPathChange: (path: string | null) => void;
 }) {
   return (
     <div className="flex flex-col gap-5 px-5 py-5">
-      {/* Storage choice -- at the top so it's instantly visible and
-         can't get pushed off-screen by the embedded picker. */}
-      <section>
-        <h3 className="mb-2 font-display text-xs font-bold uppercase tracking-[0.1em] text-ink-2">
-          How to store the videos
-        </h3>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-          <StorageRadio
-            checked={storage === "symlink"}
-            onChange={() => onStorageChange("symlink")}
-            title="Reference in place"
-            badge="Default"
-            desc="Keep originals where they are. Zero extra disk space."
-          />
-          <StorageRadio
-            checked={storage === "copy"}
-            onChange={() => onStorageChange("copy")}
-            title="Copy into project"
-            desc="Self-contained. Survives unmounting source media."
-          />
-        </div>
-      </section>
+      {/* Storage choice now lives in the 40px subheader above this
+          body, freeing the queue + picker to use the full height. */}
 
       {/* Sources queue */}
       <section>
@@ -431,6 +469,23 @@ function QueueView({
                 /* unused in autoCommit mode; onFolderFilesChange handles it */
               }}
               onFolderFilesChange={onFolderFilesChange}
+              onPathChange={onPickerPathChange}
+              // Mutex: once any file inside foo/ is queued, "Add whole
+              // folder" on foo/ is disabled; once foo/ is queued whole,
+              // file checkboxes inside it are disabled. Prevents double-
+              // import semantics entirely.
+              addWholeFolderDisabled={pickerFolderHasFileChecks}
+              addWholeFolderDisabledReason={
+                pickerFolderHasFileChecks
+                  ? "Some files in this folder are already queued. Remove them first to import the whole folder."
+                  : undefined
+              }
+              filesDisabled={pickerFolderAlreadyWhole}
+              filesDisabledReason={
+                pickerFolderAlreadyWhole
+                  ? "This folder is already queued as a whole. Remove it from the queue to pick individual files."
+                  : undefined
+              }
               onCancel={queue.length > 0 ? onTogglePicker : undefined}
               mode="inline"
               selectLabel="Add whole folder"
@@ -446,47 +501,33 @@ function QueueView({
   );
 }
 
-function StorageRadio({
+function StorageTab({
   checked,
-  onChange,
-  title,
-  badge,
-  desc,
+  onClick,
+  children,
 }: {
   checked: boolean;
-  onChange: () => void;
-  title: string;
-  badge?: string;
-  desc: string;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
+  // Dense radio-tab pair for the storage subheader. Active tab fills
+  // with --led-tint so the active mode reads instantly even at small
+  // size; inactive stays neutral with a hover lift.
   return (
-    <label
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      onClick={onClick}
       className={cn(
-        "relative cursor-pointer rounded-lg border px-4 py-3 transition-colors",
+        "inline-flex items-center rounded-full px-3 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.08em] transition-colors",
         checked
-          ? "border-led bg-led-tint shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)]"
-          : "border-rule-strong bg-surface-2 hover:border-rule-strong hover:bg-surface-3",
+          ? "bg-led-tint text-led-text shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-led)_55%,transparent)]"
+          : "text-muted hover:text-ink-2",
       )}
     >
-      <input
-        type="radio"
-        name="storage-mode"
-        checked={checked}
-        onChange={onChange}
-        className="sr-only"
-      />
-      <div className="flex items-start justify-between gap-2">
-        <div className="font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
-          {title}
-        </div>
-        {badge && (
-          <span className="rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[0.1em] text-muted">
-            {badge}
-          </span>
-        )}
-      </div>
-      <p className="mt-1.5 text-[0.75rem] leading-relaxed text-muted">{desc}</p>
-    </label>
+      {children}
+    </button>
   );
 }
 
