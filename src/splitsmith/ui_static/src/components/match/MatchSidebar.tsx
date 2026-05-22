@@ -40,7 +40,13 @@ export interface MatchSidebarStage {
   stage_number: number;
   stage_name: string;
   status: StageStatus;
+  /** First non-terminal stage in the project. Subtle "next up" hint --
+   *  beaten visually by ``active`` so the sidebar tells "you are here"
+   *  before "you should go here next". */
   next_up?: boolean;
+  /** The stage whose route the operator is currently on. Drives the
+   *  primary "you are here" treatment in the stages list. */
+  active?: boolean;
 }
 
 interface MatchSidebarProps {
@@ -198,38 +204,64 @@ export function MatchSidebar({
       ) : null}
 
       <div className={cn("flex flex-col gap-px", awaiting && "mt-1 opacity-50")}>
-        {stages.map((stage) => (
-          <button
-            key={stage.stage_number}
-            type="button"
-            onClick={() => onStageClick?.(stage.stage_number)}
-            className={cn(
-              "grid w-full grid-cols-[26px_1fr_14px] items-center gap-2 rounded-md py-1 pl-1.5 pr-2.5 text-left text-[0.8125rem] font-medium text-ink-2 transition-colors hover:bg-surface-2",
-              stage.next_up && "text-led",
-            )}
-            disabled={awaiting}
-          >
-            <span
+        {stages.map((stage) => {
+          // ``active`` (current URL) is the primary highlight: filled
+          // red badge + LED text. ``next_up`` becomes a subtle hint
+          // (outlined badge, "next" mono tag) so it never competes with
+          // the "you are here" treatment. Falls back to plain styling
+          // when neither flag is set.
+          const isActive = !!stage.active;
+          const isNextUp = !!stage.next_up && !isActive;
+          return (
+            <button
+              key={stage.stage_number}
+              type="button"
+              onClick={() => onStageClick?.(stage.stage_number)}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
-                "inline-flex size-[26px] items-center justify-center rounded-md border font-mono text-[0.6875rem] font-bold tabular-nums",
-                stage.next_up
-                  ? "badge-led-fill border-transparent"
-                  : "border-transparent bg-surface-3 text-ink-2",
+                "grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-md py-1 pl-1.5 pr-2.5 text-left text-[0.8125rem] font-medium transition-colors",
+                isActive
+                  ? "bg-led-tint text-led"
+                  : isNextUp
+                    ? "text-ink hover:bg-surface-2"
+                    : "text-ink-2 hover:bg-surface-2",
               )}
+              disabled={awaiting}
             >
-              {pad2(stage.stage_number)}
-            </span>
-            <span
-              className={cn(
-                "truncate",
-                stage.next_up && "font-bold text-led",
-              )}
-            >
-              {stage.stage_name}
-            </span>
-            <StageDot status={stage.status} />
-          </button>
-        ))}
+              <span
+                className={cn(
+                  "inline-flex size-[26px] items-center justify-center rounded-md font-mono text-[0.6875rem] font-bold tabular-nums",
+                  isActive
+                    ? "badge-led-fill border-transparent"
+                    : isNextUp
+                      ? "border border-led-deep bg-led-tint text-led-text"
+                      : "border border-transparent bg-surface-3 text-ink-2",
+                )}
+              >
+                {pad2(stage.stage_number)}
+              </span>
+              <span
+                className={cn(
+                  "truncate",
+                  isActive && "font-bold text-led",
+                )}
+              >
+                {stage.stage_name}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                {isNextUp && (
+                  <span
+                    aria-hidden
+                    className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text"
+                  >
+                    next
+                  </span>
+                )}
+                <StageDot status={stage.status} />
+              </span>
+            </button>
+          );
+        })}
       </div>
     </aside>
   );

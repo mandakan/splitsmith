@@ -187,12 +187,29 @@ export function MatchShell() {
     };
   }, [refreshKey, slug]);
 
+  // Currently-viewed stage, parsed from the URL. The shell mounts
+  // above several stage-bearing routes (/audit/:slug/:stage,
+  // /coach/:slug/:stage, /compare/:stage); a trailing integer segment
+  // disambiguates which stage the operator is looking at so the
+  // sidebar can mark that row as ``active`` rather than relying on
+  // the ``next_up`` heuristic. Returns ``null`` for non-stage routes
+  // (/shooters, /beep-review) so the sidebar falls back to next_up.
+  const activeStageFromUrl = useMemo<number | null>(() => {
+    const trailing = pathname.split("/").filter(Boolean).pop();
+    if (!trailing) return null;
+    const n = Number(trailing);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [pathname]);
+
   const stages: MatchSidebarStage[] = useMemo(() => {
     if (!project) return [];
     // Status comes from the backend (single source of truth). Pick
     // "next up" as the first non-terminal stage so the sidebar's
-    // next-up highlight tracks audit progress -- audited and skipped
-    // stages are closed out, everything else is fair game.
+    // next-up hint tracks audit progress -- audited and skipped
+    // stages are closed out, everything else is fair game. The
+    // ``active`` row (the stage whose URL we're currently on) wins
+    // visually over ``next_up`` so the sidebar tells the truth about
+    // "you are here" before "you should go here next".
     const stagesWithStatus = project.stages.map((s) => ({
       stage_number: s.stage_number,
       stage_name: s.stage_name || `Stage ${s.stage_number}`,
@@ -204,8 +221,9 @@ export function MatchShell() {
     return stagesWithStatus.map((s, i) => ({
       ...s,
       next_up: i === nextIdx,
+      active: s.stage_number === activeStageFromUrl,
     }));
-  }, [project]);
+  }, [project, activeStageFromUrl]);
 
   if (health && !health.bound) {
     return <Navigate to="/pick" replace />;
