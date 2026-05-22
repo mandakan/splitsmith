@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { ApiError, api, type Job, type MatchProject } from "@/lib/api";
@@ -99,15 +99,34 @@ export function PrereqGate({
   const [error, setError] = useState<string | null>(null);
   const running = job != null && (job.status === "pending" || job.status === "running");
 
+  // Identifies the kind+stage tuple this PrereqGate instance is for.
+  // Every pollJob progress callback is gated against this ref so a
+  // stage switch can't let the prior stage's in-flight job leak
+  // progress updates into the new stage's chrome. (Repro: trigger
+  // re-beep -> trim on stage X, navigate to stage Y while trim is
+  // still running, the Y gate would otherwise show "Detecting 30%"
+  // because the X polljob's setJob callback keeps firing.)
+  const ownerKeyRef = useRef<string>(`${kind}:${stageNumber}`);
+  ownerKeyRef.current = `${kind}:${stageNumber}`;
+
   // Adopt any in-flight job for this stage of this kind. Mirrors the
   // logic in TrimNowBadge / DetectShotsBadge -- if the page reloads
   // mid-job, we reattach rather than leaving the user a stale button
   // that would double-submit.
   useEffect(() => {
     let cancelled = false;
+    const ownerKey = `${kind}:${stageNumber}`;
     setJob(null);
     setError(null);
     const jobKind = kind === "trim" ? "trim" : "shot_detect";
+    // Guarded setter -- only forwards to React state when the effect
+    // is still active AND the gate still belongs to the same
+    // kind+stage tuple. Cancels updates from prior in-flight jobs
+    // when the operator navigates to a different stage mid-run.
+    const guardedSetJob = (j: Job) => {
+      if (cancelled || ownerKeyRef.current !== ownerKey) return;
+      setJob(j);
+    };
     api
       .listJobs()
       .then(async (jobs) => {
@@ -119,10 +138,10 @@ export function PrereqGate({
             (j.status === "pending" || j.status === "running"),
         );
         if (!active) return;
-        setJob(active);
+        guardedSetJob(active);
         try {
-          const final = await api.pollJob(active.id, setJob);
-          if (cancelled) return;
+          const final = await api.pollJob(active.id, guardedSetJob);
+          if (cancelled || ownerKeyRef.current !== ownerKey) return;
           if (final.status === "succeeded") {
             if (kind === "trim" && onProjectUpdate) {
               onProjectUpdate(await api.getProject(slug));
@@ -133,24 +152,35 @@ export function PrereqGate({
             setError(final.error ?? `${kind === "trim" ? "Trim" : "Detection"} failed`);
           }
         } finally {
-          if (!cancelled) setJob(null);
+          if (!cancelled && ownerKeyRef.current === ownerKey) setJob(null);
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
+      // Clear any local job state so a stage switch never leaves a
+      // stale "running" frame painted on the new stage's gate while
+      // the next effect's listJobs() is in flight.
+      setJob(null);
+      setError(null);
     };
   }, [kind, slug, stageNumber, onProjectUpdate, onAuditRefresh]);
 
   const run = useCallback(async () => {
+    const ownerKey = `${kind}:${stageNumber}`;
     setError(null);
+    const guardedSetJob = (j: Job) => {
+      if (ownerKeyRef.current !== ownerKey) return;
+      setJob(j);
+    };
     try {
       const initial =
         kind === "trim"
           ? await api.trimStage(slug, stageNumber)
           : await api.detectShots(slug, stageNumber, { reset: false });
-      setJob(initial);
-      const final = await api.pollJob(initial.id, setJob);
+      guardedSetJob(initial);
+      const final = await api.pollJob(initial.id, guardedSetJob);
+      if (ownerKeyRef.current !== ownerKey) return;
       if (final.status === "failed") {
         setError(final.error ?? `${kind === "trim" ? "Trim" : "Detection"} failed`);
         return;
@@ -161,9 +191,11 @@ export function PrereqGate({
         await onAuditRefresh();
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : String(err));
+      if (ownerKeyRef.current === ownerKey) {
+        setError(err instanceof ApiError ? err.detail : String(err));
+      }
     } finally {
-      setJob(null);
+      if (ownerKeyRef.current === ownerKey) setJob(null);
     }
   }, [kind, slug, stageNumber, onProjectUpdate, onAuditRefresh]);
 
