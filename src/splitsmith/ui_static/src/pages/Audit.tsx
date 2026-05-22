@@ -175,6 +175,14 @@ export function Audit() {
   // single source of truth.
 
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  // Source-mode peaks for the cam being re-picked. The audit-page
+  // ``peaks`` are the trimmed clip when trim exists; that's the right
+  // surface for the audit canvas but the WRONG surface for the
+  // beep re-picker because a buzzer that lives outside the trim window
+  // is invisible there. We fetch the per-video peaks (always full
+  // source) when sync starts and use them in the waveform; the
+  // viewfinder reverts to ``peaks`` once sync ends.
+  const [syncPeaks, setSyncPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
 
@@ -275,12 +283,16 @@ export function Audit() {
     setSyncMode(cam);
     setSyncCandidate(null);
     setSyncSnapError(null);
+    // Source peaks fetch lives in an effect below so it sees the
+    // latest slug + stageNumber without us threading them through
+    // startSync's deps.
   }, []);
   const cancelSync = useCallback(() => {
     setSyncMode(null);
     setSyncCandidate(null);
     setSyncBusy(false);
     setSyncSnapError(null);
+    setSyncPeaks(null);
   }, []);
   // Anchor for loop-to-start semantics: the audit-timeline position
   // playback last started from (or where the user last scrubbed). On
@@ -590,6 +602,39 @@ export function Audit() {
       alive = false;
     };
   }, [slug, stageNumber, primary]);
+
+  // Source peaks for sync mode. Fetches the per-video peaks (full
+  // source WAV, regardless of trim cache) when the operator enters
+  // sync mode on a primary cam whose audit peaks are trimmed. Without
+  // this swap the waveform stays anchored to the trim window and the
+  // user can't find a buzzer that lives outside it -- which is the
+  // whole reason re-picking exists. Secondary cams already serve full
+  // source peaks via the same endpoint, so the swap is a no-op cost
+  // but kept for symmetry.
+  useEffect(() => {
+    if (syncMode == null || stageNumber == null) {
+      setSyncPeaks(null);
+      return;
+    }
+    // If the audit peaks aren't trimmed (no trim cache yet) the
+    // waveform is already the source -- skip the extra fetch.
+    if (peaks && !peaks.trimmed) {
+      setSyncPeaks(null);
+      return;
+    }
+    let alive = true;
+    api
+      .getVideoPeaks(slug, stageNumber, syncMode.video_id, PEAK_BINS)
+      .then((p) => {
+        if (alive) setSyncPeaks(p);
+      })
+      .catch(() => {
+        if (alive) setSyncPeaks(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [slug, stageNumber, syncMode?.video_id, peaks?.trimmed]);
 
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
@@ -1606,11 +1651,25 @@ export function Audit() {
   // thing because the trim can't exist without a beep.
   const videoSrc = activeVideo
     ? peaks
-      ? api.videoStreamUrl(slug, activeVideo.path, peaks.trimmed ? "trim" : "source")
+      ? // Sync mode swaps to the full source stream so the operator can
+        // scrub past the trim window to find the actual buzzer. The
+        // audit peaks may be trimmed (clip anchored to the OLD beep)
+        // but the picker needs the source.
+        api.videoStreamUrl(
+          slug,
+          activeVideo.path,
+          syncMode != null ? "source" : peaks.trimmed ? "trim" : "source",
+        )
       : peaksError != null
         ? api.videoStreamUrl(slug, activeVideo.path)
         : ""
     : "";
+
+  // What the waveform actually paints. In sync mode the audit peaks
+  // (trimmed clip) leave the actual buzzer invisible -- swap to the
+  // per-video source peaks once they've landed. Falls back to the
+  // audit peaks until syncPeaks lands so the waveform doesn't blank.
+  const displayPeaks = syncMode != null && syncPeaks ? syncPeaks : peaks;
 
   // ---- Render ------------------------------------------------------------
 
@@ -2035,7 +2094,7 @@ export function Audit() {
             </PipBay>
           ) : null}
 
-          {peaks && !prereqShouldShow ? (
+          {displayPeaks && !prereqShouldShow ? (
             <>
               {/* Transport bar removed -- playback (play/pause/loop/step
                   frame) lives in the PipBay's shared transport row per
@@ -2125,11 +2184,11 @@ export function Audit() {
                     <span aria-hidden className="text-rule-strong">
                       ·
                     </span>
-                    <span>{peaks.peaks.length} peaks</span>
+                    <span>{displayPeaks.peaks.length} peaks</span>
                     <span aria-hidden className="text-rule-strong">
                       ·
                     </span>
-                    <span>{peaks.duration.toFixed(2)}s</span>
+                    <span>{displayPeaks.duration.toFixed(2)}s</span>
                   </span>
                   <span className="inline-flex items-center gap-2">
                     {peaksLoading ? (
@@ -2150,8 +2209,8 @@ export function Audit() {
                 </div>
                 <div className="relative px-4 py-3" ref={waveformWrapperRef}>
                   <Waveform
-                    peaks={peaks.peaks}
-                    duration={peaks.duration}
+                    peaks={displayPeaks.peaks}
+                    duration={displayPeaks.duration}
                     // Always reflect the playhead, even in sync mode --
                     // otherwise pressing play after picking a candidate
                     // shows playback stuck on the candidate marker
@@ -2186,7 +2245,7 @@ export function Audit() {
                     {syncMode == null ? (
                       <MarkerLayer
                         markers={markers}
-                        duration={peaks.duration}
+                        duration={displayPeaks.duration}
                         focusedId={focusedMarkerId}
                         onFocusChange={setFocusedMarkerId}
                         onClick={handleMarkerClick}
@@ -2210,7 +2269,7 @@ export function Audit() {
                   >
                     <AnomalyPins
                       anomalies={anomalies}
-                      duration={peaks.duration}
+                      duration={displayPeaks.duration}
                       onJump={(a) => {
                         if (a.time != null) handleScrub(a.time);
                       }}
@@ -2222,7 +2281,7 @@ export function Audit() {
                 <div className="flex justify-between border-t border-rule bg-surface-2 px-4 py-1.5 font-mono text-[0.625rem] tabular-nums text-whisper">
                   {Array.from({ length: 6 }, (_, i) => (
                     <span key={i}>
-                      {((i / 5) * peaks.duration).toFixed(2)}
+                      {((i / 5) * displayPeaks.duration).toFixed(2)}
                     </span>
                   ))}
                 </div>
