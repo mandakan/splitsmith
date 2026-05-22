@@ -6362,10 +6362,7 @@ def create_app(
             if pick.selected_competitor_id in comp_ids_seen:
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        f"duplicate competitor {pick.selected_competitor_id} "
-                        "in picks"
-                    ),
+                    detail=(f"duplicate competitor {pick.selected_competitor_id} " "in picks"),
                 )
             comp_ids_seen.add(pick.selected_competitor_id)
 

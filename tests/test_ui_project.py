@@ -320,9 +320,7 @@ def _bare_project(tmp_path: Path) -> tuple[Path, MatchProject]:
     """Helper for stage-status tests: empty project with 1 stage."""
     root = tmp_path / "match-status"
     project = MatchProject.init(root, name="Status Match")
-    project.stages.append(
-        StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0)
-    )
+    project.stages.append(StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0))
     project.save(root)
     return root, project
 
@@ -330,22 +328,14 @@ def _bare_project(tmp_path: Path) -> tuple[Path, MatchProject]:
 def test_stage_status_todo_when_no_primary_video(tmp_path: Path) -> None:
     """Fresh stage with no video assigned is ``todo`` -- nothing to do."""
     root, project = _bare_project(tmp_path)
-    assert (
-        stage_audit_status(project.stages[0], project.audit_path(root))
-        == StageStatus.todo
-    )
+    assert stage_audit_status(project.stages[0], project.audit_path(root)) == StageStatus.todo
 
 
 def test_stage_status_partial_when_video_but_no_time(tmp_path: Path) -> None:
     """Primary video assigned but no stage time imported = ``partial``."""
     root, project = _bare_project(tmp_path)
-    project.stages[0].videos.append(
-        StageVideo(path=Path("raw/v.mp4"), role="primary")
-    )
-    assert (
-        stage_audit_status(project.stages[0], project.audit_path(root))
-        == StageStatus.partial
-    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
+    assert stage_audit_status(project.stages[0], project.audit_path(root)) == StageStatus.partial
 
 
 def test_stage_status_ready_when_prereqs_met_but_no_detection(
@@ -355,14 +345,9 @@ def test_stage_status_ready_when_prereqs_met_but_no_detection(
     PrereqGate handles the in-page beep/trim sub-states; this status
     just means "set up to audit, detection hasn't run yet"."""
     root, project = _bare_project(tmp_path)
-    project.stages[0].videos.append(
-        StageVideo(path=Path("raw/v.mp4"), role="primary")
-    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
     project.stages[0].time_seconds = 12.5
-    assert (
-        stage_audit_status(project.stages[0], project.audit_path(root))
-        == StageStatus.ready
-    )
+    assert stage_audit_status(project.stages[0], project.audit_path(root)) == StageStatus.ready
 
 
 def test_stage_status_in_progress_when_detection_run_but_no_save(
@@ -371,9 +356,7 @@ def test_stage_status_in_progress_when_detection_run_but_no_save(
     """Audit JSON exists with a shot_detect_run event but no save event
     means detection ran and the operator hasn't committed yet."""
     root, project = _bare_project(tmp_path)
-    project.stages[0].videos.append(
-        StageVideo(path=Path("raw/v.mp4"), role="primary")
-    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
     project.stages[0].time_seconds = 12.5
     audit_dir = project.audit_path(root)
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -382,26 +365,19 @@ def test_stage_status_in_progress_when_detection_run_but_no_save(
             {
                 "stage_number": 1,
                 "shots": [],
-                "audit_events": [
-                    {"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"}
-                ],
+                "audit_events": [{"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"}],
             }
         ),
         encoding="utf-8",
     )
-    assert (
-        stage_audit_status(project.stages[0], audit_dir)
-        == StageStatus.in_progress
-    )
+    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.in_progress
 
 
 def test_stage_status_audited_when_save_event_present(tmp_path: Path) -> None:
     """One ``save`` event in audit_events is enough: that's the operator
     explicitly committing the stage."""
     root, project = _bare_project(tmp_path)
-    project.stages[0].videos.append(
-        StageVideo(path=Path("raw/v.mp4"), role="primary")
-    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
     project.stages[0].time_seconds = 12.5
     audit_dir = project.audit_path(root)
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -418,10 +394,7 @@ def test_stage_status_audited_when_save_event_present(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert (
-        stage_audit_status(project.stages[0], audit_dir)
-        == StageStatus.audited
-    )
+    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.audited
 
 
 def test_stage_status_skipped_overrides_everything(tmp_path: Path) -> None:
@@ -441,9 +414,7 @@ def test_stage_status_skipped_overrides_everything(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert (
-        stage_audit_status(project.stages[0], audit_dir) == StageStatus.skipped
-    )
+    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.skipped
 
 
 def test_stage_status_ready_on_corrupt_audit_json(tmp_path: Path) -> None:
@@ -451,16 +422,12 @@ def test_stage_status_ready_on_corrupt_audit_json(tmp_path: Path) -> None:
     state. Treat as ``ready`` so the operator can re-run detection;
     the Audit page surfaces the read error in-page."""
     root, project = _bare_project(tmp_path)
-    project.stages[0].videos.append(
-        StageVideo(path=Path("raw/v.mp4"), role="primary")
-    )
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
     project.stages[0].time_seconds = 12.5
     audit_dir = project.audit_path(root)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stage1.json").write_text("not json {", encoding="utf-8")
-    assert (
-        stage_audit_status(project.stages[0], audit_dir) == StageStatus.ready
-    )
+    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.ready
 
 
 def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
@@ -469,10 +436,7 @@ def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
     + ready stages must NOT count."""
     root = tmp_path / "match-counts"
     project = MatchProject.init(root, name="Counts")
-    project.stages = [
-        StageEntry(stage_number=i, stage_name=f"S{i}", time_seconds=10.0)
-        for i in range(1, 6)
-    ]
+    project.stages = [StageEntry(stage_number=i, stage_name=f"S{i}", time_seconds=10.0) for i in range(1, 6)]
     for s in project.stages:
         s.videos.append(StageVideo(path=Path(f"raw/v{s.stage_number}.mp4"), role="primary"))
     # Stage 5: skipped (not audited).
@@ -484,9 +448,7 @@ def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
     audit_dir = project.audit_path(root)
     audit_dir.mkdir(parents=True, exist_ok=True)
     # Stage 1: saved (audited).
-    (audit_dir / "stage1.json").write_text(
-        json.dumps({"audit_events": [{"kind": "save"}]}), encoding="utf-8"
-    )
+    (audit_dir / "stage1.json").write_text(json.dumps({"audit_events": [{"kind": "save"}]}), encoding="utf-8")
     # Stage 2: detection ran but no save (in_progress).
     (audit_dir / "stage2.json").write_text(
         json.dumps({"audit_events": [{"kind": "shot_detect_run"}]}),
