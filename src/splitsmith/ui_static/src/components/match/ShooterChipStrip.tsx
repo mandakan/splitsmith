@@ -16,6 +16,7 @@ import { Link } from "react-router-dom";
 
 import { Avatar } from "@/components/ui";
 import type { ShooterListEntry } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -61,6 +62,7 @@ export function ShooterChipStrip({
   count = defaultCount,
   variant = "block",
 }: Props) {
+  const href = useMatchHref();
   if (shooters.length <= 1) return null;
   const isInline = variant === "inline";
   return (
@@ -85,8 +87,8 @@ export function ShooterChipStrip({
         const isActive = s.slug === activeSlug;
         const target =
           stage != null
-            ? `/${urlBase}/${s.slug}/${stage}`
-            : `/${urlBase}/${s.slug}`;
+            ? href(urlBase, s.slug, String(stage))
+            : href(urlBase, s.slug);
         const secondary = count ? count(s) : null;
         return (
           <Link

@@ -79,6 +79,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -509,6 +510,17 @@ def _no_project_error() -> HTTPException:
     )
 
 
+# Per-request match root resolved by the ``/api/matches/{match_id}/...``
+# alias middleware (#353 Phase 3 PR C). When set, ``AppState.shooter_root``
+# reads from here instead of the process singleton -- which means two
+# concurrent requests carrying different match ids resolve to their own
+# match roots without fighting over ``state._bound_root``. The singleton
+# is kept as a fallback for legacy bare-path traffic + picker UX; it can
+# go away entirely once every endpoint is exercised under the new prefix.
+current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
+current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
+
+
 @dataclass
 class AppState:
     """Process state. One bound project at a time (#353).
@@ -585,7 +597,30 @@ class AppState:
         and its data lives at the bound root. The slug is accepted as-is
         (the SPA derives it from ``competitor_name`` via :func:`legacy_slug`)
         so callers don't need to special-case the legacy layout.
+
+        Resolution order (#353 Phase 3 PR C):
+
+        1. ``current_match_root`` ContextVar -- set by the
+           ``/api/matches/{match_id}/...`` alias middleware. This is the
+           per-request path; multiple tabs on different matches stay
+           isolated because each request carries its own context.
+        2. ``self._bound_root`` -- the legacy singleton. Kept as a
+           fallback for legacy bare ``/api/shooters/{slug}/...`` traffic
+           (clients that haven't migrated to the new prefix yet) and for
+           the picker boot path.
         """
+        scoped_root = current_match_root.get()
+        if scoped_root is not None:
+            # Per-request scope is always a Match folder (the middleware
+            # rejects legacy projects upstream). Validate the slug and
+            # resolve under that root, ignoring the singleton.
+            match = match_model.Match.load(scoped_root)
+            if slug not in match.shooters:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"shooter {slug!r} is not registered on this match",
+                )
+            return match_model.Match.shooter_root(scoped_root, slug)
         if self._bound_root is None:
             raise _no_project_error()
         if self._bound_kind == "legacy":
@@ -1900,19 +1935,25 @@ def create_app(
     app.state.splitsmith_state = state
 
     # ----------------------------------------------------------------------
-    # /api/matches/{match_id}/... alias middleware (#353 Phase 3 PR B)
+    # /api/matches/{match_id}/... alias middleware (#353 Phase 3 PR B/C)
     # ----------------------------------------------------------------------
     #
-    # The SPA's URLs are growing a ``/match/:matchId/`` prefix so each tab
-    # can pin its own match. To accept the corresponding API prefix
-    # without rewriting 69 endpoint decorators, we register one HTTP
-    # middleware that strips ``matches/{match_id}/`` from any matching
-    # path and forwards the request to the existing route table.
+    # The SPA's URLs live under ``/match/:matchId/`` so each tab can pin
+    # its own match. The corresponding API prefix is accepted by this
+    # one middleware:
     #
-    # Validation: ``match_id`` must resolve via the registry **and** (in
-    # this PR) must equal the currently-bound match. The singleton stays
-    # in place until PR C; the mismatch check protects stale URLs from
-    # silently writing into the wrong match.
+    # 1. Validate ``match_id`` against the registry (404 ``match_not_found``
+    #    when unknown).
+    # 2. Set the ``current_match_root`` / ``current_match_id`` ContextVars
+    #    for the lifetime of the request so ``state.shooter_root`` can
+    #    resolve against the URL's match rather than the singleton.
+    # 3. Strip ``matches/{match_id}/`` and forward to the existing route
+    #    table -- 69 endpoint decorators are untouched.
+    #
+    # Two concurrent requests with different match ids stay isolated
+    # because each runs in its own contextvar scope. The singleton
+    # ``state._bound_root`` is only consulted for legacy bare-path
+    # traffic that hasn't migrated to the new prefix.
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -1932,7 +1973,7 @@ def create_app(
                 },
             )
         try:
-            state.matches.resolve(match_id)
+            match_root = state.matches.resolve(match_id)
         except KeyError:
             return JSONResponse(
                 status_code=404,
@@ -1943,24 +1984,16 @@ def create_app(
                     }
                 },
             )
-        if state.bound_match_id and state.bound_match_id != match_id:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": {
-                        "code": "match_mismatch",
-                        "message": (
-                            f"URL match_id {match_id!r} does not match "
-                            f"bound match {state.bound_match_id!r}; rebind via "
-                            "POST /api/me/recent-projects/bind"
-                        ),
-                    }
-                },
-            )
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
-        return await call_next(request)
+        root_token = current_match_root.set(match_root)
+        id_token = current_match_id.set(match_id)
+        try:
+            return await call_next(request)
+        finally:
+            current_match_root.reset(root_token)
+            current_match_id.reset(id_token)
 
     # ----------------------------------------------------------------------
     # API

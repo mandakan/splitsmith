@@ -45,18 +45,26 @@ import {
   type StageVideo,
   type VideoRole,
 } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 type StorageMode = "symlink" | "copy";
 
 export function Ingest() {
-  const { slug } = useParams<{ slug: string }>();
-  if (!slug) return <Navigate to="/shooters" replace />;
+  const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
+  if (!slug)
+    return (
+      <Navigate
+        to={matchId ? `/match/${matchId}/shooters` : "/shooters"}
+        replace
+      />
+    );
   return <IngestInner slug={slug} />;
 }
 
 function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
+  const href = useMatchHref();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -269,7 +277,7 @@ function IngestInner({ slug }: { slug: string }) {
             onAddMore={() => setShowAddFootage(true)}
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
-            onConfirm={() => navigate("/", { replace: true })}
+            onConfirm={() => navigate(href(""), { replace: true })}
             busy={busy}
             lastScannedDir={lastScannedDir}
             onError={setError}
@@ -536,6 +544,7 @@ function ReviewState({
   const ignoredCount = assignedVideos.filter(
     (v) => v.video.role === "ignored",
   ).length + unassignedVideos.filter((v) => v.role === "ignored").length;
+  const href = useMatchHref();
 
   return (
     <>
@@ -581,7 +590,7 @@ function ReviewState({
             says "almost-done work waits for you". */}
         {beepPending > 0 && (
           <Link
-            to="/beep-review"
+            to={href("beep-review")}
             className="flex items-center gap-3.5 border-b border-rule bg-gradient-to-r from-beep/10 to-transparent px-6 py-3 font-mono text-[0.75rem] uppercase tracking-[0.06em] text-ink-2 transition-colors hover:bg-beep/15"
           >
             <span className="inline-flex size-7 items-center justify-center rounded-full border border-beep/40 bg-beep-tint text-beep shadow-[0_0_10px_var(--color-beep-glow)]">

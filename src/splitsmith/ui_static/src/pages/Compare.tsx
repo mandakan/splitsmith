@@ -54,6 +54,7 @@ import {
   type CompareStageResponse,
   type MatchProject,
 } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 type Layout = "grid" | "row" | "stack";
@@ -64,6 +65,7 @@ const SYNC_INTERVAL_MS = 120;
 export function Compare() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
+  const href = useMatchHref();
   const stageNumber = stageParam ? Number(stageParam) : NaN;
 
   const [project, setProject] = useState<MatchProject | null>(null);
@@ -242,13 +244,14 @@ export function Compare() {
     if (!project) return;
     const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
     const idx = all.indexOf(stageNumber);
-    if (idx > 0) navigate(`/compare/${all[idx - 1]}`);
+    if (idx > 0) navigate(href("compare", String(all[idx - 1])));
   }
   function nextStage() {
     if (!project) return;
     const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
     const idx = all.indexOf(stageNumber);
-    if (idx >= 0 && idx < all.length - 1) navigate(`/compare/${all[idx + 1]}`);
+    if (idx >= 0 && idx < all.length - 1)
+      navigate(href("compare", String(all[idx + 1])));
   }
 
   if (!stageNumber || Number.isNaN(stageNumber)) {
@@ -319,7 +322,7 @@ export function Compare() {
               // primary shown in this view) as the target shooter so
               // the user lands on the same camera they were watching.
               const target = audioSlug ?? orderedShooters[0]?.slug;
-              if (target) navigate(`/audit/${target}/${stageNumber}`);
+              if (target) navigate(href("audit", target, String(stageNumber)));
             }}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
@@ -332,7 +335,7 @@ export function Compare() {
             type="button"
             onClick={() => {
               const target = audioSlug ?? orderedShooters[0]?.slug;
-              if (target) navigate(`/coach/${target}/${stageNumber}`);
+              if (target) navigate(href("coach", target, String(stageNumber)));
             }}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
           >
@@ -398,7 +401,7 @@ export function Compare() {
         <UnfinishedShootersBanner
           unfinished={orderedShooters.filter((s) => !s.video_path)}
           onOpenInAudit={(slug) =>
-            navigate(`/audit/${slug}/${stageNumber}`)
+            navigate(href("audit", slug, String(stageNumber)))
           }
         />
       ) : null}
@@ -409,7 +412,7 @@ export function Compare() {
           <CompareEmptyState
             unfinished={orderedShooters.filter((s) => !s.video_path)}
             onOpenInAudit={(slug) => {
-              navigate(`/audit/${slug}/${stageNumber}`);
+              navigate(href("audit", slug, String(stageNumber)));
             }}
           />
         ) : (

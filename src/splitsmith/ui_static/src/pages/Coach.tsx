@@ -52,6 +52,7 @@ import {
   type CoachStageResponse,
   type MatchProject,
 } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 const INTERVAL_LABEL: Record<CoachIntervalClass, string> = {
@@ -121,14 +122,15 @@ interface PerStageAggregate {
 
 function CoachMatch({ slug }: { slug?: string }) {
   const navigate = useNavigate();
+  const href = useMatchHref();
   if (!slug) {
     // ShooterScopedRoute should keep this from rendering, but the
     // Coach() wrapper still passes slugParam through when undefined;
     // bounce back to the picker rather than 500ing on the API call.
-    return <Navigate to="/shooters" replace />;
+    return <Navigate to={href("shooters")} replace />;
   }
-  const stagePrefix = `/coach/${slug}`;
-  const auditPrefix = `/audit/${slug}`;
+  const stagePrefix = href("coach", slug);
+  const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [perStage, setPerStage] = useState<PerStageAggregate[]>([]);
   const [distributions, setDistributions] =
@@ -954,11 +956,12 @@ function AnnotationsCard({
 
 function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const navigate = useNavigate();
+  const href = useMatchHref();
   if (!slug) {
-    return <Navigate to="/shooters" replace />;
+    return <Navigate to={href("shooters")} replace />;
   }
-  const coachPrefix = `/coach/${slug}`;
-  const auditPrefix = `/audit/${slug}`;
+  const coachPrefix = href("coach", slug);
+  const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1174,7 +1177,7 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
           </button>
           <button
             type="button"
-            onClick={() => navigate(`/compare/${stage}`)}
+            onClick={() => navigate(href("compare", String(stage)))}
             className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
           >
             Compare

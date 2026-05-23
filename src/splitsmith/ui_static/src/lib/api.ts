@@ -1377,6 +1377,38 @@ class ApiError extends Error {
   }
 }
 
+/** Match id parsed from the current URL.
+ *
+ * The SPA's match-scoped routes live under ``/match/:matchId/...`` (#353
+ * Phase 3). When the operator is on one of those URLs we route API
+ * traffic through ``/api/matches/{matchId}/...`` so the request lands
+ * on the right match without depending on the server's bound singleton.
+ * Returns ``null`` for non-match URLs (picker, dev mode, root).
+ *
+ * Exported for the rare test / debug case; production code consults it
+ * via :func:`request` automatically. */
+export function currentMatchIdFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  const m = window.location.pathname.match(/^\/match\/([^/]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Prefixes that ride on the per-request match scope. Other ``/api/`` paths
+ *  (``/api/health``, ``/api/me/*``, ``/api/server/*``, ``/api/lab/*``,
+ *  ``/api/files/*``, ``/api/fs/*``, ``/api/dev/*``, etc.) stay on their
+ *  legacy bare paths because they are operator-global or unbound. */
+const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
+
+function scopeRequestPath(path: string): string {
+  const matchId = currentMatchIdFromLocation();
+  if (!matchId) return path;
+  if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
+  // Rewrite ``/api/shooters/foo`` -> ``/api/matches/{id}/shooters/foo``
+  // (and same for ``/api/match/...``). Preserves the query string, since
+  // we splice into the path segment only.
+  return `/api/matches/${encodeURIComponent(matchId)}${path.substring(4)}`;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit & { json?: unknown },
@@ -1389,7 +1421,7 @@ async function request<T>(
   if (json !== undefined) {
     (headers as Record<string, string>)["Content-Type"] = "application/json";
   }
-  const resp = await fetch(path, {
+  const resp = await fetch(scopeRequestPath(path), {
     ...rest,
     headers,
     body: json !== undefined ? JSON.stringify(json) : rest.body,

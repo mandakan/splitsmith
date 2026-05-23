@@ -113,8 +113,14 @@ const TITLE_STYLES: {
 ];
 
 export function Export() {
-  const { slug } = useParams<{ slug: string }>();
-  if (!slug) return <Navigate to="/shooters" replace />;
+  const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
+  if (!slug)
+    return (
+      <Navigate
+        to={matchId ? `/match/${matchId}/shooters` : "/shooters"}
+        replace
+      />
+    );
   return <ExportInner slug={slug} />;
 }
 
