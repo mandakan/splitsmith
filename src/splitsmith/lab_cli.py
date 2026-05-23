@@ -24,7 +24,6 @@ from . import beep_detect
 from . import lab as lab_module
 from .cross_align import CrossAlignError, align_secondary_to_primary
 from .ensemble.api import detect_shots_ensemble, load_ensemble_runtime
-from .runtime import runtime as process_runtime
 from .fixture_schema import (
     AgcState,
     AudioSource,
@@ -34,6 +33,7 @@ from .fixture_schema import (
     probe_camera_metadata,
 )
 from .lab.snap_window import snap_anchor_shots
+from .runtime import runtime as process_runtime
 
 app = typer.Typer(help="Algorithm lab: fixtures, eval, tuning.", no_args_is_help=True)
 

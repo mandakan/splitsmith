@@ -97,9 +97,7 @@ def _platform_user_config_dir() -> Path:
     return Path.home() / ".splitsmith"
 
 
-def _resolve_binary(
-    explicit: str | None, env_name: str, default: str
-) -> str:
+def _resolve_binary(explicit: str | None, env_name: str, default: str) -> str:
     if explicit:
         return explicit
     env_val = os.environ.get(env_name)
@@ -148,16 +146,12 @@ def resolve_runtime(
     """
     art_env = os.environ.get(ENV_ARTIFACTS_DIR)
     art = (
-        Path(artifacts_dir)
-        if artifacts_dir is not None
-        else Path(art_env) if art_env else _PACKAGE_DATA_DIR
+        Path(artifacts_dir) if artifacts_dir is not None else Path(art_env) if art_env else _PACKAGE_DATA_DIR
     )
 
     cache_env = os.environ.get(ENV_CACHE_DIR)
     cache = (
-        Path(cache_dir)
-        if cache_dir is not None
-        else Path(cache_env) if cache_env else _platform_cache_dir()
+        Path(cache_dir) if cache_dir is not None else Path(cache_env) if cache_env else _platform_cache_dir()
     )
 
     cfg_env = os.environ.get(ENV_CONFIG_DIR)

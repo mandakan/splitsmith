@@ -61,9 +61,7 @@ def test_artifact_missing_raises_actionable_error(tmp_path: Path) -> None:
     assert ENV_ARTIFACTS_DIR in msg
 
 
-def test_explicit_kwarg_beats_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_explicit_kwarg_beats_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     env_dir = tmp_path / "env-dir"
     kwarg_dir = tmp_path / "kwarg-dir"
     env_dir.mkdir()
@@ -71,16 +69,12 @@ def test_explicit_kwarg_beats_env(
     monkeypatch.setenv(ENV_ARTIFACTS_DIR, str(env_dir))
     monkeypatch.setenv(ENV_FFMPEG, "/env/bin/ffmpeg")
 
-    rt = resolve_runtime(
-        artifacts_dir=kwarg_dir, ffmpeg_binary="/kwarg/bin/ffmpeg"
-    )
+    rt = resolve_runtime(artifacts_dir=kwarg_dir, ffmpeg_binary="/kwarg/bin/ffmpeg")
     assert rt.artifacts_dir == kwarg_dir
     assert rt.ffmpeg_binary == "/kwarg/bin/ffmpeg"
 
 
-def test_env_beats_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_env_beats_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv(ENV_ARTIFACTS_DIR, str(tmp_path))
     monkeypatch.setenv(ENV_FFMPEG, "/env/ffmpeg")
     monkeypatch.setenv(ENV_FFPROBE, "/env/ffprobe")
@@ -115,9 +109,7 @@ def test_default_cache_dir_is_platform_specific() -> None:
         assert rt.cache_dir == Path.home() / ".cache" / "splitsmith"
 
 
-def test_hf_and_torch_home_setdefault(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_hf_and_torch_home_setdefault(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     monkeypatch.setenv(ENV_CACHE_DIR, str(cache))
     resolve_runtime()
@@ -125,9 +117,7 @@ def test_hf_and_torch_home_setdefault(
     assert os.environ["TORCH_HOME"] == str(cache / "torch")
 
 
-def test_hf_and_torch_home_respect_existing_value(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_hf_and_torch_home_respect_existing_value(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HF_HOME", "/already/set/hf")
     monkeypatch.setenv("TORCH_HOME", "/already/set/torch")
     monkeypatch.setenv(ENV_CACHE_DIR, str(tmp_path))
@@ -143,9 +133,7 @@ def test_resolve_runtime_is_cached() -> None:
     assert runtime() is first
 
 
-def test_clear_runtime_cache_resets(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_clear_runtime_cache_resets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     first = resolve_runtime()
     monkeypatch.setenv(ENV_ARTIFACTS_DIR, str(tmp_path))
     # Without clearing, the cached value wins.

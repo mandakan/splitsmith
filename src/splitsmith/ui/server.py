@@ -100,7 +100,6 @@ from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
-from ..runtime import runtime as process_runtime
 from ..config import (
     BeepDetectConfig,
     CoachAutoClassifyConfig,
@@ -117,6 +116,7 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
+from ..runtime import runtime as process_runtime
 from . import audio as audio_helpers
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers

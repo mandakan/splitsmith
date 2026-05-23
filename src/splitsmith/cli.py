@@ -39,7 +39,6 @@ from . import (
 from . import (
     cleanup as cleanup_mod,
 )
-from .runtime import runtime
 from .config import (
     CompetitorStages,
     Config,
@@ -48,6 +47,7 @@ from .config import (
     StageAnalysis,
     StageData,
 )
+from .runtime import runtime
 from .ui.project import MatchProject
 
 app = typer.Typer(
@@ -1105,9 +1105,7 @@ def _extract_or_load_audio(video: Path, audio_path: Path):
     if not audio_path.exists() or audio_path.stat().st_mtime < video.stat().st_mtime:
         ffmpeg_bin = runtime().ffmpeg_binary
         if not shutil.which(ffmpeg_bin):
-            raise typer.BadParameter(
-                f"ffmpeg binary not found: {ffmpeg_bin} (required to extract audio)"
-            )
+            raise typer.BadParameter(f"ffmpeg binary not found: {ffmpeg_bin} (required to extract audio)")
         import subprocess
 
         subprocess.run(

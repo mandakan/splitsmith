@@ -20,7 +20,6 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from ..config import OutputConfig
-from ..runtime import runtime
 from ..fcpxml_gen import (
     VideoMetadata,
     _asset_grid_str,
@@ -28,6 +27,7 @@ from ..fcpxml_gen import (
     _frame_aligned_str,
     _tag_source_application,
 )
+from ..runtime import runtime
 from .filler import Runner as FillerRunner
 from .filler import ensure_filler
 from .layout import GridSlot, compute_layout
