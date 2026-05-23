@@ -28,6 +28,7 @@ manager::
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -45,6 +46,7 @@ from typing import Any
 import httpx
 
 from ..runtime import runtime as process_runtime
+from .logging_setup import configure_file_logging
 from .server import create_app
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,7 @@ class ServerHandle:
     base_url: str
     artifacts_dir: str
     ffmpeg_binary: str
+    log_file: str | None = None
 
     def as_banner(self) -> str:
         """Render the one-line ``SPLITSMITH_READY {json}`` handshake."""
@@ -132,6 +135,7 @@ def run_embedded(
     port: int = 0,
     lab_enabled: bool = False,
     ready_fd: int | None = None,
+    log_file: Path | None = None,
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_S,
     shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S,
 ) -> Iterator[ServerHandle]:
@@ -182,6 +186,7 @@ def run_embedded(
         base_url=base_url,
         artifacts_dir=str(rt.artifacts_dir),
         ffmpeg_binary=rt.ffmpeg_binary,
+        log_file=str(log_file) if log_file else None,
     )
 
     try:
@@ -212,8 +217,31 @@ def _env_bool(name: str) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
-def main() -> None:
-    """``python -m splitsmith.ui.embedded`` -- sidecar entrypoint.
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="splitsmith-server",
+        description=(
+            "Embeddable splitsmith UI server. Flags override env vars; " "env vars override defaults."
+        ),
+    )
+    parser.add_argument(
+        "--log-dir",
+        default=None,
+        help=(
+            "Directory for the rotated log file. "
+            f"Default: <user_config_dir>/logs (env: {'SPLITSMITH_LOG_DIR'})."
+        ),
+    )
+    parser.add_argument(
+        "--log-level",
+        default=None,
+        help=("Logging level for the file handler. " f"Default: INFO (env: {'SPLITSMITH_LOG_LEVEL'})."),
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    """``splitsmith-server`` / ``python -m splitsmith.ui.embedded``.
 
     Reads launch parameters from the environment (so the desktop shell
     can spawn this without a wrapper script):
@@ -226,10 +254,14 @@ def main() -> None:
       to instead of stderr (the shell typically uses fd 3).
     * ``SPLITSMITH_LAB_ENABLED`` -- truthy values enable the ``/api/lab/*``
       routes.
+    * ``SPLITSMITH_LOG_DIR`` / ``SPLITSMITH_LOG_LEVEL`` -- file logging
+      destination + level (or pass ``--log-dir`` / ``--log-level``).
     * runtime overrides from :mod:`splitsmith.runtime` apply unchanged.
 
     SIGTERM and SIGINT trigger a graceful shutdown and exit status 0.
     """
+    args = _build_arg_parser().parse_args(argv)
+
     project_root_raw = os.environ.get(ENV_PROJECT_ROOT)
     project_root = Path(project_root_raw) if project_root_raw else None
     project_name = os.environ.get(ENV_PROJECT_NAME)
@@ -238,6 +270,9 @@ def main() -> None:
     ready_fd_val = os.environ.get(ENV_READY_FD)
     ready_fd = int(ready_fd_val) if ready_fd_val else None
     lab_enabled = _env_bool(ENV_LAB_ENABLED)
+
+    log_file = configure_file_logging(log_dir=args.log_dir, level=args.log_level)
+    logger.info("file logging enabled at %s", log_file)
 
     stop = threading.Event()
 
@@ -255,6 +290,7 @@ def main() -> None:
         port=port,
         lab_enabled=lab_enabled,
         ready_fd=ready_fd,
+        log_file=log_file,
     ):
         # Block until the signal handler flips the event. The context
         # manager's ``__exit__`` takes care of orderly shutdown.

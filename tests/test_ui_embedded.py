@@ -70,6 +70,7 @@ def test_banner_is_well_formed_json() -> None:
         "base_url",
         "artifacts_dir",
         "ffmpeg_binary",
+        "log_file",
     }
     assert parsed["host"] == handle.host
     assert parsed["port"] == handle.port
@@ -105,6 +106,8 @@ def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
     env["SPLITSMITH_HOST"] = "127.0.0.1"
     # Keep the test isolated from the developer's real ~/.splitsmith.
     env["SPLITSMITH_HOME"] = str(tmp_path / "home")
+    env["SPLITSMITH_CONFIG_DIR"] = str(tmp_path / "config")
+    env["SPLITSMITH_LOG_DIR"] = str(tmp_path / "logs")
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "splitsmith.ui.embedded"],
@@ -128,6 +131,11 @@ def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
     payload = json.loads(banner_line[len(READY_PREFIX) + 1 :])
     assert payload["port"] > 0
     assert payload["pid"] == proc.pid
+    # The banner advertises a log file inside the directory we set up.
+    assert payload["log_file"] is not None
+    log_file = Path(payload["log_file"])
+    assert log_file.parent == tmp_path / "logs"
+    assert log_file.exists() and log_file.stat().st_size > 0
 
 
 def _read_banner(proc: subprocess.Popen[str], *, deadline_s: float) -> str:
