@@ -7,12 +7,12 @@
  * its own content area but shares the same chrome.
  *
  * Carries the bound-check that AppShell used to do: when /api/health
- * reports unbound, redirect to /pick. JobsPanel mounts here too so
- * background work is visible across every match surface.
+ * reports unbound, redirect to /pick. Background jobs surface in the
+ * sidebar footer rail (v2 audit chrome -- no more floating FAB).
  */
 
 import { HelpCircle, Repeat, Settings } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -21,7 +21,6 @@ import {
   useParams,
 } from "react-router-dom";
 
-import { JobsPanel } from "@/components/JobsPanel";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, IconButton } from "@/components/ui";
 import {
@@ -38,6 +37,8 @@ import {
 import { useMode } from "@/lib/mode";
 import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
+
+const SIDEBAR_COLLAPSE_KEY = "splitsmith.matchshell.sidebarCollapsed";
 
 export interface MatchShellOutletContext {
   project: MatchProject | null;
@@ -82,6 +83,29 @@ export function MatchShell() {
       return "Editing";
     return null;
   }, [pathname]);
+  // Sidebar collapse state -- persisted so the operator's choice survives
+  // reloads. The Audit page (waveform + docked MultiCamColumn) benefits
+  // from collapsing once and staying collapsed.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        /* private mode etc -- in-memory only is fine */
+      }
+      return next;
+    });
+  }, []);
+
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
     if (!didInitMode) {
@@ -124,7 +148,7 @@ export function MatchShell() {
   // ``api.ts`` fires this custom event. We bump ``refreshKey`` so the
   // health-load effect re-runs, sees ``bound: false``, and the redirect
   // below sends the user to /pick. Without this, the page sits with
-  // every endpoint failing and the JobsPanel silently empty.
+  // every endpoint failing and the jobs rail silently empty.
   useEffect(() => {
     const onNoProject = () => setRefreshKey((k) => k + 1);
     window.addEventListener("splitsmith:no-project", onNoProject);
@@ -350,6 +374,8 @@ export function MatchShell() {
             navigate(target ? `/audit/${target}/${n}` : "/shooters");
           }}
           shooterSlug={slug ?? health?.default_shooter_slug ?? undefined}
+          collapsed={sidebarCollapsed}
+          onCollapseToggle={toggleSidebar}
         />
         <div className={cn("min-w-0 flex-1")}>
           <Outlet
@@ -362,8 +388,6 @@ export function MatchShell() {
           />
         </div>
       </div>
-
-      <JobsPanel />
     </div>
   );
 }

@@ -475,7 +475,7 @@ function UnfinishedShootersBanner({
       // The server queues jobs but the bundle won't see the new trim
       // until the worker finishes. Tell the user to refresh once jobs
       // settle rather than polling the bundle here (Compare's polling
-      // story is "reload the page"; the JobsPanel surfaces progress).
+      // story is "reload the page"; the jobs rail surfaces progress).
       if (res.jobs_submitted.length === 0) {
         setErrorMsg(
           `${slug}: nothing to rebuild -- either no stage qualifies or every cache is already on disk. Open the shooter in audit to see why.`,

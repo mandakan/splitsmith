@@ -920,7 +920,7 @@ function VideoRow({
     try {
       // Server-side dedupe: if a detect_beep job is already in flight for
       // this video, ``_submit_detect_beep`` returns the existing job
-      // without spawning a parallel one. JobsPanel surfaces progress;
+      // without spawning a parallel one. jobs rail surfaces progress;
       // we leave the user here.
       await api.detectBeepForVideo(slug, currentStage, video.video_id);
     } catch (e) {
@@ -1004,7 +1004,7 @@ function VideoRow({
        *  swap-primary time; if a job never ran or failed silently, the
        *  user needs an explicit affordance to kick detection. Clicking
        *  hits ``detectBeepForVideo``; the server dedupes against an
-       *  in-flight job so double-clicks are safe. JobsPanel surfaces
+       *  in-flight job so double-clicks are safe. jobs rail surfaces
        *  progress; on success the row re-renders via project reload. */}
       <div className="flex items-center justify-end gap-2">
         {video.beep_time != null ? (

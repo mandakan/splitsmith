@@ -25,7 +25,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { JobsPanel } from "@/components/JobsPanel";
+import { JobsSurface } from "@/components/Jobs";
 import { Brand, IconButton, ModeSwitch } from "@/components/ui";
 import { api, type DeveloperModelInfo } from "@/lib/api";
 import { useMode } from "@/lib/mode";
@@ -172,8 +172,6 @@ export function DeveloperShell() {
           />
         </div>
       </div>
-
-      <JobsPanel />
     </div>
   );
 }
@@ -313,6 +311,19 @@ function DeveloperSidebar({
         <SubLink to="/_design" icon={<Layers className="size-[15px]" />}>
           Design system
         </SubLink>
+      </div>
+
+      <div className="flex-1" />
+
+      {/* Jobs rail anchored at the bottom. Bleed past the aside's
+          horizontal padding so the rail's top border spans the full
+          width like the design kit's JobsRail. */}
+      <div className="-mx-3">
+        <JobsSurface
+          collapsed={false}
+          sidebarExpandedWidth={248}
+          sidebarCollapsedWidth={56}
+        />
       </div>
     </aside>
   );

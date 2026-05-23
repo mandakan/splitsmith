@@ -8,7 +8,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { JobsPanel } from "@/components/JobsPanel";
+import { JobsSurface } from "@/components/Jobs";
 import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { api, type ServerHealth } from "@/lib/api";
 import { useMode } from "@/lib/mode";
@@ -148,6 +148,12 @@ export function AppShell() {
               {sidebarCollapsed ? null : <span>Design system</span>}
             </NavLink>
           </div>
+
+          <JobsSurface
+            collapsed={sidebarCollapsed}
+            sidebarExpandedWidth={240}
+            sidebarCollapsedWidth={56}
+          />
         </aside>
       )}
       {/* min-w-0 + overflow-x-hidden bound the flex-1 column to the
@@ -172,7 +178,6 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
-      {fixtureMode ? null : <JobsPanel />}
     </div>
   );
 }

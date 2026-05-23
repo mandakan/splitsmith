@@ -142,7 +142,7 @@ export function Lab() {
       try {
         const job = await api.runLabEval({ config, persist: true });
         const finished = await api.pollJob(job.id, () => {
-          /* JobsPanel polls /api/jobs on its own interval and renders the
+          /* jobs rail polls /api/jobs on its own interval and renders the
              progress; we just need to await terminal status here. */
         });
         if (finished.status !== "succeeded") {

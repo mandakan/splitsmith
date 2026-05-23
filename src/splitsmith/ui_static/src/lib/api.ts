@@ -1032,7 +1032,7 @@ export interface Job {
   /** Targets a specific StageVideo when the operation is per-camera
    *  (multi-cam beep / trim). Null for stage-level jobs (shot_detect,
    *  export). The SPA disambiguates concurrent per-camera jobs in
-   *  JobsPanel by this id. */
+   *  jobs rail by this id. */
   video_id: string | null;
   status: JobStatus;
   progress: number | null;
@@ -1044,7 +1044,7 @@ export interface Job {
   cancel_requested: boolean;
   /** True once the user has dismissed this failure via
    *  /api/me/jobs/{id}/acknowledge (issue #73). Meaningful only on FAILED
-   *  jobs; the JobsPanel badge counts failures with acknowledged=false
+   *  jobs; the jobs rail badge counts failures with acknowledged=false
    *  and the registry rolls acknowledged failures off faster than
    *  unacknowledged ones. */
   acknowledged: boolean;
@@ -1405,7 +1405,7 @@ async function request<T>(
     // project (dev-server restart, explicit unbind, etc.). Fire a custom
     // event so the match shell can force a health refresh and redirect
     // to /pick. Without this, the page just shows broken-everything with
-    // no explanation and the JobsPanel quietly disappears. ``not_a_match``
+    // no explanation and the jobs rail quietly disappears. ``not_a_match``
     // doesn't trigger the redirect; that's a per-route concern (the
     // bound project is fine, just legacy).
     if (

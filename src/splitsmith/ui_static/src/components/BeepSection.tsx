@@ -101,7 +101,7 @@ export function BeepSection({
   // Detect / Save / Clear), so disabling controls page-wide while one
   // section's job is in flight blocks unrelated work like assigning the
   // next video from the unassigned tray. Keeping busy local means each
-  // section disables only its own buttons; the JobsPanel still surfaces
+  // section disables only its own buttons; the jobs rail still surfaces
   // the running job globally.
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
