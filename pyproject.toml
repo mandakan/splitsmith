@@ -42,6 +42,7 @@ dependencies = [
 
 [project.scripts]
 splitsmith = "splitsmith.cli:app"
+splitsmith-server = "splitsmith.ui.embedded:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -90,6 +90,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
 from .. import backup as backup_mod
 from .. import beep_detect, cross_align, match_model, report, user_config, video_probe
@@ -716,6 +717,7 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
 
 class HealthResponse(BaseModel):
     status: str = "ok"
+    version: str = splitsmith_version
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
