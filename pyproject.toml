@@ -78,6 +78,15 @@ dev = [
     # Dev-only: the production API does not read these files.
     "pyarrow>=17.0.0",
     "matplotlib>=3.9.0",
+    # ONNX export tooling (docs/local-slim/02). Needed when running
+    # scripts/export_*_onnx.py and tests/test_onnx_parity.py. The
+    # slim runtime path imports only ``onnxruntime``; ``onnxruntime``
+    # stays in [dev] until all three voters have ONNX branches and the
+    # full slim path replaces torch in [project] dependencies (see doc
+    # 06 "pyproject.toml changes" phase).
+    "onnx>=1.16.0",
+    "onnxruntime>=1.20.0",
+    "onnxscript>=0.1.0",
 ]
 
 [tool.ruff]

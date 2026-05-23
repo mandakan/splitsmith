@@ -10,14 +10,18 @@ backend the loaders construct.
 See ``docs/local-slim/05-dev-vs-prod-parity.md`` for the parity
 contract and ``06-slim-progress.md`` for the migration status.
 
-Resolution order (matches doc 05):
+Resolution order:
 
 1. ``override`` argument to :func:`select_backend` -- callers can pin
    per-process (CLI ``--backend``).
 2. ``SPLITSMITH_BACKEND`` env var (``onnx`` / ``torch``).
-3. ``onnxruntime`` if importable -- the default for slim wheel users.
-4. ``torch`` if importable -- the default for contributors with the
-   dev extras installed.
+3. ``torch`` if importable -- preferred while only PANN has an ONNX
+   branch. CLAP and the visual probe still need torch, and the doc
+   05 invariant "one backend per process" means we can't mix mid-run.
+   When the remaining ONNX branches land, this preference flips to
+   "onnxruntime first" so slim wheel users (no torch installed) keep
+   working unchanged.
+4. ``onnxruntime`` if importable -- the slim wheel's only backend.
 5. Raise :class:`SplitsmithBackendError` with install hints for both.
 """
 
@@ -69,10 +73,14 @@ def select_backend(override: Backend | str | None = None) -> Backend:
                 f"Unknown backend {explicit!r}; expected one of " f"{[b.value for b in Backend]}"
             ) from exc
 
-    if _is_importable("onnxruntime"):
-        return Backend.ONNX
+    # During slim migration: torch wins when both are installed because
+    # only PANN has an ONNX branch (issue #377). When CLAP + visual ONNX
+    # land, swap these two checks so onnxruntime wins -- the slim wheel
+    # path (no torch installed) keeps working unchanged either way.
     if _is_importable("torch"):
         return Backend.TORCH
+    if _is_importable("onnxruntime"):
+        return Backend.ONNX
 
     raise SplitsmithBackendError(
         "No inference backend available. Install one of:\n"

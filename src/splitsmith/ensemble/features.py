@@ -18,8 +18,10 @@ prompt strings were used so loading checks the bank still matches.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import librosa
@@ -441,18 +443,81 @@ def _build_pann_runtime_torch() -> PannRuntime:
     )
 
 
+PANN_ARTIFACT_SLUG = "pann_cnn14"
+ENV_ONNX_PANN_OVERRIDE = "SPLITSMITH_ONNX_PANN"
+
+
+def _resolve_onnx_pann_path() -> Path:
+    """Locate the PANN ONNX artifact.
+
+    Order:
+    1. ``SPLITSMITH_ONNX_PANN`` env var -- dev / test override pointing
+       at a freshly exported file under ``build/onnx-spike/``.
+    2. The slim model registry -- ``ensemble_calibration.json`` must have
+       a ``model_artifacts.pann_cnn14`` block; the registry downloads
+       from R2 and SHA256-verifies. Raises clear errors if the block
+       isn't there yet (still in slim v1 rollout).
+    """
+    override = os.environ.get(ENV_ONNX_PANN_OVERRIDE)
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise FileNotFoundError(f"{ENV_ONNX_PANN_OVERRIDE} points at {path}, which does not exist")
+        return path
+
+    from ..models import get_default_registry
+
+    registry = get_default_registry()
+    if registry is None:
+        raise RuntimeError(
+            "ONNX PANN backend selected but ensemble_calibration.json has no "
+            "model_artifacts block. Run `uv run python "
+            "scripts/export_pann_onnx.py` and paste the printed snippet into "
+            "src/splitsmith/data/ensemble_calibration.json, or point "
+            f"{ENV_ONNX_PANN_OVERRIDE} at a local export."
+        )
+    return registry.resolve(PANN_ARTIFACT_SLUG)
+
+
+def _build_pann_runtime_onnx() -> PannRuntime:
+    """Construct an onnxruntime-backed :class:`PannRuntime`.
+
+    Loads the consolidated single-file artifact produced by
+    ``scripts/export_pann_onnx.py``. Inference contract matches the
+    torch branch: ``(N, T)`` float32 audio at ``PANN_SR`` -> ``(N,)``
+    gunshot probability in numpy.
+    """
+    import onnxruntime as ort
+
+    onnx_path = _resolve_onnx_pann_path()
+    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    input_name = session.get_inputs()[0].name
+
+    def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
+        audio = np.ascontiguousarray(batch.astype(np.float32, copy=False))
+        clipwise = session.run(None, {input_name: audio})[0]
+        return clipwise[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
+
+    return PannRuntime(
+        predict_gunshot_prob=predict_gunshot_prob,
+        backend=Backend.ONNX,
+        tagger=None,
+    )
+
+
 def load_pann_runtime() -> PannRuntime:
     """Load PANN through the selected backend.
 
-    First call on the torch path downloads ~80 MB to ``~/panns_data/``;
-    ONNX path will fetch the slim artifact from R2 once doc 02 ships.
-    Reuse the returned runtime across detections.
+    First call on the torch path downloads ~80 MB to ``~/panns_data/``.
+    On the ONNX path, the consolidated ``pann_cnn14.onnx`` is resolved
+    via :func:`_resolve_onnx_pann_path` (env override or slim model
+    registry). Reuse the returned runtime across detections.
     """
     backend = select_backend()
     if backend is Backend.TORCH:
         return _build_pann_runtime_torch()
     if backend is Backend.ONNX:
-        raise NotImplementedError("ONNX PANN runtime not implemented yet (issue #377 phase 'ONNX exports')")
+        return _build_pann_runtime_onnx()
     raise SplitsmithBackendError(f"Unknown backend {backend!r}")
 
 
