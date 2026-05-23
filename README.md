@@ -23,14 +23,19 @@ Built to do two things from a single stage video: get per-shot splits for analys
 
 ## Quickstart
 
-The repo ships a real Stage 3 audio sample (Tallmilan 2026, 14.74s, 14 audited shots) at `tests/fixtures/stage_sample.wav` plus its companion source MP4 (gitignored; bring your own video or use any IPSC head-cam clip). Full end-to-end run:
+> The slim wheel install (`uv tool install splitsmith`) is the target end-user path once the wheel is published to PyPI -- the engine work is done (#377), publishing is the next step. Until then, install from source as described below.
+
+You need: `uv`, `ffmpeg`/`ffprobe` on PATH, and (for source checkouts) Node 20 + `pnpm` to build the SPA. See [Install](#install) for OS-specific package commands.
 
 ```bash
+# Install from source (today's recommended path)
 git clone https://github.com/mandakan/splitsmith.git
 cd splitsmith
-uv sync
+uv sync                                          # slim runtime deps only (~100 MB)
 (cd src/splitsmith/ui_static && pnpm install && pnpm build)
+uv run splitsmith fetch-models                   # ~440 MB ONNX artifacts; one-time
 
+# Bring your own head-cam clip and stage time (or use any IPSC video at hand)
 uv run splitsmith single \
     --video path/to/your_stage.mp4 \
     --time 14.74 \
@@ -42,13 +47,13 @@ ls -la ./demo_analysis/
 cat ./demo_analysis/stage3_per-told-me-to-do-it_report.txt
 ```
 
-Expected on the bundled sample: beep at ~19.87s, ~39 shot candidates (audited ground truth is 14; the rest are echoes / neighbouring bays), anomaly report flags the high shot count and the 928 ms overshoot vs official stage time. See `docs/COMMANDS.md` for the cull workflow.
-
 For the full ingest -> audit -> export workflow with persistent project state, use the UI:
 
 ```bash
 uv run splitsmith ui --project ~/matches/your-match
 ```
+
+The repo ships a real Stage 3 audio sample at `tests/fixtures/stage_sample.wav` (Tallmilan 2026, 14.74s, 14 audited shots) if you want to validate against a known reference. The companion source MP4 is gitignored -- bring your own.
 
 ## The workflow
 
@@ -59,35 +64,59 @@ uv run splitsmith ui --project ~/matches/your-match
 
 ## Install
 
-- macOS (primary target), Linux, or Windows. FCPXML is generated everywhere but Final Cut Pro itself is macOS-only -- on Linux/Windows you'll need to copy the `.fcpxml` to a Mac to open it (or just use the splits CSV directly).
-- Python 3.11+ via `uv`
+### System prerequisites
+
+- **OS.** macOS (primary target), Linux, or Windows. FCPXML is generated everywhere but Final Cut Pro itself is macOS-only -- on Linux/Windows you'll need to copy the `.fcpxml` to a Mac to open it (or just use the splits CSV directly).
+- **Python 3.11+** via `uv`
   - macOS: `brew install uv`
   - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - Windows: `winget install --id=astral-sh.uv -e`
-- `ffmpeg` and `ffprobe` on `PATH`
+- **`ffmpeg` and `ffprobe`** on `PATH`
   - macOS: `brew install ffmpeg` &nbsp;&middot;&nbsp; Linux: `apt install ffmpeg` &nbsp;&middot;&nbsp; Windows: `winget install --id=Gyan.FFmpeg -e`
-- Node.js 20+ and `pnpm` (needed to build the SPA when running from source)
-  - macOS: `brew install node && npm install -g pnpm`
-  - Linux: `apt install nodejs npm && sudo npm install -g pnpm`
-  - Windows: `winget install -e --id OpenJS.NodeJS.LTS`, open a new shell, then `npm install -g pnpm`
+
+  `splitsmith ui` checks for both on first launch and prints a copy-pasteable install hint if they're missing.
+
+### Option 1: slim wheel (end users, ~100 MB) -- pending PyPI publish
+
+The shipped install will be `uv tool install splitsmith` once the wheel is published. Detection models (~440 MB total) download from `models.splitsmith.app` on first detection -- pre-fetch with `splitsmith fetch-models`. No torch, transformers, or panns_inference in the install.
+
+```bash
+uv tool install splitsmith                       # not yet published; see Option 2 below
+splitsmith fetch-models                          # pre-fetch ONNX artifacts (optional)
+splitsmith ui --project ~/matches/your-match
+```
+
+### Option 2: from source (today's recommended path; required for contributors)
 
 ```bash
 git clone https://github.com/mandakan/splitsmith.git
 cd splitsmith
 uv sync                                          # slim runtime deps only (~100 MB)
-uv sync --all-groups                             # add torch / transformers / panns_inference + tests
 (cd src/splitsmith/ui_static && pnpm install && pnpm build)
-
+uv run splitsmith fetch-models                   # ~440 MB ONNX artifacts; one-time
 uv run splitsmith --help
-uv run pytest -q                # unit tests
-uv run pytest -q -m integration # ffmpeg/ffprobe-backed tests
+```
+
+Source checkouts also need **Node.js 20+ and `pnpm`** to build the SPA:
+- macOS: `brew install node && npm install -g pnpm`
+- Linux: `apt install nodejs npm && sudo npm install -g pnpm`
+- Windows: `winget install -e --id OpenJS.NodeJS.LTS`, open a new shell, then `npm install -g pnpm`
+
+### Option 3: contributor install (adds torch + tests + export tooling)
+
+For running the test suite, rebuilding the ONNX artifacts, or enabling the optional Voter E visual probe:
+
+```bash
+uv sync --all-groups                             # adds torch / transformers / panns / pytest / ruff / onnx export tools
+uv run pytest -q                                 # unit tests
+uv run pytest -q -m integration                  # ffmpeg/ffprobe-backed tests
 ```
 
 ## Runtime backends (slim ONNX vs dev torch)
 
-The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). `uv sync` alone installs the slim stack -- no torch, no transformers, no panns_inference. The first detection downloads ~180 MB of ONNX artifacts from `models.splitsmith.app` into `~/.splitsmith/models/` (pre-fetch with `uv run splitsmith fetch-models`).
+The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). The slim install carries no torch, no transformers, no panns_inference. The first detection downloads ~440 MB of ONNX artifacts from `models.splitsmith.app` into `~/.splitsmith/models/` (pre-fetch with `splitsmith fetch-models`).
 
-The dev backend (torch + transformers + panns_inference) ships in the `[dev]` group and is required for: re-running `scripts/build_ensemble_artifacts.py`, the ONNX export scripts (`scripts/export_pann_onnx.py`, `scripts/export_clap_onnx.py`), and enabling Voter E (CLIP visual probe -- off by default; turn on with `SPLITSMITH_ENABLE_VOTER_E=1` after `uv sync --all-groups`).
+The dev backend (torch + transformers + panns_inference) lives in the `[dev]` group and is required for: re-running `scripts/build_ensemble_artifacts.py`, the ONNX export scripts (`scripts/export_pann_onnx.py`, `scripts/export_clap_onnx.py`), and enabling Voter E (CLIP visual probe -- off by default; turn on with `SPLITSMITH_ENABLE_VOTER_E=1` after `uv sync --all-groups`).
 
 `select_backend()` resolves to torch when both backends are importable (dev path with HF caches), and to onnxruntime by elimination otherwise (slim install). Override per-process with `SPLITSMITH_BACKEND=torch|onnx`. See [`docs/local-slim/`](docs/local-slim/) for the full design.
 
