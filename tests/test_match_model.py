@@ -11,6 +11,7 @@ import pytest
 from splitsmith.config import StageRounds
 from splitsmith.match_model import (
     MATCH_FILE,
+    MATCH_SCHEMA_VERSION,
     SHOOTER_FILE,
     SHOOTERS_DIR,
     Match,
@@ -20,6 +21,7 @@ from splitsmith.match_model import (
     ShooterStageData,
     execute_merge,
     from_path,
+    generate_match_id,
     is_legacy_project_folder,
     is_match_folder,
     legacy_to_match_view,
@@ -463,3 +465,98 @@ def test_execute_merge_shooter_json_has_no_match_fields(tmp_path: Path):
             assert shooter_json["name"] == "Anton"
             continue
         assert forbidden not in shooter_json, forbidden
+
+
+# ---------------------------------------------------------------------------
+# match_id (issue #353 Phase 3 PR A)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_match_id_is_deterministic_for_same_inputs():
+    from datetime import UTC, datetime
+
+    ts = datetime(2026, 4, 3, 12, 0, 0, tzinfo=UTC)
+    a = generate_match_id("VADS Easter Shoot 2026", ts)
+    b = generate_match_id("VADS Easter Shoot 2026", ts)
+    assert a == b
+    assert a.startswith("vads-easter-shoot-2026-")
+    # ``<slug>-<10-char hex>``
+    assert len(a.rsplit("-", 1)[1]) == 10
+
+
+def test_generate_match_id_differs_for_distinct_timestamps():
+    from datetime import UTC, datetime
+
+    a = generate_match_id("VADS", datetime(2026, 1, 1, tzinfo=UTC))
+    b = generate_match_id("VADS", datetime(2026, 1, 2, tzinfo=UTC))
+    assert a != b
+    # Same slug prefix, different hash tail.
+    assert a.split("-")[0] == b.split("-")[0] == "vads"
+
+
+def test_generate_match_id_handles_unicode_and_punctuation():
+    from datetime import UTC, datetime
+
+    mid = generate_match_id("Brömma Klassikern 2026!", datetime(2026, 1, 1, tzinfo=UTC))
+    assert mid.startswith("bromma-klassikern-2026-")
+
+
+def test_generate_match_id_empty_name_falls_back():
+    from datetime import UTC, datetime
+
+    mid = generate_match_id("!!!", datetime(2026, 1, 1, tzinfo=UTC))
+    assert mid.startswith("match-")
+
+
+def test_match_init_assigns_match_id(tmp_path: Path):
+    match = Match.init(tmp_path / "match", name="VADS Easter Shoot 2026")
+    assert match.match_id is not None
+    assert match.match_id.startswith("vads-easter-shoot-2026-")
+
+
+def test_match_id_persists_across_reload(tmp_path: Path):
+    match = Match.init(tmp_path / "match", name="Persisted")
+    minted = match.match_id
+    reloaded = Match.load(tmp_path / "match")
+    assert reloaded.match_id == minted
+    # Frozen on disk too.
+    on_disk = json.loads((tmp_path / "match" / MATCH_FILE).read_text())
+    assert on_disk["match_id"] == minted
+    assert on_disk["schema_version"] == MATCH_SCHEMA_VERSION
+
+
+def test_load_migrates_pre_v4_match_in_place(tmp_path: Path):
+    """A match.json written before #353 (no match_id) gets one on first load."""
+    root = tmp_path / "legacy-match"
+    root.mkdir()
+    # Hand-write a v3-shaped match.json (no match_id; older schema_version).
+    legacy_payload = {
+        "schema_version": 3,
+        "name": "Legacy",
+        "match_id": None,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "shooters": [],
+        "stages": [],
+    }
+    (root / MATCH_FILE).write_text(json.dumps(legacy_payload))
+
+    loaded = Match.load(root)
+    assert loaded.match_id is not None
+    # Persisted: a second read sees the same id without another migration.
+    second = Match.load(root)
+    assert second.match_id == loaded.match_id
+    # The on-disk file now has it too.
+    on_disk = json.loads((root / MATCH_FILE).read_text())
+    assert on_disk["match_id"] == loaded.match_id
+
+
+def test_rename_does_not_change_match_id(tmp_path: Path):
+    """Once minted, match_id is frozen; renaming the match is purely cosmetic."""
+    match = Match.init(tmp_path / "match", name="Original Name")
+    original_id = match.match_id
+    match.name = "Renamed Match"
+    match.save(tmp_path / "match")
+    reloaded = Match.load(tmp_path / "match")
+    assert reloaded.match_id == original_id
+    assert reloaded.name == "Renamed Match"
