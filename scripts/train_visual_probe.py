@@ -70,9 +70,7 @@ def main() -> int:
         choices=("cpu", "mps", "cuda"),
     )
     parser.add_argument("--probe-dir", default=str(PROBE_DIR))
-    parser.add_argument(
-        "--C", type=float, default=1.0, help="logistic regression inverse regularization"
-    )
+    parser.add_argument("--C", type=float, default=1.0, help="logistic regression inverse regularization")
     args = parser.parse_args()
 
     probe_dir = Path(args.probe_dir)
@@ -87,7 +85,7 @@ def main() -> int:
 
     rows: list[tuple[int, str, int, Path, bool, str | None]] = []
     fixture_index: dict[str, int] = {}
-    for path, probe in sidecars:
+    for _path, probe in sidecars:
         fname = probe["fixture"]
         if fname not in fixture_index:
             fixture_index[fname] = len(fixture_index)
@@ -111,9 +109,7 @@ def main() -> int:
 
     model, processor = load_clip(args.device)
     t0 = time.time()
-    embeds = embed_frames(
-        model, processor, [r[3] for r in rows], args.device, batch=64
-    )
+    embeds = embed_frames(model, processor, [r[3] for r in rows], args.device, batch=64)
     print(f"Embedded {len(rows)} frames in {time.time()-t0:.1f}s", file=sys.stderr)
 
     is_shot = np.array([r[4] for r in rows], dtype=bool)
@@ -147,9 +143,7 @@ def main() -> int:
             print(f"  fold {held_name}: skipping (degenerate labels)")
             continue
 
-        clf = LogisticRegression(
-            C=args.C, max_iter=1000, class_weight="balanced", solver="lbfgs"
-        )
+        clf = LogisticRegression(C=args.C, max_iter=1000, class_weight="balanced", solver="lbfgs")
         clf.fit(Xtr, ytr)
 
         Xte = embeds[test_idx]
@@ -178,7 +172,7 @@ def main() -> int:
         print(f"Mean leave-one-out AUC (shot vs cross_bay only): {mean_auc:.3f}")
 
     by_fixture: dict[str, dict[int, float]] = {}
-    for (_, fname, cn, _, _, _), score in zip(rows, held_out_scores):
+    for (_, fname, cn, _, _, _), score in zip(rows, held_out_scores, strict=True):
         if not np.isnan(score):
             by_fixture.setdefault(fname, {})[cn] = float(score)
 

@@ -147,9 +147,7 @@ def evaluate_entry(
 
 def format_row(r: FixtureEvalResult) -> str:
     if r.detected_time_s is None:
-        return (
-            f"  [{r.track:4}] {r.stem:55} MISS ({r.error_kind})  " f"truth={r.ground_truth_s:.3f}s"
-        )
+        return f"  [{r.track:4}] {r.stem:55} MISS ({r.error_kind})  " f"truth={r.ground_truth_s:.3f}s"
     err_ms = (r.error_s or 0.0) * 1000.0
     flag = "OK" if r.correct_top1 else ("topN" if r.correct_in_topn else "FAIL")
     conf = f"  conf={r.detected_confidence:.2f}" if r.detected_confidence is not None else ""
@@ -176,9 +174,7 @@ def format_confidence_bins(results: list[FixtureEvalResult]) -> list[str]:
     rows = ["", "Per confidence bin (top-1 precision):"]
     for lo, hi, name in bands:
         bucket = [
-            r
-            for r in results
-            if r.detected_confidence is not None and lo <= r.detected_confidence < hi
+            r for r in results if r.detected_confidence is not None and lo <= r.detected_confidence < hi
         ]
         n = len(bucket)
         correct = sum(1 for r in bucket if r.correct_top1)
@@ -198,31 +194,22 @@ def format_bucket(name: str, summary: EvalSummary) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument(
-        "--manifest", type=Path, default=MANIFEST_PATH, help="Manifest YAML to evaluate."
-    )
+    parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH, help="Manifest YAML to evaluate.")
     parser.add_argument(
         "--track",
         action="append",
         choices=["clip", "full"],
         help="Run only the given tracks (default: both).",
     )
-    parser.add_argument(
-        "--tag", action="append", help="Restrict to fixtures with this tag (repeatable)."
-    )
-    parser.add_argument(
-        "--stem", action="append", help="Restrict to fixtures with this stem (repeatable)."
-    )
-    parser.add_argument(
-        "--json", type=Path, help="Write the per-fixture results to this JSON file."
-    )
+    parser.add_argument("--tag", action="append", help="Restrict to fixtures with this tag (repeatable).")
+    parser.add_argument("--stem", action="append", help="Restrict to fixtures with this stem (repeatable).")
+    parser.add_argument("--json", type=Path, help="Write the per-fixture results to this JSON file.")
     args = parser.parse_args()
 
     manifest = load_manifest(args.manifest)
     if not manifest.fixtures:
         raise SystemExit(
-            f"manifest empty or missing at {args.manifest}; "
-            "run scripts/build_beep_calibration.py first."
+            f"manifest empty or missing at {args.manifest}; " "run scripts/build_beep_calibration.py first."
         )
 
     selected: list[BeepFixtureEntry] = []
@@ -240,9 +227,7 @@ def main() -> None:
 
     results: list[FixtureEvalResult] = []
     for entry in selected:
-        results.extend(
-            evaluate_entry(entry, fixtures_dir=FIXTURES_DIR, config=config, tracks=tracks)
-        )
+        results.extend(evaluate_entry(entry, fixtures_dir=FIXTURES_DIR, config=config, tracks=tracks))
 
     print(f"Evaluated {len(selected)} fixtures across {len(results)} (fixture, track) rows.\n")
     print("Per-fixture results:")

@@ -90,10 +90,7 @@ def main() -> None:
     n_shots = len(canon_data["shots"])
     n_cands = len(canon_data.get("_candidates_pending_audit", {}).get("candidates", []))
     n_manual = sum(1 for s in canon_data["shots"] if s.get("source") == "manual")
-    print(
-        f"wrote {canonical}: {n_shots} shots ({n_manual} manual), "
-        f"{n_cands} candidates pending"
-    )
+    print(f"wrote {canonical}: {n_shots} shots ({n_manual} manual), " f"{n_cands} candidates pending")
     print()
     print("Next steps:")
     print(f"  git add {canonical}")

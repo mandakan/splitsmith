@@ -20,8 +20,8 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import torch
 from PIL import Image
@@ -101,8 +101,7 @@ def extract_frame(video: Path, source_time: float, dest: Path) -> bool:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0 or not dest.exists():
         print(
-            f"    ffmpeg failed at t={source_time:.3f} for {video.name}: "
-            f"{result.stderr.strip()[:200]}",
+            f"    ffmpeg failed at t={source_time:.3f} for {video.name}: " f"{result.stderr.strip()[:200]}",
             file=sys.stderr,
         )
         return False
@@ -147,7 +146,7 @@ def score_frames(
         pos_mean = pos_sims.mean(dim=-1).cpu().tolist()
         pos_max = pos_sims.max(dim=-1).values.cpu().tolist()
         neg_mean = neg_sims.mean(dim=-1).cpu().tolist()
-        for pm, pmax, nm in zip(pos_mean, pos_max, neg_mean):
+        for pm, pmax, nm in zip(pos_mean, pos_max, neg_mean, strict=True):
             out.append(
                 {
                     "clip_pos_mean": pm,
@@ -173,9 +172,7 @@ def probe_fixture(
     src_offset = float(window[0])
     video = Path(data["source_video"])
     shots_by_cand = {s.get("candidate_number"): s for s in (data.get("shots") or [])}
-    labels_by_time = (
-        (data.get("_candidates_pending_audit") or {}).get("labels_by_time")
-    ) or {}
+    labels_by_time = ((data.get("_candidates_pending_audit") or {}).get("labels_by_time")) or {}
 
     print(f"\n{fixture_path.stem}: {len(candidates)} candidates", file=sys.stderr)
 
@@ -193,13 +190,11 @@ def probe_fixture(
             extracted.append((cand, frame_path))
         if (idx + 1) % 25 == 0:
             print(
-                f"  extracted {idx+1}/{len(candidates)} "
-                f"(elapsed {time.time()-extract_t0:.1f}s)",
+                f"  extracted {idx+1}/{len(candidates)} " f"(elapsed {time.time()-extract_t0:.1f}s)",
                 file=sys.stderr,
             )
     print(
-        f"  frame extraction: {len(extracted)}/{len(candidates)} ok "
-        f"in {time.time()-extract_t0:.1f}s",
+        f"  frame extraction: {len(extracted)}/{len(candidates)} ok " f"in {time.time()-extract_t0:.1f}s",
         file=sys.stderr,
     )
 
@@ -209,7 +204,7 @@ def probe_fixture(
     print(f"  CLIP scoring: {len(scores)} frames in {time.time()-score_t0:.1f}s", file=sys.stderr)
 
     rows: list[dict] = []
-    for (cand, frame_path), score in zip(extracted, scores):
+    for (cand, frame_path), score in zip(extracted, scores, strict=True):
         cn = cand["candidate_number"]
         is_shot = cn in shots_by_cand
         time_key = f"{float(cand['time']):.3f}"
@@ -286,9 +281,7 @@ def main() -> int:
             finally:
                 tmp.unlink(missing_ok=True)
         else:
-            report = probe_fixture(
-                fixture_path, model, processor, pos_feats, neg_feats, args.device
-            )
+            report = probe_fixture(fixture_path, model, processor, pos_feats, neg_feats, args.device)
         out_path = OUT_DIR / f"{fixture_path.stem}.json"
         out_path.write_text(json.dumps(report, indent=2))
         print(f"  wrote {out_path.relative_to(REPO_ROOT)}", file=sys.stderr)

@@ -74,9 +74,7 @@ def _stage_window_in_full(audit: dict, sidecar: dict) -> tuple[float, float]:
     beep_in_full = (fws_start + float(audit["beep_time"])) - full_start
     stage_t = float(audit["stage_time_seconds"])
     shots = audit.get("shots") or []
-    last_shot_from_beep = (
-        max(float(s["time"]) for s in shots) - float(audit["beep_time"]) if shots else 0.0
-    )
+    last_shot_from_beep = max(float(s["time"]) for s in shots) - float(audit["beep_time"]) if shots else 0.0
     stage_end_in_full = beep_in_full + max(stage_t, last_shot_from_beep)
     return beep_in_full, stage_end_in_full
 
@@ -172,14 +170,10 @@ def write_outputs(all_rows: list[dict], log: Callable[[str], None]) -> None:
                 "n_pre_beep": sum(1 for r in rows if r["region_tag"] == "pre_beep"),
                 "n_post_stage": sum(1 for r in rows if r["region_tag"] == "post_stage"),
                 "sample_times_pre_beep": [
-                    round(r["time_in_full"], 3)
-                    for r in rows
-                    if r["region_tag"] == "pre_beep"
+                    round(r["time_in_full"], 3) for r in rows if r["region_tag"] == "pre_beep"
                 ][:10],
                 "sample_times_post_stage": [
-                    round(r["time_in_full"], 3)
-                    for r in rows
-                    if r["region_tag"] == "post_stage"
+                    round(r["time_in_full"], 3) for r in rows if r["region_tag"] == "post_stage"
                 ][:10],
             }
             for stem, rows in sorted(by_fixture.items())
@@ -199,10 +193,7 @@ def mine_all(
     if fixtures is None:
         fixtures = sorted(p.stem.removesuffix("_full") for p in FULL_DIR.glob("*_full.wav"))
     if not fixtures:
-        log(
-            f"No *_full.wav files in {FULL_DIR}. Run "
-            "scripts/extract_full_fixture_audio.py first."
-        )
+        log(f"No *_full.wav files in {FULL_DIR}. Run " "scripts/extract_full_fixture_audio.py first.")
         return []
     log(f"Mining negatives across {len(fixtures)} fixture(s)...")
     rows: list[dict] = []

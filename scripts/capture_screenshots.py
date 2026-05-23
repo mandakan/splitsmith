@@ -38,10 +38,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Iterator
-
 
 SCREENSHOTS = [
     # (route_template, filename, description, optional)
@@ -72,9 +71,7 @@ def wait_for_health(base_url: str, timeout_s: float = 30.0) -> dict[str, object]
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             last_err = e
         time.sleep(0.3)
-    raise TimeoutError(
-        f"splitsmith ui never reported bound=true at {base_url} (last error: {last_err})"
-    )
+    raise TimeoutError(f"splitsmith ui never reported bound=true at {base_url} (last error: {last_err})")
 
 
 @contextmanager

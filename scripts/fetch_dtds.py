@@ -64,8 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.fcp_app.exists():
         print(
-            f"Final Cut Pro not found at {args.fcp_app}; "
-            "pass --fcp-app to point at your install.",
+            f"Final Cut Pro not found at {args.fcp_app}; " "pass --fcp-app to point at your install.",
             file=sys.stderr,
         )
         return 1

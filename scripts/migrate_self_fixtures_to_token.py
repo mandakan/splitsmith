@@ -203,8 +203,10 @@ def migrate_main_fixtures() -> None:
         if name.endswith("-promotion-report.json"):
             rewrite_and_rename(path, rewrite_promotion_report)
             continue
-        if name.endswith(".json") and ".peaks-" not in name and not name.endswith(
-            (".bak", ".before-promote", ".before-rise-foot")
+        if (
+            name.endswith(".json")
+            and ".peaks-" not in name
+            and not name.endswith((".bak", ".before-promote", ".before-rise-foot"))
         ):
             # Could be a primary or derived fixture (whose payload we want
             # to fully rewrite). The .json.bak / .before-* and .peaks-*
@@ -232,6 +234,7 @@ def migrate_full_dir() -> None:
     sources_yaml = FULL_ROOT / "_sources.yaml"
     if sources_yaml.exists():
         text = sources_yaml.read_text(encoding="utf-8")
+
         # Preserve the file's leading comments by doing a regex sub on
         # only the keys we care about. yaml.safe_load + safe_dump would
         # strip the doc comment block.
@@ -248,9 +251,7 @@ def migrate_full_dir() -> None:
         payload = json.loads(mining_report.read_text(encoding="utf-8"))
         per = payload.get("per_fixture")
         if isinstance(per, dict):
-            payload["per_fixture"] = {
-                (map_stem(k) or k): v for k, v in per.items()
-            }
+            payload["per_fixture"] = {(map_stem(k) or k): v for k, v in per.items()}
         write_json(mining_report, payload)
 
 

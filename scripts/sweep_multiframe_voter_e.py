@@ -177,10 +177,7 @@ def _train_and_score_lofo(
                 continue
             sub = subclasses_by_fixture[f]
             mask = np.array(
-                [
-                    (labels_by_fixture[f][i] == 1) or (sub[i] == "cross_bay")
-                    for i in range(len(sub))
-                ],
+                [(labels_by_fixture[f][i] == 1) or (sub[i] == "cross_bay") for i in range(len(sub))],
                 dtype=bool,
             )
             train_emb_chunks.append(embeddings_by_fixture[f][mask])
@@ -196,9 +193,7 @@ def _train_and_score_lofo(
     return held_out_scores
 
 
-def _precision_at_recall(
-    scores: np.ndarray, labels: np.ndarray, target: float
-) -> tuple[float, int]:
+def _precision_at_recall(scores: np.ndarray, labels: np.ndarray, target: float) -> tuple[float, int]:
     """Return ``(precision, k)`` -- smallest top-k that captures the target recall."""
     n_pos = int(labels.sum())
     if n_pos == 0:
@@ -292,14 +287,11 @@ def main() -> int:
         a = per_config[cfg_name]["aggregate"]
         e = per_config[cfg_name]["elapsed_extract_s"]
         print(
-            f"{cfg_name:10s}  {a['auc']:6.3f}  {a['p_at_r_1.0']:8.3f}  "
-            f"{a['p_at_r_0.95']:8.3f}  {e:6.1f}"
+            f"{cfg_name:10s}  {a['auc']:6.3f}  {a['p_at_r_1.0']:8.3f}  " f"{a['p_at_r_0.95']:8.3f}  {e:6.1f}"
         )
 
     print("\n=== per-fixture AUC (single -> multi) ===")
-    fixtures = sorted(
-        set(per_config["single"]["per_fixture"]) & set(per_config["multi"]["per_fixture"])
-    )
+    fixtures = sorted(set(per_config["single"]["per_fixture"]) & set(per_config["multi"]["per_fixture"]))
     deltas: list[float] = []
     print(f"{'fixture':48s}  {'single':>8s}  {'multi':>8s}  {'delta':>8s}")
     for f in fixtures:

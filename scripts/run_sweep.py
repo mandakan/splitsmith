@@ -97,7 +97,7 @@ DEFAULTS: dict[str, Any] = {
     "enable_voter_e": False,
     "e_audio_strong_min_votes": 3,
     "apriori_boost": 1.0,
-    "voter_a_floor": None,             # use calibration
+    "voter_a_floor": None,  # use calibration
     "voter_b_threshold": None,
     "voter_c_threshold": None,
     "voter_e_threshold": None,
@@ -131,9 +131,7 @@ def _load_grid(path: str) -> dict[str, list[Any]]:
     grid: dict[str, list[Any]] = {}
     for k, v in raw.items():
         if k not in PARAM_KEYS:
-            raise SystemExit(
-                f"Unknown grid key: {k!r}. Valid keys: {sorted(PARAM_KEYS)}"
-            )
+            raise SystemExit(f"Unknown grid key: {k!r}. Valid keys: {sorted(PARAM_KEYS)}")
         grid[k] = list(v) if isinstance(v, (list, tuple)) else [v]
     return grid
 
@@ -190,8 +188,10 @@ def _evaluate_combo(
 
         va = voters.vote_a(conf, thresholds["a_floor"] or 0.0)
         vb = voters.vote_b(clap_diff, thresholds["b_threshold"] or -np.inf)
-        if combo["voter_c_mode"] == "adaptive" and combo["use_expected_rounds"] and (
-            expected is not None and expected > 0
+        if (
+            combo["voter_c_mode"] == "adaptive"
+            and combo["use_expected_rounds"]
+            and (expected is not None and expected > 0)
         ):
             vc = voters.vote_c_adaptive(
                 score_c,
@@ -225,9 +225,7 @@ def _evaluate_combo(
             ve = np.zeros_like(va)
 
         vote_total = va + vb + vc
-        eff_expected = (
-            int(expected) if (combo["use_expected_rounds"] and expected is not None) else None
-        )
+        eff_expected = int(expected) if (combo["use_expected_rounds"] and expected is not None) else None
         boost = voters.apriori_boost(conf, eff_expected, float(combo["apriori_boost"]))
         keep_mask = voters.consensus_keep(
             vote_total,
@@ -254,32 +252,32 @@ def _evaluate_combo(
 
         solo = {}
         for name, vec in (("a", va), ("b", vb), ("c", vc), ("e", ve)):
-            solo[f"solo_{name}"] = int(
-                ((label == 1) & (vec == 1) & (vote_total + ve == 1)).sum()
-            )
+            solo[f"solo_{name}"] = int(((label == 1) & (vec == 1) & (vote_total + ve == 1)).sum())
         disagree1 = int((vote_total + ve == 1).sum())
         disagree1_pos = int(((vote_total + ve == 1) & (label == 1)).sum())
 
-        rows_out.append({
-            "fixture": fixture,
-            "camera_class": cam_class,
-            "n_candidates": int(idx.size),
-            "n_positives": n_pos,
-            "n_kept": n_kept,
-            "true_pos": tp,
-            "false_pos": fp,
-            "false_neg": fn,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "disagreement_1_count": disagree1,
-            "disagreement_1_pos": disagree1_pos,
-            **solo,
-            "voter_a_floor_eff": thresholds["a_floor"],
-            "voter_b_threshold_eff": thresholds["b_threshold"],
-            "voter_c_threshold_eff": thresholds["c_threshold"],
-            "voter_e_threshold_eff": thresholds["e_threshold"],
-        })
+        rows_out.append(
+            {
+                "fixture": fixture,
+                "camera_class": cam_class,
+                "n_candidates": int(idx.size),
+                "n_positives": n_pos,
+                "n_kept": n_kept,
+                "true_pos": tp,
+                "false_pos": fp,
+                "false_neg": fn,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "disagreement_1_count": disagree1,
+                "disagreement_1_pos": disagree1_pos,
+                **solo,
+                "voter_a_floor_eff": thresholds["a_floor"],
+                "voter_b_threshold_eff": thresholds["b_threshold"],
+                "voter_c_threshold_eff": thresholds["c_threshold"],
+                "voter_e_threshold_eff": thresholds["e_threshold"],
+            }
+        )
 
         all_kept[idx] = keep_mask
         all_mask[idx] = True
@@ -353,13 +351,9 @@ def main() -> None:
     args = p.parse_args()
 
     if not args.signals.exists():
-        raise SystemExit(
-            f"{args.signals} does not exist -- run scripts/build_sweep_signals.py first."
-        )
+        raise SystemExit(f"{args.signals} does not exist -- run scripts/build_sweep_signals.py first.")
     table = pq.read_table(args.signals)
-    signals_build_id = (
-        table.column("signals_build_id")[0].as_py() if table.num_rows else "unknown"
-    )
+    signals_build_id = table.column("signals_build_id")[0].as_py() if table.num_rows else "unknown"
 
     # Materialise as numpy column-major dict for fast slicing.
     raw_cols = {name: np.array(table.column(name).to_pylist()) for name in table.schema.names}
@@ -390,15 +384,14 @@ def main() -> None:
 
     if value_lists:
         combos = [
-            {**DEFAULTS, **dict(zip(keys, vals))}
-            for vals in itertools.product(*value_lists)
+            {**DEFAULTS, **dict(zip(keys, vals, strict=True))} for vals in itertools.product(*value_lists)
         ]
     else:
         combos = [dict(DEFAULTS)]
 
     cal = load_calibration()
 
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    now = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     sha = _git_short_sha()
     slug = args.run_name
     if slug is None:

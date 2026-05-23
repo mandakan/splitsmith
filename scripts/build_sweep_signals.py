@@ -51,6 +51,15 @@ import pyarrow.parquet as pq
 # directory is not a package).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Import the same canonical fixture list calibration uses so the sweep
+# universe stays in lockstep with the shipped artifacts. Underscore-
+# prefixed in build_ensemble_artifacts; pulling it directly keeps a
+# single source of truth.
+from build_ensemble_artifacts import (  # type: ignore[import-not-found]
+    DEFAULT_FIXTURES,
+    WRONG_CLIP_FIXTURES,
+)
+
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
@@ -64,15 +73,6 @@ from splitsmith.ensemble.calibration import (
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
-
-# Import the same canonical fixture list calibration uses so the sweep
-# universe stays in lockstep with the shipped artifacts. Underscore-
-# prefixed in build_ensemble_artifacts; pulling it directly keeps a
-# single source of truth.
-from build_ensemble_artifacts import (  # type: ignore[import-not-found]
-    DEFAULT_FIXTURES,
-    WRONG_CLIP_FIXTURES,
-)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
@@ -191,9 +191,7 @@ def build_signals(
         times = np.array([s.time_absolute for s in shots], dtype=np.float64)
         confidences = np.array([s.confidence for s in shots], dtype=np.float64)
         peak_amps = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
-        ms_after_beep = np.array(
-            [round(s.time_from_beep * 1000) for s in shots], dtype=np.int64
-        )
+        ms_after_beep = np.array([round(s.time_from_beep * 1000) for s in shots], dtype=np.int64)
         labels = _label(times.tolist(), truth.get("shots", []), tolerance_ms)
         audit_count = int(sum(labels))
         rounds = truth.get("stage_rounds") or {}
@@ -225,9 +223,7 @@ def build_signals(
         hand = feat.compute_hand_features(
             audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
         )
-        x = feat.voter_c_feature_matrix(
-            hand, clap_sims, clap_diff, gunshot_prob, camera_classes=cam_class
-        )
+        x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, gunshot_prob, camera_classes=cam_class)
         cls_key = cam_class if cam_class in voter_c_model else cal.default_camera_class
         score_c = voter_c_model[cls_key].predict_proba(x)[:, 1].astype(np.float64)
 
@@ -251,9 +247,7 @@ def build_signals(
                 features = vis.compute_visual_features(
                     video_path, source_times, visual_runtime, frame_offsets=offsets
                 )
-                voter_e_signal = vis.score_visual_candidates(
-                    features, visual_runtime
-                ).astype(np.float64)
+                voter_e_signal = vis.score_visual_candidates(features, visual_runtime).astype(np.float64)
                 voter_e_ok = True
                 fixtures_with_voter_e.append(fix)
 
@@ -279,12 +273,12 @@ def build_signals(
             }
             for j, name in enumerate(HAND_FEATURE_NAMES):
                 row[f"hand_{name}"] = float(hand[i, j])
-            for j, prompt in enumerate(feat.CLAP_PROMPTS):
+            for j, _prompt in enumerate(feat.CLAP_PROMPTS):
                 row[f"clap_sim_{j:02d}"] = float(clap_sims[i, j])
             rows.append(row)
         fixtures_seen.append(fix)
 
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    now = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     sha = _git_short_sha()
     signals_build_id = f"{now}_{sha}"
 
@@ -297,7 +291,7 @@ def build_signals(
     table = pa.Table.from_pylist(rows)
     sidecar = {
         "signals_build_id": signals_build_id,
-        "built_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "git_short_sha": sha,
         "tolerance_ms": tolerance_ms,
         "default_camera_class": DEFAULT_CAMERA_CLASS,
@@ -337,9 +331,7 @@ def main() -> None:
     fixtures = args.fixture or list(DEFAULT_FIXTURES)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    table, sidecar = build_signals(
-        fixtures, args.tolerance_ms, skip_voter_e=args.skip_voter_e
-    )
+    table, sidecar = build_signals(fixtures, args.tolerance_ms, skip_voter_e=args.skip_voter_e)
     pq.write_table(table, args.out)
     sidecar_path = args.out.with_suffix(".meta.json")
     sidecar_path.write_text(json.dumps(sidecar, indent=2))

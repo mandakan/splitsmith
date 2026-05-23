@@ -23,8 +23,8 @@ PROBE_DIR = REPO_ROOT / "build" / "visual-probe"
 
 
 def roc_auc(scores: list[float], labels: list[bool]) -> float | None:
-    pos = [s for s, y in zip(scores, labels) if y]
-    neg = [s for s, y in zip(scores, labels) if not y]
+    pos = [s for s, y in zip(scores, labels, strict=True) if y]
+    neg = [s for s, y in zip(scores, labels, strict=True) if not y]
     if not pos or not neg:
         return None
     wins = ties = 0
@@ -40,7 +40,7 @@ def roc_auc(scores: list[float], labels: list[bool]) -> float | None:
 def precision_at_recall(
     scores: list[float], labels: list[bool], target_recalls: list[float]
 ) -> dict[float, dict]:
-    paired = sorted(zip(scores, labels), key=lambda x: -x[0])
+    paired = sorted(zip(scores, labels, strict=True), key=lambda x: -x[0])
     total_pos = sum(1 for _, y in paired if y)
     if total_pos == 0:
         return {r: {"precision": None, "k": 0, "threshold": None} for r in target_recalls}
@@ -85,12 +85,12 @@ def _signals(rows: list[dict]) -> dict[str, list[float]]:
     out = {
         "audio": audio,
         "visual_zeroshot": visual,
-        "combined_zeroshot": [v + a for v, a in zip(zscore(visual), zscore(audio))],
+        "combined_zeroshot": [v + a for v, a in zip(zscore(visual), zscore(audio), strict=True)],
     }
     if all("clip_probe_score" in r and r["clip_probe_score"] is not None for r in rows):
         probe = [float(r["clip_probe_score"]) for r in rows]
         out["visual_probe"] = probe
-        out["combined_probe"] = [v + a for v, a in zip(zscore(probe), zscore(audio))]
+        out["combined_probe"] = [v + a for v, a in zip(zscore(probe), zscore(audio), strict=True)]
     return out
 
 
@@ -107,9 +107,7 @@ def evaluate_one(probe: dict) -> dict:
         "n_candidates": len(rows),
         "n_shots": sum(labels),
         "auc": {name: roc_auc(s, labels) for name, s in signals.items()},
-        "p_at_r": {
-            name: precision_at_recall(s, labels, targets) for name, s in signals.items()
-        },
+        "p_at_r": {name: precision_at_recall(s, labels, targets) for name, s in signals.items()},
         "subclass_breakdown": _subclass_stats(rows),
     }
 
@@ -141,9 +139,7 @@ def aggregate(probes: list[dict]) -> dict:
         "n_candidates": len(rows),
         "n_shots": sum(labels),
         "auc": {name: roc_auc(s, labels) for name, s in signals.items()},
-        "p_at_r": {
-            name: precision_at_recall(s, labels, targets) for name, s in signals.items()
-        },
+        "p_at_r": {name: precision_at_recall(s, labels, targets) for name, s in signals.items()},
         "subclass_breakdown": _subclass_stats(rows),
     }
 
@@ -180,10 +176,7 @@ def render_report(per_fixture: list[dict], aggregate_stats: dict) -> str:
     lines.append("| subclass | n | mean | median | stdev |")
     lines.append("|----------|---|------|--------|-------|")
     for sub, s in sorted(a["subclass_breakdown"].items()):
-        lines.append(
-            f"| {sub} | {s['n']} | {fmt(s['mean'])} | "
-            f"{fmt(s['median'])} | {fmt(s['stdev'])} |"
-        )
+        lines.append(f"| {sub} | {s['n']} | {fmt(s['mean'])} | " f"{fmt(s['median'])} | {fmt(s['stdev'])} |")
     lines.append("")
     lines.append("## Per-fixture (P@R=1.0)")
     lines.append("")
@@ -194,15 +187,8 @@ def render_report(per_fixture: list[dict], aggregate_stats: dict) -> str:
     for f in per_fixture:
         if not f.get("auc"):
             continue
-        cells = [
-            fmt(f["p_at_r"][sig][1.0]["precision"]) if sig in f["p_at_r"] else "n/a"
-            for sig in signals
-        ]
-        lines.append(
-            f"| {f['fixture']} | {f['n_candidates']} | {f['n_shots']} | "
-            + " | ".join(cells)
-            + " |"
-        )
+        cells = [fmt(f["p_at_r"][sig][1.0]["precision"]) if sig in f["p_at_r"] else "n/a" for sig in signals]
+        lines.append(f"| {f['fixture']} | {f['n_candidates']} | {f['n_shots']} | " + " | ".join(cells) + " |")
     lines.append("")
     lines.append("## Per-fixture (ROC AUC)")
     lines.append("")
@@ -212,11 +198,7 @@ def render_report(per_fixture: list[dict], aggregate_stats: dict) -> str:
         if not f.get("auc"):
             continue
         cells = [fmt(f["auc"].get(sig)) for sig in signals]
-        lines.append(
-            f"| {f['fixture']} | {f['n_candidates']} | {f['n_shots']} | "
-            + " | ".join(cells)
-            + " |"
-        )
+        lines.append(f"| {f['fixture']} | {f['n_candidates']} | {f['n_shots']} | " + " | ".join(cells) + " |")
     lines.append("")
     return "\n".join(lines)
 

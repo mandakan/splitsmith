@@ -35,6 +35,7 @@ import json
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
@@ -53,12 +54,12 @@ from splitsmith.ensemble.calibration import (
     camera_class_from_mount,
     normalize_camera_model_key,
 )
-from splitsmith.ensemble.voters import within_stage_amp_anchor
 from splitsmith.ensemble.fixtures import (
     WRONG_CLIP_FIXTURES,
     fixture_stems,
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
+from splitsmith.ensemble.voters import within_stage_amp_anchor
 from splitsmith.shot_detect import detect_shots
 
 # Every audited fixture; the discovery is filesystem-driven so adding a
@@ -310,7 +311,9 @@ def _split_by_camera_class(universe: list[dict]) -> dict[str, list[dict]]:
 
 
 def _x_from(universe: list[dict]) -> np.ndarray:
-    """Stack per-row Voter C features: ``[hand | clap_sims | clap_diff | gunshot_prob | camera_class_onehot]``.
+    """Stack per-row Voter C features.
+
+    Column order: ``[hand | clap_sims | clap_diff | gunshot_prob | camera_class_onehot]``.
 
     Camera-class one-hot is appended last so the column order matches
     ``voter_c_feature_matrix`` at runtime. ``gunshot_prob`` is folded in
@@ -463,10 +466,7 @@ def _load_mined_negatives(
         )
 
     if skipped:
-        log(
-            "  skipped mined fixtures (missing full cache or no positives): "
-            + ", ".join(sorted(skipped))
-        )
+        log("  skipped mined fixtures (missing full cache or no positives): " + ", ".join(sorted(skipped)))
 
     provenance = {
         "n_mined_negatives_used": len(rows),
@@ -519,17 +519,13 @@ def _train_voter_c_for_class(rows: list[dict], target_recall: float):
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        f = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        f = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         f.fit(X[tr], y[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
     threshold = _threshold_for_recall(cv_probs, y, target_recall)
 
-    clf = GradientBoostingClassifier(
-        n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-    )
+    clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
     clf.fit(X, y)
     return clf, threshold, cv_probs, y
 
@@ -705,9 +701,7 @@ def _train_voter_e(
         log("  Voter E: empty visual universe, skipping")
         return None, None
 
-    binary = [
-        row for row in visual_universe if row["label"] == 1 or row.get("subclass") == "cross_bay"
-    ]
+    binary = [row for row in visual_universe if row["label"] == 1 or row.get("subclass") == "cross_bay"]
     if len(binary) < 20 or sum(1 for r in binary if r["label"] == 1) < 5:
         log(
             f"  Voter E: insufficient binary corpus "
@@ -930,12 +924,8 @@ def build_artifacts(
         "n_calibration_positives": int(n_pos),
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
         "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
-        "voter_e_frame_offsets": (
-            list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None
-        ),
-        "voter_e_probe_artifact": (
-            DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None
-        ),
+        "voter_e_frame_offsets": (list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None),
+        "voter_e_probe_artifact": (DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None),
         "voter_e_audio_strong_min_votes_recommended": 3 if voter_e_probe is not None else None,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "default_camera_class": default_cls,

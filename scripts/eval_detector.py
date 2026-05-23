@@ -37,15 +37,11 @@ DEFAULT_FIXTURES = fixture_stems(mount="head", shooter_id="s97dcec94")
 FIXTURES_DIR = Path("tests/fixtures")
 
 
-def evaluate_one(
-    name: str, *, tolerance_ms: float, config: ShotDetectConfig | None = None
-) -> dict:
+def evaluate_one(name: str, *, tolerance_ms: float, config: ShotDetectConfig | None = None) -> dict:
     truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text())
     audio, sr = load_audio(FIXTURES_DIR / f"{name}.wav")
     config = config or ShotDetectConfig()
-    shots = detect_shots(
-        audio, sr, truth["beep_time"], truth["stage_time_seconds"], config
-    )
+    shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], config)
     cand_t = sorted(s.time_absolute for s in shots)
     gt_t = sorted(s["time"] for s in truth.get("shots", []))
 

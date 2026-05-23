@@ -80,8 +80,10 @@ def _load_runs(path: Path, run_id: str | None) -> tuple[list[dict], str]:
         run_id = sorted({r["run_id"] for r in rows})[-1]
     rows = [r for r in rows if r["run_id"] == run_id]
     if not rows:
-        raise SystemExit(f"No rows for run_id={run_id!r}. Available: "
-                         f"{sorted({r['run_id'] for r in table.to_pylist()})}")
+        raise SystemExit(
+            f"No rows for run_id={run_id!r}. Available: "
+            f"{sorted({r['run_id'] for r in table.to_pylist()})}"
+        )
     return rows, run_id
 
 
@@ -107,11 +109,7 @@ def _agg_rows(rows: list[dict], fixture: str = "__all__") -> list[dict]:
 
 
 def _fixture_rows(rows: list[dict]) -> list[dict]:
-    return [
-        r
-        for r in rows
-        if r["fixture"] != "__all__" and not r["fixture"].startswith("__class_")
-    ]
+    return [r for r in rows if r["fixture"] != "__all__" and not r["fixture"].startswith("__class_")]
 
 
 def _unique_sorted(values: list[Any]) -> list[Any]:
@@ -129,14 +127,11 @@ def _unique_sorted(values: list[Any]) -> list[Any]:
     return sorted(set(values), key=_key)
 
 
-def _plot_1d(
-    rows: list[dict], key: str, out_dir: Path
-) -> list[tuple[str, Path]]:
+def _plot_1d(rows: list[dict], key: str, out_dir: Path) -> list[tuple[str, Path]]:
     """Three line plots (P/R/F1) over the swept key + per-fixture facet."""
     agg = _agg_rows(rows, "__all__")
     xs = [r[f"param_{key}"] for r in agg]
-    order = np.argsort([float(v) if isinstance(v, (int, float, bool)) and v is not None else 0
-                        for v in xs])
+    order = np.argsort([float(v) if isinstance(v, (int, float, bool)) and v is not None else 0 for v in xs])
     xs_sorted = [xs[i] for i in order]
     series = {
         "precision": [agg[i]["precision"] for i in order],
@@ -146,9 +141,13 @@ def _plot_1d(
     artifacts: list[tuple[str, Path]] = []
     for metric, ys in series.items():
         fig, ax = plt.subplots(figsize=(6.5, 4))
-        ax.plot(xs_sorted, ys, marker="o", linewidth=1.5, color={
-            "precision": "tab:blue", "recall": "tab:orange", "f1": "tab:green"
-        }[metric])
+        ax.plot(
+            xs_sorted,
+            ys,
+            marker="o",
+            linewidth=1.5,
+            color={"precision": "tab:blue", "recall": "tab:orange", "f1": "tab:green"}[metric],
+        )
         ax.set_xlabel(key)
         ax.set_ylabel(metric)
         ax.set_title(f"{metric} vs {key} (overall)")
@@ -168,10 +167,8 @@ def _plot_1d(
         these = [r for r in fix_rows if r["fixture"] == fix]
         x = [r[f"param_{key}"] for r in these]
         y = [r["f1"] for r in these]
-        idx = np.argsort([float(v) if isinstance(v, (int, float, bool)) and v is not None else 0
-                          for v in x])
-        ax.plot([x[i] for i in idx], [y[i] for i in idx], marker=".", alpha=0.7,
-                label=_short_fixture(fix))
+        idx = np.argsort([float(v) if isinstance(v, (int, float, bool)) and v is not None else 0 for v in x])
+        ax.plot([x[i] for i in idx], [y[i] for i in idx], marker=".", alpha=0.7, label=_short_fixture(fix))
     ax.set_xlabel(key)
     ax.set_ylabel("F1")
     ax.set_title(f"per-fixture F1 vs {key}")
@@ -186,9 +183,7 @@ def _plot_1d(
     return artifacts
 
 
-def _plot_2d(
-    rows: list[dict], keys: list[str], out_dir: Path
-) -> list[tuple[str, Path]]:
+def _plot_2d(rows: list[dict], keys: list[str], out_dir: Path) -> list[tuple[str, Path]]:
     agg = _agg_rows(rows, "__all__")
     k1, k2 = keys
     v1 = _unique_sorted([r[f"param_{k1}"] for r in agg])
@@ -214,8 +209,15 @@ def _plot_2d(
         for i in range(grid.shape[0]):
             for j in range(grid.shape[1]):
                 if not np.isnan(grid[i, j]):
-                    ax.text(j, i, f"{grid[i,j]:.2f}", ha="center", va="center", fontsize=8,
-                            color="black" if grid[i,j] < 0.55 else "white")
+                    ax.text(
+                        j,
+                        i,
+                        f"{grid[i,j]:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=8,
+                        color="black" if grid[i, j] < 0.55 else "white",
+                    )
         fig.colorbar(im, ax=ax)
         path = out_dir / f"{metric}_heatmap.png"
         fig.tight_layout()
@@ -230,9 +232,7 @@ def _plot_per_fixture_bars(rows: list[dict], out_dir: Path) -> Path:
     agg = _agg_rows(rows, "__all__")
     best = max(agg, key=lambda r: r["f1"]) if agg else None
     combo_idx = best["combo_idx"] if best else None
-    fix_rows = [
-        r for r in _fixture_rows(rows) if combo_idx is None or r["combo_idx"] == combo_idx
-    ]
+    fix_rows = [r for r in _fixture_rows(rows) if combo_idx is None or r["combo_idx"] == combo_idx]
     fixtures = sorted({r["fixture"] for r in fix_rows})
     metrics = ("precision", "recall", "f1")
     width = 0.27
@@ -269,7 +269,7 @@ def _compose_overview(
 ) -> None:
     """Stitch a 2x2 (or 1x2) collage of the most useful plots into one PNG."""
     panels: list[Path] = []
-    by_name = {n: p for n, p in artifacts}
+    by_name = dict(artifacts)
     for n in ("f1", "precision", "recall"):
         if n in by_name:
             panels.append(by_name[n])
@@ -287,9 +287,7 @@ def _compose_overview(
     for ax, p in zip(axes, panels, strict=False):
         img = plt.imread(p)
         ax.imshow(img)
-    title = "Splitsmith ensemble sweep -- " + (
-        "x".join(swept) if swept else "defaults snapshot"
-    )
+    title = "Splitsmith ensemble sweep -- " + ("x".join(swept) if swept else "defaults snapshot")
     fig.suptitle(title, fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=130)
@@ -331,11 +329,15 @@ def _write_report(
         lines.append("")
         lines.append("### Best aggregate F1")
         lines.append("")
-        lines.append(f"- F1 = **{best['f1']:.4f}**, "
-                     f"precision = {best['precision']:.4f}, recall = {best['recall']:.4f}")
-        lines.append(f"- True positives: {best['true_pos']} / {best['n_positives']}; "
-                     f"false positives: {best['false_pos']}; "
-                     f"false negatives: {best['false_neg']}")
+        lines.append(
+            f"- F1 = **{best['f1']:.4f}**, "
+            f"precision = {best['precision']:.4f}, recall = {best['recall']:.4f}"
+        )
+        lines.append(
+            f"- True positives: {best['true_pos']} / {best['n_positives']}; "
+            f"false positives: {best['false_pos']}; "
+            f"false negatives: {best['false_neg']}"
+        )
         lines.append("")
         lines.append("Parameters at the best point:")
         lines.append("")
@@ -371,8 +373,7 @@ def _write_report(
     lines.append(f"![per-fixture]({per_fixture.name})")
     lines.append("")
 
-    fix_rows = [r for r in _fixture_rows(rows)
-                if best is None or r["combo_idx"] == best["combo_idx"]]
+    fix_rows = [r for r in _fixture_rows(rows) if best is None or r["combo_idx"] == best["combo_idx"]]
     if fix_rows:
         lines.append("## Per-fixture table (at best aggregate F1)")
         lines.append("")
@@ -419,9 +420,7 @@ def main() -> None:
     shutil.copyfile(overview, latest_png)
     # Rewrite image paths inside the copied report so the "latest" pointer resolves
     # against the run-id directory rather than the cwd.
-    rewritten = report.read_text().replace("(", f"({run_id}/").replace(
-        f"({run_id}/http", "(http"
-    )
+    rewritten = report.read_text().replace("(", f"({run_id}/").replace(f"({run_id}/http", "(http")
     latest_md.write_text(rewritten)
 
     # Also drop a tracked copy under docs/ so the README image works for
@@ -438,9 +437,7 @@ def main() -> None:
     # (latest_overview.png) since we deliberately don't copy the
     # composite as ``overview.png`` -- it would shadow the run-specific
     # naming on subsequent rebuilds.
-    docs_report = report.read_text().replace(
-        "![overview](overview.png)", "![overview](latest_overview.png)"
-    )
+    docs_report = report.read_text().replace("![overview](overview.png)", "![overview](latest_overview.png)")
     (docs_dir / "latest_report.md").write_text(docs_report)
 
     print(f"run_id: {run_id}")
