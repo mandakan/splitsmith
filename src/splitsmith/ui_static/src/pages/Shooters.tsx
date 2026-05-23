@@ -38,6 +38,7 @@ import {
   type ShooterListEntry,
   type ShooterListResponse,
 } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 const RACING_PALETTES = ["ma", "jl", "pe", "rj", "manual"] as const;
@@ -99,6 +100,7 @@ const PALETTE_STYLE: Record<Palette, {
 
 export function Shooters() {
   const navigate = useNavigate();
+  const href = useMatchHref();
   const [data, setData] = useState<ShooterListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -213,7 +215,7 @@ export function Shooters() {
               stagesTotal={stagesTotal}
               busy={busy === shooter.slug}
               onRemove={() => void remove(shooter.slug, shooter.name)}
-              onOpenAudit={() => navigate(`/audit/${shooter.slug}`)}
+              onOpenAudit={() => navigate(href("audit", shooter.slug))}
               onRebuildTrims={() =>
                 void rebuildTrims(
                   shooter.slug,

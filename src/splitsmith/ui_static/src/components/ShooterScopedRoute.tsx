@@ -17,8 +17,15 @@ interface Props {
 }
 
 export function ShooterScopedRoute({ element }: Props) {
-  const { slug } = useParams<{ slug: string }>();
-  if (!slug) return <Navigate to="/shooters" replace />;
+  const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
+  if (!slug) {
+    return (
+      <Navigate
+        to={matchId ? `/match/${matchId}/shooters` : "/shooters"}
+        replace
+      />
+    );
+  }
   return (
     <span key={slug} style={{ display: "contents" }}>
       {element}

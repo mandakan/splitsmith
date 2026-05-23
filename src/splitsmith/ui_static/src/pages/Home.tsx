@@ -45,6 +45,7 @@ import {
   isNextUpCandidate,
   isTerminal,
 } from "@/lib/stageStatus";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 // Visual tone the home stage card switches on. Derived from the
@@ -65,6 +66,7 @@ interface StageView {
 
 export function Home() {
   const navigate = useNavigate();
+  const href = useMatchHref();
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
   // Slug used for slug-bearing nav links from this page. Lifted off the
@@ -211,7 +213,7 @@ export function Home() {
           <Button
             variant="outline"
             onClick={() =>
-              navigate(navSlug ? `/export/${navSlug}` : "/shooters")
+              navigate(navSlug ? href("export", navSlug) : href("shooters"))
             }
           >
             <ArrowDownToLine className="size-3.5" />
@@ -274,8 +276,9 @@ function ActiveVariant({
   navSlug: string | null;
 }) {
   const navigate = useNavigate();
+  const href = useMatchHref();
   const stageHref = (n: number) =>
-    navSlug ? `/audit/${navSlug}/${n}` : "/shooters";
+    navSlug ? href("audit", navSlug, String(n)) : href("shooters");
   return (
     <>
       {/* Resume hero */}
@@ -370,7 +373,7 @@ function ActiveVariant({
         action={
           <button
             type="button"
-            onClick={() => navigate("/shooters")}
+            onClick={() => navigate(href("shooters"))}
             className="link-led-fill inline-flex items-center gap-1.5"
           >
             Manage shooters
@@ -452,7 +455,8 @@ function EmptyVariant({
   navSlug: string | null;
 }) {
   const navigate = useNavigate();
-  const ingestHref = navSlug ? `/ingest/${navSlug}` : "/shooters";
+  const href = useMatchHref();
+  const ingestHref = navSlug ? href("ingest", navSlug) : href("shooters");
   return (
     <>
       <section
@@ -519,7 +523,7 @@ function EmptyVariant({
         action={
           <button
             type="button"
-            onClick={() => navigate("/shooters")}
+            onClick={() => navigate(href("shooters"))}
             className="link-led-fill inline-flex items-center gap-1.5"
           >
             Manage shooters

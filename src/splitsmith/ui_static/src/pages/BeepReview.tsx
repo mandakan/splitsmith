@@ -38,10 +38,12 @@ import {
   type BeepQueueItem,
   type BeepQueueResponse,
 } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 export function BeepReview() {
   const navigate = useNavigate();
+  const href = useMatchHref();
   const [data, setData] = useState<BeepQueueResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -217,7 +219,7 @@ export function BeepReview() {
             onConfirmAlt={(t) => void confirm(active, t)}
             onSkip={skip}
             onOpenAudit={() =>
-              navigate(`/audit/${active.slug}/${active.stage_number}`)
+              navigate(href("audit", active.slug, String(active.stage_number)))
             }
           />
         ) : (

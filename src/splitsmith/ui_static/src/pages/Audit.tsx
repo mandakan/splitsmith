@@ -95,6 +95,7 @@ import {
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
+import { useMatchHref } from "@/lib/matchHref";
 import { deriveStageStatus } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
@@ -111,6 +112,7 @@ export function Audit() {
     stage?: string;
   }>();
   const navigate = useNavigate();
+  const href = useMatchHref();
   const [searchParams] = useSearchParams();
   const doneParam = searchParams.get("done");
   const nextShooterParam = searchParams.get("next");
@@ -1187,14 +1189,14 @@ export function Audit() {
             activeStage: stageNumber,
           });
           if (step.kind === "stage") {
-            navigate(`/audit/${step.nextSlug}/${step.nextStage}`);
+            navigate(href("audit", step.nextSlug, String(step.nextStage)));
           } else if (step.kind === "shooter" && slugParam != null && stageNumber != null) {
             navigate(
-              `/audit/${slugParam}/${stageNumber}?done=1&next=${encodeURIComponent(step.nextSlug)}`,
+              `${href("audit", slugParam, String(stageNumber))}?done=1&next=${encodeURIComponent(step.nextSlug)}`,
               { replace: true },
             );
           } else if (slugParam != null && stageNumber != null) {
-            navigate(`/audit/${slugParam}/${stageNumber}?done=1`, { replace: true });
+            navigate(`${href("audit", slugParam, String(stageNumber))}?done=1`, { replace: true });
           }
         }
         return true;
@@ -2270,7 +2272,7 @@ export function Audit() {
                 shooters.find((s) => s.slug === slugParam)?.name ?? null
               }
               stats={summaryStats}
-              onJumpToOverview={() => navigate("/shooters")}
+              onJumpToOverview={() => navigate(href("shooters"))}
               nextShooterLabel={
                 nextShooterParam
                   ? (shooters.find((s) => s.slug === nextShooterParam)?.name ??
@@ -2279,7 +2281,7 @@ export function Audit() {
               }
               onAuditNextShooter={
                 nextShooterParam
-                  ? () => navigate(`/audit/${nextShooterParam}`)
+                  ? () => navigate(href("audit", nextShooterParam))
                   : undefined
               }
             />

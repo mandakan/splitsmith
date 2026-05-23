@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from splitsmith.automation import AutomationOverride
@@ -6392,25 +6393,74 @@ def test_match_id_alias_unknown_id_returns_404(tmp_path: Path, _user_config_home
     assert body["detail"]["code"] == "match_not_found"
 
 
-def test_match_id_alias_mismatched_bound_match_returns_409(tmp_path: Path, _user_config_home: Path) -> None:
-    """The middleware refuses a known-but-not-bound match id (#353 Phase 3 PR B).
+def test_match_id_alias_serves_non_bound_match(tmp_path: Path, _user_config_home: Path) -> None:
+    """A non-bound match resolves independently of the bound singleton (#353 Phase 3 PR C).
 
-    Until PR C drops the bound-match singleton, the URL must agree with
-    what the server currently has open. A second Match registered via
-    ``user_config.record_project_open`` resolves through the registry but
-    triggers a 409 because the bound match is the first one.
+    PR B briefly enforced ``match_id == state.bound_match_id``; PR C
+    drops that check because the middleware sets a per-request
+    ContextVar -- two tabs on different matches each get their own
+    scope. Both match ids must be served when both are registered.
     """
     from splitsmith import match_model, user_config
 
-    app, _, _ = _make_match_app(tmp_path)
+    app, bound_match, _ = _make_match_app(tmp_path)
     other_root = tmp_path / "other-match"
     other = match_model.Match.init(other_root, name="Other Match")
     user_config.record_project_open(other_root, other.name, kind="match")
 
     client = TestClient(app)
+    # The bound match still resolves via its own id.
+    resp = client.get(f"/api/matches/{bound_match.match_id}/health")
+    assert resp.status_code == 200
+    # The non-bound match also resolves; no more 409 ``match_mismatch``.
     resp = client.get(f"/api/matches/{other.match_id}/health")
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["code"] == "match_mismatch"
+    assert resp.status_code == 200
+
+
+def test_match_id_alias_contextvar_isolates_per_request(tmp_path: Path, _user_config_home: Path) -> None:
+    """``state.shooter_root(slug)`` honours the per-request contextvar (#353 Phase 3 PR C).
+
+    Directly exercises ``current_match_root`` instead of going through
+    HTTP so the assertion can observe the resolved path without coupling
+    to a specific endpoint's storage layout.
+    """
+    from splitsmith import match_model, user_config
+    from splitsmith.ui.server import current_match_root
+
+    app, bound_match, bound_root = _make_match_app(tmp_path)
+    other_root = tmp_path / "other-match"
+    other = match_model.Match.init(other_root, name="Other Match")
+    other_shooter = match_model.Shooter(slug="alice", name="Alice")
+    other.add_shooter(other_root, other_shooter)
+    user_config.record_project_open(other_root, other.name, kind="match")
+
+    state = app.state.splitsmith_state
+    # No contextvar set -> falls back to bound singleton; ``alice`` isn't
+    # on the bound match, so 404.
+    with pytest.raises(HTTPException) as exc:
+        state.shooter_root("alice")
+    assert exc.value.status_code == 404
+
+    # Set the contextvar to point at the OTHER match (simulating what
+    # the middleware does on /api/matches/{other.match_id}/...). Now
+    # ``alice`` resolves under the other match's shooter dir.
+    token = current_match_root.set(other_root)
+    try:
+        resolved = state.shooter_root("alice")
+        assert resolved == match_model.Match.shooter_root(other_root, "alice")
+    finally:
+        current_match_root.reset(token)
+
+    # After reset the singleton fallback returns -- ``alice`` 404s on
+    # the bound match again, proving the contextvar didn't leak.
+    with pytest.raises(HTTPException) as exc:
+        state.shooter_root("alice")
+    assert exc.value.status_code == 404
+
+    # The bound match's own shooter ``mathias`` still resolves via the
+    # singleton fallback with no contextvar set.
+    resolved = state.shooter_root("mathias")
+    assert resolved == match_model.Match.shooter_root(bound_root, "mathias")
 
 
 def test_match_id_alias_missing_segment_returns_400(tmp_path: Path, _user_config_home: Path) -> None:

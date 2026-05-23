@@ -1,4 +1,12 @@
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
@@ -24,60 +32,46 @@ import { Pick } from "@/pages/Pick";
 import { Shooters } from "@/pages/Shooters";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { Review } from "@/pages/Review";
+import { api } from "@/lib/api";
 
 function RedirectLabSlug() {
   const { slug } = useParams<{ slug: string }>();
   return <Navigate to={`/dev/legacy/lab/${slug ?? ""}`} replace />;
 }
 
-/* All match-scoped routes (#353 Phase 3 PR B). Rendered both under the
- * canonical /match/:matchId/ prefix and at the bare path so legacy
- * bookmarks (and incremental in-app navigations that haven't migrated to
- * the prefix yet) keep working. Once the navigation sweep is done in a
- * follow-up PR the bare paths can drop. */
-function MatchScopedRoutes() {
-  return (
-    <>
-      <Route
-        path="ingest/:slug"
-        element={<ShooterScopedRoute element={<Ingest />} />}
-      />
-      <Route path="ingest" element={<Navigate to="../shooters" replace />} />
-      <Route element={<MatchShell />}>
-        <Route index element={<Home />} />
-        <Route
-          path="audit/:slug"
-          element={<ShooterScopedRoute element={<Audit />} />}
-        />
-        <Route
-          path="audit/:slug/:stage"
-          element={<ShooterScopedRoute element={<Audit />} />}
-        />
-        <Route path="audit" element={<Navigate to="../shooters" replace />} />
-        <Route path="compare/:stage" element={<Compare />} />
-        <Route
-          path="coach/:slug"
-          element={<ShooterScopedRoute element={<Coach />} />}
-        />
-        <Route
-          path="coach/:slug/:stage"
-          element={<ShooterScopedRoute element={<Coach />} />}
-        />
-        <Route path="coach" element={<Navigate to="../shooters" replace />} />
-        <Route path="shooters" element={<Shooters />} />
-        <Route path="beep-review" element={<BeepReview />} />
-        <Route
-          path="export/:slug"
-          element={<ShooterScopedRoute element={<Export />} />}
-        />
-        <Route
-          path="export/:slug/:stage"
-          element={<ShooterScopedRoute element={<Export />} />}
-        />
-        <Route path="export" element={<Navigate to="../shooters" replace />} />
-      </Route>
-    </>
-  );
+/* Catch-all for bare match-scoped paths (``/audit/...``, ``/ingest``,
+ * ``/shooters``, etc.) hit directly via bookmark or external link. Reads
+ * the server's bound ``match_id`` via ``/api/health`` and redirects into
+ * ``/match/:matchId/<original path>``. Falls through to ``/pick`` when no
+ * match is bound. */
+function LegacyMatchRedirect() {
+  const location = useLocation();
+  const [target, setTarget] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .getHealth()
+      .then((h) => {
+        if (!alive) return;
+        if (h.bound && h.match_id) {
+          const rest =
+            location.pathname.startsWith("/") && location.pathname !== "/"
+              ? location.pathname
+              : "";
+          setTarget(`/match/${h.match_id}${rest}${location.search}`);
+        } else {
+          setTarget("/pick");
+        }
+      })
+      .catch(() => {
+        if (alive) setTarget("/pick");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [location.pathname, location.search]);
+  if (target == null) return null;
+  return <Navigate to={target} replace />;
 }
 
 export function App() {
@@ -91,25 +85,52 @@ export function App() {
           <Route path="pick" element={<Pick />} />
           <Route path="pick/new" element={<CreateMatch />} />
           <Route path="pick/merge" element={<MergeMatches />} />
-          {/* Match-mode surfaces ride under the Shot Timer shell as
-              their redesign issues ship. Ingest stays self-shelled
-              (focused-task page, no sidebar).
-
-              Shooter-scoped routes (#353): /audit /export /ingest /coach
-              take an explicit /:slug so the URL alone identifies which
-              shooter is in focus. Slugless visits redirect to /shooters.
-              ShooterScopedRoute keys on slug so the page remounts cleanly
-              when the chip strip switches shooters.
-
-              /compare /shooters /beep-review stay slug-less: compare is
-              inherently multi-shooter, /shooters is the shooter manager
-              itself, beep-review is a cross-shooter queue.
-
-              The same subtree is mounted under /match/:matchId/* so each
-              tab can pin its own match (#353 Phase 3 PR B). The bare-path
-              copy below stays until the in-app navigation sweep is done. */}
-          <Route path="match/:matchId">{MatchScopedRoutes()}</Route>
-          {MatchScopedRoutes()}
+          {/* Canonical match-scoped surfaces (#353 Phase 3 PR C). All
+              shooter / stage / overview / picker-within-match routes
+              live under ``/match/:matchId/...``. Bare match-scoped paths
+              are caught by LegacyMatchRedirect and re-routed into the
+              prefix using ``/api/health.match_id`` so old bookmarks land
+              on the right place. */}
+          <Route path="match/:matchId">
+            <Route
+              path="ingest/:slug"
+              element={<ShooterScopedRoute element={<Ingest />} />}
+            />
+            <Route path="ingest" element={<Navigate to="../shooters" replace />} />
+            <Route element={<MatchShell />}>
+              <Route index element={<Home />} />
+              <Route
+                path="audit/:slug"
+                element={<ShooterScopedRoute element={<Audit />} />}
+              />
+              <Route
+                path="audit/:slug/:stage"
+                element={<ShooterScopedRoute element={<Audit />} />}
+              />
+              <Route path="audit" element={<Navigate to="../shooters" replace />} />
+              <Route path="compare/:stage" element={<Compare />} />
+              <Route
+                path="coach/:slug"
+                element={<ShooterScopedRoute element={<Coach />} />}
+              />
+              <Route
+                path="coach/:slug/:stage"
+                element={<ShooterScopedRoute element={<Coach />} />}
+              />
+              <Route path="coach" element={<Navigate to="../shooters" replace />} />
+              <Route path="shooters" element={<Shooters />} />
+              <Route path="beep-review" element={<BeepReview />} />
+              <Route
+                path="export/:slug"
+                element={<ShooterScopedRoute element={<Export />} />}
+              />
+              <Route
+                path="export/:slug/:stage"
+                element={<ShooterScopedRoute element={<Export />} />}
+              />
+              <Route path="export" element={<Navigate to="../shooters" replace />} />
+            </Route>
+          </Route>
           {/* Developer mode (#331). All four workflow steps + the
               retired Lab + fixture-editor surfaces sit under the
               cyan-accented DeveloperShell. */}
@@ -133,8 +154,12 @@ export function App() {
             {/* Legacy redirects so old bookmarks don't 404. */}
             <Route path="lab" element={<Navigate to="/dev/legacy/lab" replace />} />
             <Route path="lab/:slug" element={<RedirectLabSlug />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
+          {/* Bare match-scoped paths -- caught here and bounced into the
+              ``/match/:matchId/`` prefix via LegacyMatchRedirect. ``/``
+              also goes through here so a fresh-bound match lands on its
+              own overview without the picker needing to plumb the id. */}
+          <Route path="*" element={<LegacyMatchRedirect />} />
         </Routes>
       </BrowserRouter>
     </ModeProvider>
