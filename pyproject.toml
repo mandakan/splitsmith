@@ -92,6 +92,10 @@ dev = [
     "torch>=2.11.0",
     "transformers>=5.7.0",
     "panns-inference>=0.1.1",
+    # S3 multipart upload to Cloudflare R2 (scripts/upload_model_artifacts.py).
+    # wrangler caps single PUTs at 300 MiB; PANN's consolidated ONNX
+    # is ~312 MiB so we route through R2's S3-compatible endpoint.
+    "boto3>=1.35.0",
 ]
 
 [tool.ruff]
