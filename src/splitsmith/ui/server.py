@@ -1900,6 +1900,69 @@ def create_app(
     app.state.splitsmith_state = state
 
     # ----------------------------------------------------------------------
+    # /api/matches/{match_id}/... alias middleware (#353 Phase 3 PR B)
+    # ----------------------------------------------------------------------
+    #
+    # The SPA's URLs are growing a ``/match/:matchId/`` prefix so each tab
+    # can pin its own match. To accept the corresponding API prefix
+    # without rewriting 69 endpoint decorators, we register one HTTP
+    # middleware that strips ``matches/{match_id}/`` from any matching
+    # path and forwards the request to the existing route table.
+    #
+    # Validation: ``match_id`` must resolve via the registry **and** (in
+    # this PR) must equal the currently-bound match. The singleton stays
+    # in place until PR C; the mismatch check protects stale URLs from
+    # silently writing into the wrong match.
+    @app.middleware("http")
+    async def _match_id_alias(request, call_next):
+        path = request.url.path
+        prefix = "/api/matches/"
+        if not path.startswith(prefix):
+            return await call_next(request)
+        remainder = path[len(prefix) :]
+        match_id, sep, rest = remainder.partition("/")
+        if not sep or not match_id:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "detail": {
+                        "code": "match_id_required",
+                        "message": "expected /api/matches/{match_id}/...",
+                    }
+                },
+            )
+        try:
+            state.matches.resolve(match_id)
+        except KeyError:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": {
+                        "code": "match_not_found",
+                        "message": f"unknown match_id {match_id!r}",
+                    }
+                },
+            )
+        if state.bound_match_id and state.bound_match_id != match_id:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "match_mismatch",
+                        "message": (
+                            f"URL match_id {match_id!r} does not match "
+                            f"bound match {state.bound_match_id!r}; rebind via "
+                            "POST /api/me/recent-projects/bind"
+                        ),
+                    }
+                },
+            )
+        rewritten = "/api/" + rest
+        request.scope["path"] = rewritten
+        request.scope["raw_path"] = rewritten.encode("utf-8")
+        return await call_next(request)
+
+    # ----------------------------------------------------------------------
     # API
     # ----------------------------------------------------------------------
 

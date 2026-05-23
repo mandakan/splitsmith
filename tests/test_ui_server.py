@@ -6334,3 +6334,91 @@ def test_merge_execute_refuses_destination_with_existing_match(tmp_path: Path) -
         json={"inputs": [str(a), str(b)], "output": str(out), "name": "Match X"},
     )
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# /api/matches/{match_id}/ alias middleware (#353 Phase 3 PR B)
+# ---------------------------------------------------------------------------
+
+
+def _make_match_app(tmp_path: Path):
+    """Build a TestClient bound to a real Match folder with one shooter."""
+    from splitsmith import match_model
+
+    match_root = tmp_path / "scoped-match"
+    match = match_model.Match.init(match_root, name="Scoped Match")
+    shooter = match_model.Shooter(slug="mathias", name="Mathias")
+    match.add_shooter(match_root, shooter)
+    app = create_app(project_root=match_root, project_name=match.name)
+    return app, match, match_root
+
+
+def test_match_id_alias_rewrites_to_existing_route(tmp_path: Path, _user_config_home: Path) -> None:
+    """``/api/matches/{match_id}/health`` resolves to the same health route."""
+    app, match, _ = _make_match_app(tmp_path)
+    client = TestClient(app)
+
+    direct = client.get("/api/health")
+    aliased = client.get(f"/api/matches/{match.match_id}/health")
+
+    assert direct.status_code == 200
+    assert aliased.status_code == 200
+    # Same payload on either prefix: the middleware strips the
+    # match-id segment and hands off to the existing handler.
+    assert direct.json() == aliased.json()
+    assert aliased.json()["match_id"] == match.match_id
+
+
+def test_match_id_alias_resolves_match_level_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
+    """A real match-level endpoint works through both prefixes."""
+    app, match, _ = _make_match_app(tmp_path)
+    client = TestClient(app)
+
+    direct = client.get("/api/match/shooters")
+    aliased = client.get(f"/api/matches/{match.match_id}/match/shooters")
+
+    assert direct.status_code == 200
+    assert aliased.status_code == 200
+    assert direct.json() == aliased.json()
+
+
+def test_match_id_alias_unknown_id_returns_404(tmp_path: Path, _user_config_home: Path) -> None:
+    app, _, _ = _make_match_app(tmp_path)
+    client = TestClient(app)
+
+    resp = client.get("/api/matches/nope-deadbeef/health")
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body["detail"]["code"] == "match_not_found"
+
+
+def test_match_id_alias_mismatched_bound_match_returns_409(tmp_path: Path, _user_config_home: Path) -> None:
+    """The middleware refuses a known-but-not-bound match id (#353 Phase 3 PR B).
+
+    Until PR C drops the bound-match singleton, the URL must agree with
+    what the server currently has open. A second Match registered via
+    ``user_config.record_project_open`` resolves through the registry but
+    triggers a 409 because the bound match is the first one.
+    """
+    from splitsmith import match_model, user_config
+
+    app, _, _ = _make_match_app(tmp_path)
+    other_root = tmp_path / "other-match"
+    other = match_model.Match.init(other_root, name="Other Match")
+    user_config.record_project_open(other_root, other.name, kind="match")
+
+    client = TestClient(app)
+    resp = client.get(f"/api/matches/{other.match_id}/health")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "match_mismatch"
+
+
+def test_match_id_alias_missing_segment_returns_400(tmp_path: Path, _user_config_home: Path) -> None:
+    app, _, _ = _make_match_app(tmp_path)
+    client = TestClient(app)
+
+    # No trailing segment after /api/matches/{id} -- the middleware can't
+    # rewrite to a real route without one.
+    resp = client.get("/api/matches/")
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "match_id_required"

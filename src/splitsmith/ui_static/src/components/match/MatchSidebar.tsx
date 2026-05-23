@@ -79,6 +79,12 @@ interface MatchSidebarProps {
    *  focus (e.g. /shooters, /); in that case the per-shooter nav rows
    *  point at /shooters so the user picks one. */
   shooterSlug?: string;
+  /** Match identifier for the canonical ``/match/:matchId/`` URL prefix
+   *  (#353 Phase 3 PR B). When set the sidebar's nav rows include it so
+   *  every click stays inside the match-scoped subtree. ``undefined`` on
+   *  legacy bind contexts (no match id) -- in that case the bare paths
+   *  are used and React Router's legacy routes pick them up. */
+  matchId?: string;
   /** Collapsed state -- when true the sidebar renders at COLLAPSED_WIDTH
    *  with icon-only nav and the match card / stages list hidden. */
   collapsed?: boolean;
@@ -99,10 +105,16 @@ export function MatchSidebar({
   awaiting = false,
   onStageClick,
   shooterSlug,
+  matchId,
   collapsed = false,
   onCollapseToggle,
   className,
 }: MatchSidebarProps) {
+  // Prefix every nav row with /match/:matchId when one is in scope, so
+  // clicks keep the user inside the match-scoped subtree (#353 Phase 3).
+  // Without a match id we fall back to the bare paths -- legacy routes
+  // in App.tsx still resolve them, so this stays backwards compatible.
+  const base = matchId ? `/match/${matchId}` : "";
   // Sidebar header shows audited / total. Skipped stages count as
   // closed out (operator made a decision) but read as audited in the
   // tally; this matches the Home progress bar.
@@ -169,7 +181,7 @@ export function MatchSidebar({
         )}
       >
         <SidebarLink
-          to="/"
+          to={`${base}/`}
           icon={<LayoutGrid className="size-[15px]" />}
           end
           collapsed={collapsed}
@@ -177,21 +189,21 @@ export function MatchSidebar({
           Overview
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `/audit/${shooterSlug}` : "/shooters"}
+          to={shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters`}
           icon={<Crosshair className="size-[15px]" />}
           collapsed={collapsed}
         >
           Audit
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `/coach/${shooterSlug}` : "/shooters"}
+          to={shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters`}
           icon={<ClipboardCheck className="size-[15px]" />}
           collapsed={collapsed}
         >
           Coach
         </SidebarLink>
         <SidebarLink
-          to="/shooters"
+          to={`${base}/shooters`}
           icon={<Users className="size-[15px]" />}
           count={shooterCount}
           badgeKind="count"
@@ -200,14 +212,14 @@ export function MatchSidebar({
           Shooters
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `/ingest/${shooterSlug}` : "/shooters"}
+          to={shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters`}
           icon={<Film className="size-[15px]" />}
           collapsed={collapsed}
         >
           Videos
         </SidebarLink>
         <SidebarLink
-          to="/beep-review"
+          to={`${base}/beep-review`}
           icon={<Volume2 className="size-[15px]" />}
           count={beepReviewPendingCount}
           badgeKind="pending"
@@ -216,7 +228,7 @@ export function MatchSidebar({
           Beep review
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `/export/${shooterSlug}` : "/shooters"}
+          to={shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters`}
           icon={<ArrowDownToLine className="size-[15px]" />}
           collapsed={collapsed}
         >

@@ -54,7 +54,10 @@ export function MatchShell() {
   // /compare/:stage). When a slug is in the URL we load that shooter's
   // project so the sidebar reflects their progress; otherwise the sidebar
   // shows match-level info without per-stage status.
-  const { slug } = useParams<{ slug?: string }>();
+  const { slug, matchId: urlMatchId } = useParams<{
+    slug?: string;
+    matchId?: string;
+  }>();
   const { pathname } = useLocation();
   const { mode, setMode } = useMode();
   // Trailing breadcrumb segment ("AUDIT" / "COACH" / ...) derived from the
@@ -371,9 +374,12 @@ export function MatchShell() {
           }
           onStageClick={(n) => {
             const target = slug ?? health?.default_shooter_slug;
-            navigate(target ? `/audit/${target}/${n}` : "/shooters");
+            const mid = urlMatchId ?? health?.match_id ?? null;
+            const base = mid ? `/match/${mid}` : "";
+            navigate(target ? `${base}/audit/${target}/${n}` : `${base}/shooters`);
           }}
           shooterSlug={slug ?? health?.default_shooter_slug ?? undefined}
+          matchId={urlMatchId ?? health?.match_id ?? undefined}
           collapsed={sidebarCollapsed}
           onCollapseToggle={toggleSidebar}
         />
