@@ -78,6 +78,11 @@ dev = [
     # Dev-only: the production API does not read these files.
     "pyarrow>=17.0.0",
     "matplotlib>=3.9.0",
+    # Packaging the splitsmith-server sidecar into a standalone binary
+    # for the (closed-source) desktop shell (issue #371). Invoked via
+    # the .github/workflows/release.yml matrix; dev-only because the
+    # OSS workflow is "splitsmith ui" via the source checkout.
+    "pyinstaller>=6.10.0",
 ]
 
 [tool.ruff]

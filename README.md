@@ -82,6 +82,10 @@ uv run pytest -q                # unit tests
 uv run pytest -q -m integration # ffmpeg/ffprobe-backed tests
 ```
 
+## Prebuilt sidecar binaries
+
+For embedding the engine into a desktop shell (issue #129), tagged releases on the [GitHub releases page](https://github.com/mandakan/splitsmith/releases) ship a standalone `splitsmith-server` per platform (macOS arm64/x86_64, Linux x86_64, Windows x86_64). The binary boots a local HTTP server, prints a `SPLITSMITH_READY {json}` handshake on stderr, and serves the same FastAPI surface the source checkout does. ffmpeg/ffprobe are **not** bundled -- drop them next to the binary or rely on `PATH`; the runtime resolver looks at both.
+
 ## Subcommands
 
 All commands run as `uv run splitsmith <subcommand>`. Pass `--help` for the full option list. See [`docs/COMMANDS.md`](docs/COMMANDS.md) for usage examples per command.
