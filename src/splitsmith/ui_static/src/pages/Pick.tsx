@@ -39,10 +39,21 @@ import {
   api,
   type RecentProjectDetail,
   type ScoreboardIdentity,
+  type ServerHealth,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "in_progress" | "exported" | "archived";
+
+/** Build the URL the picker should navigate to after a successful bind.
+ *
+ * Prefers the match-id-prefixed home (#353 Phase 3 PR B) so each tab
+ * carries its match in the URL. Falls back to ``/`` when the server
+ * doesn't surface an id (legacy single-shooter projects, or a future
+ * unbound state). */
+function matchHome(health: ServerHealth): string {
+  return health.match_id ? `/match/${health.match_id}/` : "/";
+}
 
 export function Pick() {
   const navigate = useNavigate();
@@ -148,8 +159,8 @@ export function Pick() {
     setOpening(target.path);
     setError(null);
     try {
-      await api.bindProject(target.path, target.name);
-      navigate("/", { replace: true });
+      const health = await api.bindProject(target.path, target.name);
+      navigate(matchHome(health), { replace: true });
     } catch (e: unknown) {
       setOpening(null);
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -175,8 +186,8 @@ export function Pick() {
     setOpening(trimmed);
     setError(null);
     try {
-      await api.bindProject(trimmed);
-      navigate("/", { replace: true });
+      const health = await api.bindProject(trimmed);
+      navigate(matchHome(health), { replace: true });
     } catch (e: unknown) {
       setOpening(null);
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -192,7 +203,10 @@ export function Pick() {
         overwrite: importOverwrite,
         bind: true,
       });
-      navigate("/", { replace: true });
+      // Import returns a manifest, not a HealthResponse -- read /api/health
+      // to pick up the just-bound match's id for the URL prefix.
+      const health = await api.getHealth();
+      navigate(matchHome(health), { replace: true });
     } catch (e: unknown) {
       setImporting(false);
       setError(e instanceof ApiError ? e.detail : String(e));

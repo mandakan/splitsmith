@@ -1101,9 +1101,16 @@ export function isNoProjectError(err: unknown): boolean {
  *  the SPA renders the picker until the user selects one. */
 export interface ServerHealth {
   status: string;
+  /** Engine version (issue #131). */
+  version?: string;
   bound: boolean;
   project_name: string | null;
   project_root: string | null;
+  /** Stable match identifier (#353 Phase 3). Populated for ``kind="match"``;
+   *  ``null`` for legacy single-shooter projects and the unbound state.
+   *  SPA URLs are migrating to a ``/match/:matchId/`` prefix; this field
+   *  is the source of truth for what to write into the URL. */
+  match_id?: string | null;
   /** Discriminates the on-disk layout. ``"match"`` for the Match -> Shooter
    *  folder layout; ``"legacy"`` for single-shooter projects that predate
    *  the split; ``null`` when the server is unbound. */
