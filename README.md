@@ -74,13 +74,22 @@ uv run splitsmith ui --project ~/matches/your-match
 ```bash
 git clone https://github.com/mandakan/splitsmith.git
 cd splitsmith
-uv sync
+uv sync                                          # slim runtime deps only (~100 MB)
+uv sync --all-groups                             # add torch / transformers / panns_inference + tests
 (cd src/splitsmith/ui_static && pnpm install && pnpm build)
 
 uv run splitsmith --help
 uv run pytest -q                # unit tests
 uv run pytest -q -m integration # ffmpeg/ffprobe-backed tests
 ```
+
+## Runtime backends (slim ONNX vs dev torch)
+
+The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). `uv sync` alone installs the slim stack -- no torch, no transformers, no panns_inference. The first detection downloads ~180 MB of ONNX artifacts from `models.splitsmith.app` into `~/.splitsmith/models/` (pre-fetch with `uv run splitsmith fetch-models`).
+
+The dev backend (torch + transformers + panns_inference) ships in the `[dev]` group and is required for: re-running `scripts/build_ensemble_artifacts.py`, the ONNX export scripts (`scripts/export_pann_onnx.py`, `scripts/export_clap_onnx.py`), and enabling Voter E (CLIP visual probe -- off by default; turn on with `SPLITSMITH_ENABLE_VOTER_E=1` after `uv sync --all-groups`).
+
+`select_backend()` resolves to torch when both backends are importable (dev path with HF caches), and to onnxruntime by elimination otherwise (slim install). Override per-process with `SPLITSMITH_BACKEND=torch|onnx`. See [`docs/local-slim/`](docs/local-slim/) for the full design.
 
 ## Subcommands
 
