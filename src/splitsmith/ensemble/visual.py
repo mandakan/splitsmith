@@ -28,6 +28,8 @@ from typing import Any
 
 import numpy as np
 
+from ..runtime import runtime as process_runtime
+
 CLIP_VISUAL_MODEL_ID = "openai/clip-vit-base-patch32"
 CLIP_VISUAL_EMBED_DIM = 512
 DEFAULT_FRAME_OFFSETS: tuple[float, ...] = (0.0,)
@@ -172,8 +174,9 @@ def compute_visual_features(
         return np.zeros((0, n_offsets * CLIP_VISUAL_EMBED_DIM), dtype=np.float32)
     if not video_path.exists():
         raise FileNotFoundError(f"Voter E source video not found: {video_path}")
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("Voter E requires ffmpeg on $PATH")
+    ffmpeg_bin = process_runtime().ffmpeg_binary
+    if not shutil.which(ffmpeg_bin):
+        raise RuntimeError(f"Voter E requires ffmpeg: {ffmpeg_bin} not found")
 
     fingerprint = _video_fingerprint(video_path)
     times = np.asarray(source_times, dtype=np.float64)
@@ -188,7 +191,7 @@ def compute_visual_features(
                 missing.append((p, float(t) + float(off)))
 
     for dest, t_seek in missing:
-        if not _extract_frame(video_path, t_seek, dest):
+        if not _extract_frame(video_path, t_seek, dest, ffmpeg=ffmpeg_bin):
             raise RuntimeError(
                 f"Voter E: ffmpeg frame extraction failed for {video_path} at "
                 f"t={t_seek:.3f}s (target {dest.name})"

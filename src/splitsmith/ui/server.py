@@ -100,6 +100,7 @@ from .. import ensemble as ensemble_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
+from ..runtime import runtime as process_runtime
 from ..config import (
     BeepDetectConfig,
     CoachAutoClassifyConfig,
@@ -660,11 +661,12 @@ def _trim_wav_to_clip(src_wav: Path, dst_wav: Path, start_s: float, end_s: float
     Re-encodes (PCM s16 / mono / 48 kHz) so the output is a stable WAV
     regardless of the source codec.
     """
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg binary not found on PATH")
+    ffmpeg_bin = process_runtime().ffmpeg_binary
+    if not shutil.which(ffmpeg_bin):
+        raise RuntimeError(f"ffmpeg binary not found: {ffmpeg_bin}")
     duration = max(0.0, end_s - start_s)
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-hide_banner",
         "-loglevel",
         "error",
@@ -3028,6 +3030,7 @@ def create_app(
                 video,
                 source,
                 project=proj,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
         except beep_detect.BeepNotFoundError as exc:
             # Primary failure is fatal -- the entire downstream pipeline
@@ -3150,6 +3153,7 @@ def create_app(
                     stg.time_seconds,
                     project=proj,
                     runner=_cancellable_runner(handle),
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
                 video.processed["trim"] = True
                 trimmed_ok = True
@@ -3443,6 +3447,7 @@ def create_app(
             stg.time_seconds,
             project=proj,
             runner=_cancellable_runner(handle),
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
         )
         handle.update(progress=0.85, message="Saving project...")
         # Read-modify-write to avoid stomping concurrent edits made
@@ -3513,6 +3518,7 @@ def create_app(
             stg.time_seconds,
             project=proj,
             runner=_cancellable_runner(handle),
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
         )
         handle.update(progress=0.85, message="Saving project...")
         fresh = MatchProject.load(shooter_root)
@@ -3592,6 +3598,7 @@ def create_app(
                 stg.time_seconds,
                 project=proj,
                 runner=_cancellable_runner(handle),
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
             trim_fresh = state.shooter_project(slug)
             try:
@@ -3618,6 +3625,7 @@ def create_app(
             source,
             prim.beep_time,
             project=proj,
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
         )
         beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
 
@@ -4145,7 +4153,12 @@ def create_app(
             raise HTTPException(status_code=400, detail="window_s must be > 0")
 
         audio_path = audio_helpers.ensure_video_audio(
-            state.shooter_root(slug), stage_number, video, source, project=project
+            state.shooter_root(slug),
+            stage_number,
+            video,
+            source,
+            project=project,
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
         )
         audio, sr = beep_detect.load_audio(audio_path)
         duration_s = audio.size / sr if sr > 0 else 0.0
@@ -4407,6 +4420,7 @@ def create_app(
                 project.resolve_video_path(state.shooter_root(slug), primary.path),
                 primary.beep_time,
                 project=project,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -4436,6 +4450,7 @@ def create_app(
                 video,
                 source,
                 project=project,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -4477,6 +4492,7 @@ def create_app(
                 center_time=float(center),
                 duration_s=1.0,
                 width=480,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
         except thumbnail_helpers.ThumbnailError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -7839,7 +7855,12 @@ def create_app(
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
-                    state.shooter_root(slug), stage_number, video, source, project=project
+                    state.shooter_root(slug),
+                    stage_number,
+                    video,
+                    source,
+                    project=project,
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
             except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -8054,7 +8075,12 @@ def create_app(
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
-                    state.shooter_root(slug), stage_number, video, source, project=project
+                    state.shooter_root(slug),
+                    stage_number,
+                    video,
+                    source,
+                    project=project,
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
             except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -8737,7 +8763,11 @@ def _video_metadata_for(
         duration = cached_probe.duration
     elif allow_new:
         try:
-            result = video_probe.probe(source, cache_dir=probes_dir)
+            result = video_probe.probe(
+                source,
+                cache_dir=probes_dir,
+                ffprobe_binary=process_runtime().ffprobe_binary,
+            )
             duration = result.duration
         except video_probe.ProbeError as exc:
             logger.debug("probe failed for %s: %s", source, exc)
@@ -8753,6 +8783,7 @@ def _video_metadata_for(
                 source,
                 cache_dir=thumbs_dir,
                 duration=t_dur,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
             thumbnail_url = f"/api/shooters/{slug}/thumbnails/{extracted.stem}.jpg"
         except thumbnail_helpers.ThumbnailError as exc:

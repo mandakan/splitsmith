@@ -24,6 +24,7 @@ from . import beep_detect
 from . import lab as lab_module
 from .cross_align import CrossAlignError, align_secondary_to_primary
 from .ensemble.api import detect_shots_ensemble, load_ensemble_runtime
+from .runtime import runtime as process_runtime
 from .fixture_schema import (
     AgcState,
     AudioSource,
@@ -275,10 +276,11 @@ def load_config(
 
 def _extract_video_audio(video: Path, dest: Path, *, sample_rate: int) -> None:
     """Drop a mono float32 WAV at ``dest`` from ``video`` via ffmpeg."""
-    if not shutil.which("ffmpeg"):
-        raise typer.BadParameter("ffmpeg binary not found on PATH")
+    ffmpeg_bin = process_runtime().ffmpeg_binary
+    if not shutil.which(ffmpeg_bin):
+        raise typer.BadParameter(f"ffmpeg binary not found: {ffmpeg_bin}")
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-hide_banner",
         "-loglevel",
         "error",
