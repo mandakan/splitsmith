@@ -60,7 +60,42 @@ SHOOTER_SUBDIRS = SUBDIRS  # raw / audio / trimmed / audit / exports / scoreboar
 #: the legacy MatchProject schema (which tops out at 2) so the version space
 #: is shared and "is this a redesign-era match or a legacy project?" can be
 #: answered from a single integer.
-MATCH_SCHEMA_VERSION = 3
+#:
+#: v3 -> v4 adds ``match_id`` (issue #353 Phase 3). Pre-v4 matches get a
+#: deterministic id assigned on first load (derived from name + created_at
+#: so a re-open from the same disk always lands on the same id).
+MATCH_SCHEMA_VERSION = 4
+
+
+def _slugify(name: str) -> str:
+    """Kebab-case ``name`` for use inside a URL-safe identifier.
+
+    Strips diacritics down to ASCII via ``unicodedata.normalize``, lowers,
+    keeps ``[a-z0-9]`` runs, joins with ``-``. Bounded to 32 chars so the
+    full ``<slug>-<hash>`` id stays under typical URL-segment limits.
+    Empty result (e.g. all-symbol name) falls back to ``"match"``.
+    """
+    import re
+    import unicodedata
+
+    normalised = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    parts = re.findall(r"[a-z0-9]+", normalised.lower())
+    slug = "-".join(parts)[:32].strip("-")
+    return slug or "match"
+
+
+def generate_match_id(name: str, created_at: datetime) -> str:
+    """Deterministic, URL-safe match id from immutable identity fields.
+
+    ``<slug-of-name>-<10-char hash>``. The hash mixes name + ``created_at``
+    so two matches with the same name (different timestamps) get distinct
+    ids; once assigned the id is frozen in ``match.json`` and a later rename
+    does not invalidate links.
+    """
+    import hashlib
+
+    digest = hashlib.sha1(f"{name}\x00{created_at.isoformat()}".encode()).hexdigest()[:10]
+    return f"{_slugify(name)}-{digest}"
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +204,12 @@ class Match(BaseModel):
 
     schema_version: int = MATCH_SCHEMA_VERSION
     name: str
+    #: Stable, URL-safe match identifier (issue #353 Phase 3). Persisted in
+    #: ``match.json`` so SPA routes can carry the id without leaking the
+    #: filesystem path. Optional on the model to allow the v3 -> v4 load-time
+    #: migration; :meth:`Match.load` assigns + saves it when missing so
+    #: in-memory ``Match`` instances always have one set.
+    match_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scoreboard_match_id: str | None = None
@@ -198,6 +239,7 @@ class Match(BaseModel):
         if existing.exists():
             return cls.load(root)
         match = cls(name=name)
+        match.match_id = generate_match_id(match.name, match.created_at)
         match.save(root)
         return match
 
@@ -208,6 +250,11 @@ class Match(BaseModel):
         Raises ``FileNotFoundError`` if ``root`` is neither a match folder
         nor a legacy project folder. Use :meth:`is_match_folder` or
         :meth:`from_path` to inspect a path without raising.
+
+        Side effect: pre-v4 matches (no ``match_id`` on disk) get one
+        assigned deterministically and the file is re-saved. The id is
+        derived from immutable identity fields so subsequent loads land on
+        the same value; once persisted the id is frozen.
         """
         path = root / MATCH_FILE
         if not path.exists():
@@ -215,7 +262,11 @@ class Match(BaseModel):
         import json
 
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls.model_validate(data)
+        match = cls.model_validate(data)
+        if not match.match_id:
+            match.match_id = generate_match_id(match.name, match.created_at)
+            match.save(root)
+        return match
 
     def save(self, root: Path) -> None:
         """Atomically persist the match to ``<root>/match.json``."""

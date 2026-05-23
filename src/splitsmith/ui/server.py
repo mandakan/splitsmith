@@ -117,6 +117,7 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
+from ..match_registry import MatchRegistry
 from ..runtime import runtime as process_runtime
 from . import audio as audio_helpers
 from . import exports as export_helpers
@@ -533,7 +534,9 @@ class AppState:
     _bound_root: Path | None = None
     _bound_kind: Literal["match", "legacy"] | None = None
     _bound_name: str | None = None
+    _bound_match_id: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
+    matches: MatchRegistry = field(default_factory=MatchRegistry)
 
     @property
     def is_bound(self) -> bool:
@@ -599,20 +602,34 @@ class AppState:
         """Load the legacy ``MatchProject`` for ``slug``."""
         return MatchProject.load(self.shooter_root(slug))
 
+    @property
+    def bound_match_id(self) -> str | None:
+        """The bound match's stable id, or ``None`` when unbound / legacy."""
+        return self._bound_match_id
+
     def bind_match(self, root: Path, name: str) -> None:
         self._bound_root = root
         self._bound_kind = "match"
         self._bound_name = name
+        # Load to ensure ``match_id`` is materialised (Match.load runs the
+        # v3 -> v4 migration on the fly), then pin it into the registry so
+        # the id resolves immediately even before the next recents refresh.
+        match = match_model.Match.load(root)
+        self._bound_match_id = match.match_id
+        if match.match_id:
+            self.matches.register(match.match_id, root)
 
     def bind_legacy(self, root: Path, name: str) -> None:
         self._bound_root = root
         self._bound_kind = "legacy"
         self._bound_name = name
+        self._bound_match_id = None
 
     def unbind(self) -> None:
         self._bound_root = None
         self._bound_kind = None
         self._bound_name = None
+        self._bound_match_id = None
 
 
 def legacy_slug(project: MatchProject) -> str:
@@ -721,6 +738,10 @@ class HealthResponse(BaseModel):
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
+    # Stable match identifier (issue #353 Phase 3 PR A). ``None`` when
+    # unbound or bound to a legacy single-shooter project. The SPA will
+    # start scoping URLs on this in a follow-up PR.
+    match_id: str | None = None
     # Layout discriminator + a default slug for shooter-scoped URLs (#353).
     # Match-bound: the alphabetically-first registered shooter, or ``None``
     # when the match is empty. Legacy-bound: the deterministic legacy slug.
@@ -791,6 +812,9 @@ class RecentProjectDetail(BaseModel):
     name: str
     last_opened_at: datetime
     kind: Literal["match", "legacy", "missing", "unknown"]
+    # Stable match identifier (#353 Phase 3). Populated for ``kind="match"``
+    # via the load-time migration; ``None`` on legacy / missing / unknown.
+    match_id: str | None = None
     # The five fields below only populate for resolved kinds.
     shooter_count: int = 0
     stage_count: int = 0
@@ -1758,6 +1782,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             match = match_model.Match.load(path)
             detail.kind = "match"
             detail.name = match.name or rp.name
+            detail.match_id = match.match_id
             detail.shooter_count = len(match.shooters)
             detail.stage_count = len(match.stages)
             detail.match_date = match.match_date.isoformat() if match.match_date else None
@@ -1843,6 +1868,12 @@ def create_app(
     nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
     """
     state = AppState()
+    # Populate the match-id registry from recent projects so id -> path
+    # lookups resolve without waiting for a picker bind. Cheap (one
+    # match.json read per recent entry; legacy projects are skipped).
+    # Pre-v4 match.json files get the id assigned + persisted here on
+    # the fly via Match.load's load-time migration.
+    state.matches.refresh_from_recent_projects()
     # Load .env / .env.local before binding so SPLITSMITH_SSI_TOKEN (and
     # friends) are available on the unbound boot path too -- the
     # create-match-from-scoreboard flow needs the token before any
@@ -1917,6 +1948,7 @@ def create_app(
             project_root=str(state.bound_root),
             kind=kind,
             default_shooter_slug=default_slug,
+            match_id=state.bound_match_id,
         )
 
     @app.get("/api/health", response_model=HealthResponse)
