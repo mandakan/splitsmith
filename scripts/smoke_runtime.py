@@ -147,7 +147,10 @@ def main() -> None:
     cfg = EnsembleConfig()
     print(f"Calibration built at: {runtime.calibration.built_at}")
     print(f"Default class: {runtime.calibration.default_camera_class}  consensus: {cfg.consensus}")
-    print(f"{'fixture':62s} {'kept':>5s} {'TP':>4s} {'FP':>4s} {'FN':>4s} {'gt':>4s} {'prec':>7s} {'rec':>7s}")
+    print(
+        f"{'fixture':62s} {'kept':>5s} {'TP':>4s} {'FP':>4s} "
+        f"{'FN':>4s} {'gt':>4s} {'prec':>7s} {'rec':>7s}"
+    )
     print("-" * 110)
 
     rows: list[dict[str, object]] = []

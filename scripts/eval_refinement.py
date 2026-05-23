@@ -41,12 +41,16 @@ def main() -> None:
         min_confidence=args.min_confidence,
     )
 
-    print(f"method={args.method}  search=+/-{args.search_half_window_ms:.0f}ms  "
-          f"min_conf={args.min_confidence}\n")
+    print(
+        f"method={args.method}  search=+/-{args.search_half_window_ms:.0f}ms  "
+        f"min_conf={args.min_confidence}\n"
+    )
     all_orig: list[float] = []
     all_refined: list[float] = []
-    print(f"{'fixture':38s} {'n_pos':>5s} {'orig_med':>9s} {'orig_p90':>9s} "
-          f"{'ref_med':>8s} {'ref_p90':>8s} {'big_fix':>7s} {'rejected':>8s}")
+    print(
+        f"{'fixture':38s} {'n_pos':>5s} {'orig_med':>9s} {'orig_p90':>9s} "
+        f"{'ref_med':>8s} {'ref_p90':>8s} {'big_fix':>7s} {'rejected':>8s}"
+    )
     for fix in DEFAULT_FIXTURES:
         truth_path = FIXTURES_DIR / f"{fix}.json"
         if not truth_path.exists():
@@ -88,16 +92,20 @@ def main() -> None:
         all_refined.extend(refined_drifts)
         o = np.array(orig_drifts)
         r_arr = np.array(refined_drifts)
-        print(f"{fix:38s} {len(orig_drifts):5d} "
-              f"{np.median(o):8.1f}  {np.quantile(o, 0.9):8.1f}  "
-              f"{np.median(r_arr):7.1f}  {np.quantile(r_arr, 0.9):7.1f}  "
-              f"{big_fixes:7d}  {rejected:8d}")
+        print(
+            f"{fix:38s} {len(orig_drifts):5d} "
+            f"{np.median(o):8.1f}  {np.quantile(o, 0.9):8.1f}  "
+            f"{np.median(r_arr):7.1f}  {np.quantile(r_arr, 0.9):7.1f}  "
+            f"{big_fixes:7d}  {rejected:8d}"
+        )
 
     o = np.array(all_orig)
     r = np.array(all_refined)
-    print(f"\n{'TOTAL':38s} {len(all_orig):5d} "
-          f"{np.median(o):8.1f}  {np.quantile(o, 0.9):8.1f}  "
-          f"{np.median(r):7.1f}  {np.quantile(r, 0.9):7.1f}")
+    print(
+        f"\n{'TOTAL':38s} {len(all_orig):5d} "
+        f"{np.median(o):8.1f}  {np.quantile(o, 0.9):8.1f}  "
+        f"{np.median(r):7.1f}  {np.quantile(r, 0.9):7.1f}"
+    )
     delta_med = np.median(o) - np.median(r)
     delta_p90 = np.quantile(o, 0.9) - np.quantile(r, 0.9)
     print(f"  median improvement: {delta_med:+.1f} ms")

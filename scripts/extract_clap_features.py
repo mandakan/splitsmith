@@ -165,10 +165,7 @@ def extract_for_fixture(name: str, *, force: bool, model, processor, full: bool 
         text_sims=text_sims.astype(np.float32),
         prompts=np.array(PROMPTS, dtype=object),
     )
-    print(
-        f"  {name}: {len(times)} cands  audio_emb {audio_emb.shape}  "
-        f"text_sims {text_sims.shape}"
-    )
+    print(f"  {name}: {len(times)} cands  audio_emb {audio_emb.shape}  " f"text_sims {text_sims.shape}")
 
 
 def main() -> None:
@@ -198,12 +195,10 @@ def main() -> None:
     fixtures = args.fixture or DEFAULT_FIXTURES
     print("\nExtracting CLAP features:")
     for f in fixtures:
-        extract_for_fixture(
-            f, force=args.force, model=model, processor=processor, full=args.full
-        )
+        extract_for_fixture(f, force=args.force, model=model, processor=processor, full=args.full)
     suffix = "_clap_full" if args.full else "_clap"
     print(f"\nDone. Cached to tests/fixtures/.cache/*{suffix}.npz")
-    print(f"\nPrompts (in column order):")
+    print("\nPrompts (in column order):")
     for i, prompt in enumerate(PROMPTS):
         flag = "[shot]" if prompt in PROMPTS_SHOT else "[not] "
         print(f"  {i:2d} {flag} {prompt}")

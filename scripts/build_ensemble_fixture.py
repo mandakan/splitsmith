@@ -87,23 +87,17 @@ def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[
     return labels
 
 
-def _hand_features(
-    audio, sr, t, all_times, beep_time, confidence, peak_amp
-) -> list[float]:
+def _hand_features(audio, sr, t, all_times, beep_time, confidence, peak_amp) -> list[float]:
     idx = int(round(t * sr))
     n = audio.size
     win = int(0.050 * sr)
     pre_lo, pre_hi = max(0, idx - win), idx
     post_lo, post_hi = idx, min(n, idx + win)
     rms_pre = (
-        float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2)))
-        if pre_hi > pre_lo
-        else 0.0
+        float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2))) if pre_hi > pre_lo else 0.0
     )
     rms_post = (
-        float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2)))
-        if post_hi > post_lo
-        else 0.0
+        float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2))) if post_hi > post_lo else 0.0
     )
     pre10 = int(0.010 * sr)
     a_lo = max(0, idx - pre10)
@@ -208,9 +202,7 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
 
         clap = np.load(CACHE_DIR / f"{fix}_clap.npz", allow_pickle=True)
         if clap["audio_emb"].shape[0] != len(all_shots):
-            raise SystemExit(
-                f"{fix}: CLAP cache stale; re-run extract_clap_features.py --force"
-            )
+            raise SystemExit(f"{fix}: CLAP cache stale; re-run extract_clap_features.py --force")
         prompts = [str(p) for p in clap["prompts"].tolist()]
         sims = clap["text_sims"]
         shot_idx = [i for i, p in enumerate(prompts) if p in _CLAP_PROMPTS_SHOT]
@@ -221,14 +213,10 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
 
         pann_path = CACHE_DIR / f"{fix}_pann.npz"
         if not pann_path.exists():
-            raise SystemExit(
-                f"{fix}: PANN cache missing; run scripts/extract_audio_embeddings.py first."
-            )
+            raise SystemExit(f"{fix}: PANN cache missing; run scripts/extract_audio_embeddings.py first.")
         pann = np.load(pann_path)
         if pann["gunshot_prob"].shape[0] != len(all_shots):
-            raise SystemExit(
-                f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force"
-            )
+            raise SystemExit(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
         gunshot_prob = pann["gunshot_prob"]
 
         per_fixture[fix] = {
@@ -239,23 +227,30 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
 
         for i, shot in enumerate(all_shots):
             feats = _hand_features(
-                audio, sr, shot.time_absolute, cand_t, truth["beep_time"],
-                shot.confidence, shot.peak_amplitude,
+                audio,
+                sr,
+                shot.time_absolute,
+                cand_t,
+                truth["beep_time"],
+                shot.confidence,
+                shot.peak_amplitude,
             )
             per_fixture[fix]["indices_in_universe"].append(len(universe))
-            universe.append({
-                "fixture": fix,
-                "t": shot.time_absolute,
-                "label": labels[i],
-                "vote_a": int(round(shot.time_absolute, 6) in safe_times),
-                "clap_diff": float(diff[i]),
-                "gunshot_prob": float(gunshot_prob[i]),
-                "hand_feats": feats,
-                "clap_sims": list(sims[i]),
-                "peak_amplitude": float(shot.peak_amplitude),
-                "confidence": float(shot.confidence),
-                "time_from_beep": float(shot.time_from_beep),
-            })
+            universe.append(
+                {
+                    "fixture": fix,
+                    "t": shot.time_absolute,
+                    "label": labels[i],
+                    "vote_a": int(round(shot.time_absolute, 6) in safe_times),
+                    "clap_diff": float(diff[i]),
+                    "gunshot_prob": float(gunshot_prob[i]),
+                    "hand_feats": feats,
+                    "clap_sims": list(sims[i]),
+                    "peak_amplitude": float(shot.peak_amplitude),
+                    "confidence": float(shot.confidence),
+                    "time_from_beep": float(shot.time_from_beep),
+                }
+            )
     return universe, per_fixture
 
 
@@ -266,10 +261,7 @@ def _vote_b_threshold(calib_universe) -> float:
 
 def _x_from(cands) -> np.ndarray:
     return np.array(
-        [
-            c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]]
-            for c in cands
-        ],
+        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]] for c in cands],
         dtype=np.float64,
     )
 
@@ -283,9 +275,7 @@ def _train_voter_c(calib_universe, target_recall: float):
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        f = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        f = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         f.fit(X[tr], y[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
@@ -301,9 +291,7 @@ def _train_voter_c(calib_universe, target_recall: float):
 
     # Final model trained on ALL calibration data (no held-out -- this is what
     # we apply to the new fixtures).
-    clf = GradientBoostingClassifier(
-        n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-    )
+    clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
     clf.fit(X, y)
     return clf, threshold
 
@@ -341,17 +329,26 @@ def _materialize(json_path: Path, wav_src: Path, fixture_dict: dict) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--fixture", action="append", help="Calibration fixture stem (repeatable). Default: all four audited.")
+    p.add_argument(
+        "--fixture",
+        action="append",
+        help="Calibration fixture stem (repeatable). Default: all four audited.",
+    )
     p.add_argument(
         "--include-fixture",
         action="append",
         default=[],
         help="Apply the trained ensemble to this fixture too (no labels needed). Repeatable.",
     )
-    p.add_argument("--consensus", type=int, default=2, choices=[1, 2, 3],
-                   help="Consensus threshold for the *-ensemble-{N}of3.json variant. "
-                   "Default 2 (= 2-of-3 strict majority, preserves 100 %% recall). "
-                   "Keep if (vote_total + apriori_boost) >= consensus.")
+    p.add_argument(
+        "--consensus",
+        type=int,
+        default=2,
+        choices=[1, 2, 3],
+        help="Consensus threshold for the *-ensemble-{N}of3.json variant. "
+        "Default 2 (= 2-of-3 strict majority, preserves 100 %% recall). "
+        "Keep if (vote_total + apriori_boost) >= consensus.",
+    )
     p.add_argument(
         "--gbdt-target-recall",
         type=float,
@@ -470,25 +467,29 @@ def main() -> None:
         # are 1-based and stable within a fixture.
         all_candidates = []
         for n, shot in enumerate(all_shots, start=1):
-            all_candidates.append({
-                "candidate_number": n,
-                "time": round(shot.time_absolute, 4),
-                "ms_after_beep": round(shot.time_from_beep * 1000, 0),
-                "peak_amplitude": round(shot.peak_amplitude, 4),
-                "confidence": round(shot.confidence, 3),
-            })
+            all_candidates.append(
+                {
+                    "candidate_number": n,
+                    "time": round(shot.time_absolute, 4),
+                    "ms_after_beep": round(shot.time_from_beep * 1000, 0),
+                    "peak_amplitude": round(shot.peak_amplitude, 4),
+                    "confidence": round(shot.confidence, 3),
+                }
+            )
 
         # Baseline shots[]: candidates voted by A (cwt + min_confidence=0.03).
         baseline_shots = []
         for n, ui in enumerate(idxs, start=1):
             if universe[ui]["vote_a"] == 1:
-                baseline_shots.append({
-                    "shot_number": len(baseline_shots) + 1,
-                    "candidate_number": n,
-                    "time": round(universe[ui]["t"], 4),
-                    "ms_after_beep": round(universe[ui]["time_from_beep"] * 1000, 0),
-                    "source": "detected",
-                })
+                baseline_shots.append(
+                    {
+                        "shot_number": len(baseline_shots) + 1,
+                        "candidate_number": n,
+                        "time": round(universe[ui]["t"], 4),
+                        "ms_after_beep": round(universe[ui]["time_from_beep"] * 1000, 0),
+                        "source": "detected",
+                    }
+                )
 
         # Ensemble shots[]: keep if (vote_total + apriori_boost) >= consensus.
         # Each entry surfaces its votes / boost / score so the JSON documents
@@ -497,29 +498,41 @@ def main() -> None:
         for n, ui in enumerate(idxs, start=1):
             u = universe[ui]
             if u["score"] >= args.consensus:
-                ensemble_shots.append({
-                    "shot_number": len(ensemble_shots) + 1,
-                    "candidate_number": n,
-                    "time": round(u["t"], 4),
-                    "ms_after_beep": round(u["time_from_beep"] * 1000, 0),
-                    "source": "detected",
-                    "ensemble_votes": u["vote_total"],
-                    "apriori_boost": u["apriori_boost"],
-                    "ensemble_score": round(u["score"], 2),
-                })
+                ensemble_shots.append(
+                    {
+                        "shot_number": len(ensemble_shots) + 1,
+                        "candidate_number": n,
+                        "time": round(u["t"], 4),
+                        "ms_after_beep": round(u["time_from_beep"] * 1000, 0),
+                        "source": "detected",
+                        "ensemble_votes": u["vote_total"],
+                        "apriori_boost": u["apriori_boost"],
+                        "ensemble_score": round(u["score"], 2),
+                    }
+                )
 
         # Materialize both.
         wav_src = FIXTURES_DIR / f"{fix}.wav"
         baseline_json = OUTPUT_DIR / f"{fix}-baseline.json"
         ensemble_json = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"
 
-        _materialize(baseline_json, wav_src, _build_fixture_json(
-            truth, baseline_shots, all_candidates, label="baseline (cwt + min_confidence=0.03)"
-        ))
-        _materialize(ensemble_json, wav_src, _build_fixture_json(
-            truth, ensemble_shots, all_candidates,
-            label=f"ensemble {args.consensus}-of-3 consensus (A=baseline+0.03, B=CLAP, C=GBDT+PANN)",
-        ))
+        _materialize(
+            baseline_json,
+            wav_src,
+            _build_fixture_json(
+                truth, baseline_shots, all_candidates, label="baseline (cwt + min_confidence=0.03)"
+            ),
+        )
+        _materialize(
+            ensemble_json,
+            wav_src,
+            _build_fixture_json(
+                truth,
+                ensemble_shots,
+                all_candidates,
+                label=f"ensemble {args.consensus}-of-3 consensus (A=baseline+0.03, B=CLAP, C=GBDT+PANN)",
+            ),
+        )
 
         n_total = len(all_candidates)
         n_base = len(baseline_shots)
@@ -528,9 +541,7 @@ def main() -> None:
         n_manual = sum(1 for s in truth.get("shots", []) if s.get("source") == "manual")
         boost_tag = ""
         if fix in boost_set and args.expected_rounds is not None:
-            n_boosted = sum(
-                1 for ui in idxs if universe[ui]["apriori_boost"] > 0
-            )
+            n_boosted = sum(1 for ui in idxs if universe[ui]["apriori_boost"] > 0)
             n_lift = sum(
                 1
                 for ui in idxs
@@ -548,7 +559,7 @@ def main() -> None:
             f"audited {n_audited} (+{n_manual} manual){boost_tag}"
         )
 
-    print(f"\nOpen in the review UI -- one fixture per browser tab/window:")
+    print("\nOpen in the review UI -- one fixture per browser tab/window:")
     for fix in apply_fixtures:
         b = OUTPUT_DIR / f"{fix}-baseline.json"
         e = OUTPUT_DIR / f"{fix}-ensemble-{args.consensus}of3.json"

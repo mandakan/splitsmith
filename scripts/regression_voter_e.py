@@ -114,9 +114,7 @@ def main() -> int:
     print(f"Evaluating {len(fixtures)} head-mounted Go 3S fixtures with reachable video")
     print(f"Variants: {[v[0] for v in VARIANTS]}\n")
 
-    aggregates: dict[str, dict[str, int]] = {
-        name: {"tp": 0, "fp": 0, "fn": 0} for name, _, _ in VARIANTS
-    }
+    aggregates: dict[str, dict[str, int]] = {name: {"tp": 0, "fp": 0, "fn": 0} for name, _, _ in VARIANTS}
 
     rows: list[dict] = []
     for fixture_path in fixtures:

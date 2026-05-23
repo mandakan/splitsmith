@@ -60,9 +60,7 @@ _CLAP_PROMPTS_SHOT = {
 }
 
 
-def _label(
-    cand_t: list[float], truth_shots: list[dict], tol_ms: float
-) -> tuple[list[int], list[dict]]:
+def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> tuple[list[int], list[dict]]:
     """Map candidates to GT shots. Returns (labels, generator_misses).
 
     Strategy per audit shot:
@@ -100,19 +98,23 @@ def _label(
             continue
         cn = s.get("candidate_number")
         if cn is not None and 1 <= cn <= len(cand_t):
-            misses.append({
-                "audit_time": t,
-                "candidate_number": cn,
-                "candidate_time": cand_t[cn - 1],
-                "drift_ms": abs(cand_t[cn - 1] - t) * 1000.0,
-            })
+            misses.append(
+                {
+                    "audit_time": t,
+                    "candidate_number": cn,
+                    "candidate_time": cand_t[cn - 1],
+                    "drift_ms": abs(cand_t[cn - 1] - t) * 1000.0,
+                }
+            )
         else:
-            misses.append({
-                "audit_time": t,
-                "candidate_number": None,
-                "candidate_time": None,
-                "drift_ms": None,
-            })
+            misses.append(
+                {
+                    "audit_time": t,
+                    "candidate_number": None,
+                    "candidate_time": None,
+                    "drift_ms": None,
+                }
+            )
     return labels, misses
 
 
@@ -165,9 +167,7 @@ def main() -> None:
         truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
-        all_shots = detect_shots(
-            audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall
-        )
+        all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
         cand_t = [s.time_absolute for s in all_shots]
         labels, _ = _label(cand_t, truth.get("shots", []), args.tolerance_ms)
         for sh, lbl in zip(all_shots, labels, strict=True):
@@ -184,12 +184,8 @@ def main() -> None:
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)
-        all_shots = detect_shots(
-            audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall
-        )
-        safe_shots = detect_shots(
-            audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_safe
-        )
+        all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
+        safe_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_safe)
         safe_times = {round(s.time_absolute, 6) for s in safe_shots}
 
         cand_t = [s.time_absolute for s in all_shots]
@@ -198,9 +194,7 @@ def main() -> None:
 
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
         if not clap_path.exists():
-            raise SystemExit(
-                f"Missing CLAP cache for {fix}. Run scripts/extract_clap_features.py first."
-            )
+            raise SystemExit(f"Missing CLAP cache for {fix}. Run scripts/extract_clap_features.py first.")
         clap = np.load(clap_path, allow_pickle=True)
         if clap["audio_emb"].shape[0] != len(all_shots):
             raise SystemExit(
@@ -217,9 +211,7 @@ def main() -> None:
 
         pann_path = CACHE_DIR / f"{fix}_pann.npz"
         if not pann_path.exists():
-            raise SystemExit(
-                f"Missing PANN cache for {fix}. Run scripts/extract_audio_embeddings.py first."
-            )
+            raise SystemExit(f"Missing PANN cache for {fix}. Run scripts/extract_audio_embeddings.py first.")
         pann = np.load(pann_path)
         if pann["gunshot_prob"].shape[0] != len(all_shots):
             raise SystemExit(
@@ -283,9 +275,7 @@ def main() -> None:
     pos_pann = [c["gunshot_prob"] for c in universe if c["label"] == 1]
     pann_threshold = min(pos_pann) if pos_pann else 0.0
     d_kept = sum(1 for c in universe if c["gunshot_prob"] >= pann_threshold)
-    d_pos = sum(
-        1 for c in universe if c["gunshot_prob"] >= pann_threshold and c["label"] == 1
-    )
+    d_pos = sum(1 for c in universe if c["gunshot_prob"] >= pann_threshold and c["label"] == 1)
     print(
         f"Voter D (PANN gunshot_prob >= {pann_threshold:.4f}): kept {d_kept}, recall "
         f"{d_pos}/{n_pos} = {d_pos/n_pos*100:.1f}%, precision "
@@ -296,16 +286,12 @@ def main() -> None:
     from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.model_selection import StratifiedKFold
 
-    X = np.array(
-        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in universe], dtype=np.float64
-    )
+    X = np.array([c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in universe], dtype=np.float64)
     y = np.array([c["label"] for c in universe], dtype=np.int64)
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        clf = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         clf.fit(X[tr], y[tr])
         probs[te] = clf.predict_proba(X[te])[:, 1]
 
@@ -337,9 +323,7 @@ def main() -> None:
         for fix in fixtures:
             truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
             rounds = truth.get("stage_rounds", {})
-            expected_by_fixture[fix] = (
-                rounds.get("expected") if isinstance(rounds, dict) else None
-            )
+            expected_by_fixture[fix] = rounds.get("expected") if isinstance(rounds, dict) else None
         per_fixture_indices: dict[str, list[int]] = {}
         for i, c in enumerate(universe):
             per_fixture_indices.setdefault(c["fixture"], []).append(i)
@@ -357,15 +341,12 @@ def main() -> None:
             target = K + slack
             fix_probs = np.array([probs[i] for i in idxs])
             order = np.argsort(-fix_probs)
-            keep_local = set(order[:min(target, len(order))].tolist())
+            keep_local = set(order[: min(target, len(order))].tolist())
             for li, gi in enumerate(idxs):
                 if li in keep_local:
                     voter_c_adaptive[gi] = True
             ad_kept += len(keep_local)
-            ad_pos += sum(
-                1 for li, gi in enumerate(idxs)
-                if li in keep_local and universe[gi]["label"] == 1
-            )
+            ad_pos += sum(1 for li, gi in enumerate(idxs) if li in keep_local and universe[gi]["label"] == 1)
         print(
             f"Voter C ADAPTIVE (per-stage top-K+max(3,10%) by GBDT prob, "
             f"{n_real_prior}/{len(per_fixture_indices)} fixtures use real "
@@ -376,9 +357,7 @@ def main() -> None:
 
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_threshold)
-        c["vote_c"] = (
-            int(voter_c_adaptive[i]) if args.adaptive_voter_c else int(probs[i] >= threshold_c)
-        )
+        c["vote_c"] = int(voter_c_adaptive[i]) if args.adaptive_voter_c else int(probs[i] >= threshold_c)
         c["vote_d"] = int(c["gunshot_prob"] >= pann_threshold)
         c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
 
@@ -476,19 +455,11 @@ def main() -> None:
             cn_s = str(cn) if cn is not None else "-"
             ct_s = f"{ct:9.4f}" if ct is not None else "        -"
             dr_s = f"{dr:+.1f} ms" if dr is not None else "-"
-            print(
-                f"{m['fixture']:38s} {m['audit_time']:9.4f} {cn_s:>5s} {ct_s} {dr_s:>10s}"
-            )
+            print(f"{m['fixture']:38s} {m['audit_time']:9.4f} {cn_s:>5s} {ct_s} {dr_s:>10s}")
 
     print("\n=== Solo-correct shots (would be lost without that voter) ===")
     for voter in ("a", "b", "c", "d"):
-        solo = [
-            c
-            for c in universe
-            if c["label"] == 1
-            and c[f"vote_{voter}"] == 1
-            and c["vote_total"] == 1
-        ]
+        solo = [c for c in universe if c["label"] == 1 and c[f"vote_{voter}"] == 1 and c["vote_total"] == 1]
         print(f"  voter {voter.upper()}: {len(solo)} real shots saved only by this voter")
 
 

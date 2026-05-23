@@ -141,9 +141,7 @@ def main() -> None:
         wants_shooter_override = fnmatch.fnmatch(slug, args.scope) and (
             args.shooter_id != DEFAULT_SHOOTER_KEY or args.shooter_name is not None
         )
-        if not isinstance(existing_shooter, dict) or not isinstance(
-            existing_shooter.get("id"), str
-        ):
+        if not isinstance(existing_shooter, dict) or not isinstance(existing_shooter.get("id"), str):
             shooter_block: dict[str, object] = {"id": DEFAULT_SHOOTER_KEY}
         else:
             shooter_block = dict(existing_shooter)
@@ -173,12 +171,8 @@ def main() -> None:
             )
             event_id = build_event_id(match_slug, n, shooter_key)
 
-        existing_event_str = (
-            existing_event if isinstance(existing_event, str) and existing_event else None
-        )
-        existing_shooter_id = (
-            existing_shooter.get("id") if isinstance(existing_shooter, dict) else None
-        )
+        existing_event_str = existing_event if isinstance(existing_event, str) and existing_event else None
+        existing_shooter_id = existing_shooter.get("id") if isinstance(existing_shooter, dict) else None
         new_shooter_id = shooter_block.get("id")
         if existing_event_str == event_id and existing_shooter_id == new_shooter_id:
             by_event.setdefault(event_id, []).append(slug)

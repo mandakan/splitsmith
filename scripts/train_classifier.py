@@ -106,8 +106,12 @@ def _featurize(
     win = int(0.050 * sr)
     pre_lo, pre_hi = max(0, idx - win), idx
     post_lo, post_hi = idx, min(n, idx + win)
-    rms_pre = float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2))) if pre_hi > pre_lo else 0.0
-    rms_post = float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2))) if post_hi > post_lo else 0.0
+    rms_pre = (
+        float(np.sqrt(np.mean(audio[pre_lo:pre_hi].astype(np.float64) ** 2))) if pre_hi > pre_lo else 0.0
+    )
+    rms_post = (
+        float(np.sqrt(np.mean(audio[post_lo:post_hi].astype(np.float64) ** 2))) if post_hi > post_lo else 0.0
+    )
     rms_ratio = rms_post / (rms_pre + 1e-6)
 
     # CWT envelope max in ±5 ms window.
@@ -169,9 +173,7 @@ def _featurize(
     }
 
 
-def _label_candidates(
-    cand_times: list[float], gt_times: list[float], tolerance_ms: float
-) -> list[int]:
+def _label_candidates(cand_times: list[float], gt_times: list[float], tolerance_ms: float) -> list[int]:
     """Greedy match: each ground-truth claims its closest unused candidate
     within tolerance. Unmatched candidates -> 0; matched -> 1."""
     used: set[int] = set()
@@ -223,8 +225,7 @@ def collect_candidates(
     pann_cache = _load_pann_cache(fixture) if use_pann else None
     if use_pann and pann_cache is None:
         raise SystemExit(
-            f"--use-pann set but no cache for {fixture}; "
-            f"run scripts/extract_audio_embeddings.py first"
+            f"--use-pann set but no cache for {fixture}; " f"run scripts/extract_audio_embeddings.py first"
         )
     if pann_cache is not None:
         if pann_cache["embedding"].shape[0] != len(shots):
@@ -237,8 +238,7 @@ def collect_candidates(
     clap_cache = _load_clap_cache(fixture) if use_clap else None
     if use_clap and clap_cache is None:
         raise SystemExit(
-            f"--use-clap set but no cache for {fixture}; "
-            f"run scripts/extract_clap_features.py first"
+            f"--use-clap set but no cache for {fixture}; " f"run scripts/extract_clap_features.py first"
         )
     if clap_cache is not None:
         if clap_cache["audio_emb"].shape[0] != len(shots):
@@ -264,9 +264,7 @@ def collect_candidates(
         gprob = float(pann_cache["gunshot_prob"][i]) if pann_cache is not None else None
         clap_aemb = clap_cache["audio_emb"][i] if clap_cache is not None else None
         clap_sims = clap_cache["text_sims"][i] if clap_cache is not None else None
-        clap_prompts = (
-            [str(p) for p in clap_cache["prompts"].tolist()] if clap_cache is not None else None
-        )
+        clap_prompts = [str(p) for p in clap_cache["prompts"].tolist()] if clap_cache is not None else None
         out.append(
             Candidate(
                 fixture=fixture,
@@ -284,8 +282,7 @@ def collect_candidates(
     n_gt = len(gt_t)
     matched_recall = n_pos / n_gt if n_gt else 0.0
     print(
-        f"  {fixture}: {len(out)} cands, {n_pos} positives, {n_gt} gt, "
-        f"recall={matched_recall*100:.1f}%"
+        f"  {fixture}: {len(out)} cands, {n_pos} positives, {n_gt} gt, " f"recall={matched_recall*100:.1f}%"
     )
     return out
 
@@ -444,10 +441,7 @@ def main() -> None:
         else:
             ap = float("nan")
             f1_str = "n/a"
-        print(
-            f"{held:38s} {rec*100:6.1f}% {prec*100:6.1f}% {kept:5d} {miss:5d} "
-            f"{ap:5.2f} {f1_str:>14s}"
-        )
+        print(f"{held:38s} {rec*100:6.1f}% {prec*100:6.1f}% {kept:5d} {miss:5d} " f"{ap:5.2f} {f1_str:>14s}")
         held_results.append((rec, prec, kept, miss))
 
     if held_results:
@@ -474,9 +468,7 @@ def main() -> None:
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     fold_probs = np.zeros_like(y, dtype=np.float64)
     for tr_idx, te_idx in skf.split(X, y):
-        clf = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         clf.fit(X[tr_idx], y[tr_idx])
         fold_probs[te_idx] = clf.predict_proba(X[te_idx])[:, 1]
     print(f"{'threshold':>10s} {'recall':>8s} {'prec':>8s} {'kept':>6s} {'miss':>6s}")
@@ -502,9 +494,7 @@ def main() -> None:
             )
 
     # === Feature importance on full fit ===
-    clf_full = GradientBoostingClassifier(
-        n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-    )
+    clf_full = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
     clf_full.fit(X, y)
     print("\n=== Feature importance (full-dataset fit, top 20) ===")
     importances = clf_full.feature_importances_

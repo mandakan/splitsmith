@@ -97,8 +97,7 @@ def two_pass_detect(
     env = cwt_envelope(audio, sr)
     pad = int(0.005 * sr)
     p1_strengths = [
-        float(env[max(0, int(t * sr) - pad) : min(env.size, int(t * sr) + pad)].max())
-        for t in pass1_t
+        float(env[max(0, int(t * sr) - pad) : min(env.size, int(t * sr) + pad)].max()) for t in pass1_t
     ]
     threshold = float(np.quantile(p1_strengths, shot_strength_quantile))
     splits = [pass1_t[i + 1] - pass1_t[i] for i in range(len(pass1_t) - 1)]
@@ -145,9 +144,7 @@ def evaluate(name: str, **kw) -> dict:
     pre_path = FIX / f"{name}.json.before-rise-foot"
     gt_src = json.loads(pre_path.read_text()) if pre_path.exists() else truth
     gt = sorted(s["time"] for s in gt_src.get("shots", []))
-    pass1, extras = two_pass_detect(
-        audio, sr, truth["beep_time"], truth["stage_time_seconds"], **kw
-    )
+    pass1, extras = two_pass_detect(audio, sr, truth["beep_time"], truth["stage_time_seconds"], **kw)
     all_t = sorted(pass1 + extras)
     used: set[int] = set()
     drags: list[float] = []
@@ -180,9 +177,7 @@ def main() -> None:
         print(f"\n[shot_strength_quantile={q}, gap_factor=3.0, gap_min_ms=250]")
         tot_p1 = tot_ex = tot_match = tot_gt = 0
         for name in NAMES:
-            r = evaluate(
-                name, gap_factor=3.0, gap_min_ms=250, shot_strength_quantile=q
-            )
+            r = evaluate(name, gap_factor=3.0, gap_min_ms=250, shot_strength_quantile=q)
             miss_s = ", ".join(f"{t:.4f}" for t in r["misses"]) or "-"
             rec = r["matched"] / r["gt"] if r["gt"] else 0
             print(

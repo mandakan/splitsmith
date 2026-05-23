@@ -74,14 +74,10 @@ def resolve_video(stem: str, sources: dict) -> Path:
     else:
         basename = (sources.get("fixtures") or {}).get(stem)
         if not basename:
-            raise ExtractError(
-                f"{stem}: no entry in _sources.yaml. Add a 'fixtures' or 'overrides' line."
-            )
+            raise ExtractError(f"{stem}: no entry in _sources.yaml. Add a 'fixtures' or 'overrides' line.")
         video_dir = sources.get("video_dir")
         if not video_dir:
-            raise ExtractError(
-                f"{stem}: 'video_dir' unset in _sources.yaml and no override given."
-            )
+            raise ExtractError(f"{stem}: 'video_dir' unset in _sources.yaml and no override given.")
         candidate = Path(video_dir) / basename
     if not candidate.exists():
         raise ExtractError(
@@ -152,9 +148,7 @@ def run_ffmpeg_extract(
     except FileNotFoundError as exc:
         raise ExtractError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:
-        raise ExtractError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
+        raise ExtractError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
 
 
 def extract_one(
@@ -204,9 +198,7 @@ def extract_one(
     )
     duration = end - start
     if duration <= 0.0:
-        raise ExtractError(
-            f"{stem}: computed extraction window [{start}, {end}] is non-positive"
-        )
+        raise ExtractError(f"{stem}: computed extraction window [{start}, {end}] is non-positive")
 
     FULL_DIR.mkdir(parents=True, exist_ok=True)
     run_ffmpeg_extract(

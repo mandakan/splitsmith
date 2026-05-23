@@ -110,9 +110,7 @@ def extract_for_fixture(name: str, *, force: bool, audio_tagger, full: bool = Fa
         audio_pann = librosa.resample(audio.astype(np.float32), orig_sr=sr, target_sr=PANN_SR)
     else:
         audio_pann = audio.astype(np.float32)
-    batch = np.stack(
-        [_slice_window(audio_pann, PANN_SR, float(t), WINDOW_S) for t in times], axis=0
-    )
+    batch = np.stack([_slice_window(audio_pann, PANN_SR, float(t), WINDOW_S) for t in times], axis=0)
 
     # PANNs.inference returns (clipwise_output, embedding) for batch input.
     clipwise, embedding = audio_tagger.inference(batch)

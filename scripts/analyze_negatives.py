@@ -57,7 +57,8 @@ def _stage_group(fixture_slug: str, fixtures_dir: Path = FIXTURES_DIR) -> str:
     except Exception:
         base = fixture_slug
     prefix = "stage-shots-"
-    return base[len(prefix):] if base.startswith(prefix) else base
+    return base[len(prefix) :] if base.startswith(prefix) else base
+
 
 _CLAP_PROMPTS_SHOT = {
     "a single gunshot at close range",
@@ -116,23 +117,23 @@ def _build_universe(fixtures, tol_ms):
         cand_arr = np.array(cand_t, dtype=np.float64)
         confs_arr = np.array([s.confidence for s in shots], dtype=np.float64)
         peaks_arr = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
-        tta_arr = compute_tta_agreement(
-            audio, sr, truth["beep_time"], truth["stage_time_seconds"], cand_arr
-        )
+        tta_arr = compute_tta_agreement(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cand_arr)
         feats_matrix = compute_hand_features(
             audio, sr, cand_arr, truth["beep_time"], confs_arr, peaks_arr, tta_arr
         )
         for i, sh in enumerate(shots):
-            universe.append({
-                "fixture": fix,
-                "t": sh.time_absolute,
-                "label": labels[i],
-                "clap_diff": float(diff[i]),
-                "hand_feats": feats_matrix[i].tolist(),
-                "clap_sims": list(sims[i]),
-                "peak": float(sh.peak_amplitude),
-                "conf_detector": float(sh.confidence),
-            })
+            universe.append(
+                {
+                    "fixture": fix,
+                    "t": sh.time_absolute,
+                    "label": labels[i],
+                    "clap_diff": float(diff[i]),
+                    "hand_feats": feats_matrix[i].tolist(),
+                    "clap_sims": list(sims[i]),
+                    "peak": float(sh.peak_amplitude),
+                    "conf_detector": float(sh.confidence),
+                }
+            )
     return universe
 
 
@@ -146,12 +147,11 @@ def _holdout_probs(X, y, sample_weight=None):
     """5-fold stratified held-out probabilities."""
     from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.model_selection import StratifiedKFold
+
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        clf = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         sw = sample_weight[tr] if sample_weight is not None else None
         clf.fit(X[tr], y[tr], sample_weight=sw)
         probs[te] = clf.predict_proba(X[te])[:, 1]
@@ -180,9 +180,7 @@ def _lofo_probs(X, y, fixtures, groups=None):
         if tr.sum() == 0 or y[tr].sum() == 0:
             # Not enough training data after holding this group out; skip.
             continue
-        clf = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         clf.fit(X[tr], y[tr])
         probs[te] = clf.predict_proba(X[te])[:, 1]
     return probs
@@ -208,12 +206,19 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--tolerance-ms", type=float, default=75.0)
     p.add_argument("--target-recall", type=float, default=0.95)
-    p.add_argument("--hard-frac", type=float, default=0.20,
-                   help="Top fraction of negatives (by predicted prob) to upweight.")
-    p.add_argument("--hard-weight", type=float, default=3.0,
-                   help="Sample weight multiplier for hard negatives (1.0 = off).")
-    p.add_argument("--show", type=int, default=15,
-                   help="How many top mistakes to print per category.")
+    p.add_argument(
+        "--hard-frac",
+        type=float,
+        default=0.20,
+        help="Top fraction of negatives (by predicted prob) to upweight.",
+    )
+    p.add_argument(
+        "--hard-weight",
+        type=float,
+        default=3.0,
+        help="Sample weight multiplier for hard negatives (1.0 = off).",
+    )
+    p.add_argument("--show", type=int, default=15, help="How many top mistakes to print per category.")
     args = p.parse_args()
 
     universe = _build_universe(DEFAULT_FIXTURES, args.tolerance_ms)
@@ -240,7 +245,11 @@ def main() -> None:
     probs = _holdout_probs(X, y)
     thr, kept, pos = _eval_at_target_recall(probs, y, args.target_recall)
     print(f"Pass 1 (unweighted, target recall {args.target_recall*100:.0f} %):")
-    print(f"  threshold {thr:.4f}  kept {kept}  recall {pos}/{n_pos} = {pos/n_pos*100:.1f}%  precision {pos/kept*100:.1f}%")
+    print(
+        f"  threshold {thr:.4f}  kept {kept}  "
+        f"recall {pos}/{n_pos} = {pos/n_pos*100:.1f}%  "
+        f"precision {pos/kept*100:.1f}%"
+    )
 
     # Leave-one-stage-group-out: stress cross-fixture generalization.
     # Group key = stage-event identity (issue #126): anchor + all derived
@@ -256,7 +265,11 @@ def main() -> None:
         f"\nLOFO (leave-one-stage-group-out, {n_groups} groups, "
         f"target recall {args.target_recall*100:.0f} %):"
     )
-    print(f"  threshold {lofo_thr:.4f}  kept {lofo_kept}  recall {lofo_pos}/{n_pos} = {lofo_pos/n_pos*100:.1f}%  precision {lofo_pos/lofo_kept*100:.1f}%")
+    print(
+        f"  threshold {lofo_thr:.4f}  kept {lofo_kept}  "
+        f"recall {lofo_pos}/{n_pos} = {lofo_pos/n_pos*100:.1f}%  "
+        f"precision {lofo_pos/lofo_kept*100:.1f}%"
+    )
 
     # Per-fixture LOFO breakdown so we can see which fixtures generalize and
     # which break -- the average can hide a single fixture collapsing.
@@ -283,8 +296,10 @@ def main() -> None:
     neg_with_probs = [(probs[i], universe[i]) for i in range(len(universe)) if universe[i]["label"] == 0]
     neg_with_probs.sort(key=lambda x: -x[0])
     for prob, c in neg_with_probs[: args.show]:
-        print(f"{c['fixture']:38s} {c['t']:9.4f} {prob:6.3f} {c['conf_detector']:11.3f} "
-              f"{c['peak']:7.3f} {c['clap_diff']:10.4f}")
+        print(
+            f"{c['fixture']:38s} {c['t']:9.4f} {prob:6.3f} {c['conf_detector']:11.3f} "
+            f"{c['peak']:7.3f} {c['clap_diff']:10.4f}"
+        )
 
     # Show borderline positives -- model uncertain, you said real.
     print(f"\n=== Bottom {args.show} POSITIVES (model uncertain, audit says shot) ===")
@@ -292,8 +307,10 @@ def main() -> None:
     pos_with_probs = [(probs[i], universe[i]) for i in range(len(universe)) if universe[i]["label"] == 1]
     pos_with_probs.sort(key=lambda x: x[0])
     for prob, c in pos_with_probs[: args.show]:
-        print(f"{c['fixture']:38s} {c['t']:9.4f} {prob:6.3f} {c['conf_detector']:11.3f} "
-              f"{c['peak']:7.3f} {c['clap_diff']:10.4f}")
+        print(
+            f"{c['fixture']:38s} {c['t']:9.4f} {prob:6.3f} {c['conf_detector']:11.3f} "
+            f"{c['peak']:7.3f} {c['clap_diff']:10.4f}"
+        )
 
     # Pass 2: hard-negative mining.
     if args.hard_weight != 1.0:
@@ -309,11 +326,11 @@ def main() -> None:
             weights[hardest] = args.hard_weight
         probs2 = _holdout_probs(X, y, sample_weight=weights)
         thr2, kept2, pos2 = _eval_at_target_recall(probs2, y, args.target_recall)
+        print(f"\nPass 2 (top {args.hard_frac*100:.0f}% of negatives weighted {args.hard_weight}x):")
         print(
-            f"\nPass 2 (top {args.hard_frac*100:.0f}% of negatives weighted {args.hard_weight}x):"
-        )
-        print(
-            f"  threshold {thr2:.4f}  kept {kept2}  recall {pos2}/{n_pos} = {pos2/n_pos*100:.1f}%  precision {pos2/kept2*100:.1f}%"
+            f"  threshold {thr2:.4f}  kept {kept2}  "
+            f"recall {pos2}/{n_pos} = {pos2/n_pos*100:.1f}%  "
+            f"precision {pos2/kept2*100:.1f}%"
         )
         delta_kept = kept - kept2
         delta_prec = (pos2 / kept2 - pos / kept) * 100

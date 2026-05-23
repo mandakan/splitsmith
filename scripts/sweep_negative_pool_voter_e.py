@@ -79,9 +79,7 @@ def _load_cache(fixture: str) -> dict | None:
     }
 
 
-def _train_mask_for_variant(
-    variant: str, labels: np.ndarray, subclasses: list[str | None]
-) -> np.ndarray:
+def _train_mask_for_variant(variant: str, labels: np.ndarray, subclasses: list[str | None]) -> np.ndarray:
     """Boolean mask over a fixture's rows selecting which join the training pool.
 
     ``labels`` is the binary shot/non-shot vector; ``subclasses`` carry

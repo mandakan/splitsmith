@@ -22,7 +22,6 @@ Run:
 from __future__ import annotations
 
 import json
-from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -94,12 +93,8 @@ def build_in_stage_rows(fix: str) -> list[dict]:
     peak_amps = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
     from splitsmith.ensemble.tta import compute_tta_agreement
 
-    tta_arr = compute_tta_agreement(
-        audio, sr, truth["beep_time"], truth["stage_time_seconds"], times
-    )
-    hand = feat.compute_hand_features(
-        audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_arr
-    )
+    tta_arr = compute_tta_agreement(audio, sr, truth["beep_time"], truth["stage_time_seconds"], times)
+    hand = feat.compute_hand_features(audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_arr)
 
     rows: list[dict] = []
     for i, shot in enumerate(shots):
@@ -157,9 +152,7 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
     # Mined negatives sit outside any stage window; TTA agreement isn't
     # meaningful here, so use the 1.0 floor (matches build_ensemble_artifacts).
     tta_arr = np.ones(len(cand_t), dtype=np.float64)
-    hand = feat.compute_hand_features(
-        audio, sr, cand_t, beep_in_full, cand_conf, cand_peak, tta_arr
-    )
+    hand = feat.compute_hand_features(audio, sr, cand_t, beep_in_full, cand_conf, cand_peak, tta_arr)
 
     rows: list[dict] = []
     for k, mi in enumerate(indices):
@@ -220,9 +213,7 @@ def train_with_threshold(rows: list[dict]) -> tuple[GradientBoostingClassifier, 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        f = GradientBoostingClassifier(
-            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-        )
+        f = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
         f.fit(X[tr], y[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
     pairs = sorted(zip(cv_probs, y, strict=True), key=lambda x: -x[0])
@@ -233,9 +224,7 @@ def train_with_threshold(rows: list[dict]) -> tuple[GradientBoostingClassifier, 
         if cum / n_pos >= TARGET_RECALL:
             threshold = float(prob)
             break
-    final = GradientBoostingClassifier(
-        n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42
-    )
+    final = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
     final.fit(X, y)
     return final, threshold
 
@@ -299,9 +288,7 @@ def run() -> None:
     else:
         raise SystemExit("missing _mined_negatives.npz; run scripts/mine_negatives.py first")
 
-    n_pos_by_fixture = {
-        fix: sum(r["label"] for r in rows) for fix, rows in in_stage_by_fixture.items()
-    }
+    n_pos_by_fixture = {fix: sum(r["label"] for r in rows) for fix, rows in in_stage_by_fixture.items()}
 
     print(
         f"In-stage universe: {sum(len(v) for v in in_stage_by_fixture.values())} candidates, "
@@ -344,9 +331,7 @@ def run() -> None:
             train_in_stage.extend(in_stage_by_fixture[f])
             train_mined_raw.extend(mined_by_fixture[f])
 
-        train_pos_by_fix = {
-            f: sum(r["label"] for r in in_stage_by_fixture[f]) for f in fixtures if f != held
-        }
+        train_pos_by_fix = {f: sum(r["label"] for r in in_stage_by_fixture[f]) for f in fixtures if f != held}
         train_mined = cap_mined(train_mined_raw, train_pos_by_fix)
 
         clf_no, thr_no = train_with_threshold(train_in_stage)
@@ -413,23 +398,15 @@ def run() -> None:
         agg_recall_y.append(in_pos_y / n_pos)
 
         # Full 4-voter ensemble (production: consensus=3, no apriori).
-        ens_kept_no_in, _ = evaluate_ensemble(
-            held_in, clf_no, a_floor, b_thr, thr_no, d_thr
-        )
-        ens_kept_y_in, _ = evaluate_ensemble(
-            held_in, clf_y, a_floor, b_thr, thr_y, d_thr
-        )
+        ens_kept_no_in, _ = evaluate_ensemble(held_in, clf_no, a_floor, b_thr, thr_no, d_thr)
+        ens_kept_y_in, _ = evaluate_ensemble(held_in, clf_y, a_floor, b_thr, thr_y, d_thr)
         ens_in_pos_no = int((ens_kept_no_in & (y_in == 1)).sum())
         ens_in_pos_y = int((ens_kept_y_in & (y_in == 1)).sum())
         ens_in_kept_no = int(ens_kept_no_in.sum())
         ens_in_kept_y = int(ens_kept_y_in.sum())
         if held_mined:
-            ens_kept_no_m, _ = evaluate_ensemble(
-                held_mined, clf_no, a_floor, b_thr, thr_no, d_thr
-            )
-            ens_kept_y_m, _ = evaluate_ensemble(
-                held_mined, clf_y, a_floor, b_thr, thr_y, d_thr
-            )
+            ens_kept_no_m, _ = evaluate_ensemble(held_mined, clf_no, a_floor, b_thr, thr_no, d_thr)
+            ens_kept_y_m, _ = evaluate_ensemble(held_mined, clf_y, a_floor, b_thr, thr_y, d_thr)
             ens_mined_no = int(ens_kept_no_m.sum())
             ens_mined_y = int(ens_kept_y_m.sum())
         else:
@@ -523,16 +500,8 @@ def run() -> None:
     p_y = ens_y["in_pos"] / ens_y["in_kept"] * 100.0 if ens_y["in_kept"] else 0.0
     r_no = ens_no["in_pos"] / n_pos_total * 100.0
     r_y = ens_y["in_pos"] / n_pos_total * 100.0
-    fp_rate_no = (
-        ens_no["mined_fired"] / ens_no["mined_total"] * 100.0
-        if ens_no["mined_total"]
-        else 0.0
-    )
-    fp_rate_y = (
-        ens_y["mined_fired"] / ens_y["mined_total"] * 100.0
-        if ens_y["mined_total"]
-        else 0.0
-    )
+    fp_rate_no = ens_no["mined_fired"] / ens_no["mined_total"] * 100.0 if ens_no["mined_total"] else 0.0
+    fp_rate_y = ens_y["mined_fired"] / ens_y["mined_total"] * 100.0 if ens_y["mined_total"] else 0.0
     print(
         f"  NO_MINING   in-stage precision={p_no:5.1f}%  recall={r_no:5.1f}%  "
         f"mined-FP rate={fp_rate_no:5.2f}% ({ens_no['mined_fired']}/{ens_no['mined_total']})"
@@ -551,15 +520,9 @@ def run() -> None:
     cp_no = ens_no["in_pos"] / combined_kept_no * 100.0 if combined_kept_no else 0.0
     cp_y = ens_y["in_pos"] / combined_kept_y * 100.0 if combined_kept_y else 0.0
     print()
-    print(
-        "Combined production-realistic precision (in-stage kept + mined-FP as denominator):"
-    )
-    print(
-        f"  NO_MINING   {ens_no['in_pos']}/{combined_kept_no} = {cp_no:5.2f}%"
-    )
-    print(
-        f"  WITH_MINING {ens_y['in_pos']}/{combined_kept_y} = {cp_y:5.2f}%"
-    )
+    print("Combined production-realistic precision (in-stage kept + mined-FP as denominator):")
+    print(f"  NO_MINING   {ens_no['in_pos']}/{combined_kept_no} = {cp_no:5.2f}%")
+    print(f"  WITH_MINING {ens_y['in_pos']}/{combined_kept_y} = {cp_y:5.2f}%")
 
     print()
     print(
