@@ -368,18 +368,105 @@ def _build_clap_runtime_torch() -> ClapRuntime:
     )
 
 
+CLAP_AUDIO_ARTIFACT_SLUG = "clap_audio_encoder"
+CLAP_TEXT_ARTIFACT_SLUG = "clap_text_embeddings"
+ENV_ONNX_CLAP_OVERRIDE = "SPLITSMITH_ONNX_CLAP"
+ENV_CLAP_TEXT_OVERRIDE = "SPLITSMITH_CLAP_TEXT"
+
+
+def _resolve_onnx_clap_paths() -> tuple[Path, Path]:
+    """Locate the CLAP audio encoder ONNX + pre-baked text embeddings.
+
+    Order matches PANN's :func:`_resolve_onnx_pann_path`:
+
+    1. ``SPLITSMITH_ONNX_CLAP`` / ``SPLITSMITH_CLAP_TEXT`` env vars --
+       dev / test override (paths produced by ``export_clap_onnx.py``).
+    2. Slim model registry -- requires ``ensemble_calibration.json`` to
+       carry ``model_artifacts.{clap_audio_encoder, clap_text_embeddings}``
+       entries the registry can download from R2 and SHA256-verify.
+    """
+    override_audio = os.environ.get(ENV_ONNX_CLAP_OVERRIDE)
+    override_text = os.environ.get(ENV_CLAP_TEXT_OVERRIDE)
+    if override_audio and override_text:
+        audio_path = Path(override_audio)
+        text_path = Path(override_text)
+        for path, env in ((audio_path, ENV_ONNX_CLAP_OVERRIDE), (text_path, ENV_CLAP_TEXT_OVERRIDE)):
+            if not path.is_file():
+                raise FileNotFoundError(f"{env} points at {path}, which does not exist")
+        return audio_path, text_path
+
+    from ..models import get_default_registry
+
+    registry = get_default_registry()
+    if registry is None:
+        raise RuntimeError(
+            "ONNX CLAP backend selected but ensemble_calibration.json has no "
+            "model_artifacts block. Run `uv run python "
+            "scripts/export_clap_onnx.py` and paste the printed snippets into "
+            "src/splitsmith/data/ensemble_calibration.json, or point "
+            f"{ENV_ONNX_CLAP_OVERRIDE} + {ENV_CLAP_TEXT_OVERRIDE} at local exports."
+        )
+    return (
+        registry.resolve(CLAP_AUDIO_ARTIFACT_SLUG),
+        registry.resolve(CLAP_TEXT_ARTIFACT_SLUG),
+    )
+
+
+def _build_clap_runtime_onnx() -> ClapRuntime:
+    """Construct an onnxruntime-backed :class:`ClapRuntime`.
+
+    Loads the audio trunk + pre-encoded text embeddings produced by
+    ``scripts/export_clap_onnx.py``. Inference contract matches the
+    torch branch: ``(N, T)`` float32 audio at ``CLAP_SR`` -> ``(N, D)``
+    L2-normalised embeddings. Audio preprocessing goes through the
+    license-clean numpy mel pipeline in :mod:`splitsmith.ensemble.clap_mel`.
+    """
+    import onnxruntime as ort
+
+    from .clap_mel import batch_log_mel_input_features
+
+    audio_path, text_path = _resolve_onnx_clap_paths()
+    session = ort.InferenceSession(str(audio_path), providers=["CPUExecutionProvider"])
+    input_name = session.get_inputs()[0].name
+    text_emb = np.load(text_path).astype(np.float32)
+    if text_emb.ndim != 2 or text_emb.shape[0] != len(CLAP_PROMPTS):
+        raise RuntimeError(
+            f"clap_text_embeddings.npy has unexpected shape {text_emb.shape}; "
+            f"expected ({len(CLAP_PROMPTS)}, D). Re-run scripts/export_clap_onnx.py "
+            "against the current prompt bank."
+        )
+    text_emb = text_emb / (np.linalg.norm(text_emb, axis=1, keepdims=True) + 1e-9)
+
+    def encode_audio(batch: np.ndarray) -> np.ndarray:
+        """``(N, T)`` float32 audio -> ``(N, D)`` L2-normalised embeddings."""
+        input_features = batch_log_mel_input_features(batch.astype(np.float32, copy=False))
+        emb = session.run(None, {input_name: input_features})[0]
+        emb = np.asarray(emb, dtype=np.float32)
+        return emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-9)
+
+    return ClapRuntime(
+        encode_audio=encode_audio,
+        text_embeddings=text_emb,
+        backend=Backend.ONNX,
+        model=None,
+        processor=None,
+    )
+
+
 def load_clap_runtime() -> ClapRuntime:
     """Load CLAP through the selected backend.
 
-    First call on the torch path downloads ~600 MB to the HF cache;
-    ONNX path will fetch the slim artifacts from R2 once doc 02 ships.
-    Reuse the returned runtime across detections.
+    First call on the torch path downloads ~600 MB to the HF cache. On
+    the ONNX path, the consolidated audio encoder + pre-baked text
+    embeddings are resolved via :func:`_resolve_onnx_clap_paths` (env
+    overrides or slim model registry). Reuse the returned runtime
+    across detections.
     """
     backend = select_backend()
     if backend is Backend.TORCH:
         return _build_clap_runtime_torch()
     if backend is Backend.ONNX:
-        raise NotImplementedError("ONNX CLAP runtime not implemented yet (issue #377 phase 'ONNX exports')")
+        return _build_clap_runtime_onnx()
     raise SplitsmithBackendError(f"Unknown backend {backend!r}")
 
 
