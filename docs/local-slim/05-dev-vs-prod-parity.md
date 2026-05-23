@@ -13,8 +13,15 @@ test.
 
 | Backend          | Used by                                  | Models live where | Imports |
 | ---------------- | ---------------------------------------- | ----------------- | ------- |
-| **ONNX Runtime** | All end users with the slim wheel install. The default everywhere onnxruntime is installed. | `~/.splitsmith/models/artifacts/<sha>/...` (doc 03) | `onnxruntime`, `numpy` |
-| **Torch**        | Contributors with the dev extras installed who want to debug a model against the original PyTorch checkpoints. | `~/.cache/huggingface/hub/` and `~/panns_data/` | `torch`, `transformers`, `panns_inference` |
+| **ONNX Runtime** | All end users with the slim wheel install (the only backend available when torch isn't installed). | `~/.splitsmith/models/artifacts/<sha>/...` (doc 03) | `onnxruntime`, `numpy`, `librosa` |
+| **Torch**        | Contributors with the dev extras installed. Preferred when both backends are importable so the local model caches under `~/.cache/huggingface/hub/` and `~/panns_data/` continue to work without R2. | `~/.cache/huggingface/hub/` and `~/panns_data/` | `torch`, `transformers`, `panns_inference` |
+
+`select_backend()` resolves to torch when `import torch` succeeds,
+falling back to onnxruntime when only `import onnxruntime` succeeds.
+End users on the slim wheel have only `onnxruntime` installed; they
+reach the ONNX branch by elimination. Contributors with the dev
+extras can opt into ONNX explicitly via `SPLITSMITH_BACKEND=onnx`
+when debugging a slim-runtime regression.
 
 The two backends are equally first-class for **inference**. The
 parity test is bidirectional: changes to either backend must keep

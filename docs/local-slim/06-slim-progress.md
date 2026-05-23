@@ -32,55 +32,48 @@ detection inside the <300 MB on-disk target.
 
 ### Foundation -- backend abstraction in the codebase
 
-These can ship before any ONNX artifact exists. Each is a refactor
-that makes today's torch code pass through a backend selector
-without behavioural change.
-
-- [ ] Add `src/splitsmith/ensemble/backend.py` with the `Backend`
-  enum and `select_backend()`. ONNX path raises NotImplementedError
-  for now. (See doc 05.)
-- [ ] Refactor `load_clap_runtime`, `load_pann_runtime`,
-  `load_visual_runtime` to return a typed runtime dataclass with
-  numpy-in / numpy-out callables. Today's torch implementation
-  becomes the torch branch of the selector. (See doc 05.)
-- [ ] Refactor `compute_clap_similarities`,
-  `compute_pann_gunshot_probs`, and CLIP visual inference to call
-  the typed callable rather than the model directly. No `import
-  torch` in these functions. (See doc 02.)
-- [ ] Add `tests/test_no_torch_in_prod_path.py` -- patches
-  `sys.modules['torch']` to None and runs a tiny detection. Becomes
-  a regression sentinel for accidental torch imports. (See doc 05.)
+- [x] `src/splitsmith/ensemble/backend.py` with `Backend` enum +
+  `select_backend()`. **PR #378.** Preference: torch wins when both
+  installed (dev path with model caches); ONNX wins when only
+  onnxruntime is installed (slim wheel). End users on the slim wheel
+  reach the ONNX branch by elimination.
+- [x] `load_clap_runtime`, `load_pann_runtime`,
+  `load_visual_runtime` return typed runtime dataclasses with numpy
+  callables. **PR #378.**
+- [x] `compute_*` functions go through the typed callable; no
+  module-level torch imports. **PR #378.**
+- [x] `tests/test_no_torch_in_prod_path.py` sentinel. **PR #378.**
 
 ### ONNX exports
 
-- [ ] Extend `scripts/build_ensemble_artifacts.py` with a `--onnx`
-  flag that exports `clap_audio_encoder.onnx`,
-  `clap_text_embeddings.npy`, `pann_cnn14.onnx`,
-  `clip_visual_encoder.onnx`. (See doc 02.)
-- [ ] Pre-bake CLAP text embeddings from the locked prompt bank;
-  write `clap_text_embeddings.npy` and a sibling JSON with prompt
-  order. (See doc 02.)
-- [ ] Vendor a small PANN CNN14 export script that loads the
-  upstream `Cnn14_mAP=0.431.pth` checkpoint and traces a
-  `(1, 320000)` forward pass to ONNX. (See doc 02.)
-- [ ] Validate `optimum.exporters.onnx` covers CLAP cleanly. If not,
-  add a manual `torch.onnx.export` fallback. (Doc 00 open question.)
-- [ ] Write a NumPy mel-spectrogram helper that matches
-  `transformers.ClapProcessor`'s output exactly. (See doc 02 open
-  questions; required for parity.)
-- [ ] Add `model_artifacts` block writer to the build script -- per
-  artifact: filename, sha256, size, R2 URL. Writes into
-  `src/splitsmith/data/ensemble_calibration.json`. (See doc 02.)
+- [x] PANN CNN14 export (`scripts/export_pann_onnx.py`) -- raw audio
+  in, gunshot probability out; mel-spec layer baked into the graph.
+  **PR #381 + #84 spike.**
+- [x] CLAP audio encoder export + pre-baked text embeddings
+  (`scripts/export_clap_onnx.py`). **PR #382.**
+- [x] Pure-numpy mel-spectrogram for CLAP (no Apache-2.0 vendoring;
+  uses BSD-3 librosa + numpy primitives). Parity vs
+  `ClapFeatureExtractor`: L_inf 3.8e-6 dB. **PR #383.**
+- [-] CLIP visual encoder export. Deferred to v2 with Voter E ONNX
+  migration; Voter E is off by default (`enable_voter_e=False`,
+  gated by `SPLITSMITH_ENABLE_VOTER_E`) and explicitly out of slim
+  v1. To use Voter E today, install dev extras
+  (`uv sync --all-groups`) so the torch backend stays available.
+- [ ] `--upload` step on the export scripts: SHA256 + size +
+  filename + R2 URL written into a `model_artifacts` block in
+  `ensemble_calibration.json` and uploaded via `wrangler r2 object
+  put`. Manual snippet emission already works; wrapper still TODO.
 
 ### Parity testing
 
-- [ ] Add `tests/test_onnx_parity.py` with per-voter L_inf checks
-  against the existing fixtures. Tolerances from doc 05. (See doc 05.)
-- [ ] Add the end-to-end parity test: full ensemble on each fixture,
-  compare consensus shot times exact, signal arrays within ±15 ms.
-  (See doc 05.)
-- [ ] Wire the parity tests into the dev-extras CI matrix. (See
-  doc 04.)
+- [x] `tests/test_onnx_parity.py` for PANN + CLAP. Each test
+  pytest.skip()s when its env-var-resolved artifact isn't present so
+  CI without the export-time toolchain still runs cleanly. **PR
+  #381 + #383.**
+- [ ] End-to-end full-ensemble parity test once R2 + artifact upload
+  lands so CI can pull artifacts on demand.
+- [ ] Wire the parity tests into the dev-extras CI matrix (today
+  they run locally with env vars set).
 
 ### Model hosting infrastructure
 
@@ -97,41 +90,43 @@ without behavioural change.
 
 ### Slim runtime model layer
 
-- [ ] Add `src/splitsmith/models/` module: manifest schema parsing,
-  download with sha256 verification, on-disk cache layout under
-  `~/.splitsmith/models/`, lock file. (See doc 03.)
-- [ ] Use `huggingface_hub`'s download helper (pointed at our own
-  URL) for resumable HTTP + etag caching. (See doc 03.)
-- [ ] Implement typed failure modes (`NetworkUnreachable`,
-  `HttpError`, `HashMismatch`) and clear user-facing messages.
-  (See doc 03.)
-- [ ] Add the `splitsmith fetch-models` CLI command with
-  `--verify` / `--force` / `--list` flags. (See doc 03 + doc 04.)
-- [ ] Wire the FastAPI server's `/api/models/status` endpoint and
-  the frontend overlay that shows download progress when artifacts
-  are missing or in-flight. (See doc 03.)
+- [x] `src/splitsmith/models/` module: manifest parsing, on-disk
+  cache layout, SHA256 streaming verify, exclusive cross-process
+  lock. **PR #379.**
+- [x] httpx-only resumable download with retry on transient network
+  failure; no retry on hash mismatch. **PR #379.** (huggingface_hub's
+  helper deferred -- httpx covers the v1 contract.)
+- [x] Typed failure modes (`NetworkUnreachable`, `HttpError`,
+  `HashMismatch`). **PR #379.**
+- [x] `splitsmith fetch-models --list / --verify / --force` CLI.
+  **PR #379.**
+- [x] `GET /api/models/status` endpoint reports per-artifact
+  present / missing / mismatched. Frontend overlay still TODO; the
+  endpoint is in place for the SPA to consume. **PR #379.**
 
 ### `pyproject.toml` changes
 
-- [ ] Remove `torch`, `transformers`, `panns-inference` from
-  `[project] dependencies`. (See doc 04.)
-- [ ] Add `onnxruntime>=1.20.0` and `huggingface_hub>=0.26.0` to
-  `[project] dependencies`. (See doc 04.)
-- [ ] Move `torch`, `transformers`, `panns-inference` into
-  `[dependency-groups] dev`; add `optimum` and `onnx`. (See doc 04.)
-- [ ] Add `[project.optional-dependencies] gpu =
-  ["onnxruntime-gpu"]`. (See doc 04.)
-- [ ] Update `[tool.hatch.build.targets.wheel] exclude` to drop
-  `**/data/onnx/**`. (See doc 04.)
+- [x] `torch`, `transformers`, `panns-inference` moved to
+  `[dependency-groups] dev`. **PR #384.**
+- [x] `onnxruntime>=1.20.0` + `huggingface_hub>=0.26.0` promoted to
+  `[project] dependencies`. **PR #384.**
+- [x] `onnx` + `onnxscript` kept in `[dev]` alongside torch for the
+  export scripts + parity tests. **PR #384.**
+- [-] `[project.optional-dependencies] gpu = ["onnxruntime-gpu"]`.
+  Deferred until measured demand from a CUDA user; CPU path covers
+  the desktop app at responsive cold-start times.
+- [-] `[tool.hatch.build.targets.wheel] exclude` for `**/data/onnx/**`.
+  Not needed yet -- no ONNX files live under `src/splitsmith/data/`.
+  Reconsider when the R2 upload tooling lands.
 
 ### ffmpeg + install UX
 
-- [ ] First-launch ffmpeg check with friendly install instructions
-  per OS. Cache the positive result in
-  `~/.splitsmith/state.json` for 24h. (See doc 04.)
-- [ ] README install section rewrite: `uv tool install splitsmith`
-  as the primary path; `splitsmith fetch-models` as the optional
-  pre-fetch step. (See doc 04.)
+- [x] First-launch ffmpeg check + 24h positive-result cache in
+  `state.json`; platform-aware install hints (darwin / linux /
+  win32). **PR #380.**
+- [ ] README install section rewrite around `uv tool install
+  splitsmith` + optional `splitsmith fetch-models`. Pending the R2
+  hosting phase landing so the upgrade story is true.
 
 ### Release gating
 
