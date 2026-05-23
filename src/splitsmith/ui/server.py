@@ -2086,6 +2086,40 @@ def create_app(
             return HealthResponse(bound=False)
         return _health_after_bind(state.bound_name or "")
 
+    @app.get("/api/models/status")
+    def models_status() -> dict[str, Any]:
+        """Slim model layer status (issue #377 -- doc 03).
+
+        The SPA polls this on mount + after each detect to know whether
+        to render the "downloading models" overlay. Wheels that don't
+        ship the ``model_artifacts`` calibration block (today's torch
+        path) return ``available=False`` so the frontend doesn't draw
+        the overlay at all.
+        """
+        from .. import models as model_layer
+
+        registry = model_layer.get_default_registry()
+        if registry is None:
+            return {"available": False, "artifacts": [], "missing": [], "mismatched": []}
+        statuses = registry.status()
+        missing = [s.slug for s in statuses if s.state == "missing"]
+        mismatched = [s.slug for s in statuses if s.state == "mismatched"]
+        return {
+            "available": True,
+            "cache_root": str(registry.root),
+            "artifacts": [
+                {
+                    "slug": s.slug,
+                    "state": s.state,
+                    "sha256": s.expected_sha256,
+                    "size_bytes": s.size_bytes,
+                }
+                for s in statuses
+            ],
+            "missing": missing,
+            "mismatched": mismatched,
+        }
+
     @app.post("/api/shutdown", status_code=202)
     def shutdown(request: Request) -> dict[str, Any]:
         """Drain in-flight jobs and ask uvicorn to exit (issue #369).

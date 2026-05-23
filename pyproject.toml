@@ -114,6 +114,10 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PTH"]
 # convention. The names are part of the documented surface; renaming would
 # break callers.
 "src/splitsmith/ui/scoreboard/http.py" = ["N818"]
+# Slim model layer exceptions (NetworkUnreachable, HashMismatch) are
+# named per docs/local-slim/03-model-hosting-and-delivery.md; the doc
+# is the public contract, not the N818 `*Error` convention.
+"src/splitsmith/models/errors.py" = ["N818"]
 # Training + evaluation scripts use ML naming conventions (X / Y / Xtr / Xte
 # for feature/label matrices) by long-standing scikit-learn convention. The
 # scripts directory is also where the team iterates on research code, so
