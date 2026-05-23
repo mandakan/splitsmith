@@ -75,7 +75,10 @@ production UI's ``/api/stages/{n}/shot-detect`` endpoint. Calibration
 artifacts ship under ``src/splitsmith/data/`` (built once by
 ``scripts/build_ensemble_artifacts.py``); the FastAPI server lazy-loads
 the CLAP / PANN / GBDT models on the first detection. Re-run the build
-script after adding new audited fixtures.
+script after adding new audited fixtures. Set
+``SPLITSMITH_ARTIFACTS_DIR=/path/to/experimental`` to point the engine
+at a different artifact set for A/B comparisons without rebuilding the
+shipped one (see ``splitsmith.runtime`` for the full env-var list).
 
 The review-time variant generator ``scripts/build_ensemble_fixture.py``
 still exists for offline comparison under ``build/ensemble-review/``.

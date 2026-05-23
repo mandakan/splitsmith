@@ -17,10 +17,11 @@ installed (wheel) or run from the source tree.
 from __future__ import annotations
 
 import json
-from importlib.resources import as_file, files
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from ..runtime import runtime
 
 # Coarse camera classes the ensemble stratifies thresholds on. Keeping the
 # vocabulary small on purpose: we only stratify per-voter thresholds today,
@@ -327,16 +328,13 @@ class EnsembleCalibration(BaseModel):
         return next(iter(per_class.values()))
 
 
-_DATA_PACKAGE = "splitsmith.data"
-_CALIBRATION_FILENAME = "ensemble_calibration.json"
-_VOTER_C_MODEL_FILENAME = "voter_c_gbdt.joblib"
 DEFAULT_VOTER_E_PROBE_FILENAME = "voter_e_visual_probe.joblib"
 
 
 def load_calibration() -> EnsembleCalibration:
-    """Read ``ensemble_calibration.json`` from the installed package."""
-    resource = files(_DATA_PACKAGE).joinpath(_CALIBRATION_FILENAME)
-    with resource.open("r", encoding="utf-8") as fh:
+    """Read ``ensemble_calibration.json`` from the resolved artifacts dir."""
+    path = runtime().artifact("ensemble_calibration.json")
+    with path.open("r", encoding="utf-8") as fh:
         return EnsembleCalibration.model_validate(json.load(fh))
 
 
@@ -349,11 +347,7 @@ def load_voter_c_model() -> dict[str, Any]:
     """
     import joblib
 
-    resource = files(_DATA_PACKAGE).joinpath(_VOTER_C_MODEL_FILENAME)
-    # joblib needs a real filesystem path, so materialise via as_file (which
-    # is a no-op when the package is laid out on disk).
-    with as_file(resource) as path:
-        return joblib.load(path)
+    return joblib.load(runtime().artifact("voter_c_gbdt.joblib"))
 
 
 def load_voter_e_probe(filename: str | None = None) -> Any | None:
@@ -367,8 +361,7 @@ def load_voter_e_probe(filename: str | None = None) -> Any | None:
     import joblib
 
     name = filename or DEFAULT_VOTER_E_PROBE_FILENAME
-    resource = files(_DATA_PACKAGE).joinpath(name)
-    if not resource.is_file():
+    path = runtime().artifacts_dir / name
+    if not path.is_file():
         return None
-    with as_file(resource) as path:
-        return joblib.load(path)
+    return joblib.load(path)

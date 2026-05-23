@@ -47,6 +47,7 @@ from .config import (
     StageAnalysis,
     StageData,
 )
+from .runtime import runtime
 from .ui.project import MatchProject
 
 app = typer.Typer(
@@ -527,15 +528,16 @@ def audit_prep(
     config = Config.load(config_path)
     if not video.exists():
         raise typer.BadParameter(f"video not found: {video}")
-    if not shutil.which("ffmpeg"):
-        raise typer.BadParameter("ffmpeg is required to extract audio")
+    ffmpeg_bin = runtime().ffmpeg_binary
+    if not shutil.which(ffmpeg_bin):
+        raise typer.BadParameter(f"ffmpeg binary not found: {ffmpeg_bin}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     full_wav = output_dir / f"{stem}-FULL.wav"
     console.print(f"  extracting full audio -> {full_wav}")
     _subprocess.run(
         [
-            "ffmpeg",
+            ffmpeg_bin,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -812,7 +814,7 @@ def fcpxml(
         )
         for r in rows
     ]
-    meta = fcpxml_gen.probe_video(video)
+    meta = fcpxml_gen.probe_video(video, ffprobe_binary=runtime().ffprobe_binary)
     fcpxml_gen.generate_fcpxml(
         video_path=video,
         video=meta,
@@ -887,6 +889,7 @@ def overlay(
         max_fps=max_fps,
         font_name=font_name,
         theme=theme,  # type: ignore[arg-type]
+        ffmpeg_binary=runtime().ffmpeg_binary,
     )
     console.print(f"[green]Wrote[/] {output}")
 
@@ -1009,6 +1012,7 @@ def _process_one(
             crf=config.output.trim_audit_crf,
             preset=config.output.trim_audit_preset,
             overwrite=True,
+            ffmpeg_binary=runtime().ffmpeg_binary,
         )
         console.print(f"  [green]trimmed video[/]: {files.video}")
 
@@ -1023,7 +1027,7 @@ def _process_one(
 
     if write_fcpxml and files.video and files.video.exists():
         files.fcpxml = output_dir / f"{base}.fcpxml"
-        meta = fcpxml_gen.probe_video(files.video)
+        meta = fcpxml_gen.probe_video(files.video, ffprobe_binary=runtime().ffprobe_binary)
         fcpxml_gen.generate_fcpxml(
             video_path=files.video,
             video=meta,
@@ -1099,13 +1103,14 @@ def _extract_or_load_audio(video: Path, audio_path: Path):
     which trades disk for repeat-run speed.
     """
     if not audio_path.exists() or audio_path.stat().st_mtime < video.stat().st_mtime:
-        if not shutil.which("ffmpeg"):
-            raise typer.BadParameter("ffmpeg is required to extract audio from video files")
+        ffmpeg_bin = runtime().ffmpeg_binary
+        if not shutil.which(ffmpeg_bin):
+            raise typer.BadParameter(f"ffmpeg binary not found: {ffmpeg_bin} (required to extract audio)")
         import subprocess
 
         subprocess.run(
             [
-                "ffmpeg",
+                ffmpeg_bin,
                 "-hide_banner",
                 "-loglevel",
                 "error",

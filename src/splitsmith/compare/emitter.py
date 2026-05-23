@@ -27,6 +27,7 @@ from ..fcpxml_gen import (
     _frame_aligned_str,
     _tag_source_application,
 )
+from ..runtime import runtime
 from .filler import Runner as FillerRunner
 from .filler import ensure_filler
 from .layout import GridSlot, compute_layout
@@ -234,6 +235,7 @@ def emit_compare_fcpxml(
             duration_seconds=duration_seconds,
             output_dir=filler_dir,
             runner=runner,
+            ffmpeg_binary=runtime().ffmpeg_binary,
         )
         format_id = _format_id_for(seq_meta)  # shares the sequence format
         asset_id = _next_id()

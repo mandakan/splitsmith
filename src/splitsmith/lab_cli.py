@@ -33,6 +33,7 @@ from .fixture_schema import (
     probe_camera_metadata,
 )
 from .lab.snap_window import snap_anchor_shots
+from .runtime import runtime as process_runtime
 
 app = typer.Typer(help="Algorithm lab: fixtures, eval, tuning.", no_args_is_help=True)
 
@@ -275,10 +276,11 @@ def load_config(
 
 def _extract_video_audio(video: Path, dest: Path, *, sample_rate: int) -> None:
     """Drop a mono float32 WAV at ``dest`` from ``video`` via ffmpeg."""
-    if not shutil.which("ffmpeg"):
-        raise typer.BadParameter("ffmpeg binary not found on PATH")
+    ffmpeg_bin = process_runtime().ffmpeg_binary
+    if not shutil.which(ffmpeg_bin):
+        raise typer.BadParameter(f"ffmpeg binary not found: {ffmpeg_bin}")
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-hide_banner",
         "-loglevel",
         "error",
