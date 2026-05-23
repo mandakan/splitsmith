@@ -30,7 +30,7 @@ import os
 import shutil
 import tempfile
 from datetime import UTC, date, datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -318,7 +318,7 @@ class StageVideo(BaseModel):
         return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
 
 
-class StageStatus(str, Enum):
+class StageStatus(StrEnum):
     """Per-stage lifecycle state, derived from project + audit-file state.
 
     Single source of truth -- the sidebar, the Home overview cards, the
@@ -353,7 +353,7 @@ class StageStatus(str, Enum):
 
 
 def stage_audit_status(
-    stage: "StageEntry",
+    stage: StageEntry,
     audit_dir: Path,
     *,
     has_trim: bool | None = None,
@@ -389,9 +389,7 @@ def stage_audit_status(
         # detection. The Audit page will surface the read error itself.
         return StageStatus.ready
     events = payload.get("audit_events") or []
-    saved = any(
-        isinstance(e, dict) and e.get("kind") == "save" for e in events
-    )
+    saved = any(isinstance(e, dict) and e.get("kind") == "save" for e in events)
     if saved:
         return StageStatus.audited
     return StageStatus.in_progress
@@ -795,9 +793,7 @@ class MatchProject(BaseModel):
         can use :meth:`audited_count` instead, which is the same work.
         """
         audit_dir = self.audit_path(root)
-        return {
-            s.stage_number: stage_audit_status(s, audit_dir) for s in self.stages
-        }
+        return {s.stage_number: stage_audit_status(s, audit_dir) for s in self.stages}
 
     def audited_count(self, root: Path) -> int:
         """Number of stages that are ``audited`` (Save has been hit).
@@ -809,11 +805,7 @@ class MatchProject(BaseModel):
         state but represent operator intent to ignore, not work done.
         """
         audit_dir = self.audit_path(root)
-        return sum(
-            1
-            for s in self.stages
-            if stage_audit_status(s, audit_dir) == StageStatus.audited
-        )
+        return sum(1 for s in self.stages if stage_audit_status(s, audit_dir) == StageStatus.audited)
 
     # ------------------------------------------------------------------
     # Video registry helpers (Sub 2 / #13)

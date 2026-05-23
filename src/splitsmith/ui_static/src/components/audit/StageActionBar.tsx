@@ -1,14 +1,15 @@
 import { ArrowRight, CheckCircle2, Loader2, Undo2 } from "lucide-react";
 
 import { Kbd } from "@/components/ui/Kbd";
-import type { ShooterListEntry } from "@/lib/api";
+import type { ShooterListEntry, StageStatus } from "@/lib/api";
 import type { AuditNextStep } from "@/lib/audit-next-step";
+import { isTerminal } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
 export interface StageActionBarStage {
   stageNumber: number;
   stageName: string;
-  status: "done" | "active" | "todo";
+  status: StageStatus;
 }
 
 export interface StageActionBarProps {
@@ -57,7 +58,7 @@ export function StageActionBar({
   const shooter = shooterIdx >= 0 ? shooters[shooterIdx] : null;
   const stage = stageIdx >= 0 ? stages[stageIdx] : null;
   const isFinish = step.kind === "finish";
-  const isReview = stage?.status === "done";
+  const isReview = stage != null && isTerminal(stage.status);
 
   return (
     <div
@@ -100,7 +101,7 @@ export function StageActionBar({
                 {stage.stageName ? (
                   <span className="truncate text-ink-2/80">{stage.stageName}</span>
                 ) : null}
-                {stage.status === "done" ? (
+                {isTerminal(stage.status) ? (
                   <span aria-hidden className="text-done">·</span>
                 ) : null}
               </span>
@@ -112,7 +113,7 @@ export function StageActionBar({
           <div className="hidden items-center gap-[3px] sm:flex" aria-hidden>
             {stages.map((s) => {
               const isActive = s.stageNumber === activeStage;
-              const isDone = s.status === "done";
+              const isDone = isTerminal(s.status);
               return (
                 <span
                   key={s.stageNumber}

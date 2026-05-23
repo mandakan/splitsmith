@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { ApiError, api, type Job, type MatchProject } from "@/lib/api";
@@ -35,9 +35,11 @@ export interface PrereqGateProps {
    *  the chip's hardcoded 0.85 default; pass the project's automation
    *  override to keep them in sync. */
   beepLowConfThreshold?: number;
-  /** Opens sync mode for the primary cam so the operator can re-pick the
-   *  buzzer. When omitted, the beep row stays informational only. */
-  onRePickBeep?: () => void;
+  /** Ping the toolbar's :class:`BeepStatusChip` -- the chip owns beep
+   *  state, so the gate's beep row no longer renders its own Re-pick.
+   *  Clicking the row instead calls this callback, which scrolls the
+   *  chip into view and flashes it. */
+  onPingBeepChip?: () => void;
   /** True when the audit clip has been trimmed. */
   hasTrim: boolean;
   /** Refresh the project after a trim completes. Wired only when kind === 'trim'. */
@@ -53,9 +55,10 @@ interface ChecklistItem {
    *  beep), "todo" = neutral dashed circle. */
   tone?: "done" | "warn" | "todo";
   sub: string;
-  /** Optional in-row action (e.g. "Re-pick"). Rendered as a small button
-   *  on the right when present. */
-  action?: { label: string; onClick: () => void };
+  /** Optional click handler. When set, the entire row reads as a
+   *  pointer affordance and dispatches on click. Used to ping the
+   *  toolbar's beep chip from the beep-position row. */
+  onClick?: () => void;
 }
 
 /**
@@ -63,11 +66,16 @@ interface ChecklistItem {
  * (the trim hasn't been built yet, or detection hasn't run on the trim),
  * the entire audit canvas is replaced by this centered card.
  *
- * The toolbar status badges that used to show TrimNowBadge / DetectShotsBadge
- * implied "you can audit while these are pending" -- but you can't, so the
- * design moves the affordance into a single blocking card. The card owns
- * its own job polling so it can adopt in-flight jobs on remount and show
- * the run state inline, mirroring the badge polling pattern.
+ * The card has three visual states, each tied to ``jobStatus``:
+ *
+ *   - **running** -- neutral chrome (--rule-strong border, --surface bg,
+ *     ink-toned spinner). Running is *not* a warning, so the amber that
+ *     screams "something is wrong with the trim" is dropped.
+ *   - **blocked** -- the canonical amber treatment. Honest warning: the
+ *     operator needs to fix a prereq before audit unlocks.
+ *   - **failed** -- amber, same shape as blocked. Escalating to a
+ *     destructive red is a follow-up; today the difference is the inline
+ *     error string.
  */
 export function PrereqGate({
   kind,
@@ -82,7 +90,7 @@ export function PrereqGate({
   beepConfidence = null,
   beepDiagnostic = null,
   beepLowConfThreshold = 0.85,
-  onRePickBeep,
+  onPingBeepChip,
   hasTrim,
   onProjectUpdate,
   onAuditRefresh,
@@ -91,15 +99,34 @@ export function PrereqGate({
   const [error, setError] = useState<string | null>(null);
   const running = job != null && (job.status === "pending" || job.status === "running");
 
+  // Identifies the kind+stage tuple this PrereqGate instance is for.
+  // Every pollJob progress callback is gated against this ref so a
+  // stage switch can't let the prior stage's in-flight job leak
+  // progress updates into the new stage's chrome. (Repro: trigger
+  // re-beep -> trim on stage X, navigate to stage Y while trim is
+  // still running, the Y gate would otherwise show "Detecting 30%"
+  // because the X polljob's setJob callback keeps firing.)
+  const ownerKeyRef = useRef<string>(`${kind}:${stageNumber}`);
+  ownerKeyRef.current = `${kind}:${stageNumber}`;
+
   // Adopt any in-flight job for this stage of this kind. Mirrors the
   // logic in TrimNowBadge / DetectShotsBadge -- if the page reloads
   // mid-job, we reattach rather than leaving the user a stale button
   // that would double-submit.
   useEffect(() => {
     let cancelled = false;
+    const ownerKey = `${kind}:${stageNumber}`;
     setJob(null);
     setError(null);
     const jobKind = kind === "trim" ? "trim" : "shot_detect";
+    // Guarded setter -- only forwards to React state when the effect
+    // is still active AND the gate still belongs to the same
+    // kind+stage tuple. Cancels updates from prior in-flight jobs
+    // when the operator navigates to a different stage mid-run.
+    const guardedSetJob = (j: Job) => {
+      if (cancelled || ownerKeyRef.current !== ownerKey) return;
+      setJob(j);
+    };
     api
       .listJobs()
       .then(async (jobs) => {
@@ -111,10 +138,10 @@ export function PrereqGate({
             (j.status === "pending" || j.status === "running"),
         );
         if (!active) return;
-        setJob(active);
+        guardedSetJob(active);
         try {
-          const final = await api.pollJob(active.id, setJob);
-          if (cancelled) return;
+          const final = await api.pollJob(active.id, guardedSetJob);
+          if (cancelled || ownerKeyRef.current !== ownerKey) return;
           if (final.status === "succeeded") {
             if (kind === "trim" && onProjectUpdate) {
               onProjectUpdate(await api.getProject(slug));
@@ -125,24 +152,35 @@ export function PrereqGate({
             setError(final.error ?? `${kind === "trim" ? "Trim" : "Detection"} failed`);
           }
         } finally {
-          if (!cancelled) setJob(null);
+          if (!cancelled && ownerKeyRef.current === ownerKey) setJob(null);
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
+      // Clear any local job state so a stage switch never leaves a
+      // stale "running" frame painted on the new stage's gate while
+      // the next effect's listJobs() is in flight.
+      setJob(null);
+      setError(null);
     };
   }, [kind, slug, stageNumber, onProjectUpdate, onAuditRefresh]);
 
   const run = useCallback(async () => {
+    const ownerKey = `${kind}:${stageNumber}`;
     setError(null);
+    const guardedSetJob = (j: Job) => {
+      if (ownerKeyRef.current !== ownerKey) return;
+      setJob(j);
+    };
     try {
       const initial =
         kind === "trim"
           ? await api.trimStage(slug, stageNumber)
           : await api.detectShots(slug, stageNumber, { reset: false });
-      setJob(initial);
-      const final = await api.pollJob(initial.id, setJob);
+      guardedSetJob(initial);
+      const final = await api.pollJob(initial.id, guardedSetJob);
+      if (ownerKeyRef.current !== ownerKey) return;
       if (final.status === "failed") {
         setError(final.error ?? `${kind === "trim" ? "Trim" : "Detection"} failed`);
         return;
@@ -153,9 +191,11 @@ export function PrereqGate({
         await onAuditRefresh();
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : String(err));
+      if (ownerKeyRef.current === ownerKey) {
+        setError(err instanceof ApiError ? err.detail : String(err));
+      }
     } finally {
-      setJob(null);
+      if (ownerKeyRef.current === ownerKey) setJob(null);
     }
   }, [kind, slug, stageNumber, onProjectUpdate, onAuditRefresh]);
 
@@ -164,7 +204,10 @@ export function PrereqGate({
   // Match BeepStatusChip's reading: a beep that exists but has low
   // confidence or carries a post-audit diagnostic is "likely wrong",
   // not "picked". Same threshold + same trigger so the chip and the
-  // checklist never disagree about the same beep.
+  // checklist never disagree about the same beep. When the beep needs
+  // attention the row becomes clickable -- clicking it pings the
+  // toolbar chip (which owns the affordance) instead of duplicating
+  // a Re-pick button inside this card.
   const beepLikelyWrong =
     hasBeep &&
     ((beepConfidence != null && beepConfidence < beepLowConfThreshold) ||
@@ -175,9 +218,7 @@ export function PrereqGate({
         done: false,
         tone: "todo",
         sub: "not yet picked",
-        ...(onRePickBeep
-          ? { action: { label: "Pick beep", onClick: onRePickBeep } }
-          : {}),
+        ...(onPingBeepChip ? { onClick: onPingBeepChip } : {}),
       }
     : beepLikelyWrong
       ? {
@@ -188,9 +229,7 @@ export function PrereqGate({
           done: true,
           tone: "warn",
           sub: beepDiagnostic ?? "likely wrong",
-          ...(onRePickBeep
-            ? { action: { label: "Re-pick", onClick: onRePickBeep } }
-            : {}),
+          ...(onPingBeepChip ? { onClick: onPingBeepChip } : {}),
         }
       : {
           label: "Beep position",
@@ -264,17 +303,36 @@ export function PrereqGate({
       <div
         role="region"
         aria-label={headline}
-        className="relative w-full max-w-[40rem] overflow-hidden rounded-3xl border border-live/30 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-live)_4%,var(--color-surface))_0%,var(--color-surface)_100%)] p-8 pb-7 shadow-[inset_0_0_0_1px_var(--color-rule),0_24px_60px_-24px_rgba(0,0,0,0.7),0_0_32px_color-mix(in_srgb,var(--color-live)_14%,transparent)]"
+        className={cn(
+          "relative w-full max-w-[40rem] overflow-hidden rounded-3xl p-8 pb-7",
+          // Two distinct chromes:
+          //   running -- neutral. No amber anywhere; the gate is doing
+          //              the work the user asked for, not warning them.
+          //   blocked -- the canonical amber. Honest "fix this first".
+          running
+            ? "border border-rule-strong bg-surface shadow-[inset_0_0_0_1px_var(--color-rule),0_24px_60px_-24px_rgba(0,0,0,0.7)]"
+            : "border border-live/30 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-live)_4%,var(--color-surface))_0%,var(--color-surface)_100%)] shadow-[inset_0_0_0_1px_var(--color-rule),0_24px_60px_-24px_rgba(0,0,0,0.7),0_0_32px_color-mix(in_srgb,var(--color-live)_14%,transparent)]",
+        )}
       >
         <span
           aria-hidden
-          className="absolute inset-y-0 left-0 w-[3px] bg-live shadow-[0_0_14px_var(--color-live-glow)]"
+          className={cn(
+            "absolute inset-y-0 left-0 w-[3px]",
+            running
+              ? "bg-[color:color-mix(in_srgb,var(--color-ink-2)_45%,transparent)]"
+              : "bg-live shadow-[0_0_14px_var(--color-live-glow)]",
+          )}
         />
 
         <div className="flex items-start gap-5">
           <span
             aria-hidden
-            className="inline-flex size-[52px] shrink-0 items-center justify-center rounded-full border border-live/40 bg-live-tint text-live shadow-[0_0_20px_var(--color-live-glow)]"
+            className={cn(
+              "inline-flex size-[52px] shrink-0 items-center justify-center rounded-full",
+              running
+                ? "border border-rule-strong bg-surface-2 text-ink-2"
+                : "border border-live/40 bg-live-tint text-live shadow-[0_0_20px_var(--color-live-glow)]",
+            )}
           >
             {running ? (
               <Loader2 className="size-6 animate-spin" aria-hidden />
@@ -285,7 +343,12 @@ export function PrereqGate({
             )}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="font-mono text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-live">
+            <div
+              className={cn(
+                "font-mono text-[0.6875rem] font-bold uppercase tracking-[0.14em]",
+                running ? "text-ink-2" : "text-live",
+              )}
+            >
               {stageLabel}
               {stage.stage_name ? (
                 <span className="ml-1.5 text-muted">· {stage.stage_name}</span>
@@ -303,16 +366,27 @@ export function PrereqGate({
         <ul className="mb-5 mt-[1.375rem] flex list-none flex-col gap-1.5 p-0">
           {checklist.map((c, i) => {
             const tone = c.tone ?? (c.done ? "done" : "todo");
+            const interactive = c.onClick != null;
+            const Tag = interactive ? "button" : "li";
             return (
-              <li
+              <Tag
                 key={i}
+                {...(interactive
+                  ? {
+                      type: "button" as const,
+                      onClick: c.onClick,
+                      "aria-label": `${c.label} -- ${c.sub}. Click to highlight the beep status chip.`,
+                    }
+                  : {})}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-md border px-3 py-2.5",
+                  "flex w-full items-center gap-2.5 rounded-md border px-3 py-2.5 text-left",
                   tone === "warn"
                     ? "border-live/40 bg-live-tint"
                     : tone === "done"
                       ? "border-rule bg-[color-mix(in_srgb,var(--color-done)_5%,var(--color-surface-2))]"
                       : "border-rule bg-surface-2",
+                  interactive &&
+                    "cursor-pointer transition-colors hover:border-rule-strong hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led/60",
                 )}
               >
                 <span
@@ -361,21 +435,15 @@ export function PrereqGate({
                 >
                   {c.sub}
                 </span>
-                {c.action ? (
-                  <button
-                    type="button"
-                    onClick={c.action.onClick}
-                    className={cn(
-                      "ml-1 inline-flex shrink-0 items-center rounded font-display text-[0.625rem] font-bold uppercase tracking-[0.08em] transition-colors",
-                      tone === "warn"
-                        ? "border border-led/70 bg-led-tint px-2.5 py-1 text-led hover:bg-led/20"
-                        : "border border-rule bg-surface-2 px-2.5 py-1 text-ink-2 hover:border-rule-strong hover:bg-surface-3 hover:text-ink",
-                    )}
+                {interactive ? (
+                  <span
+                    aria-hidden
+                    className="ml-1 inline-flex shrink-0 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em] text-muted"
                   >
-                    {c.action.label}
-                  </button>
+                    Highlight chip →
+                  </span>
                 ) : null}
-              </li>
+              </Tag>
             );
           })}
         </ul>

@@ -236,6 +236,26 @@ function ScoreboardVariant({
   const [parentDir, setParentDir] = useState<string>(DEFAULT_PARENT_DIR);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Division facet -- ``null`` means "any". Selected division narrows the
+  // accordion list to a single group. Squad isn't on the wire today, so
+  // division does double duty as both the facet chip row and the
+  // accordion grouping axis.
+  const [divisionFacet, setDivisionFacet] = useState<string | null>(null);
+  // Open/closed state per division accordion. Defaults are decided after
+  // roster load: all open when the roster is small (<=40), all collapsed
+  // otherwise so the operator scans group headers first.
+  const [openDivisions, setOpenDivisions] = useState<Record<string, boolean>>({});
+  // Project folder slug. Defaults to slugify(matchName) when a match is
+  // picked; editable via the inline input below the parent-dir picker.
+  // Validated on blur (kebab-case, deduped against on-disk match dirs).
+  const [slug, setSlug] = useState("");
+  const [slugDirty, setSlugDirty] = useState(false);
+  const [slugError, setSlugError] = useState<string | null>(null);
+  // Leaf names of existing match dirs, harvested from /api/me/recent-projects
+  // -- used so the slug validation can flag "name already taken" before
+  // the operator hits Create. Best-effort: if recents is empty or the
+  // fetch fails, we still let them submit and let the backend complain.
+  const [existingLeaves, setExistingLeaves] = useState<Set<string>>(new Set());
   const step2Ref = useRef<HTMLDivElement | null>(null);
 
   // Scroll step 2 into view when the user picks a match (the detail
@@ -280,14 +300,65 @@ function ScoreboardVariant({
     };
   }, [selected?.id, selected?.content_type, onError]);
 
-  const slug = useMemo(
-    () => (selected ? slugify(selected.name) : ""),
-    [selected],
-  );
+  // Default the slug from the picked match name. Once the operator
+  // edits it (``slugDirty``) we stop auto-overwriting on subsequent
+  // match picks -- they're presumably keeping their custom name.
+  useEffect(() => {
+    if (!selected) {
+      setSlug("");
+      setSlugDirty(false);
+      setSlugError(null);
+      return;
+    }
+    if (!slugDirty) {
+      setSlug(slugify(selected.name));
+      setSlugError(null);
+    }
+  }, [selected?.id, selected?.content_type, slugDirty]);
+
+  // Harvest the leaf name of every known match dir from recents so we
+  // can flag duplicates inline. Fire once on mount; if the user creates
+  // a match and bounces back to this page, the next mount picks up the
+  // new entry. Quiet on failure -- this is a hint, not a gate.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getRecentProjectsDetail()
+      .then((projects) => {
+        if (cancelled) return;
+        const leaves = new Set<string>();
+        for (const p of projects) {
+          const leaf = p.path.split("/").filter(Boolean).pop();
+          if (leaf) leaves.add(leaf);
+        }
+        setExistingLeaves(leaves);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const projectFolder = useMemo(
     () => (slug ? projectFolderPath(parentDir, slug) : ""),
     [parentDir, slug],
   );
+
+  // Re-default accordion open state when a new roster arrives. Auto-
+  // collapse for rosters > 40 so the operator scans group headers first;
+  // small matches stay expanded so checkboxes are immediately reachable.
+  useEffect(() => {
+    if (!matchData) return;
+    const divisions = new Set<string>();
+    for (const c of matchData.competitors) {
+      divisions.add(c.division ?? "Unknown division");
+    }
+    const expand = matchData.competitors.length <= 40;
+    const next: Record<string, boolean> = {};
+    for (const d of divisions) next[d] = expand;
+    setOpenDivisions(next);
+    setDivisionFacet(null);
+  }, [matchData]);
 
   // ENTER triggers a search against the unbound /api/scoreboard/search
   // endpoint. Any backend failure (no SSI token, scoreboard down, rate
@@ -337,18 +408,66 @@ function ScoreboardVariant({
   const competitors = matchData?.competitors ?? [];
   const filteredCompetitors = useMemo(() => {
     const q = competitorFilter.trim().toLowerCase();
-    if (!q) return competitors;
     return competitors.filter((c) => {
+      if (divisionFacet && (c.division ?? "Unknown division") !== divisionFacet) {
+        return false;
+      }
+      if (!q) return true;
       const hay = `${c.name} ${c.club ?? ""} ${c.division ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [competitors, competitorFilter]);
+  }, [competitors, competitorFilter, divisionFacet]);
+
+  // Distinct divisions in roster order. Used by the facet chip row to
+  // surface the meaningful categories without us having to predict them.
+  // ``count`` is total roster size in that division (not the filtered
+  // count) so the chip badge stays stable while the operator types.
+  const divisionFacets = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of competitors) {
+      const d = c.division ?? "Unknown division";
+      counts.set(d, (counts.get(d) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([division, count]) => ({
+      division,
+      count,
+    }));
+  }, [competitors]);
+
+  // Group the *filtered* roster by division so the accordion bodies
+  // shrink as the operator types into the search box. When the active
+  // facet narrows to a single division this is just one group.
+  const groupedFiltered = useMemo(() => {
+    const groups = new Map<string, ScoreboardMatchCompetitor[]>();
+    for (const c of filteredCompetitors) {
+      const d = c.division ?? "Unknown division";
+      const arr = groups.get(d) ?? [];
+      arr.push(c);
+      groups.set(d, arr);
+    }
+    return Array.from(groups.entries());
+  }, [filteredCompetitors]);
+
+  // Slug validation. Kebab-cased pattern + dedup against on-disk match
+  // dirs. Returns ``null`` when the value is acceptable, otherwise a
+  // short message for the inline error string.
+  function validateSlug(s: string): string | null {
+    const trimmed = s.trim();
+    if (!trimmed) return "Folder name can't be empty";
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
+      return "Use kebab-case: lowercase letters, digits, hyphens";
+    }
+    if (existingLeaves.has(trimmed)) return "A match folder by that name already exists";
+    return null;
+  }
 
   const canCreate =
     !!selected &&
     !!matchData &&
     checked.size > 0 &&
     parentDir.trim().length > 0 &&
+    slug.trim().length > 0 &&
+    slugError == null &&
     !creating;
 
   async function create() {
@@ -387,7 +506,7 @@ function ScoreboardVariant({
   return (
     <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_24px_48px_-24px_rgba(0,0,0,0.7)]">
       {/* Step 1: locate */}
-      <Section eyebrow="Step 1 · locate match" title="Find the match on scoreboard.urdr.dev">
+      <Section eyebrow="01 Locate match" title="Find the match on scoreboard.urdr.dev">
         <p className="-mt-1 mb-4 max-w-xl text-[0.8125rem] text-muted">
           Search by name, club, or date. Level II+ matches shown by default.
         </p>
@@ -474,7 +593,7 @@ function ScoreboardVariant({
       {selected && (
         <div ref={step2Ref}>
           <Section
-            eyebrow="Step 2 · pick shooters"
+            eyebrow="02 Pick shooters"
             title={`Add shooters from ${selected.name}`}
           >
             <p className="-mt-1 mb-4 max-w-2xl text-[0.8125rem] text-muted">
@@ -503,6 +622,36 @@ function ScoreboardVariant({
               )}
             </label>
 
+            {/* Division facets. A single ``All`` chip plus one chip per
+                division. Clicking a division narrows the accordion list
+                to that one group; clicking the active chip (or All)
+                clears the facet. */}
+            {divisionFacets.length > 1 && (
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                <FacetChip
+                  active={divisionFacet == null}
+                  onClick={() => setDivisionFacet(null)}
+                  count={competitors.length}
+                >
+                  All
+                </FacetChip>
+                {divisionFacets.map((f) => (
+                  <FacetChip
+                    key={f.division}
+                    active={divisionFacet === f.division}
+                    onClick={() =>
+                      setDivisionFacet(
+                        divisionFacet === f.division ? null : f.division,
+                      )
+                    }
+                    count={f.count}
+                  >
+                    {f.division}
+                  </FacetChip>
+                ))}
+              </div>
+            )}
+
             <div className="mt-3 flex items-center justify-between font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-subtle">
               <span>
                 {loadingRoster ? (
@@ -518,12 +667,12 @@ function ScoreboardVariant({
                 <span>
                   {filteredCompetitors.length === competitors.length
                     ? `${competitors.length} shooters`
-                    : `${filteredCompetitors.length} match · ${competitors.length} total`}
+                    : `${filteredCompetitors.length} shown · ${competitors.length} total`}
                 </span>
               )}
             </div>
 
-            <div className="mt-2 max-h-80 overflow-y-auto rounded-[10px] border border-rule bg-bg-glow">
+            <div className="mt-2 max-h-96 overflow-y-auto rounded-[10px] border border-rule bg-bg-glow">
               {loadingRoster ? (
                 <div className="px-4 py-8 text-center font-mono text-xs uppercase tracking-[0.08em] text-muted">
                   Loading roster from scoreboard...
@@ -535,23 +684,89 @@ function ScoreboardVariant({
                     : "No shooters match that filter."}
                 </div>
               ) : (
-                filteredCompetitors.map((c) => (
-                  <CompetitorRow
-                    key={c.id}
-                    competitor={c}
-                    checked={checked.has(c.id)}
-                    onToggle={() => toggleChecked(c.id)}
-                  />
-                ))
+                groupedFiltered.map(([division, rows]) => {
+                  const selectedInGroup = rows.filter((c) =>
+                    checked.has(c.id),
+                  ).length;
+                  const open = openDivisions[division] ?? true;
+                  return (
+                    <DivisionAccordion
+                      key={division}
+                      division={division}
+                      count={rows.length}
+                      selected={selectedInGroup}
+                      open={open}
+                      onToggle={() =>
+                        setOpenDivisions((prev) => ({
+                          ...prev,
+                          [division]: !open,
+                        }))
+                      }
+                      onSelectAll={() => {
+                        setChecked((prev) => {
+                          const next = new Set(prev);
+                          for (const c of rows) next.add(c.id);
+                          return next;
+                        });
+                      }}
+                      onClear={() => {
+                        setChecked((prev) => {
+                          const next = new Set(prev);
+                          for (const c of rows) next.delete(c.id);
+                          return next;
+                        });
+                      }}
+                    >
+                      {open
+                        ? rows.map((c) => (
+                            <CompetitorRow
+                              key={c.id}
+                              competitor={c}
+                              checked={checked.has(c.id)}
+                              onToggle={() => toggleChecked(c.id)}
+                            />
+                          ))
+                        : null}
+                    </DivisionAccordion>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Sticky selection footer. Lives in normal flow but
+                ``position: sticky`` so it pins to the viewport bottom
+                while the operator scrolls section 02. The Create
+                button is rendered at the bottom of the form, but the
+                running tally is more useful next to the list. */}
+            <div className="sticky bottom-3 z-10 mt-3 flex items-center justify-between rounded-lg border border-rule-strong bg-surface/95 px-4 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-ink-2 backdrop-blur">
+              <span>
+                <b
+                  className={cn(
+                    "font-bold",
+                    checked.size > 0 ? "text-led-text" : "text-muted",
+                  )}
+                >
+                  {checked.size}
+                </b>{" "}
+                of {competitors.length} selected
+              </span>
+              {checked.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setChecked(new Set())}
+                  className="text-subtle transition-colors hover:text-ink-2"
+                >
+                  Clear selection
+                </button>
               )}
             </div>
           </Section>
 
-          <Section eyebrow="Step 3 · project folder" title="Where to save this match">
+          <Section eyebrow="03 Project folder" title="Where to save this match">
             <p className="-mt-1 mb-4 max-w-2xl text-[0.8125rem] text-muted">
               The match folder will be created as a new directory inside
-              the parent you pick. The leaf is generated from the match
-              name.
+              the parent you pick. The leaf defaults to the match name in
+              kebab-case; edit it if you'd like a different folder name.
             </p>
 
             <div className="flex flex-col gap-3 rounded-lg border border-rule bg-surface-3 px-4 py-3.5">
@@ -572,6 +787,50 @@ function ScoreboardVariant({
                   <FolderOpen className="size-3.5" />
                   Change...
                 </button>
+              </div>
+              <div className="border-t border-rule pt-3">
+                <label className="block font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
+                  Folder name
+                </label>
+                <input
+                  type="text"
+                  value={slug}
+                  onChange={(e) => {
+                    setSlug(e.target.value);
+                    setSlugDirty(true);
+                    // Don't surface the error while the operator is
+                    // still typing -- only on blur. Clear any stale
+                    // message so they don't see "duplicate" linger
+                    // after they edit it away.
+                    if (slugError) setSlugError(null);
+                  }}
+                  onBlur={() => {
+                    // Normalise to kebab-case on blur so a user who types
+                    // "Bromma Classifier 2026" gets snapped to the canonical
+                    // form (matches what the backend would have used) and
+                    // can then accept or override.
+                    const normalised = slugify(slug);
+                    if (normalised !== slug) setSlug(normalised);
+                    setSlugError(validateSlug(normalised));
+                  }}
+                  spellCheck={false}
+                  aria-invalid={slugError != null}
+                  aria-describedby={slugError ? "slug-error" : undefined}
+                  className={cn(
+                    "mt-1 w-full rounded-md border bg-surface-2 px-3 py-2 font-mono text-[0.8125rem] tabular-nums text-ink outline-none transition-colors",
+                    slugError
+                      ? "border-led shadow-[0_0_0_3px_var(--color-led-tint)]"
+                      : "border-rule focus:border-led focus:shadow-[0_0_0_3px_var(--color-led-tint)]",
+                  )}
+                />
+                {slugError && (
+                  <p
+                    id="slug-error"
+                    className="mt-1.5 font-mono text-[0.6875rem] text-led-text"
+                  >
+                    {slugError}
+                  </p>
+                )}
               </div>
               <div className="border-t border-rule pt-3">
                 <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
@@ -635,6 +894,98 @@ function ScoreboardVariant({
           onCancel={() => setPickerOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+function FacetChip({
+  active,
+  count,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  count: number;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-display text-[0.6875rem] font-bold uppercase tracking-[0.06em] transition-colors",
+        active
+          ? "border-led bg-led-tint text-led-text"
+          : "border-rule bg-surface-3 text-ink-2 hover:border-rule-strong hover:bg-surface-2",
+      )}
+    >
+      <span>{children}</span>
+      <span
+        className={cn(
+          "font-mono text-[0.625rem] tabular-nums",
+          active ? "text-led-text" : "text-muted",
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function DivisionAccordion({
+  division,
+  count,
+  selected,
+  open,
+  onToggle,
+  onSelectAll,
+  onClear,
+  children,
+}: {
+  division: string;
+  count: number;
+  selected: number;
+  open: boolean;
+  onToggle: () => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  children: React.ReactNode;
+}) {
+  const allSelected = selected > 0 && selected === count;
+  return (
+    <div className="border-b border-rule last:border-b-0">
+      <div className="flex items-center gap-2 bg-surface-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex flex-1 items-center gap-2 text-left transition-colors hover:text-ink"
+        >
+          <ChevronDown
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-subtle transition-transform",
+              open ? "rotate-0" : "-rotate-90",
+            )}
+          />
+          <span className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink">
+            {division}
+          </span>
+          <span className="font-mono text-[0.625rem] tabular-nums text-muted">
+            {selected > 0 ? `${selected}/${count}` : count}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={allSelected ? onClear : onSelectAll}
+          className="rounded border border-rule bg-surface-3 px-2 py-0.5 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-rule-strong hover:text-ink"
+        >
+          {allSelected ? "Clear" : "All"}
+        </button>
+      </div>
+      {open ? children : null}
     </div>
   );
 }
@@ -891,7 +1242,7 @@ function ManualVariant({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_24px_48px_-24px_rgba(0,0,0,0.7)]">
-      <Section eyebrow="Step 1 · match details" title="Match details">
+      <Section eyebrow="01 Match details" title="Match details">
         <div className="mt-2 grid gap-x-5 gap-y-4 sm:grid-cols-2">
           <FormField label="Match name" required>
             <TextInput
@@ -938,7 +1289,7 @@ function ManualVariant({
         </div>
       </Section>
 
-      <Section eyebrow="Step 2 · stages" title="Stages">
+      <Section eyebrow="02 Stages" title="Stages">
         <p className="-mt-1 mb-4 text-[0.8125rem] text-muted">
           Add a row per stage. Expected shots feed the stage-aware
           detector; the name is what shows up everywhere downstream.
@@ -1026,7 +1377,7 @@ function ManualVariant({
         </p>
       </Section>
 
-      <Section eyebrow="Step 3 · first shooter" title="Add a shooter">
+      <Section eyebrow="03 First shooter" title="Add a shooter">
         <p className="-mt-1 mb-4 text-[0.8125rem] text-muted">
           Manual matches need at least one shooter to start. More can be
           added from the shooters page later.
@@ -1088,9 +1439,14 @@ function Section({
   title?: string;
   children: React.ReactNode;
 }) {
+  // Eyebrow is structural ("01 Locate match"), not a stepper. The kicker
+  // colour is muted subtle so it reads as "section number" rather than
+  // "step indicator" -- the page used to render the LED-red "Step 1"
+  // / "Step 2" / "Step 3" stepper which implied an enforced order the
+  // form doesn't actually require.
   return (
     <div className="border-b border-rule px-7 py-6 last:border-b-0">
-      <div className="mb-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-led">
+      <div className="mb-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-subtle">
         {eyebrow}
       </div>
       {title && (

@@ -157,7 +157,7 @@ export function Shooters() {
     setError(null);
     try {
       const result = await api.buildShooterTrimCaches(slug);
-      // The JobsPanel already polls /api/jobs and surfaces the queued
+      // The jobs rail already polls /api/jobs and surfaces the queued
       // trim jobs; we just refresh the shooter list so the missing-trim
       // count moves toward zero as jobs complete (the user re-loads the
       // page or comes back here later; we don't long-poll here).

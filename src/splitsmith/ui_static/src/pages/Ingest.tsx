@@ -575,24 +575,27 @@ function ReviewState({
             uncertain beeps on /beep-review for confirm/adjust. Surfacing
             it from the videos page is the missing handoff -- without
             this row the user lands on Audit and sees the chip warn
-            "likely wrong" with nowhere obvious to fix it. */}
+            "likely wrong" with nowhere obvious to fix it.
+            Tone is beep-cyan, not amber: this is positive pending work,
+            not a warning. Amber would say "something is wrong"; cyan
+            says "almost-done work waits for you". */}
         {beepPending > 0 && (
           <Link
             to="/beep-review"
-            className="flex items-center gap-3.5 border-b border-rule bg-gradient-to-r from-live/10 to-transparent px-6 py-3 font-mono text-[0.75rem] uppercase tracking-[0.06em] text-ink-2 transition-colors hover:bg-live/15"
+            className="flex items-center gap-3.5 border-b border-rule bg-gradient-to-r from-beep/10 to-transparent px-6 py-3 font-mono text-[0.75rem] uppercase tracking-[0.06em] text-ink-2 transition-colors hover:bg-beep/15"
           >
-            <span className="inline-flex size-7 items-center justify-center rounded-full border border-live/40 bg-live-tint text-live shadow-[0_0_10px_var(--color-live-glow)]">
+            <span className="inline-flex size-7 items-center justify-center rounded-full border border-beep/40 bg-beep-tint text-beep shadow-[0_0_10px_var(--color-beep-glow)]">
               <Video className="size-3.5" />
             </span>
             <span className="flex-1">
-              <b className="font-bold text-live">{beepPending}</b>{" "}
+              <b className="font-bold text-beep">{beepPending}</b>{" "}
               beep{beepPending === 1 ? "" : "s"} need
               {beepPending === 1 ? "s" : ""} confirmation &middot;{" "}
               <span className="text-muted">
                 detect found candidates but isn't sure
               </span>
             </span>
-            <span className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-led">
+            <span className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-beep">
               Review beeps <ArrowRight className="size-3" />
             </span>
           </Link>
@@ -917,7 +920,7 @@ function VideoRow({
     try {
       // Server-side dedupe: if a detect_beep job is already in flight for
       // this video, ``_submit_detect_beep`` returns the existing job
-      // without spawning a parallel one. JobsPanel surfaces progress;
+      // without spawning a parallel one. jobs rail surfaces progress;
       // we leave the user here.
       await api.detectBeepForVideo(slug, currentStage, video.video_id);
     } catch (e) {
@@ -1001,7 +1004,7 @@ function VideoRow({
        *  swap-primary time; if a job never ran or failed silently, the
        *  user needs an explicit affordance to kick detection. Clicking
        *  hits ``detectBeepForVideo``; the server dedupes against an
-       *  in-flight job so double-clicks are safe. JobsPanel surfaces
+       *  in-flight job so double-clicks are safe. jobs rail surfaces
        *  progress; on success the row re-renders via project reload. */}
       <div className="flex items-center justify-end gap-2">
         {video.beep_time != null ? (

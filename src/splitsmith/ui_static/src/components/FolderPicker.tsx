@@ -28,6 +28,7 @@ import {
   HardDrive,
   Home,
   Loader2,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -41,10 +42,37 @@ import {
 import { cn } from "@/lib/utils";
 
 interface FolderPickerProps {
-  /** Shooter slug for shooter-scoped fs endpoints. The picker browses
-   *  the host filesystem boundary-checked against this shooter's project
-   *  root. */
-  slug: string;
+  /** Shooter slug for shooter-scoped fs endpoints. Required when
+   *  ``unbound !== true``; the picker browses the host filesystem
+   *  boundary-checked against this shooter's project root. Ignored
+   *  when ``unbound`` is true. */
+  slug?: string;
+  /** When true the picker uses :func:`api.listFolderUnbound` (no
+   *  project required, no video probing) instead of the shooter-bound
+   *  endpoint. Used by the create-match flow's parent-folder picker
+   *  which runs before any project exists. */
+  unbound?: boolean;
+  /** Which row kinds to render in the listing. Mirrors the design
+   *  brief's ``mode`` prop; renamed locally to avoid colliding with
+   *  the legacy ``mode: "inline" | "compact"`` density toggle below.
+   *
+   *  ``directories``        Show subfolders only. Video files are
+   *                         silently hidden -- the caller is picking a
+   *                         parent dir, not files within it.
+   *  ``directories+files``  Default. Subfolders + video files. When
+   *                         combined with ``onSelectFiles`` /
+   *                         ``autoCommitFiles`` the file rows render
+   *                         with checkboxes.
+   */
+  contentMode?: "directories" | "directories+files";
+  /** Render chrome. ``inline`` returns a card-shaped block suitable
+   *  for embedding inside a page or another modal. ``modal`` wraps
+   *  the body in a fixed-position dialog with backdrop, header (title
+   *  + close button) and footer (Cancel + primary action). */
+  shell?: "inline" | "modal";
+  /** Modal-specific chrome. Only used when ``shell === "modal"``. */
+  modalTitle?: string;
+  modalSubtitle?: string;
   initialPath?: string | null;
   onSelect: (path: string) => void;
   /** Optional callback for multi-file selection. When provided, video rows
@@ -82,10 +110,29 @@ interface FolderPickerProps {
   allowEmptyFolder?: boolean;
   /** Override the action button label. Default: "Use this folder". */
   selectLabel?: string;
+  /** Reports the picker's current path each time the operator navigates
+   *  to a new folder. Used by the Add-Footage modal to compute the
+   *  folder-vs-file mutex flags below. */
+  onPathChange?: (path: string | null) => void;
+  /** Disable the "Use this folder" CTA (and surface the reason). Used
+   *  when the current folder is mutually exclusive with something the
+   *  caller already has -- e.g. the queue already has individual files
+   *  picked inside it, so importing the whole folder would double up. */
+  addWholeFolderDisabled?: boolean;
+  addWholeFolderDisabledReason?: string;
+  /** Disable file checkboxes (and the select-all helpers). Used when the
+   *  current folder is already queued as a whole-folder source. */
+  filesDisabled?: boolean;
+  filesDisabledReason?: string;
 }
 
 export function FolderPicker({
   slug,
+  unbound = false,
+  contentMode = "directories+files",
+  shell = "inline",
+  modalTitle,
+  modalSubtitle,
   initialPath,
   onSelect,
   onSelectFiles,
@@ -96,6 +143,11 @@ export function FolderPicker({
   matchWindow = null,
   allowEmptyFolder = false,
   selectLabel = "Use this folder",
+  onPathChange,
+  addWholeFolderDisabled = false,
+  addWholeFolderDisabledReason,
+  filesDisabled = false,
+  filesDisabledReason,
 }: FolderPickerProps) {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [path, setPath] = useState<string | null>(initialPath ?? null);
@@ -109,14 +161,21 @@ export function FolderPicker({
   // first. Toggling cycles name -> date-desc -> date-asc -> name.
   const [sortMode, setSortMode] = useState<SortMode>("name");
 
-  const wantMetadata = onSelectFiles !== undefined;
+  // ``directories``-mode pickers skip metadata probing -- they never
+  // render video rows, so the thumbnail/duration sidecars would be
+  // wasted bandwidth. ``unbound`` pickers also skip (they run before
+  // any project exists; no probe endpoint is reachable).
+  const wantMetadata =
+    !unbound && contentMode === "directories+files" && onSelectFiles !== undefined;
 
   const load = useCallback(
     async (next?: string | null) => {
       setBusy(true);
       setError(null);
       try {
-        const data = await api.listFolder(slug, next ?? undefined, { probe: wantMetadata });
+        const data = unbound
+          ? await api.listFolderUnbound(next ?? undefined)
+          : await api.listFolder(slug!, next ?? undefined, { probe: wantMetadata });
         setListing(data);
         setPath(data.path);
         // Reset multi-file selection when navigating to a new directory.
@@ -127,7 +186,7 @@ export function FolderPicker({
         setBusy(false);
       }
     },
-    [slug, wantMetadata],
+    [slug, unbound, wantMetadata],
   );
 
   useEffect(() => {
@@ -135,18 +194,31 @@ export function FolderPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Surface the current path to the parent. AddFootageModal uses this
+  // to compute folder/file mutex flags without owning a duplicate
+  // navigation state.
+  useEffect(() => {
+    onPathChange?.(path);
+  }, [path, onPathChange]);
+
   const breadcrumb = useMemo(() => buildBreadcrumb(path), [path]);
   const dirEntries = useMemo(
     () => sortEntries(listing?.entries.filter((e) => e.kind === "dir") ?? [], sortMode),
     [listing, sortMode],
   );
+  // ``directories``-mode pickers don't render video rows at all even
+  // when the listing carries them -- the caller is picking a parent
+  // folder, not files within it.
   const videoEntries = useMemo(
     () =>
-      sortEntries(listing?.entries.filter((e) => e.kind === "video") ?? [], sortMode),
-    [listing, sortMode],
+      contentMode === "directories"
+        ? []
+        : sortEntries(listing?.entries.filter((e) => e.kind === "video") ?? [], sortMode),
+    [listing, sortMode, contentMode],
   );
   const videosHere = videoEntries.length;
-  const multiFileMode = onSelectFiles !== undefined;
+  const multiFileMode =
+    contentMode !== "directories" && onSelectFiles !== undefined;
   const selectedCount = selectedFiles.size;
 
   const toggleSelect = (name: string) => {
@@ -201,11 +273,28 @@ export function FolderPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFiles, path, autoCommitFiles]);
 
-  return (
+  // Esc closes the modal shell. Kept inside the component (not behind
+  // a separate file) so the unified picker owns its modal behaviour.
+  useEffect(() => {
+    if (shell !== "modal" || !onCancel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shell, onCancel]);
+
+  const body = (
     <div
       className={cn(
-        "flex flex-col gap-3 rounded-lg border border-border bg-card",
-        mode === "compact" ? "p-3" : "p-4",
+        "flex flex-col gap-3",
+        shell === "modal"
+          ? "min-h-0 flex-1"
+          : "rounded-lg border border-border bg-card",
+        shell !== "modal" && (mode === "compact" ? "p-3" : "p-4"),
       )}
     >
       <PathBar path={path} onChange={(p) => void load(p)} disabled={busy} />
@@ -298,11 +387,12 @@ export function FolderPicker({
                     return (
                       <VideoRowMulti
                         key={`v-${entry.name}`}
-                        slug={slug}
+                        slug={slug!}
                         entry={entry}
                         fullPath={fullPath}
                         checked={checked}
-                        busy={busy}
+                        busy={busy || filesDisabled}
+                        disabledReason={filesDisabled ? filesDisabledReason : undefined}
                         inMatchWindow={isInMatchWindow(entry.mtime, matchWindow)}
                         onToggle={() => toggleSelect(entry.name)}
                         onProbed={(duration, thumbnail_url) => {
@@ -347,9 +437,10 @@ export function FolderPicker({
           {multiFileMode && videosHere > 0 ? (
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 underline-offset-2 hover:underline"
+              className="rounded px-1.5 py-0.5 underline-offset-2 hover:underline disabled:opacity-50"
               onClick={selectedCount === videosHere ? () => setSelectedFiles(new Set()) : selectAll}
-              disabled={busy}
+              disabled={busy || filesDisabled}
+              title={filesDisabled ? filesDisabledReason : undefined}
             >
               {selectedCount === videosHere ? "Clear selection" : "Select all"}
             </button>
@@ -357,13 +448,20 @@ export function FolderPicker({
           {multiFileMode && inWindowVideoCount > 0 ? (
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 text-status-info underline-offset-2 hover:underline"
+              className="rounded px-1.5 py-0.5 text-status-info underline-offset-2 hover:underline disabled:opacity-50"
               onClick={selectInMatchWindow}
-              disabled={busy}
-              title="Select videos whose modified time falls inside the match window"
+              disabled={busy || filesDisabled}
+              title={
+                filesDisabled
+                  ? filesDisabledReason
+                  : "Select videos whose modified time falls inside the match window"
+              }
             >
               Select {inWindowVideoCount} in match window
             </button>
+          ) : null}
+          {filesDisabled && filesDisabledReason ? (
+            <span className="text-muted-foreground">{filesDisabledReason}</span>
           ) : null}
         </div>
         <div className="flex gap-2">
@@ -380,12 +478,19 @@ export function FolderPicker({
           ) : (
             <Button
               type="button"
-              disabled={busy || !path || (!allowEmptyFolder && videosHere === 0)}
+              disabled={
+                busy ||
+                !path ||
+                (!allowEmptyFolder && videosHere === 0) ||
+                addWholeFolderDisabled
+              }
               onClick={() => path && onSelect(path)}
               title={
-                !allowEmptyFolder && videosHere === 0
-                  ? "Select a folder that contains video files, or drill in."
-                  : `Use ${path}`
+                addWholeFolderDisabled && addWholeFolderDisabledReason
+                  ? addWholeFolderDisabledReason
+                  : !allowEmptyFolder && videosHere === 0
+                    ? "Select a folder that contains video files, or drill in."
+                    : `Use ${path}`
               }
             >
               <FolderOpen />
@@ -393,6 +498,55 @@ export function FolderPicker({
             </Button>
           )}
         </div>
+      </div>
+    </div>
+  );
+
+  // Inline shell: the body is the entire output. Used when the picker
+  // is embedded in a page or larger modal (e.g. AddFootageModal).
+  if (shell !== "modal") return body;
+
+  // Modal shell: wrap the body in a backdrop + card with a header
+  // (title + close) and a footer (path readout + cancel/use buttons).
+  // Replaces the legacy DirectoryPickerModal which had ~80% identical
+  // code paths; the parent-folder picker in CreateMatch now renders
+  // through this branch with ``contentMode="directories"`` and
+  // ``unbound``.
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={modalTitle ?? "Pick a folder"}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="relative flex h-[min(640px,88vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between gap-4 border-b border-rule px-5 py-3.5">
+          <div>
+            <h2 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+              {modalTitle ?? "Pick a folder"}
+            </h2>
+            {modalSubtitle && (
+              <p className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+                {modalSubtitle}
+              </p>
+            )}
+          </div>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Cancel"
+              className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col px-5 py-4">{body}</div>
       </div>
     </div>
   );
@@ -465,6 +619,7 @@ function VideoRowMulti({
   fullPath,
   checked,
   busy,
+  disabledReason,
   inMatchWindow,
   onToggle,
   onProbed,
@@ -474,6 +629,9 @@ function VideoRowMulti({
   fullPath: string;
   checked: boolean;
   busy: boolean;
+  /** When set the row is treated as disabled; we surface this as a
+   *  tooltip so the operator knows *why* the checkbox is off. */
+  disabledReason?: string;
   inMatchWindow: boolean;
   onToggle: () => void;
   onProbed: (duration: number | null, thumbnail_url: string | null) => void;
@@ -511,8 +669,15 @@ function VideoRowMulti({
           checked && "bg-accent/30",
           inMatchWindow && !checked && "border-l-status-info bg-status-info/5",
           inMatchWindow && checked && "border-l-status-info",
+          disabledReason && "cursor-not-allowed opacity-50 hover:bg-transparent",
         )}
-        title={inMatchWindow ? "Modified during the match window" : undefined}
+        title={
+          disabledReason
+            ? disabledReason
+            : inMatchWindow
+              ? "Modified during the match window"
+              : undefined
+        }
       >
         <span className="flex min-w-0 items-center gap-2">
           <input

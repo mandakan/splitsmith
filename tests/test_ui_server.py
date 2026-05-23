@@ -112,9 +112,7 @@ def test_get_project_marks_stage_audited_after_save_event(tmp_path: Path) -> Non
             stage_number=1,
             stage_name="S1",
             time_seconds=10.0,
-            videos=[
-                StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)
-            ],
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
         )
     ]
     project.save(root)
@@ -444,9 +442,7 @@ def test_fs_list_dirs_unbound_returns_directories(
 def test_fs_list_dirs_404_for_missing_path(tmp_path: Path) -> None:
     app = create_app()
     client = TestClient(app)
-    resp = client.get(
-        "/api/fs/list-dirs", params={"path": str(tmp_path / "nope")}
-    )
+    resp = client.get("/api/fs/list-dirs", params={"path": str(tmp_path / "nope")})
     assert resp.status_code == 404
 
 
@@ -514,9 +510,7 @@ def test_create_from_scoreboard_creates_n_shooters_from_local(
     # LocalJsonScoreboard for the target instead of trying SsiHttpClient.
     scoreboard_dir = target / "scoreboard"
     scoreboard_dir.mkdir(parents=True)
-    (scoreboard_dir / "match.json").write_text(
-        _json.dumps(fixture), encoding="utf-8"
-    )
+    (scoreboard_dir / "match.json").write_text(_json.dumps(fixture), encoding="utf-8")
 
     app = create_app()
     client = TestClient(app)
@@ -555,9 +549,7 @@ def test_create_from_scoreboard_creates_n_shooters_from_local(
     assert len(shooter_dirs) == 2
     # Each shooter has a populated project with stages from the match data.
     for shooter_dir in shooter_dirs:
-        project = _json.loads(
-            (shooter_dir / "project.json").read_text(encoding="utf-8")
-        )
+        project = _json.loads((shooter_dir / "project.json").read_text(encoding="utf-8"))
         assert project["selected_competitor_id"] in {alice["id"], bob["id"]}
         assert len(project["stages"]) >= 1
 

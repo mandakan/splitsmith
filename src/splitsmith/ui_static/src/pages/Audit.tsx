@@ -36,32 +36,24 @@ import {
 } from "react-router-dom";
 import {
   Crosshair,
-  Eye,
   HelpCircle,
   ListChecks,
   Loader2,
   MoreHorizontal,
-  Pause,
-  Play,
-  Repeat,
 } from "lucide-react";
 
 import { AnomalyChips } from "@/components/audit/AnomalyChips";
 import { AnomalyPins } from "@/components/audit/AnomalyPins";
-import { BeepStatusChip } from "@/components/audit/BeepStatusChip";
+import { BeepStatusChip, type BeepStatusChipHandle } from "@/components/audit/BeepStatusChip";
 import { PrereqGate } from "@/components/audit/PrereqGate";
 import {
   CamSyncPill,
   type CamSyncState,
 } from "@/components/audit/CamSyncPill";
+import { CamGridModal } from "@/components/audit/CamGridModal";
+import { MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
 import { SessionSummary } from "@/components/audit/SessionSummary";
 import { SyncBanner } from "@/components/audit/SyncBanner";
-import {
-  PipBay,
-  pipFootprintWidth,
-  type PipCorner,
-  type PipSize,
-} from "@/components/audit/PipBay";
 import { StageActionBar } from "@/components/audit/StageActionBar";
 import { StageChipRail } from "@/components/audit/StageChipRail";
 import {
@@ -103,48 +95,12 @@ import {
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
+import { deriveStageStatus } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
 const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
-// v2: sizes rebalanced 2026-05-17 to match design (smaller, less intrusive).
-// Bumping the key forces every operator back onto the new defaults exactly
-// once; subsequent tweaks of corner/size still persist normally.
-const PIP_LAYOUT_KEY = "splitsmith.audit.pip.v2";
-
-interface PipLayoutState {
-  corner: PipCorner;
-  size: PipSize;
-  hidden: boolean;
-}
-
-const PIP_LAYOUT_DEFAULT: PipLayoutState = { corner: "br", size: "S", hidden: false };
-
-function loadPipLayout(): PipLayoutState {
-  if (typeof window === "undefined") return PIP_LAYOUT_DEFAULT;
-  try {
-    const raw = window.localStorage.getItem(PIP_LAYOUT_KEY);
-    if (!raw) return PIP_LAYOUT_DEFAULT;
-    const parsed = JSON.parse(raw) as Partial<PipLayoutState>;
-    return {
-      corner:
-        parsed.corner === "tl" || parsed.corner === "tr" || parsed.corner === "bl" || parsed.corner === "br"
-          ? parsed.corner
-          : PIP_LAYOUT_DEFAULT.corner,
-      size:
-        parsed.size === "S" || parsed.size === "M" || parsed.size === "L"
-          ? parsed.size
-          : PIP_LAYOUT_DEFAULT.size,
-      hidden: parsed.hidden === true,
-    };
-  } catch {
-    return PIP_LAYOUT_DEFAULT;
-  }
-}
-
-const NEXT_CORNER: Record<PipCorner, PipCorner> = { tl: "tr", tr: "br", br: "bl", bl: "tl" };
-const NEXT_SIZE: Record<PipSize, PipSize> = { S: "M", M: "L", L: "S" };
 
 export function Audit() {
   // ShooterScopedRoute canonicalises every Audit entry to /audit/:slug/:stage
@@ -174,6 +130,14 @@ export function Audit() {
   // single source of truth.
 
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  // Source-mode peaks for the cam being re-picked. The audit-page
+  // ``peaks`` are the trimmed clip when trim exists; that's the right
+  // surface for the audit canvas but the WRONG surface for the
+  // beep re-picker because a buzzer that lives outside the trim window
+  // is invisible there. We fetch the per-video peaks (always full
+  // source) when sync starts and use them in the waveform; the
+  // viewfinder reverts to ``peaks`` once sync ends.
+  const [syncPeaks, setSyncPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
 
@@ -197,12 +161,21 @@ export function Audit() {
   const isDirtyRef = useRef(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
 
+  // Ping handle for the toolbar's BeepStatusChip. PrereqGate's beep row
+  // (and any future surface that wants to point at "the beep") calls
+  // flash() here -- the chip owns beep state, so re-pick affordances
+  // never duplicate.
+  const beepChipRef = useRef<BeepStatusChipHandle>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
-  const [gridMode, setGridMode] = useState(true);
+  // VideoPanel still ships a Grid/Single toggle internally (we suppress
+  // it via showHeader={false}) but the prop is required, so keep a
+  // no-op callback. The v2 column always operates in single-cam mode --
+  // secondaries are picker tiles, not concurrent <video>s.
   // Stable refs used by grid-mode callbacks to avoid stale closures without
   // adding them to useCallback / useEffect dep arrays.
   const isPlayingRef = useRef(false);
@@ -226,35 +199,11 @@ export function Audit() {
     window.localStorage.setItem(K_AUTO_PROGRESS_KEY, kAutoProgress ? "1" : "0");
   }, [kAutoProgress]);
 
-  // Floating PiP layout: corner, size step, hidden flag. Persisted per
-  // localStorage so the operator's preferred bay position survives
-  // reloads and stage switches. Hotkeys V / Alt+V / D mutate this from
-  // the global keyboard handler.
-  const [pipLayout, setPipLayout] = useState<PipLayoutState>(loadPipLayout);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(PIP_LAYOUT_KEY, JSON.stringify(pipLayout));
-    } catch {
-      /* quota / private mode: best-effort persistence */
-    }
-  }, [pipLayout]);
-  const togglePipHidden = useCallback(
-    () => setPipLayout((p) => ({ ...p, hidden: !p.hidden })),
-    [],
-  );
-  const cyclePipSize = useCallback(
-    () => setPipLayout((p) => ({ ...p, size: NEXT_SIZE[p.size] })),
-    [],
-  );
-  const cyclePipCorner = useCallback(
-    () => setPipLayout((p) => ({ ...p, corner: NEXT_CORNER[p.corner] })),
-    [],
-  );
-  const showPipBay = useCallback(
-    () => setPipLayout((p) => ({ ...p, hidden: false })),
-    [],
-  );
+  // Cam layout: "focus" docks the column with primary + secondaries,
+  // "grid" opens the equal-grid review modal. The column itself never
+  // disappears -- the operator always has the docked surface for
+  // scrubbing.
+  const [camLayout, setCamLayout] = useState<CamLayout>("focus");
 
   // Sync mode state lives up here so callbacks below can close over it;
   // the handlers that actually call overrideBeepForVideo are declared
@@ -268,12 +217,16 @@ export function Audit() {
     setSyncMode(cam);
     setSyncCandidate(null);
     setSyncSnapError(null);
+    // Source peaks fetch lives in an effect below so it sees the
+    // latest slug + stageNumber without us threading them through
+    // startSync's deps.
   }, []);
   const cancelSync = useCallback(() => {
     setSyncMode(null);
     setSyncCandidate(null);
     setSyncBusy(false);
     setSyncSnapError(null);
+    setSyncPeaks(null);
   }, []);
   // Anchor for loop-to-start semantics: the audit-timeline position
   // playback last started from (or where the user last scrubbed). On
@@ -377,32 +330,20 @@ export function Audit() {
   }, [project]);
 
   // Stable identity for memoisation: a fresh array each render churns
-  // any consumer that keys on the items.
+  // any consumer that keys on the items. The status field carries the
+  // backend's per-stage lifecycle so the chip rail's trailing dot reads
+  // the truth instead of falling back to "todo".
   const stageSelectorOptions = useMemo(
     () =>
       stagesWithPrimary.map((s) => ({
         stageNumber: s.stage_number,
         stageName: s.stage_name,
+        status: deriveStageStatus(s),
       })),
     [stagesWithPrimary],
   );
 
-  // Stage rail items carry the active flag; per-stage done state needs a
-  // server endpoint we don't have yet (stages_audited is a count, not a
-  // set), so completed stages render as "todo" for now. Tracked as a
-  // follow-up to phase 2 of the audit redesign.
-  const stageRailItems = useMemo(
-    () =>
-      stageSelectorOptions.map((s) => ({
-        stageNumber: s.stageNumber,
-        stageName: s.stageName,
-        status: (s.stageNumber === stageNumber ? "active" : "todo") as
-          | "done"
-          | "active"
-          | "todo",
-      })),
-    [stageSelectorOptions, stageNumber],
-  );
+  const stageRailItems = stageSelectorOptions;
 
   // Neighbour stage numbers for prev/next nav. `null` at the boundaries
   // so the header buttons disable instead of wrapping -- accidental wrap
@@ -453,7 +394,7 @@ export function Audit() {
   const primaryBeep = primary?.beep_time ?? null;
 
   // Per-cam buzzer sync state, surfaced as the CamSyncPill on each tile
-  // inside the PipBay.
+  // inside the video column.
   //
   //   no_beep          -- never detected anything
   //   manual           -- operator overrode the buzzer time
@@ -480,9 +421,6 @@ export function Audit() {
       return "synced";
     });
   }, [videos, beepLowConfThreshold]);
-  const camsNeedingSync = camSyncStates.filter(
-    (s) => s === "low_confidence" || s === "no_beep",
-  ).length;
   const activeBeep = activeVideo?.beep_time ?? null;
   // Beep position **on the audit timeline** -- this is the X where the
   // waveform draws the dashed beep line and where audit-time = beep-time.
@@ -555,7 +493,7 @@ export function Audit() {
     sessionEventsRef.current = [];
     isDirtyRef.current = false;
     setSaveStatus({ kind: "idle" });
-    setGridMode(true);
+    setCamLayout("focus");
     // Don't clear secondaryRefsMap here. Refs attach during commit before
     // this effect runs, so a clear() would wipe the freshly-mounted new
     // stage's <video> elements. SecondarySlot's unmount path calls
@@ -595,6 +533,39 @@ export function Audit() {
       alive = false;
     };
   }, [slug, stageNumber, primary]);
+
+  // Source peaks for sync mode. Fetches the per-video peaks (full
+  // source WAV, regardless of trim cache) when the operator enters
+  // sync mode on a primary cam whose audit peaks are trimmed. Without
+  // this swap the waveform stays anchored to the trim window and the
+  // user can't find a buzzer that lives outside it -- which is the
+  // whole reason re-picking exists. Secondary cams already serve full
+  // source peaks via the same endpoint, so the swap is a no-op cost
+  // but kept for symmetry.
+  useEffect(() => {
+    if (syncMode == null || stageNumber == null) {
+      setSyncPeaks(null);
+      return;
+    }
+    // If the audit peaks aren't trimmed (no trim cache yet) the
+    // waveform is already the source -- skip the extra fetch.
+    if (peaks && !peaks.trimmed) {
+      setSyncPeaks(null);
+      return;
+    }
+    let alive = true;
+    api
+      .getVideoPeaks(slug, stageNumber, syncMode.video_id, PEAK_BINS)
+      .then((p) => {
+        if (alive) setSyncPeaks(p);
+      })
+      .catch(() => {
+        if (alive) setSyncPeaks(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [slug, stageNumber, syncMode?.video_id, peaks?.trimmed]);
 
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
@@ -818,16 +789,9 @@ export function Audit() {
   );
 
   const handleGridModeToggle = useCallback(() => {
-    setGridMode((prev) => {
-      if (!prev) {
-        // Entering grid mode: lock to primary so beepOffset stays at 0.
-        setActiveVideoIndex(0);
-      } else {
-        // Leaving grid mode: clean up secondary refs.
-        secondaryRefsMap.current.clear();
-      }
-      return !prev;
-    });
+    // No-op in v2: VideoPanel always renders the single primary cell
+    // and the column owns the multicam picker. Kept so VideoPanel's
+    // required prop type is satisfied.
   }, []);
 
   // ---- Marker mutators (push prev state to undo stack) -------------------
@@ -1399,21 +1363,6 @@ export function Audit() {
         void performSave({ advance: true });
         return;
       }
-      // PiP bay shortcuts: V toggle, Alt+V cycle size, D snap next corner.
-      // Suppressed in text fields so users typing notes don't trip them.
-      if (!inField && !e.metaKey && !e.ctrlKey) {
-        if (e.key.toLowerCase() === "v") {
-          e.preventDefault();
-          if (e.altKey) cyclePipSize();
-          else togglePipHidden();
-          return;
-        }
-        if (e.key.toLowerCase() === "d" && !e.altKey) {
-          e.preventDefault();
-          cyclePipCorner();
-          return;
-        }
-      }
       // `[` / `]` walk between stages without leaving the keyboard.
       // navigateToStage auto-saves a dirty stage before navigating, so
       // these can be tapped freely while auditing.
@@ -1589,9 +1538,6 @@ export function Audit() {
     navigateToStage,
     prevStageNumber,
     nextStageNumber,
-    togglePipHidden,
-    cyclePipSize,
-    cyclePipCorner,
   ]);
 
   // Stage switch / unmount: flush any pending nudge bracket so the
@@ -1611,11 +1557,25 @@ export function Audit() {
   // thing because the trim can't exist without a beep.
   const videoSrc = activeVideo
     ? peaks
-      ? api.videoStreamUrl(slug, activeVideo.path, peaks.trimmed ? "trim" : "source")
+      ? // Sync mode swaps to the full source stream so the operator can
+        // scrub past the trim window to find the actual buzzer. The
+        // audit peaks may be trimmed (clip anchored to the OLD beep)
+        // but the picker needs the source.
+        api.videoStreamUrl(
+          slug,
+          activeVideo.path,
+          syncMode != null ? "source" : peaks.trimmed ? "trim" : "source",
+        )
       : peaksError != null
         ? api.videoStreamUrl(slug, activeVideo.path)
         : ""
     : "";
+
+  // What the waveform actually paints. In sync mode the audit peaks
+  // (trimmed clip) leave the actual buzzer invisible -- swap to the
+  // per-video source peaks once they've landed. Falls back to the
+  // audit peaks until syncPeaks lands so the waveform doesn't blank.
+  const displayPeaks = syncMode != null && syncPeaks ? syncPeaks : peaks;
 
   // ---- Render ------------------------------------------------------------
 
@@ -1724,66 +1684,44 @@ export function Audit() {
   const syncing = syncMode != null;
 
   return (
-    <div
-      className={cn(
-        "relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink transition-colors",
-        // Sync-mode skin: the whole audit canvas adopts a subtle live-
-        // amber background wash so the operator can't mistake which
-        // mode they're in. The actual interactive surfaces below tone
-        // up or down independently; this is just the ambient frame.
-        // (Strawman -- pending designer review.)
-        syncing && "bg-[radial-gradient(900px_300px_at_50%_-80px,rgba(251,191,36,0.06),transparent_60%)]",
-      )}
-    >
-      {/* Persistent mode chrome -- amber rails on the left + right edges
-          of the canvas + a "PICKING BUZZER" mode label centered at the
-          top, so even mid-scrub you can't lose track of what state
-          you're in. pointer-events-none so clicks fall through to the
-          waveform / controls behind. */}
-      {syncing && (
-        <>
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-0 w-[3px] animate-pulse bg-live shadow-[0_0_12px_var(--color-live-glow)]"
-          />
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 right-0 w-[3px] animate-pulse bg-live shadow-[0_0_12px_var(--color-live-glow)]"
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 translate-y-0"
-          >
-            <span className="inline-flex items-center gap-2 rounded-b-md border border-t-0 border-live/60 bg-live-tint px-3 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.14em] text-live shadow-[0_4px_18px_var(--color-live-glow)]">
-              <span
-                className="inline-block size-1.5 animate-pulse rounded-full bg-live"
-                aria-hidden
-              />
-              Picking buzzer
-            </span>
-          </div>
-        </>
-      )}
+    <div className="relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
+      {/* Sync mode is now signposted by the SyncBanner above the
+          waveform (the readout owns the mode chip), the amber halo on
+          the waveform card border, and the dimmed chip rail. The page-
+          edge rails, radial wash and floating canvas chip were dropped
+          per designer review -- five amber surfaces became three, all
+          anchored to the target instead of the page geometry. */}
 
       {stage && primary ? (
         <>
           {/* Stage chip rail. The Audit / Compare / Coach view switcher
               isn't on this page per design -- those views are reached
               from the sidebar (cross-view nav is shell-level).
-              In sync mode it dims back so the focus stays on the
-              re-pick task; navigation away still works (existing
-              dirty-flush handles unsaved audit shots; sync candidate
-              state is intentionally discarded). */}
+              In sync mode the rail dims to ~55% (per designer review)
+              so focus stays on the re-pick task. Clicks still work,
+              but we intercept with a confirm so the operator isn't
+              silently dropped from sync mode mid-pick. Silent ignore
+              is worse than an interrupt. */}
           <div
             className={cn(
               "border-b border-rule pb-3 transition-opacity",
-              syncing && "pointer-events-none opacity-40",
+              syncing && "opacity-55",
             )}
           >
             <StageChipRail
               stages={stageRailItems}
               activeStage={stageNumber ?? null}
-              onPick={(n) => void navigateToStage(n)}
+              onPick={(n) => {
+                if (syncing) {
+                  const ok = window.confirm(
+                    "Exit sync without applying? Your unsaved buzzer pick will be discarded.",
+                  );
+                  if (!ok) return;
+                  setSyncMode(null);
+                  setSyncCandidate(null);
+                }
+                void navigateToStage(n);
+              }}
             />
           </div>
 
@@ -1796,16 +1734,17 @@ export function Audit() {
                 "BeepDiagnostic" banner into a chip tooltip + tone shift
                 so the diagnostic lives next to its trigger. Re-pick beep
                 opens sync mode on the primary cam; it also remains
-                available on the per-cam CamSyncPill inside the PipBay
+                available on the per-cam CamSyncPill inside the video column
                 for secondaries. */}
             <BeepStatusChip
+              ref={beepChipRef}
               beepTime={primary.beep_time}
               confidence={primary.beep_confidence ?? null}
               diagnostic={beepDiagnostic?.reason ?? null}
               onRePick={() => startSync(primary)}
             />
             {/* Re-pick beep affordance is now the primary cam's
-                CamSyncPill inside the PipBay. Click the pill to enter
+                CamSyncPill inside the video column. Click the pill to enter
                 sync mode for that cam (or any secondary). */}
             {peaks && !peaks.trimmed && !prereqActive ? (
               <TrimNowBadge
@@ -1886,21 +1825,6 @@ export function Audit() {
                 <Kbd size="sm">K</Kbd>
                 <span>Auto-step</span>
               </button>
-              {pipLayout.hidden ? (
-                <button
-                  type="button"
-                  onClick={showPipBay}
-                  aria-label="Show camera bay (V)"
-                  title="Show camera bay (V)"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-led-deep bg-led-tint px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-led-soft shadow-[0_0_12px_var(--color-led-glow)] transition-colors hover:bg-led/20"
-                >
-                  <Eye className="size-3.5" aria-hidden />
-                  Show cam
-                  <span className="ml-1 inline-flex h-4 items-center rounded-sm border border-led-deep bg-bg/40 px-1 font-mono text-[0.5625rem] font-bold text-led-soft">
-                    V
-                  </span>
-                </button>
-              ) : null}
               {peaks ? <ZoomControls zoom={zoom} onZoomChange={setZoom} /> : null}
               <button
                 type="button"
@@ -1965,7 +1889,7 @@ export function Audit() {
               beepConfidence={primary.beep_confidence ?? null}
               beepDiagnostic={beepDiagnostic?.reason ?? null}
               beepLowConfThreshold={beepLowConfThreshold}
-              onRePickBeep={() => startSync(primary)}
+              onPingBeepChip={() => beepChipRef.current?.flash()}
               hasTrim={!!peaks?.trimmed}
               onProjectUpdate={(p) => {
                 setProject(p);
@@ -1985,86 +1909,17 @@ export function Audit() {
             />
           ) : null}
 
-          {/* Video lives in a floating PiP bay (replaces the legacy
-              inline instrument frame). The bay anchors to a viewport
-              corner so the waveform owns full page width, and the page
-              flow no longer reserves vertical room for the video. */}
-          {!prereqShouldShow && !pipLayout.hidden ? (
-            <PipBay
-              corner={pipLayout.corner}
-              size={pipLayout.size}
-              camCount={videos.length}
-              needsSyncCount={camsNeedingSync}
-              onNeedsSyncClick={() => {
-                const idx = camSyncStates.findIndex(
-                  (s) => s === "low_confidence" || s === "no_beep",
-                );
-                if (idx >= 0 && videos[idx]) startSync(videos[idx]);
-              }}
-              onHide={togglePipHidden}
-              onCycleSize={cyclePipSize}
-              onCycleCorner={cyclePipCorner}
-              transport={
-                peaks ? (
-                  <BayTransport
-                    isPlaying={isPlaying}
-                    loopMode={loopMode}
-                    currentTime={currentTime}
-                    duration={peaks.duration}
-                    onTogglePlay={togglePlay}
-                    onToggleLoop={() => setLoopMode((v) => !v)}
-                    onStepFrame={(dir) => {
-                      const v = videoRef.current;
-                      if (!v) return;
-                      const t = v.currentTime - beepOffset;
-                      const dur = peaks.duration;
-                      handleScrub(Math.min(dur, Math.max(0, t + dir * 0.025)));
-                    }}
-                  />
-                ) : null
-              }
-            >
-              <VideoPanel
-                ref={videoRef}
-                videos={videos}
-                primaryBeepTime={primaryBeep}
-                activeIndex={activeVideoIndex}
-                onActiveIndexChange={setActiveVideoIndex}
-                videoSrc={videoSrc}
-                gridMode={gridMode}
-                onGridModeToggle={handleGridModeToggle}
-                onSecondaryRef={handleSecondaryRef}
-                onSecondaryBuffering={handleSecondaryBuffering}
-                onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
-                showHeader={false}
-                renderCamOverlay={(video, index) => {
-                  const state = camSyncStates[index] ?? "no_beep";
-                  // Secondaries show the offset from primary on the pill
-                  // so the cam's drift is visible right next to the cam.
-                  const offsetSeconds =
-                    index === 0 || video.beep_time == null || primaryBeep == null
-                      ? null
-                      : video.beep_time - primaryBeep;
-                  return (
-                    <CamSyncPill
-                      state={state}
-                      beepTime={video.beep_time}
-                      beepConfidence={video.beep_confidence}
-                      offsetSeconds={offsetSeconds}
-                      size={pipLayout.size === "S" ? "xs" : "sm"}
-                      onClick={() => startSync(video)}
-                    />
-                  );
-                }}
-                className="size-full [&_video]:!max-h-full [&_video]:!w-full"
-              />
-            </PipBay>
-          ) : null}
-
-          {peaks && !prereqShouldShow ? (
-            <>
+          {/* Audit canvas: two-column layout.
+              left  -- SyncBanner / AnomalyChips + waveform + ShotStepper.
+              right -- 380px docked MultiCamColumn (video + transport).
+              Replaces the floating video column so the bottom-right corner is
+              just content. The sidebar (in MatchShell) is collapsible to
+              buy back the column's horizontal budget. */}
+          {!prereqShouldShow && displayPeaks ? (
+            <div className="flex gap-4">
+              <div className="flex min-w-0 flex-1 flex-col gap-4">
               {/* Transport bar removed -- playback (play/pause/loop/step
-                  frame) lives in the PipBay's shared transport row per
+                  frame) lives in the video column's shared transport row per
                   design. Position/clip readouts also live in the bay;
                   stage time is in the bottom action bar's kicker.
                   Kept/rejected/manual counts are covered by the filter
@@ -2151,11 +2006,11 @@ export function Audit() {
                     <span aria-hidden className="text-rule-strong">
                       ·
                     </span>
-                    <span>{peaks.peaks.length} peaks</span>
+                    <span>{displayPeaks.peaks.length} peaks</span>
                     <span aria-hidden className="text-rule-strong">
                       ·
                     </span>
-                    <span>{peaks.duration.toFixed(2)}s</span>
+                    <span>{displayPeaks.duration.toFixed(2)}s</span>
                   </span>
                   <span className="inline-flex items-center gap-2">
                     {peaksLoading ? (
@@ -2176,8 +2031,8 @@ export function Audit() {
                 </div>
                 <div className="relative px-4 py-3" ref={waveformWrapperRef}>
                   <Waveform
-                    peaks={peaks.peaks}
-                    duration={peaks.duration}
+                    peaks={displayPeaks.peaks}
+                    duration={displayPeaks.duration}
                     // Always reflect the playhead, even in sync mode --
                     // otherwise pressing play after picking a candidate
                     // shows playback stuck on the candidate marker
@@ -2212,7 +2067,7 @@ export function Audit() {
                     {syncMode == null ? (
                       <MarkerLayer
                         markers={markers}
-                        duration={peaks.duration}
+                        duration={displayPeaks.duration}
                         focusedId={focusedMarkerId}
                         onFocusChange={setFocusedMarkerId}
                         onClick={handleMarkerClick}
@@ -2236,7 +2091,7 @@ export function Audit() {
                   >
                     <AnomalyPins
                       anomalies={anomalies}
-                      duration={peaks.duration}
+                      duration={displayPeaks.duration}
                       onJump={(a) => {
                         if (a.time != null) handleScrub(a.time);
                       }}
@@ -2248,7 +2103,7 @@ export function Audit() {
                 <div className="flex justify-between border-t border-rule bg-surface-2 px-4 py-1.5 font-mono text-[0.625rem] tabular-nums text-whisper">
                   {Array.from({ length: 6 }, (_, i) => (
                     <span key={i}>
-                      {((i / 5) * peaks.duration).toFixed(2)}
+                      {((i / 5) * displayPeaks.duration).toFixed(2)}
                     </span>
                   ))}
                 </div>
@@ -2257,39 +2112,140 @@ export function Audit() {
                     it applies to instead of as a separate footer. */}
               </div>
 
-              {/* Shot stepper. When the PiP bay is anchored to a
-                  bottom corner it overlays the page near the stepper's
-                  notes input -- reserve horizontal room on that side so
-                  the input never ends up under the bay. */}
-              <div
-                style={{
-                  marginRight:
-                    !pipLayout.hidden && pipLayout.corner === "br"
-                      ? pipFootprintWidth(pipLayout.size, videos.length) + 20
-                      : undefined,
-                  marginLeft:
-                    !pipLayout.hidden && pipLayout.corner === "bl"
-                      ? pipFootprintWidth(pipLayout.size, videos.length) + 20
-                      : undefined,
-                  transition: "margin 180ms var(--ease-default)",
-                }}
-              >
-                <ShotStepper
-                  shots={keptShots}
-                  currentIndex={currentShotIndex}
-                  onStep={stepShot}
-                  onNoteChange={handleNoteChange}
-                />
+              {/* Shot stepper. The right column owns its own width now
+                  (MultiCamColumn) so the stepper never ends up under the
+                  bay -- the legacy margin offsets are gone. */}
+              <ShotStepper
+                shots={keptShots}
+                currentIndex={currentShotIndex}
+                onStep={stepShot}
+                onNoteChange={handleNoteChange}
+              />
               </div>
-            </>
-          ) : peaksLoading ? (
+
+              {/* Docked video column. Replaces video column. VideoPanel renders
+                  inside CamTile so the Audit page keeps owning the
+                  primary <video> ref + secondary refs map. */}
+              {primary ? (
+                <MultiCamColumn
+                  videos={videos}
+                  activeIndex={activeVideoIndex}
+                  onActiveIndexChange={setActiveVideoIndex}
+                  camSyncStates={camSyncStates}
+                  primaryBeepTime={primaryBeep}
+                  onStartSync={startSync}
+                  onPromote={(cam) => {
+                    const idx = videos.findIndex(
+                      (v) => v.video_id === cam.video_id,
+                    );
+                    if (idx > 0) setActiveVideoIndex(idx);
+                  }}
+                  layout={camLayout}
+                  onLayoutChange={setCamLayout}
+                  isPlaying={isPlaying}
+                  loopMode={loopMode}
+                  currentTime={currentTime}
+                  duration={peaks?.duration ?? 0}
+                  onTogglePlay={togglePlay}
+                  onToggleLoop={() => setLoopMode((v) => !v)}
+                  onStepFrame={(dir) => {
+                    const v = videoRef.current;
+                    if (!v || !peaks) return;
+                    const t = v.currentTime - beepOffset;
+                    handleScrub(
+                      Math.min(peaks.duration, Math.max(0, t + dir * 0.025)),
+                    );
+                  }}
+                >
+                  <VideoPanel
+                    ref={videoRef}
+                    videos={videos}
+                    primaryBeepTime={primaryBeep}
+                    activeIndex={activeVideoIndex}
+                    onActiveIndexChange={setActiveVideoIndex}
+                    videoSrc={videoSrc}
+                    // v2 column: focus mode shows a single tile in the
+                    // primary slot; secondaries surface as picker tiles
+                    // below (CamStrip / CamThumb) rather than as live
+                    // <video> elements. Grid review happens in
+                    // CamGridModal which is a click-to-focus picker.
+                    gridMode={false}
+                    onGridModeToggle={handleGridModeToggle}
+                    onSecondaryRef={handleSecondaryRef}
+                    onSecondaryBuffering={handleSecondaryBuffering}
+                    onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
+                    showHeader={false}
+                    renderCamOverlay={(video, index) => {
+                      const state = camSyncStates[index] ?? "no_beep";
+                      const offsetSeconds =
+                        index === 0 ||
+                        video.beep_time == null ||
+                        primaryBeep == null
+                          ? null
+                          : video.beep_time - primaryBeep;
+                      return (
+                        <CamSyncPill
+                          state={state}
+                          beepTime={video.beep_time}
+                          beepConfidence={video.beep_confidence}
+                          offsetSeconds={offsetSeconds}
+                          size="xs"
+                          onClick={() => startSync(video)}
+                        />
+                      );
+                    }}
+                    className="size-full [&_video]:!max-h-full [&_video]:!w-full"
+                  />
+                </MultiCamColumn>
+              ) : null}
+            </div>
+          ) : !prereqShouldShow && peaksLoading ? (
             <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted">
               <Loader2 className="size-4 animate-spin" /> Computing waveform...
             </div>
-          ) : peaksError ? (
+          ) : !prereqShouldShow && peaksError ? (
             <div className="rounded-md border border-led/40 bg-led/10 p-4 text-sm text-led">
               Couldn't load peaks: {peaksError}
             </div>
+          ) : null}
+
+          {/* Fullscreen grid review. The column's "Grid" segment opens
+              this; clicking a tile promotes that cam to primary and
+              returns to focus mode. */}
+          {!prereqShouldShow && camLayout === "grid" && videos.length >= 2 ? (
+            <CamGridModal
+              videos={videos}
+              primaryBeepTime={primaryBeep}
+              isPlaying={isPlaying}
+              currentTime={currentTime}
+              duration={peaks?.duration ?? 0}
+              onTogglePlay={togglePlay}
+              onClose={() => setCamLayout("focus")}
+              onPickFocus={(cam) => {
+                const idx = videos.findIndex(
+                  (v) => v.video_id === cam.video_id,
+                );
+                if (idx >= 0) setActiveVideoIndex(idx);
+                setCamLayout("focus");
+              }}
+              renderTile={(cam, _i) => {
+                // The actual <video> stays in MultiCamColumn behind the
+                // backdrop. Grid mode is a click-to-focus picker per the
+                // kit -- a stylized tile is enough for the operator to
+                // pick which cam to promote.
+                void cam;
+                return (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="inline-flex size-14 items-center justify-center rounded-full border border-led/40 bg-led-tint">
+                      <span
+                        aria-hidden
+                        className="size-5 rounded-full bg-led shadow-[0_0_16px_var(--color-led-glow)]"
+                      />
+                    </span>
+                  </div>
+                );
+              }}
+            />
           ) : null}
         </>
       ) : null}
@@ -2355,87 +2311,6 @@ export function Audit() {
       ) : null}
       {saveStatus.kind === "error" ? <SaveToast status={saveStatus} /> : null}
     </div>
-  );
-}
-
-/** Shared transport row inside the PipBay: play/pause, time readout,
- *  loop toggle, frame-step buttons. Per design, the page no longer
- *  ships its own transport bar; this is the single source of playback
- *  truth for the operator. */
-function BayTransport({
-  isPlaying,
-  loopMode,
-  currentTime,
-  duration,
-  onTogglePlay,
-  onToggleLoop,
-  onStepFrame,
-}: {
-  isPlaying: boolean;
-  loopMode: boolean;
-  currentTime: number;
-  duration: number;
-  onTogglePlay: () => void;
-  onToggleLoop: () => void;
-  onStepFrame: (dir: -1 | 1) => void;
-}) {
-  return (
-    <>
-      <button
-        type="button"
-        onClick={onTogglePlay}
-        title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-        aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
-        className="inline-flex size-6 items-center justify-center rounded-full border-0 bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
-      >
-        {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
-      </button>
-      <span className="font-mono text-[0.6875rem] tabular-nums text-ink-2">
-        {currentTime.toFixed(3)}
-        <span className="text-subtle">/{duration.toFixed(2)}s</span>
-      </span>
-      <span
-        aria-hidden
-        className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-subtle"
-      >
-        shared transport
-      </span>
-      <div className="ml-auto inline-flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onToggleLoop}
-          aria-pressed={loopMode}
-          title="Loop (R)"
-          aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
-          className={cn(
-            "inline-flex size-[22px] items-center justify-center rounded-sm border transition-colors",
-            loopMode
-              ? "border-led bg-led/10 text-led shadow-[0_0_8px_var(--color-led-glow)]"
-              : "border-rule bg-transparent text-muted hover:border-rule-strong hover:text-ink-2",
-          )}
-        >
-          <Repeat className="size-3" aria-hidden />
-        </button>
-        <button
-          type="button"
-          onClick={() => onStepFrame(-1)}
-          title="Step frame back (Shift+←)"
-          aria-label="Step frame back"
-          className="inline-flex size-[22px] items-center justify-center rounded-sm border border-rule font-mono text-[0.625rem] font-bold text-muted transition-colors hover:border-rule-strong hover:text-ink-2"
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          onClick={() => onStepFrame(1)}
-          title="Step frame forward (Shift+→)"
-          aria-label="Step frame forward"
-          className="inline-flex size-[22px] items-center justify-center rounded-sm border border-rule font-mono text-[0.625rem] font-bold text-muted transition-colors hover:border-rule-strong hover:text-ink-2"
-        >
-          ›
-        </button>
-      </div>
-    </>
   );
 }
 
@@ -2630,7 +2505,7 @@ function DetectShotsBadge({
 
   // CSV-only re-run. Reuses the existing exportStage job (the server
   // supports write_csv with everything else off, see ui/exports.py). The
-  // JobsPanel surfaces progress + the result path; we just kick it off
+  // jobs rail surfaces progress + the result path; we just kick it off
   // and clear errors here.
   const onExportShotsClick = useCallback(() => {
     setError(null);
