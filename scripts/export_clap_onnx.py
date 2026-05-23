@@ -115,6 +115,9 @@ def main() -> None:
     print("Building sample input_features from a 1 s synthetic clip")
     rng = np.random.default_rng(0)
     sample_audio = rng.standard_normal(CLAP_SR).astype(np.float32) * 0.05
+    audio_path = args.out_dir / "clap_sample_audio.npy"
+    np.save(audio_path, sample_audio)
+    print(f"  wrote {audio_path}  shape={sample_audio.shape}")
     feat_inputs = processor(audio=[sample_audio], sampling_rate=CLAP_SR, return_tensors="pt")
     sample_input_features = feat_inputs["input_features"].cpu().numpy().astype(np.float32)
     sample_path = args.out_dir / "clap_sample_input_features.npy"
