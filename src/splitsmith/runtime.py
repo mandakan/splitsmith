@@ -11,12 +11,26 @@ The same hooks let OSS users A/B-test custom model artifacts:
 
     SPLITSMITH_ARTIFACTS_DIR=/path/to/experimental splitsmith ui
 
-Resolution priority for every field:
+Resolution priority for paths:
 
 1. Explicit kwargs to :func:`resolve_runtime`.
 2. Environment variables (see ``ENV_*`` constants below).
-3. Built-in defaults: package data dir for artifacts, ``shutil.which``
-   for binaries, platform-appropriate cache/config dirs.
+3. Built-in defaults: package data dir for artifacts,
+   platform-appropriate cache/config dirs.
+
+Binary resolution adds two more steps before falling back to PATH so
+PyInstaller-bundled sidecars find their ffmpeg/ffprobe without env
+vars (issue #370):
+
+1. Explicit kwarg.
+2. Environment variable.
+3. ``sys._MEIPASS`` -- PyInstaller onefile temp dir, set on extracted
+   bundle launch only.
+4. Directory of ``sys.executable`` -- PyInstaller onedir layout, also
+   covers the dev case where ffmpeg is dropped into the venv's ``bin``.
+5. ``shutil.which`` on PATH.
+
+Each candidate must be executable; non-executable entries fall through.
 
 The first call has a side effect: it ``setdefault``-s ``HF_HOME`` and
 ``TORCH_HOME`` into the resolved cache dir so CLAP / PANN downloads
@@ -97,12 +111,53 @@ def _platform_user_config_dir() -> Path:
     return Path.home() / ".splitsmith"
 
 
+def _bundle_search_dirs() -> list[Path]:
+    """Directories adjacent to the running executable to probe for bundled binaries.
+
+    Returned in priority order:
+
+    * ``sys._MEIPASS`` -- PyInstaller onefile mode extracts datas + binaries
+      to a temp dir and points this attr at it.
+    * ``Path(sys.executable).parent`` -- PyInstaller onedir layout, plus the
+      dev case where ffmpeg/ffprobe live in the venv's ``bin`` next to
+      the Python interpreter.
+    """
+    dirs: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        dirs.append(Path(meipass))
+    exe_dir = Path(sys.executable).parent
+    if exe_dir not in dirs:
+        dirs.append(exe_dir)
+    return dirs
+
+
+def _executable_in_dir(directory: Path, name: str) -> Path | None:
+    """Return ``directory/name`` (with ``.exe`` on Windows) if it's executable."""
+    candidates = [directory / name]
+    if sys.platform.startswith("win") and not name.lower().endswith(".exe"):
+        candidates.append(directory / f"{name}.exe")
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _resolve_binary(explicit: str | None, env_name: str, default: str) -> str:
+    """Pick the most specific binary the caller has provided or shipped.
+
+    Order: explicit kwarg > env var > bundled (``_MEIPASS`` / executable
+    dir) > the bare name (resolved by the OS via PATH at exec time).
+    """
     if explicit:
         return explicit
     env_val = os.environ.get(env_name)
     if env_val:
         return env_val
+    for directory in _bundle_search_dirs():
+        bundled = _executable_in_dir(directory, default)
+        if bundled is not None:
+            return str(bundled)
     return default
 
 

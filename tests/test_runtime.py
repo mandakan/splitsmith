@@ -164,3 +164,100 @@ def test_calibration_loader_uses_runtime_artifacts_dir(
     with pytest.raises(FileNotFoundError) as exc:
         load_calibration()
     assert "ensemble_calibration.json" in str(exc.value)
+
+
+# ----------------------------------------------------------------------
+# Bundled-binary discovery (issue #370)
+# ----------------------------------------------------------------------
+
+
+def _make_executable(path: Path) -> None:
+    path.write_text("#!/bin/sh\nexit 0\n")
+    path.chmod(0o755)
+
+
+def test_meipass_dir_wins_over_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A bundled binary under ``sys._MEIPASS`` beats whatever's on PATH."""
+    bundle = tmp_path / "meipass"
+    bundle.mkdir()
+    _make_executable(bundle / "ffmpeg")
+    _make_executable(bundle / "ffprobe")
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
+
+    rt = resolve_runtime()
+    assert rt.ffmpeg_binary == str(bundle / "ffmpeg")
+    assert rt.ffprobe_binary == str(bundle / "ffprobe")
+
+
+def test_executable_dir_used_when_no_meipass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Without _MEIPASS, ffmpeg next to ``sys.executable`` is picked up."""
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    bin_dir = tmp_path / "venv-bin"
+    bin_dir.mkdir()
+    fake_exe = bin_dir / "python-fake"
+    fake_exe.write_text("")
+    fake_exe.chmod(0o755)
+    _make_executable(bin_dir / "ffmpeg")
+    _make_executable(bin_dir / "ffprobe")
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+
+    rt = resolve_runtime()
+    assert rt.ffmpeg_binary == str(bin_dir / "ffmpeg")
+    assert rt.ffprobe_binary == str(bin_dir / "ffprobe")
+
+
+def test_env_var_beats_bundled_binary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``SPLITSMITH_FFMPEG`` overrides the bundled lookup."""
+    bundle = tmp_path / "meipass"
+    bundle.mkdir()
+    _make_executable(bundle / "ffmpeg")
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
+
+    override = tmp_path / "override-ffmpeg"
+    _make_executable(override)
+    monkeypatch.setenv(ENV_FFMPEG, str(override))
+
+    rt = resolve_runtime()
+    assert rt.ffmpeg_binary == str(override)
+
+
+def test_explicit_kwarg_beats_bundled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    bundle = tmp_path / "meipass"
+    bundle.mkdir()
+    _make_executable(bundle / "ffmpeg")
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
+
+    rt = resolve_runtime(ffmpeg_binary="/explicit/ffmpeg")
+    assert rt.ffmpeg_binary == "/explicit/ffmpeg"
+
+
+def test_falls_back_to_bare_name_when_no_bundle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No env / no _MEIPASS / nothing next to executable -> bare name for PATH lookup."""
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    empty_dir = tmp_path / "no-binaries"
+    empty_dir.mkdir()
+    fake_exe = empty_dir / "python-fake"
+    fake_exe.write_text("")
+    fake_exe.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+
+    rt = resolve_runtime()
+    assert rt.ffmpeg_binary == "ffmpeg"
+    assert rt.ffprobe_binary == "ffprobe"
+
+
+def test_non_executable_candidate_is_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A file named 'ffmpeg' without +x doesn't get picked up."""
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    bin_dir = tmp_path / "venv-bin"
+    bin_dir.mkdir()
+    fake_exe = bin_dir / "python-fake"
+    fake_exe.write_text("")
+    fake_exe.chmod(0o755)
+    not_executable = bin_dir / "ffmpeg"
+    not_executable.write_text("")
+    not_executable.chmod(0o644)
+    monkeypatch.setattr(sys, "executable", str(fake_exe))
+
+    rt = resolve_runtime()
+    assert rt.ffmpeg_binary == "ffmpeg"  # fell through to PATH lookup
