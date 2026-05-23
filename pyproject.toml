@@ -34,6 +34,12 @@ dependencies = [
     "joblib>=1.4.0",
     "onnxruntime>=1.20.0",
     "huggingface_hub>=0.26.0",
+    # PIL/Pillow was a transitive of torch + transformers before the
+    # slim migration. The overlay renderer + Voter E frame loader
+    # import it directly, so we pin it as a first-class runtime dep
+    # now that the torch trio moved to [dev]. Caught by the clean-venv
+    # smoke test 2026-05-23.
+    "pillow>=10.0.0",
     # Model Context Protocol server (issue #211). Wraps the existing
     # HTTP / library APIs as tools any MCP-aware client can drive.
     # Stdio transport is the default; SSE comes for free.
