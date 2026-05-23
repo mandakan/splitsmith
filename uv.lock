@@ -3007,11 +3007,12 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "huggingface-hub" },
     { name = "joblib" },
     { name = "librosa" },
     { name = "mcp" },
     { name = "numpy" },
-    { name = "panns-inference" },
+    { name = "onnxruntime" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -3020,8 +3021,6 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "soundfile" },
-    { name = "torch" },
-    { name = "transformers" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -3032,24 +3031,27 @@ dev = [
     { name = "matplotlib" },
     { name = "mypy" },
     { name = "onnx" },
-    { name = "onnxruntime" },
     { name = "onnxscript" },
+    { name = "panns-inference" },
     { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "torch" },
+    { name = "transformers" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "huggingface-hub", specifier = ">=0.26.0" },
     { name = "joblib", specifier = ">=1.4.0" },
     { name = "librosa", specifier = ">=0.10.2" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=1.26.0" },
-    { name = "panns-inference", specifier = ">=0.1.1" },
+    { name = "onnxruntime", specifier = ">=1.20.0" },
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
@@ -3058,8 +3060,6 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "soundfile", specifier = ">=0.12.1" },
-    { name = "torch", specifier = ">=2.11.0" },
-    { name = "transformers", specifier = ">=5.7.0" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
@@ -3070,13 +3070,15 @@ dev = [
     { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "mypy", specifier = ">=1.10.0" },
     { name = "onnx", specifier = ">=1.16.0" },
-    { name = "onnxruntime", specifier = ">=1.20.0" },
     { name = "onnxscript", specifier = ">=0.1.0" },
+    { name = "panns-inference", specifier = ">=0.1.1" },
     { name = "pyarrow", specifier = ">=17.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
     { name = "respx", specifier = ">=0.21.1" },
     { name = "ruff", specifier = ">=0.4.0" },
+    { name = "torch", specifier = ">=2.11.0" },
+    { name = "transformers", specifier = ">=5.7.0" },
 ]
 
 [[package]]

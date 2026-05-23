@@ -26,7 +26,11 @@ jobs:
         run: uv python install 3.11
 
       - name: Sync dependencies
-        run: uv sync --frozen
+        # --all-groups so the dev group (torch / transformers /
+        # panns-inference + the ONNX export tools + lint + tests) is
+        # installed alongside the slim runtime deps. The shipped wheel
+        # is still slim; CI has to exercise both backends.
+        run: uv sync --frozen --all-groups
 
       - name: Lint (ruff)
         run: uv run ruff check src tests scripts

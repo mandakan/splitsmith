@@ -131,8 +131,16 @@ def load_visual_runtime(
             probe, model_id=model_id, device=device, frame_cache_dir=frame_cache_dir
         )
     if backend is Backend.ONNX:
+        # Voter E is opt-in (off by default; gated behind
+        # ``SPLITSMITH_ENABLE_VOTER_E=1`` + ``EnsembleConfig.enable_voter_e``)
+        # and explicitly out of the slim v1 ONNX migration. End users on
+        # the slim wheel never reach here unless they deliberately turn
+        # Voter E on -- in which case they need the dev extras for the
+        # torch CLIP path.
         raise NotImplementedError(
-            "ONNX visual probe runtime not implemented yet " "(issue #377 phase 'ONNX exports')"
+            "Voter E (visual probe) ONNX runtime is not implemented in slim v1. "
+            "To use Voter E, install the dev extras (uv sync --all-groups) so "
+            "the torch backend is available, or unset SPLITSMITH_ENABLE_VOTER_E."
         )
     raise SplitsmithBackendError(f"Unknown backend {backend!r}")
 

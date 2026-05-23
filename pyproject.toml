@@ -24,16 +24,16 @@ dependencies = [
     # Auto-loads <project>/.env / .env.local so SPLITSMITH_SSI_TOKEN works
     # without the user having to ``export`` it before launching the UI.
     "python-dotenv>=1.0.0",
-    # Ensemble shot-detection runtime (issue #31). Heavy ML deps live in
-    # the runtime path because the production audit UI needs voters
-    # B (CLAP), C (GBDT), and D (PANN) to seed shots[] correctly.
-    # Re-evaluate later if first-launch model download or wheel size
-    # becomes a problem.
+    # Ensemble shot-detection runtime. Voter C (GBDT) lives via
+    # scikit-learn + joblib. Voters B (CLAP) and D (PANN, folded into
+    # C as a feature) use the slim ONNX runtime path (#377). Heavy
+    # torch / transformers / panns-inference moved to [dev] -- they
+    # power the export scripts + the optional Voter E visual probe,
+    # not the shipped audit hot path.
     "scikit-learn>=1.8.0",
     "joblib>=1.4.0",
-    "torch>=2.11.0",
-    "panns-inference>=0.1.1",
-    "transformers>=5.7.0",
+    "onnxruntime>=1.20.0",
+    "huggingface_hub>=0.26.0",
     # Model Context Protocol server (issue #211). Wraps the existing
     # HTTP / library APIs as tools any MCP-aware client can drive.
     # Stdio transport is the default; SSE comes for free.
@@ -80,13 +80,18 @@ dev = [
     "matplotlib>=3.9.0",
     # ONNX export tooling (docs/local-slim/02). Needed when running
     # scripts/export_*_onnx.py and tests/test_onnx_parity.py. The
-    # slim runtime path imports only ``onnxruntime``; ``onnxruntime``
-    # stays in [dev] until all three voters have ONNX branches and the
-    # full slim path replaces torch in [project] dependencies (see doc
-    # 06 "pyproject.toml changes" phase).
+    # slim runtime imports ``onnxruntime`` (in [project] deps); this
+    # group pulls in the export-side tools.
     "onnx>=1.16.0",
-    "onnxruntime>=1.20.0",
     "onnxscript>=0.1.0",
+    # Heavy ML libs for: (a) the optional Voter E visual probe (off
+    # by default, requires SPLITSMITH_ENABLE_VOTER_E=1), (b) running
+    # build_ensemble_artifacts.py + export_*_onnx.py against the
+    # upstream torch checkpoints, (c) parity tests against the torch
+    # reference. End users on the slim wheel never see these.
+    "torch>=2.11.0",
+    "transformers>=5.7.0",
+    "panns-inference>=0.1.1",
 ]
 
 [tool.ruff]
