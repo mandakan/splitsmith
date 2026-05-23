@@ -21,12 +21,17 @@ import hashlib
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from .backend import Backend, SplitsmithBackendError, select_backend
+
+if TYPE_CHECKING:
+    from PIL.Image import Image as PilImage
 
 from ..runtime import runtime as process_runtime
 
@@ -38,35 +43,39 @@ DEFAULT_FRAME_CACHE_DIR = Path.home() / ".cache" / "splitsmith" / "voter_e_frame
 
 @dataclass
 class VisualRuntime:
-    """Loaded heavy state for Voter E.
+    """Loaded heavy state for Voter E, backend-agnostic.
 
-    ``probe`` is the trained sklearn classifier (``LogisticRegression``)
-    that maps a CLIP image embedding to a per-candidate shot probability.
-    Cleared / replaced when the calibration is rebuilt.
+    ``encode_images`` takes a list of PIL ``Image`` objects (RGB) and
+    returns ``(N, CLIP_VISUAL_EMBED_DIM)`` L2-normalised CLIP image
+    embeddings in numpy. The torch and ONNX implementations both wrap
+    their backend-specific objects inside this callable so voter code
+    is backend-agnostic.
+
+    ``probe`` is the trained sklearn classifier
+    (``LogisticRegression``) that maps a CLIP image embedding to a
+    per-candidate shot probability. ``model`` / ``processor`` slots
+    remain as opaque ``Any`` references so the torch branch can hold
+    its objects alive; consumers should not read them directly.
     """
 
-    model: Any
-    processor: Any
+    encode_images: Callable[[list[PilImage]], np.ndarray]
     probe: Any
+    backend: Backend
+    model: Any = None
+    processor: Any = None
     model_id: str = CLIP_VISUAL_MODEL_ID
     device: str = "cpu"
     frame_cache_dir: Path = field(default_factory=lambda: DEFAULT_FRAME_CACHE_DIR)
 
 
-def load_visual_runtime(
+def _build_visual_runtime_torch(
     probe: Any,
     *,
-    model_id: str = CLIP_VISUAL_MODEL_ID,
-    device: str | None = None,
-    frame_cache_dir: Path | None = None,
+    model_id: str,
+    device: str | None,
+    frame_cache_dir: Path | None,
 ) -> VisualRuntime:
-    """Materialise the CLIP model + processor; bind the supplied probe head.
-
-    First call downloads ~600 MB to the HF cache. Reuse the returned
-    runtime across detections. ``probe`` is loaded by the caller (typically
-    via ``calibration.load_voter_e_probe``) so this function stays a pure
-    model-init helper.
-    """
+    """Torch-backed :class:`VisualRuntime`. Dev / contributor path."""
     import torch
     from transformers import CLIPModel, CLIPProcessor
 
@@ -80,14 +89,52 @@ def load_visual_runtime(
 
     model = CLIPModel.from_pretrained(model_id).to(device).eval()
     processor = CLIPProcessor.from_pretrained(model_id)
+
+    def encode_images(images: list[PilImage]) -> np.ndarray:  # noqa: F821 -- TYPE_CHECKING import
+        """Per-image CLIP embedding, L2-normalised on the embedding axis."""
+        inputs = processor(images=images, return_tensors="pt").to(device)
+        with torch.no_grad():
+            feats = model.get_image_features(**inputs).pooler_output
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+        return feats.cpu().numpy().astype(np.float32)
+
     return VisualRuntime(
+        encode_images=encode_images,
+        probe=probe,
+        backend=Backend.TORCH,
         model=model,
         processor=processor,
-        probe=probe,
         model_id=model_id,
         device=device,
         frame_cache_dir=frame_cache_dir or DEFAULT_FRAME_CACHE_DIR,
     )
+
+
+def load_visual_runtime(
+    probe: Any,
+    *,
+    model_id: str = CLIP_VISUAL_MODEL_ID,
+    device: str | None = None,
+    frame_cache_dir: Path | None = None,
+) -> VisualRuntime:
+    """Load the visual probe runtime through the selected backend.
+
+    First call on the torch path downloads ~600 MB to the HF cache;
+    ONNX path will fetch the slim artifact from R2 once doc 02 ships.
+    Reuse the returned runtime across detections. ``probe`` is loaded
+    by the caller (typically via ``calibration.load_voter_e_probe``)
+    so this function stays a pure model-init helper.
+    """
+    backend = select_backend()
+    if backend is Backend.TORCH:
+        return _build_visual_runtime_torch(
+            probe, model_id=model_id, device=device, frame_cache_dir=frame_cache_dir
+        )
+    if backend is Backend.ONNX:
+        raise NotImplementedError(
+            "ONNX visual probe runtime not implemented yet " "(issue #377 phase 'ONNX exports')"
+        )
+    raise SplitsmithBackendError(f"Unknown backend {backend!r}")
 
 
 def _video_fingerprint(video_path: Path) -> str:
@@ -165,7 +212,6 @@ def compute_visual_features(
     ``runtime.frame_cache_dir/<video_fingerprint>/`` keyed on
     ``(time_ms, offset_ms)``.
     """
-    import torch
     from PIL import Image
 
     n = int(np.asarray(source_times).shape[0])
@@ -201,11 +247,7 @@ def compute_visual_features(
     for i in range(0, len(frame_paths), batch_size):
         chunk_paths = frame_paths[i : i + batch_size]
         images = [Image.open(p).convert("RGB") for p in chunk_paths]
-        inputs = runtime.processor(images=images, return_tensors="pt").to(runtime.device)
-        with torch.no_grad():
-            feats = runtime.model.get_image_features(**inputs).pooler_output
-            feats = feats / feats.norm(dim=-1, keepdim=True)
-        embeds.append(feats.cpu().numpy().astype(np.float32))
+        embeds.append(runtime.encode_images(images))
     flat = np.vstack(embeds)
     return flat.reshape(n, n_offsets * CLIP_VISUAL_EMBED_DIM)
 

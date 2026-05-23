@@ -18,6 +18,7 @@ prompt strings were used so loading checks the bank still matches.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +26,7 @@ import librosa
 import numpy as np
 
 from .agc_state import compute_agc_features
+from .backend import Backend, SplitsmithBackendError, select_backend
 
 # Shot-positive prompts (used for the (shot - not-shot) differential
 # voter B keys on, and as a column subset of voter C's feature vector).
@@ -136,18 +138,40 @@ def camera_class_one_hot(camera_classes: list[str] | np.ndarray, n_rows: int) ->
 
 @dataclass
 class ClapRuntime:
-    """Pre-loaded CLAP model + pre-encoded text embeddings."""
+    """CLAP inference state, backend-agnostic.
 
-    model: Any
-    processor: Any
+    ``encode_audio`` takes an ``(N, T_samples)`` float32 batch at
+    ``CLAP_SR`` and returns ``(N, D)`` L2-normalised embeddings in
+    numpy. ``text_embeddings`` is ``(P, D)``, pre-encoded once at load
+    time so per-detection runs only pay the audio cost.
+
+    The torch and ONNX implementations both wrap their backend-specific
+    objects (``transformers.ClapModel``, ``onnxruntime.InferenceSession``)
+    inside the callable so voter code stays backend-agnostic. ``model``
+    and ``processor`` are retained as opaque ``Any`` slots so the torch
+    branch can keep references alive for the lifetime of the runtime;
+    consumers should not read them directly.
+    """
+
+    encode_audio: Callable[[np.ndarray], np.ndarray]
     text_embeddings: np.ndarray  # (P, D), L2-normalised
+    backend: Backend
+    model: Any = None
+    processor: Any = None
 
 
 @dataclass
 class PannRuntime:
-    """Pre-loaded PANN audio tagger."""
+    """PANN gunshot-class inference state, backend-agnostic.
 
-    tagger: Any
+    ``predict_gunshot_prob`` takes an ``(N, T_samples)`` float32 batch
+    at ``PANN_SR`` and returns an ``(N,)`` numpy vector of the AudioSet
+    ``Gunshot, gunfire`` class probability per row.
+    """
+
+    predict_gunshot_prob: Callable[[np.ndarray], np.ndarray]
+    backend: Backend
+    tagger: Any = None
 
 
 def _slice_window(audio: np.ndarray, sr: int, t: float, win_s: float) -> np.ndarray:
@@ -304,12 +328,8 @@ def compute_hand_features(
     return out
 
 
-def load_clap_runtime() -> ClapRuntime:
-    """Load the CLAP model + pre-encode the prompt bank.
-
-    First call downloads ~600 MB to the HF cache. Reuse the returned
-    runtime across detections.
-    """
+def _build_clap_runtime_torch() -> ClapRuntime:
+    """Construct a torch-backed :class:`ClapRuntime`. Dev / contributor path."""
     import torch
     from transformers import ClapModel, ClapProcessor
 
@@ -319,11 +339,46 @@ def load_clap_runtime() -> ClapRuntime:
 
     text_inputs = processor(text=list(CLAP_PROMPTS), return_tensors="pt", padding=True)
     with torch.no_grad():
-        out = model.get_text_features(**dict(text_inputs))
-    text_emb_t = out.pooler_output if hasattr(out, "pooler_output") else out
+        text_out = model.get_text_features(**dict(text_inputs))
+    text_emb_t = text_out.pooler_output if hasattr(text_out, "pooler_output") else text_out
     text_emb = text_emb_t.cpu().numpy().astype(np.float32)
     text_emb = text_emb / (np.linalg.norm(text_emb, axis=1, keepdims=True) + 1e-9)
-    return ClapRuntime(model=model, processor=processor, text_embeddings=text_emb)
+
+    def encode_audio(batch: np.ndarray) -> np.ndarray:
+        """``(N, T)`` float32 audio -> ``(N, D)`` L2-normalised embeddings."""
+        inputs = processor(
+            audio=list(batch),
+            sampling_rate=CLAP_SR,
+            return_tensors="pt",
+        )
+        with torch.no_grad():
+            audio_out = model.get_audio_features(**dict(inputs))
+        emb = audio_out.pooler_output if hasattr(audio_out, "pooler_output") else audio_out
+        emb_np = emb.cpu().numpy().astype(np.float32)
+        return emb_np / (np.linalg.norm(emb_np, axis=1, keepdims=True) + 1e-9)
+
+    return ClapRuntime(
+        encode_audio=encode_audio,
+        text_embeddings=text_emb,
+        backend=Backend.TORCH,
+        model=model,
+        processor=processor,
+    )
+
+
+def load_clap_runtime() -> ClapRuntime:
+    """Load CLAP through the selected backend.
+
+    First call on the torch path downloads ~600 MB to the HF cache;
+    ONNX path will fetch the slim artifacts from R2 once doc 02 ships.
+    Reuse the returned runtime across detections.
+    """
+    backend = select_backend()
+    if backend is Backend.TORCH:
+        return _build_clap_runtime_torch()
+    if backend is Backend.ONNX:
+        raise NotImplementedError("ONNX CLAP runtime not implemented yet (issue #377 phase 'ONNX exports')")
+    raise SplitsmithBackendError(f"Unknown backend {backend!r}")
 
 
 def compute_clap_similarities(
@@ -334,11 +389,11 @@ def compute_clap_similarities(
 ) -> np.ndarray:
     """Per-candidate cosine similarity to every prompt, shape ``(N, P)``.
 
-    Audio is resampled to ``CLAP_SR`` once; per-candidate windows are then
-    sliced from the resampled stream so the model sees its native rate.
+    Audio is resampled to ``CLAP_SR`` once; per-candidate windows are
+    then sliced from the resampled stream so the model sees its native
+    rate. Inference goes through ``runtime.encode_audio`` so this
+    function is backend-agnostic and free of ``import torch``.
     """
-    import torch
-
     if not len(candidate_times):
         return np.zeros((0, len(CLAP_PROMPTS)), dtype=np.float32)
     if sample_rate != CLAP_SR:
@@ -346,19 +401,16 @@ def compute_clap_similarities(
     else:
         clap_audio = audio.astype(np.float32)
 
-    windows = [_slice_window(clap_audio, CLAP_SR, float(t), CLAP_WINDOW_S) for t in candidate_times]
+    windows = np.stack(
+        [_slice_window(clap_audio, CLAP_SR, float(t), CLAP_WINDOW_S) for t in candidate_times],
+        axis=0,
+    )
 
     audio_embeddings: list[np.ndarray] = []
     batch_size = 16
-    for i in range(0, len(windows), batch_size):
-        batch = windows[i : i + batch_size]
-        inputs = runtime.processor(audio=batch, sampling_rate=CLAP_SR, return_tensors="pt")
-        with torch.no_grad():
-            out = runtime.model.get_audio_features(**dict(inputs))
-        emb = out.pooler_output if hasattr(out, "pooler_output") else out
-        audio_embeddings.append(emb.cpu().numpy())
+    for i in range(0, windows.shape[0], batch_size):
+        audio_embeddings.append(runtime.encode_audio(windows[i : i + batch_size]))
     audio_emb = np.concatenate(audio_embeddings, axis=0).astype(np.float32)
-    audio_emb = audio_emb / (np.linalg.norm(audio_emb, axis=1, keepdims=True) + 1e-9)
     return (audio_emb @ runtime.text_embeddings.T).astype(np.float32)
 
 
@@ -372,15 +424,36 @@ def clap_diff_from_similarities(sims: np.ndarray) -> np.ndarray:
     return (shot_mean - not_mean).astype(np.float32)
 
 
-def load_pann_runtime() -> PannRuntime:
-    """Load the PANN CNN14 audio tagger.
-
-    First call downloads ~80 MB to ``~/panns_data/``. Reuse across
-    detections.
-    """
+def _build_pann_runtime_torch() -> PannRuntime:
+    """Construct a torch-backed :class:`PannRuntime`. Dev / contributor path."""
     from panns_inference import AudioTagging
 
-    return PannRuntime(tagger=AudioTagging(checkpoint_path=None, device="cpu"))
+    tagger = AudioTagging(checkpoint_path=None, device="cpu")
+
+    def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
+        clipwise, _embedding = tagger.inference(batch)
+        return np.asarray(clipwise, dtype=np.float32)[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
+
+    return PannRuntime(
+        predict_gunshot_prob=predict_gunshot_prob,
+        backend=Backend.TORCH,
+        tagger=tagger,
+    )
+
+
+def load_pann_runtime() -> PannRuntime:
+    """Load PANN through the selected backend.
+
+    First call on the torch path downloads ~80 MB to ``~/panns_data/``;
+    ONNX path will fetch the slim artifact from R2 once doc 02 ships.
+    Reuse the returned runtime across detections.
+    """
+    backend = select_backend()
+    if backend is Backend.TORCH:
+        return _build_pann_runtime_torch()
+    if backend is Backend.ONNX:
+        raise NotImplementedError("ONNX PANN runtime not implemented yet (issue #377 phase 'ONNX exports')")
+    raise SplitsmithBackendError(f"Unknown backend {backend!r}")
 
 
 def compute_pann_gunshot_probs(
@@ -389,7 +462,11 @@ def compute_pann_gunshot_probs(
     candidate_times: np.ndarray,
     runtime: PannRuntime,
 ) -> np.ndarray:
-    """Per-candidate ``Gunshot, gunfire`` class probability, shape ``(N,)``."""
+    """Per-candidate ``Gunshot, gunfire`` class probability, shape ``(N,)``.
+
+    Inference goes through ``runtime.predict_gunshot_prob`` so this
+    function is backend-agnostic and free of ``import torch``.
+    """
     if not len(candidate_times):
         return np.zeros(0, dtype=np.float32)
     if sample_rate != PANN_SR:
@@ -400,9 +477,7 @@ def compute_pann_gunshot_probs(
         [_slice_window(pann_audio, PANN_SR, float(t), PANN_WINDOW_S) for t in candidate_times],
         axis=0,
     )
-    clipwise, _embedding = runtime.tagger.inference(batch)
-    clipwise = np.asarray(clipwise, dtype=np.float32)
-    return clipwise[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
+    return runtime.predict_gunshot_prob(batch)
 
 
 def voter_c_feature_matrix(
