@@ -9049,6 +9049,7 @@ def serve(
     port: int = 5174,
     reload: bool = False,
     lab_enabled: bool = False,
+    skip_system_check: bool = False,
 ) -> None:
     """Boot uvicorn synchronously. Used by the ``splitsmith ui`` CLI command.
 
@@ -9058,8 +9059,22 @@ def serve(
     like the process hanging. Uvicorn already promotes a second Ctrl-C
     to a force-exit; we just decorate the first press with the job
     inventory + a hint about pressing again.
+
+    The first thing we do is check ffmpeg / ffprobe are invocable
+    (issue #377 -- doc 04). The slim install ships them as documented
+    system deps; a missing binary surfaces a copy-pasteable install
+    hint here rather than a cryptic ``FileNotFoundError`` mid-trim.
+    ``skip_system_check=True`` bypasses the probe (used by tests).
     """
     import uvicorn
+
+    if not skip_system_check:
+        from ..system_check import check_ffmpeg
+
+        outcome = check_ffmpeg()
+        if not outcome.ok:
+            sys.stderr.write(outcome.hint + "\n")
+            sys.exit(2)
 
     _ensure_ui_built()
 

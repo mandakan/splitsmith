@@ -419,6 +419,15 @@ def ui(
             "heavy CLAP/PANN models on first use."
         ),
     ),
+    skip_system_check: bool = typer.Option(
+        False,
+        "--skip-system-check",
+        help=(
+            "Bypass the first-launch ffmpeg / ffprobe presence check. "
+            "Use only for debugging install issues -- detection will "
+            "fail with a cryptic error if either binary is missing."
+        ),
+    ),
 ) -> None:
     """Start the production UI server (issue #11/#12).
 
@@ -467,6 +476,7 @@ def ui(
             host=host,
             port=port,
             lab_enabled=lab,
+            skip_system_check=skip_system_check,
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
