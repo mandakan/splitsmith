@@ -224,5 +224,25 @@
     "missing_video_fixtures": []
   },
   "n_mined_negatives_used": 0,
-  "mining_source_fixtures": []
+  "mining_source_fixtures": [],
+  "model_artifacts": {
+    "pann_cnn14": {
+      "filename": "pann_cnn14.onnx",
+      "sha256": "8cce942c0c42adea31dcd3d7ee3e6cc1920a877b9977209265aaf4b180a7c81b",
+      "size_bytes": 327411500,
+      "url": "https://models.splitsmith.app/artifacts/8cce942c0c42adea31dcd3d7ee3e6cc1920a877b9977209265aaf4b180a7c81b/pann_cnn14.onnx"
+    },
+    "clap_audio_encoder": {
+      "filename": "clap_audio.onnx",
+      "sha256": "9a736ca337c59cba54d62380c3d36b27f0b1bfd8f00e0f418d6d03578bcca0c7",
+      "size_bytes": 119594930,
+      "url": "https://models.splitsmith.app/artifacts/9a736ca337c59cba54d62380c3d36b27f0b1bfd8f00e0f418d6d03578bcca0c7/clap_audio.onnx"
+    },
+    "clap_text_embeddings": {
+      "filename": "clap_text_embeddings.npy",
+      "sha256": "85c6b195aefe9894512846558177edfbc24c351db0021a07452a7be2973589e4",
+      "size_bytes": 20608,
+      "url": "https://models.splitsmith.app/artifacts/85c6b195aefe9894512846558177edfbc24c351db0021a07452a7be2973589e4/clap_text_embeddings.npy"
+    }
+  }
 }
