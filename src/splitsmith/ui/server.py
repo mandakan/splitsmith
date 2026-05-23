@@ -79,13 +79,14 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -123,7 +124,7 @@ from ..runtime import runtime as process_runtime
 from . import audio as audio_helpers
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
-from .jobs import Job, JobCancelled, JobHandle, JobRegistry
+from .jobs import Job, JobCancelled, JobHandle, JobRegistry, ShutdownInProgressError
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -490,6 +491,22 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
     raise HTTPException(status_code=500, detail=str(exc))
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
+
+def _is_loopback(request: Request) -> bool:
+    """Reject /api/shutdown from non-loopback callers.
+
+    ``testclient`` is included so the TestClient ASGI shim works in
+    pytest without a real socket; it's a value set by the server side
+    (the ASGI scope) so a remote caller can't spoof it.
+    """
+    client = request.client
+    if client is None:
+        return False
+    return client.host in _LOOPBACK_HOSTS
+
+
 def _no_project_error() -> HTTPException:
     """Raised by :class:`AppState` when an endpoint that needs a bound
     project is hit while the server is in unbound (picker) mode.
@@ -549,6 +566,14 @@ class AppState:
     _bound_match_id: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
+    # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
+    # so the /api/shutdown route can ask uvicorn to exit. None under the
+    # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
+    # is the stop mechanism there.
+    shutdown_handler: Callable[[], None] | None = None
+    # Idempotency latch for /api/shutdown: first call kicks the drain
+    # thread, subsequent calls return 202 without rescheduling.
+    shutdown_initiated: bool = False
 
     @property
     def is_bound(self) -> bool:
@@ -1934,6 +1959,14 @@ def create_app(
     # outside the closure.
     app.state.splitsmith_state = state
 
+    @app.exception_handler(ShutdownInProgressError)
+    async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
+        """Map ShutdownInProgressError to 503 across every submit() callsite."""
+        return JSONResponse(
+            status_code=503,
+            content={"detail": {"code": "shutting_down", "message": str(exc)}},
+        )
+
     # ----------------------------------------------------------------------
     # /api/matches/{match_id}/... alias middleware (#353 Phase 3 PR B/C)
     # ----------------------------------------------------------------------
@@ -2052,6 +2085,40 @@ def create_app(
         if not state.is_bound:
             return HealthResponse(bound=False)
         return _health_after_bind(state.bound_name or "")
+
+    @app.post("/api/shutdown", status_code=202)
+    def shutdown(request: Request) -> dict[str, Any]:
+        """Drain in-flight jobs and ask uvicorn to exit (issue #369).
+
+        Loopback-only -- the embedded sidecar trusts only its own host.
+        Idempotent: the first call kicks a daemon drain thread; later
+        calls return 202 without rescheduling.
+
+        Under the CLI's ``splitsmith ui`` path the registered stop
+        callback is None, so this drains jobs but does not stop the
+        server -- the operator still uses Ctrl-C there.
+        """
+        if not _is_loopback(request):
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "loopback_only", "message": "shutdown is loopback-only"},
+            )
+        if state.shutdown_initiated:
+            return {"status": "shutting_down", "already": True}
+        state.shutdown_initiated = True
+        state.jobs.begin_shutdown()
+        handler = state.shutdown_handler
+        drain_timeout = 30.0
+
+        def _drain_then_stop() -> None:
+            try:
+                state.jobs.wait_for_drain(drain_timeout)
+            finally:
+                if handler is not None:
+                    handler()
+
+        threading.Thread(target=_drain_then_stop, name="splitsmith-shutdown", daemon=True).start()
+        return {"status": "shutting_down", "already": False}
 
     @app.get("/api/shooters/{slug}/project")
     def get_project(slug: str) -> JSONResponse:

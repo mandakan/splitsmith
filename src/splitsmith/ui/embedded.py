@@ -189,11 +189,22 @@ def run_embedded(
         log_file=str(log_file) if log_file else None,
     )
 
+    # Expose a stop callback so the in-process /api/shutdown route (issue
+    # #369) can ask uvicorn to exit. The CLI's ``splitsmith ui`` path
+    # never reaches here, so the route stays drain-only there.
+    splitsmith_state = app.state.splitsmith_state
+    splitsmith_state.shutdown_handler = lambda: setattr(server, "should_exit", True)
+
     try:
         _wait_for_health(base_url, timeout=startup_timeout)
         _emit_banner(handle, ready_fd)
         yield handle
     finally:
+        # Drain in-flight jobs before flipping ``should_exit``. If
+        # /api/shutdown or SIGTERM already kicked the drain, this is a
+        # no-op past the first transition.
+        splitsmith_state.jobs.begin_shutdown()
+        splitsmith_state.jobs.wait_for_drain(shutdown_timeout)
         server.should_exit = True
         thread.join(timeout=shutdown_timeout)
         if thread.is_alive():

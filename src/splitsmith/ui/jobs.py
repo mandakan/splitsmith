@@ -116,6 +116,15 @@ class JobCancelled(Exception):  # noqa: N818 -- control-flow, not error; mirrors
     """
 
 
+class ShutdownInProgressError(RuntimeError):
+    """Raised by :meth:`JobRegistry.submit` after :meth:`begin_shutdown`.
+
+    The HTTP layer maps this to a ``503 shutting_down`` so the desktop
+    shell can tell the user "wait for current work to finish, then
+    relaunch" instead of silently dropping new submissions.
+    """
+
+
 class Job(BaseModel):
     """Wire shape returned by ``/api/jobs/{id}``."""
 
@@ -261,6 +270,53 @@ class JobRegistry:
         # so we can terminate it on cancel even when the worker is blocked
         # on proc.wait().
         self._subprocs: dict[str, subprocess.Popen] = {}
+        # Set by :meth:`begin_shutdown`. Once True, ``submit`` raises
+        # :class:`ShutdownInProgressError` and ``wait_for_drain`` waits
+        # for the active set to clear before the embedded entrypoint
+        # stops uvicorn. Idempotent: a second call is a no-op.
+        self._shutting_down = False
+        self._drained = threading.Event()
+
+    @property
+    def is_shutting_down(self) -> bool:
+        return self._shutting_down
+
+    def active_count(self) -> int:
+        """Count of PENDING or RUNNING jobs at this instant."""
+        with self._lock:
+            return self._active_count_locked()
+
+    def _active_count_locked(self) -> int:
+        return sum(1 for j in self._jobs.values() if j.status in (JobStatus.PENDING, JobStatus.RUNNING))
+
+    def _signal_drain_if_complete_locked(self) -> None:
+        """Set the drain event when shutting down and the active set is empty."""
+        if self._shutting_down and self._active_count_locked() == 0:
+            self._drained.set()
+
+    def begin_shutdown(self) -> None:
+        """Reject new submissions; flip the drain event when active is 0.
+
+        Idempotent. After the call, :meth:`submit` raises
+        :class:`ShutdownInProgressError`; :meth:`wait_for_drain` returns
+        once active drops to zero (or its timeout elapses).
+        """
+        with self._lock:
+            if self._shutting_down:
+                return
+            self._shutting_down = True
+            self._signal_drain_if_complete_locked()
+
+    def wait_for_drain(self, timeout_s: float) -> bool:
+        """Block until active_count is 0 or ``timeout_s`` elapses.
+
+        Returns True if the drain completed, False on timeout. Safe to
+        call before :meth:`begin_shutdown` -- if there's no active work
+        it returns immediately.
+        """
+        if self.active_count() == 0:
+            return True
+        return self._drained.wait(timeout=timeout_s)
 
     def submit(
         self,
@@ -274,7 +330,12 @@ class JobRegistry:
 
         Returns the job snapshot (status=PENDING) immediately so the HTTP
         handler can hand the id back to the caller without blocking.
+
+        Raises :class:`ShutdownInProgressError` if :meth:`begin_shutdown`
+        has been called -- the HTTP layer maps this to a 503.
         """
+        if self._shutting_down:
+            raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
         now = datetime.now(UTC)
         job = Job(
             id=uuid.uuid4().hex,
@@ -342,6 +403,7 @@ class JobRegistry:
                     j.updated_at = j.finished_at
                     self._trim_retained_locked()
                     break
+            self._signal_drain_if_complete_locked()
             snapshot = j.model_copy(deep=True)
         # Kill outside the lock so a slow ``terminate()`` (proc held a
         # held resource etc.) can't stall other registry callers.
@@ -492,6 +554,7 @@ class JobRegistry:
             with self._lock:
                 self._running_count = max(0, self._running_count - 1)
                 self._dispatch_locked()
+                self._signal_drain_if_complete_locked()
 
     def _dispatch_locked(self) -> None:
         """Hand the highest-priority pending job to the executor.
