@@ -8,6 +8,10 @@ on:
     # branch (stacked PRs). Match every base so each stacked PR also
     # runs CI.
     branches: ["**"]
+    # ``labeled`` so adding ``run-slim-smoke`` to an existing PR
+    # triggers a fresh run without needing a force-push.
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -49,11 +53,23 @@ jobs:
     # end. Catches "transitive dep went missing" regressions (the kind
     # that bit us on Pillow in PR #388) before they ship.
     #
-    # ~2 min runtime + ~440 MiB egress from models.splitsmith.app per
-    # invocation. Acceptable for OSS scale.
+    # Cadence:
+    #   - push to main: automatic (post-merge regression detection)
+    #   - workflow_dispatch: manual on-demand from the Actions tab
+    #   - pull_request: opt-in via the ``run-slim-smoke`` label
+    #
+    # Skipped on default PR pushes because each run costs ~2 min wall
+    # + ~440 MiB R2 egress; the same flow runs locally via
+    # ``scripts/smoke_slim_install.sh`` if you want a fast signal
+    # before opening the PR.
     name: slim wheel smoke test
     runs-on: ubuntu-latest
     needs: test
+    if: >-
+      github.event_name == 'push'
+      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request'
+          && contains(github.event.pull_request.labels.*.name, 'run-slim-smoke'))
 
     steps:
       - uses: actions/checkout@v4
