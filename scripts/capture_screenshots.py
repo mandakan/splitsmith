@@ -7,24 +7,21 @@ gallery.
 
 One-time prereqs (not part of the project's locked deps):
 
-    uv pip install --with playwright playwright
-    playwright install chromium
+    uv pip install playwright
+    uv run playwright install chromium
 
-Then point at a project that has shot detection completed for at least
-one stage (use ``--stage`` to pick which one Audit + Compare visit;
-defaults to the first stage with assigned videos):
+Then point at a multi-shooter MatchProject (Compare needs >= 2 shooters
+with trim caches; on a single-shooter project Compare is skipped with a
+warning instead of failing):
 
     uv run python scripts/capture_screenshots.py \\
-        --project ~/matches/tallmilan-2026 \\
+        --project ~/matches/your-match \\
         --stage 3 \\
         --output docs/screenshots/
 
-Compare needs the project to have multiple shooters' trims on disk
-(see ``splitsmith compare`` in the README). On a single-shooter project
-the Compare PNG is skipped with a warning instead of failing.
-
 The script starts ``splitsmith ui --no-browser`` on a free port, polls
-``/api/health`` until it reports ``bound=true``, runs the capture pass,
+``/api/health`` for the bound ``match_id`` + ``default_shooter_slug``,
+walks the canonical path-scoped routes under ``/match/{match_id}/...``,
 and terminates the server on exit (or on Ctrl+C).
 """
 
@@ -42,14 +39,40 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-SCREENSHOTS = [
-    # (route_template, filename, description, optional)
-    ("/", "home.png", "Home / overview after project bind", False),
-    ("/ingest", "ingest.png", "Ingest page: scan + auto-match videos", False),
-    ("/beep-review", "beep-review.png", "Beep review queue (HITL)", False),
-    ("/audit/{stage}", "audit.png", "Audit page: waveform + shot markers", False),
-    ("/compare/{stage}", "compare.png", "Multi-shooter Compare grid", True),
-    ("/export", "export.png", "Per-stage / match export panel", False),
+# (route_template, filename, description, optional)
+# Routes are formatted with .format(match_id=..., slug=..., stage=...).
+SCREENSHOTS: list[tuple[str, str, str, bool]] = [
+    ("/match/{match_id}/", "home.png", "Match overview", False),
+    (
+        "/match/{match_id}/ingest/{slug}",
+        "ingest.png",
+        "Ingest page: scan + auto-match videos",
+        False,
+    ),
+    (
+        "/match/{match_id}/beep-review",
+        "beep-review.png",
+        "Beep review queue (HITL)",
+        False,
+    ),
+    (
+        "/match/{match_id}/audit/{slug}/{stage}",
+        "audit.png",
+        "Audit page: waveform + shot markers",
+        False,
+    ),
+    (
+        "/match/{match_id}/compare/{stage}",
+        "compare.png",
+        "Multi-shooter Compare grid",
+        True,
+    ),
+    (
+        "/match/{match_id}/export/{slug}",
+        "export.png",
+        "Per-stage / match export panel",
+        False,
+    ),
 ]
 
 
@@ -59,15 +82,19 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def http_get_json(url: str, timeout: float = 5.0) -> dict[str, object]:
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
 def wait_for_health(base_url: str, timeout_s: float = 30.0) -> dict[str, object]:
     deadline = time.monotonic() + timeout_s
     last_err: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(f"{base_url}/api/health", timeout=2) as r:
-                payload = json.loads(r.read().decode())
-                if payload.get("bound"):
-                    return payload
+            payload = http_get_json(f"{base_url}/api/health", timeout=2)
+            if payload.get("bound"):
+                return payload
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             last_err = e
         time.sleep(0.3)
@@ -103,16 +130,20 @@ def boot_ui(project: Path, port: int) -> Iterator[subprocess.Popen[bytes]]:
             proc.kill()
 
 
-def pick_default_stage(base_url: str) -> int:
-    with urllib.request.urlopen(f"{base_url}/api/project", timeout=5) as r:
-        project = json.loads(r.read().decode())
+def pick_default_stage(base_url: str, slug: str) -> int:
+    project = http_get_json(f"{base_url}/api/shooters/{slug}/project")
     stages = project.get("stages", []) or []
+    # Prefer an audited stage so the audit/compare/export views render
+    # populated. Fall back to any stage with videos, then any stage.
+    for s in stages:
+        if s.get("status") == "audited" and not s.get("skipped"):
+            return int(s["stage_number"])
     for s in stages:
         if s.get("videos") and not s.get("skipped"):
             return int(s["stage_number"])
     if stages:
         return int(stages[0]["stage_number"])
-    raise RuntimeError("project has no stages -- ingest something first")
+    raise RuntimeError(f"shooter {slug!r} has no stages -- ingest something first")
 
 
 def main() -> int:
@@ -124,11 +155,17 @@ def main() -> int:
         help="MatchProject root directory (must have shot detection completed).",
     )
     parser.add_argument(
+        "--slug",
+        type=str,
+        default=None,
+        help="Shooter slug to feature. Defaults to /api/health.default_shooter_slug.",
+    )
+    parser.add_argument(
         "--stage",
         type=int,
         default=None,
-        help="Stage number to feature on Audit + Compare. Defaults to the "
-        "first stage with assigned videos.",
+        help="Stage number for Audit / Compare / Export. Defaults to the "
+        "first audited stage on the default shooter.",
     )
     parser.add_argument(
         "--output",
@@ -161,8 +198,8 @@ def main() -> int:
     except ImportError:
         print(
             "Playwright is not installed. Run:\n"
-            "  uv pip install --with playwright playwright\n"
-            "  playwright install chromium",
+            "  uv pip install playwright\n"
+            "  uv run playwright install chromium",
             file=sys.stderr,
         )
         return 2
@@ -179,9 +216,30 @@ def main() -> int:
             tail = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
             print(f"[capture] {e}\n--- server output tail ---\n{tail}", file=sys.stderr)
             return 1
-        print(f"[capture] bound to project: {health.get('project_name')!r}")
 
-        stage = args.stage if args.stage is not None else pick_default_stage(base_url)
+        match_id = health.get("match_id")
+        if not match_id:
+            print(
+                "[capture] /api/health did not return a match_id -- this script "
+                "requires a match-bound project (legacy single-shooter projects "
+                "are no longer supported by the path-scoped URL scheme).",
+                file=sys.stderr,
+            )
+            return 1
+        slug = args.slug or health.get("default_shooter_slug")
+        if not slug:
+            print(
+                "[capture] no shooter slug available (project has no registered "
+                "shooters). Bind a shooter before running.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"[capture] bound to project: {health.get('project_name')!r} "
+            f"(match_id={match_id}, slug={slug})"
+        )
+
+        stage = args.stage if args.stage is not None else pick_default_stage(base_url, str(slug))
         print(f"[capture] feature stage: {stage}")
 
         with sync_playwright() as p:
@@ -192,9 +250,10 @@ def main() -> int:
             )
             page = context.new_page()
             for route, filename, description, optional in SCREENSHOTS:
-                url = base_url + route.format(stage=stage)
+                path = route.format(match_id=match_id, slug=slug, stage=stage)
+                url = base_url + path
                 target = args.output / filename
-                print(f"[capture] {filename:18} <- {route.format(stage=stage)}")
+                print(f"[capture] {filename:18} <- {path}")
                 try:
                     page.goto(url, wait_until="networkidle", timeout=15_000)
                     page.wait_for_timeout(500)
@@ -209,7 +268,7 @@ def main() -> int:
                     return 1
             browser.close()
 
-    print(f"[capture] wrote {len(SCREENSHOTS)} PNGs to {args.output}/")
+    print(f"[capture] wrote PNGs to {args.output}/")
     return 0
 
 

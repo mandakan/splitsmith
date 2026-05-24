@@ -410,8 +410,7 @@ def main() -> None:
     # ``stage_rounds.expected`` (set by audit-prep --paper/--poppers/--plates),
     # voter C keeps top-(K + max(3, K*10%)) by GBDT prob within that fixture
     # instead of using the single global threshold. Cross-bay-heavy stages
-    # get a tighter cutoff; clean stages stay lenient. See PRECISION_LIMITS
-    # current state table for the +9.6 pp LOFO precision lift this gives.
+    # get a tighter cutoff; clean stages stay lenient.
     adaptive_used: list[str] = []
     for fix in apply_fixtures:
         truth = per_fixture[fix]["truth"]
