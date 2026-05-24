@@ -1,0 +1,68 @@
+name: Publish to PyPI
+
+on:
+  # Tag-triggered: ``git tag v0.2.0 && git push origin v0.2.0`` from a human
+  # (or PAT-authenticated automation) fires this. release-please-created tags
+  # don't trigger this because GitHub's GITHUB_TOKEN can't fire downstream
+  # workflows -- the auto-flow's publish job lives inside release-please.yml
+  # as a same-workflow dependent job instead.
+  push:
+    tags: ['v*']
+  # Manual on-demand from the Actions tab; honour ``tag`` input so re-publish
+  # after a transient PyPI / OIDC outage doesn't need a new tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.2.0). Defaults to the triggering ref.'
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    name: build wheel + uv publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/splitsmith
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Install Node + pnpm (for SPA build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        # Version comes from the root package.json packageManager field.
+        uses: pnpm/action-setup@v4
+
+      - name: Build SPA so wheel includes it
+        working-directory: src/splitsmith/ui_static
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Sync build deps
+        run: uv sync --frozen --all-groups
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Publish to PyPI
+        # OIDC trusted publishing -- pypi.org verifies the workflow identity
+        # against the configured publisher (mandakan/splitsmith, environment
+        # ``pypi``). No API token in repo secrets.
+        run: uv publish --trusted-publishing automatic
