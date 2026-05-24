@@ -328,8 +328,7 @@ class ShotRefineConfig(BaseModel):
     method: Literal["envelope", "aic"] = "envelope"
     # Half-width of the audio window scanned around each approximate time.
     # 200 ms covers reverb-anchored cases where the candidate generator
-    # placed its rise foot 100-200 ms after the true onset (see
-    # PRECISION_LIMITS.md section 4a).
+    # placed its rise foot 100-200 ms after the true onset.
     search_half_window_ms: float = 200.0
     # Reject refinements whose confidence falls below this threshold and
     # keep the original timestamp instead. 0.0 = always accept.
@@ -338,7 +337,7 @@ class ShotRefineConfig(BaseModel):
     # least this much louder than the local-position peak. Small ratios
     # (< 2.0) mean the original was already on a peak; tight rise-foot
     # adjustment is used instead. Mirrors the same heuristic as the
-    # candidate-time reverb-chain re-anchor (PRECISION_LIMITS section 4a).
+    # candidate-time reverb-chain re-anchor.
     reanchor_ratio: float = 2.0
     # AIC-only: bandpass before AIC. Muzzle-blast energy concentrates above
     # ~500 Hz; bandpassing reduces wind/handling noise that can mask the

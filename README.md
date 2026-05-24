@@ -19,24 +19,18 @@ Built to do two things from a single stage video: get per-shot splits for analys
 | ![compare](docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
 | ![export](docs/screenshots/export.png) | **Export.** Per-stage or whole-match FCPXML. Open in Final Cut Pro, M / Shift+M to navigate markers. |
 
-> Screenshots regenerate from a live `splitsmith ui` via `scripts/capture_screenshots.py`. See [issue tracking the local run](#regenerating-screenshots) below.
+> Screenshots regenerate from a live `splitsmith ui` via `scripts/capture_screenshots.py`. See [Regenerating screenshots](#regenerating-screenshots) below.
 
 ## Quickstart
 
-> The slim wheel install (`uv tool install splitsmith`) is the target end-user path once the wheel is published to PyPI -- the engine work is done (#377), publishing is the next step. Until then, install from source as described below.
-
-You need: `uv`, `ffmpeg`/`ffprobe` on PATH, and (for source checkouts) Node 20 + `pnpm` to build the SPA. See [Install](#install) for OS-specific package commands.
+You need: `uv` and `ffmpeg`/`ffprobe` on PATH. See [Install](#install) for OS-specific package commands.
 
 ```bash
-# Install from source (today's recommended path)
-git clone https://github.com/mandakan/splitsmith.git
-cd splitsmith
-uv sync                                          # slim runtime deps only (~100 MB)
-(cd src/splitsmith/ui_static && pnpm install && pnpm build)
-uv run splitsmith fetch-models                   # ~440 MB ONNX artifacts; one-time
+uv tool install splitsmith                       # slim runtime, ~100 MB
+splitsmith fetch-models                          # ~440 MB ONNX artifacts; one-time
 
 # Bring your own head-cam clip and stage time (or use any IPSC video at hand)
-uv run splitsmith single \
+splitsmith single \
     --video path/to/your_stage.mp4 \
     --time 14.74 \
     --output ./demo_analysis \
@@ -50,7 +44,7 @@ cat ./demo_analysis/stage3_per-told-me-to-do-it_report.txt
 For the full ingest -> audit -> export workflow with persistent project state, use the UI:
 
 ```bash
-uv run splitsmith ui --project ~/matches/your-match
+splitsmith ui --project ~/matches/your-match
 ```
 
 The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav` (Tallmilan 2026, 14.74s, 14 audited shots) plus its sibling JSON with ground-truth shot times. The companion source MP4 is gitignored -- bring your own video to exercise the full ingest pipeline.
@@ -76,17 +70,17 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
   `splitsmith ui` checks for both on first launch and prints a copy-pasteable install hint if they're missing.
 
-### Option 1: slim wheel (end users, ~100 MB) -- pending first PyPI release
-
-The shipped install will be `uv tool install splitsmith` once the first release-please release lands on `main` (see [Releases](#releases) below). Detection models (~440 MB total) download from `models.splitsmith.app` on first detection -- pre-fetch with `splitsmith fetch-models`. No torch, transformers, or panns_inference in the install.
+### Option 1: slim wheel (end users, ~100 MB)
 
 ```bash
-uv tool install splitsmith                       # available after the first 0.x.y release; see Option 2 below until then
+uv tool install splitsmith                       # from PyPI
 splitsmith fetch-models                          # pre-fetch ONNX artifacts (optional)
 splitsmith ui --project ~/matches/your-match
 ```
 
-### Option 2: from source (today's recommended path; required for contributors)
+Detection models (~440 MB total) download from `models.splitsmith.app` on first detection -- pre-fetch with `splitsmith fetch-models`. No torch, transformers, or panns_inference in the install.
+
+### Option 2: from source (required for contributors)
 
 ```bash
 git clone https://github.com/mandakan/splitsmith.git

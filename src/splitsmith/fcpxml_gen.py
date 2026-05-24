@@ -1,6 +1,6 @@
 """Generate Final Cut Pro XML timelines (FCPXML 1.10).
 
-v1 scope (per FIRST_PROMPT.md, fcpxml is intentionally minimal):
+v1 scope (intentionally minimal):
 - One asset (the trimmed video) + one sequence at the source frame rate.
 - V1 = ref-clip of the trimmed video.
 - One ``<marker>`` per shot, frame-aligned, with a descriptive name that
