@@ -1,5 +1,10 @@
 # splitsmith
 
+[![PyPI version](https://img.shields.io/pypi/v/splitsmith.svg)](https://pypi.org/project/splitsmith/)
+[![Python versions](https://img.shields.io/pypi/pyversions/splitsmith.svg)](https://pypi.org/project/splitsmith/)
+[![License](https://img.shields.io/pypi/l/splitsmith.svg)](https://github.com/mandakan/splitsmith/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/mandakan/splitsmith/ci.yml?branch=main&label=ci)](https://github.com/mandakan/splitsmith/actions/workflows/ci.yml)
+
 Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers.
 
 ![audit view](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png)
