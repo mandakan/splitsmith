@@ -42,3 +42,133 @@ jobs:
         # Integration tests are skipped: they need ffmpeg + the full source video,
         # neither of which lives in the repo.
         run: uv run pytest -q
+
+  slim-smoke:
+    # Release gate: builds the slim wheel + installs it into a fresh venv
+    # that has no dev extras, then exercises the user-facing flow end-to-
+    # end. Catches "transitive dep went missing" regressions (the kind
+    # that bit us on Pillow in PR #388) before they ship.
+    #
+    # ~2 min runtime + ~440 MiB egress from models.splitsmith.app per
+    # invocation. Acceptable for OSS scale.
+    name: slim wheel smoke test
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Install ffmpeg + ffprobe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Install Node + pnpm (for SPA build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Build SPA so wheel includes it
+        working-directory: src/splitsmith/ui_static
+        # The wheel's hatch config ships ui_static/dist; building here
+        # populates that path before uv build runs.
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Sync dev deps so we can build the wheel
+        run: uv sync --frozen --all-groups
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Create fresh slim venv (no dev extras)
+        run: uv venv slim-venv --python 3.11
+
+      - name: Install only the built wheel
+        # Use the venv's bin/python so this is the same install path
+        # an end user would get from ``uv tool install splitsmith``.
+        run: uv pip install --python slim-venv/bin/python dist/splitsmith-*.whl
+
+      - name: Sentinel -- torch / transformers / panns_inference must NOT be installed
+        run: |
+          slim-venv/bin/python - <<'PY'
+          import sys
+
+          forbidden = ("torch", "transformers", "panns_inference")
+          for name in forbidden:
+              try:
+                  __import__(name)
+              except ImportError:
+                  continue
+              raise SystemExit(
+                  f"slim wheel pulled in {name} -- the [dev] group leaked into the runtime install"
+              )
+
+          required = ("onnxruntime", "librosa", "huggingface_hub", "numpy", "PIL")
+          for name in required:
+              __import__(name)
+
+          print("import surface ok: no torch trio; slim ML stack present")
+          PY
+
+      - name: CLI -- splitsmith --help
+        run: slim-venv/bin/splitsmith --help > /dev/null
+
+      - name: fetch-models --list
+        env:
+          # Pin the cache under the workspace so it's scoped to this job
+          # rather than the runner's $HOME (also lets a future cache step
+          # key on it without permissions surprises).
+          SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg
+        run: slim-venv/bin/splitsmith fetch-models --list
+
+      - name: fetch-models (real download from R2)
+        env:
+          SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg
+        # ~440 MiB from models.splitsmith.app; SHA256-verified by the
+        # registry. Failure here means R2 + calibration are out of sync.
+        run: slim-venv/bin/splitsmith fetch-models
+
+      - name: splitsmith detect on bundled fixture
+        env:
+          SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg
+        # Real CLAP + PANN inference through the ONNX runtime path on
+        # tests/fixtures/stage_sample.wav (Tallmilan 2026 stage 3,
+        # audited ground truth 14 shots; detection emits more candidates
+        # because echoes / cross-bay aren't filtered until audit).
+        run: |
+          set -o pipefail
+          slim-venv/bin/splitsmith detect \
+              --video tests/fixtures/stage_sample.wav \
+              --time 14.74 \
+              | tee detect-output.txt
+          # Sanity: the Rich table renders a "N shots" title above the
+          # candidates table. Pull N out and assert a plausible range
+          # (~40 on the current calibration; allow 20-80 to absorb
+          # future model swaps without churning the gate).
+          count=$(grep -oE '[0-9]+ shots' detect-output.txt | head -1 | grep -oE '[0-9]+')
+          if [ -z "$count" ]; then
+              echo "::error::slim-runtime detect produced no parseable shot count"
+              exit 1
+          fi
+          echo "candidate count: $count"
+          if [ "$count" -lt 20 ] || [ "$count" -gt 80 ]; then
+              echo "::error::slim-runtime detect produced $count candidates; expected 20-80"
+              exit 1
+          fi
