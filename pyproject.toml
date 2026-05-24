@@ -71,6 +71,27 @@ exclude = [
   "**/ui_static/dist/**/*.map",
 ]
 
+[tool.hatch.build.targets.sdist]
+# Test fixtures are ~140 MB of audio (above PyPI's default 100 MB per-file
+# limit) and never needed by anyone installing from sdist. Build / dev
+# outputs, design docs, maintainer scripts, and the SPA source tree are
+# also excluded -- they live in git for contributors; nobody source-builds
+# the wheel needs them.
+include = [
+  "src/splitsmith/**",
+  "README.md",
+  "LICENSE*",
+  "CHANGELOG.md",
+  "pyproject.toml",
+  "uv.lock",
+]
+exclude = [
+  "**/__pycache__",
+  "**/*.pyc",
+  "**/ui_static/node_modules",
+  "**/ui_static/dist/**/*.map",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
