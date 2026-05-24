@@ -1,10 +1,15 @@
-"""Unit tests for the CLI's audio-path derivation helpers."""
+"""Unit tests for the CLI's audio-path / extraction helpers."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
-from splitsmith.cli import _video_to_audio_path
+import numpy as np
+import pytest
+import soundfile as sf
+
+from splitsmith.cli import _extract_or_load_audio, _video_to_audio_path
 
 
 def test_video_to_audio_path_for_mp4() -> None:
@@ -12,23 +17,63 @@ def test_video_to_audio_path_for_mp4() -> None:
     assert _video_to_audio_path(Path("/tmp/x.mp4")) == Path("/tmp/x.wav")
 
 
-def test_video_to_audio_path_for_wav_does_not_collide_with_input() -> None:
-    """Regression for the smoke-test failure on 2026-05-24.
+def _make_wav(path: Path, sr: int = 48000, seconds: float = 0.5) -> None:
+    samples = (np.sin(2 * np.pi * 440.0 * np.arange(int(sr * seconds)) / sr) * 0.1).astype(np.float32)
+    sf.write(path, samples, sr)
 
-    When the input is already a ``.wav``, the naive
-    ``Path.with_suffix(".wav")`` returns the same path. ffmpeg then either
-    rejects the call (Linux: exit 254 "Output file is the same as input")
-    or silently overwrites the source (macOS with ``-y``). The helper
-    has to give a distinct path.
+
+def test_extract_or_load_audio_skips_ffmpeg_for_wav_input(tmp_path: Path) -> None:
+    """Regression for the slim-smoke failure on 2026-05-24.
+
+    When the input is already a ``.wav``, the ffmpeg pass is skipped and
+    the file is read directly via soundfile. This avoids two failure
+    modes:
+
+    1. Linux ffmpeg with input==output -> exit 254 (the original CI bug).
+    2. macOS ffmpeg with ``-y`` -> silently overwrites the source.
+
+    The test guarantees the helper doesn't shell out to ffmpeg at all
+    on a ``.wav`` input by deleting ``ffmpeg`` from PATH for the call.
     """
-    inp = Path("/tmp/sample.wav")
-    out = _video_to_audio_path(inp)
-    assert out != inp
-    assert out.suffix == ".wav"
+    wav_path = tmp_path / "stage_sample.wav"
+    _make_wav(wav_path)
+
+    # Belt-and-braces: ensure the function doesn't fall through to ffmpeg.
+    saved = shutil.which
+    shutil.which = lambda _name: None  # type: ignore[assignment]
+    try:
+        audio, sr = _extract_or_load_audio(wav_path, _video_to_audio_path(wav_path))
+    finally:
+        shutil.which = saved  # type: ignore[assignment]
+
+    assert sr == 48000
+    assert audio.dtype == np.float32
+    assert audio.size == int(48000 * 0.5)
 
 
-def test_video_to_audio_path_handles_uppercase_wav() -> None:
-    """Path suffix check is case-insensitive."""
-    inp = Path("/tmp/SAMPLE.WAV")
-    out = _video_to_audio_path(inp)
-    assert out != inp
+def test_extract_or_load_audio_collision_guard(tmp_path: Path) -> None:
+    """If a caller hand-crafts ``audio_path == video``, load directly."""
+    wav_path = tmp_path / "x.wav"
+    _make_wav(wav_path)
+
+    audio, sr = _extract_or_load_audio(wav_path, wav_path)
+    assert sr == 48000
+    assert audio.size > 0
+
+
+def test_extract_or_load_audio_ffmpeg_required_for_non_wav(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-wav input still triggers the ffmpeg path."""
+    fake_video = tmp_path / "fake.mp4"
+    fake_video.write_bytes(b"\x00" * 32)
+    audio_path = _video_to_audio_path(fake_video)
+    assert audio_path != fake_video
+
+    # Stub ffmpeg out of PATH so we can assert the ffmpeg branch was reached
+    # without depending on a real binary.
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    import typer
+
+    with pytest.raises(typer.BadParameter, match="ffmpeg binary not found"):
+        _extract_or_load_audio(fake_video, audio_path)

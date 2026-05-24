@@ -1103,16 +1103,7 @@ def _refine_shot_times(
 
 
 def _video_to_audio_path(video: Path) -> Path:
-    """Return a sibling path where the extracted mono wav can be cached.
-
-    When ``video`` is already a ``.wav``, pick a sibling ``.extracted.wav``
-    so the ffmpeg pass below isn't asked to write to its own input -- Linux
-    ffmpeg rejects that outright (exit 254); macOS ffmpeg with ``-y``
-    overwrites the source, silently corrupting it. The smoke-tested WAV
-    fixture path goes through this branch.
-    """
-    if video.suffix.lower() == ".wav":
-        return video.with_suffix(".extracted.wav")
+    """Return a sibling path where the extracted mono wav can be cached."""
     return video.with_suffix(".wav")
 
 
@@ -1123,10 +1114,16 @@ def _extract_or_load_audio(video: Path, audio_path: Path):
     decides what to do with it. For a one-off ``detect`` we never delete it,
     which trades disk for repeat-run speed.
     """
+    if video.suffix.lower() == ".wav":
+        # Input is already a WAV; skip the ffmpeg pass entirely. The
+        # downstream detection code handles arbitrary sample rates.
+        # This avoids two failure modes that bit the slim-smoke job:
+        # (1) Linux ffmpeg refusing input==output with exit 254;
+        # (2) macOS ffmpeg with ``-y`` silently overwriting the source.
+        return beep_detect.load_audio(video)
     if audio_path == video:
-        # Defensive: ``_video_to_audio_path`` should already prevent this,
-        # but if a caller hand-crafts the audio path we don't want ffmpeg
-        # writing to its own input.
+        # Defensive: caller-supplied audio_path that collides with the
+        # video. Load in place rather than ffmpeg-ing into the input.
         return beep_detect.load_audio(video)
     if not audio_path.exists() or audio_path.stat().st_mtime < video.stat().st_mtime:
         ffmpeg_bin = runtime().ffmpeg_binary
