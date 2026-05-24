@@ -23,7 +23,7 @@ SCRATCH_ROOT="${SMOKE_SCRATCH_ROOT:-${HOME}/.claude-tmp}"
 SMOKE_DIR="${SCRATCH_ROOT}/slim-smoke"
 SMOKE_VENV="${SMOKE_DIR}/venv"
 SMOKE_CFG="${SMOKE_DIR}/cfg"
-SAMPLE_WAV="${REPO_ROOT}/tests/fixtures/stage_sample.wav"
+SAMPLE_WAV="${REPO_ROOT}/tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav"
 
 REBUILD_VENV=0
 REFETCH_MODELS=0
@@ -133,7 +133,7 @@ echo "==> fetch-models (downloads if missing)"
 
 # --- detection smoke -------------------------------------------------
 
-echo "==> splitsmith detect on tests/fixtures/stage_sample.wav"
+echo "==> splitsmith detect on $(basename "$SAMPLE_WAV")"
 DETECT_LOG="${SMOKE_DIR}/detect-output.txt"
 "$SMOKE_VENV/bin/splitsmith" detect \
     --video "$SAMPLE_WAV" \

@@ -168,13 +168,15 @@ jobs:
         env:
           SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg
         # Real CLAP + PANN inference through the ONNX runtime path on
-        # tests/fixtures/stage_sample.wav (Tallmilan 2026 stage 3,
-        # audited ground truth 14 shots; detection emits more candidates
-        # because echoes / cross-bay aren't filtered until audit).
+        # tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav
+        # (Tallmilan 2026 stage 3, audited ground truth 14 shots;
+        # detection emits more candidates because echoes / cross-bay
+        # aren't filtered until audit). ``stage_sample.wav`` is
+        # gitignored -- this canonical tracked fixture is its source.
         run: |
           set -o pipefail
           slim-venv/bin/splitsmith detect \
-              --video tests/fixtures/stage_sample.wav \
+              --video tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav \
               --time 14.74 \
               | tee detect-output.txt
           # Sanity: the Rich table renders a "N shots" title above the
