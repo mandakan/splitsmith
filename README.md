@@ -1,8 +1,13 @@
 # splitsmith
 
+[![PyPI version](https://img.shields.io/pypi/v/splitsmith.svg)](https://pypi.org/project/splitsmith/)
+[![Python versions](https://img.shields.io/pypi/pyversions/splitsmith.svg)](https://pypi.org/project/splitsmith/)
+[![License](https://img.shields.io/pypi/l/splitsmith.svg)](https://github.com/mandakan/splitsmith/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/mandakan/splitsmith/ci.yml?branch=main&label=ci)](https://github.com/mandakan/splitsmith/actions/workflows/ci.yml)
+
 Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers.
 
-![audit view](docs/screenshots/audit.png)
+![audit view](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png)
 
 Built to do two things from a single stage video: get per-shot splits for analysis and coaching, and prepare frame-marked clips for match-footage review. Your head-mounted cam (Insta360 Go 3S in this case) already captures audio of every shot; the RO's timer only records your total stage time, so the splits live in the video and nowhere else. Splitsmith extracts them and turns them into a CSV plus an FCPXML timeline with per-shot markers you can step through in Final Cut Pro.
 
@@ -13,11 +18,11 @@ Built to do two things from a single stage video: get per-shot splits for analys
 
 | | |
 |---|---|
-| ![ingest](docs/screenshots/ingest.png) | **Ingest.** Drop a folder of GoPro clips; the engine auto-matches them to stages by file timestamp. |
-| ![beep review](docs/screenshots/beep-review.png) | **Beep review.** Auto-snap to the start beep on each stage; low-confidence detections land in a HITL queue. |
-| ![audit](docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
-| ![compare](docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
-| ![export](docs/screenshots/export.png) | **Export.** Per-stage or whole-match FCPXML. Open in Final Cut Pro, M / Shift+M to navigate markers. |
+| ![ingest](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/ingest.png) | **Ingest.** Drop a folder of GoPro clips; the engine auto-matches them to stages by file timestamp. |
+| ![beep review](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/beep-review.png) | **Beep review.** Auto-snap to the start beep on each stage; low-confidence detections land in a HITL queue. |
+| ![audit](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
+| ![compare](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
+| ![export](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/export.png) | **Export.** Per-stage or whole-match FCPXML. Open in Final Cut Pro, M / Shift+M to navigate markers. |
 
 > Screenshots regenerate from a live `splitsmith ui` via `scripts/capture_screenshots.py`. See [Regenerating screenshots](#regenerating-screenshots) below.
 
