@@ -1114,6 +1114,17 @@ def _extract_or_load_audio(video: Path, audio_path: Path):
     decides what to do with it. For a one-off ``detect`` we never delete it,
     which trades disk for repeat-run speed.
     """
+    if video.suffix.lower() == ".wav":
+        # Input is already a WAV; skip the ffmpeg pass entirely. The
+        # downstream detection code handles arbitrary sample rates.
+        # This avoids two failure modes that bit the slim-smoke job:
+        # (1) Linux ffmpeg refusing input==output with exit 254;
+        # (2) macOS ffmpeg with ``-y`` silently overwriting the source.
+        return beep_detect.load_audio(video)
+    if audio_path == video:
+        # Defensive: caller-supplied audio_path that collides with the
+        # video. Load in place rather than ffmpeg-ing into the input.
+        return beep_detect.load_audio(video)
     if not audio_path.exists() or audio_path.stat().st_mtime < video.stat().st_mtime:
         ffmpeg_bin = runtime().ffmpeg_binary
         if not shutil.which(ffmpeg_bin):

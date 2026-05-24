@@ -53,7 +53,7 @@ For the full ingest -> audit -> export workflow with persistent project state, u
 uv run splitsmith ui --project ~/matches/your-match
 ```
 
-The repo ships a real Stage 3 audio sample at `tests/fixtures/stage_sample.wav` (Tallmilan 2026, 14.74s, 14 audited shots) if you want to validate against a known reference. The companion source MP4 is gitignored -- bring your own.
+The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav` (Tallmilan 2026, 14.74s, 14 audited shots) plus its sibling JSON with ground-truth shot times. The companion source MP4 is gitignored -- bring your own video to exercise the full ingest pipeline.
 
 ## The workflow
 
