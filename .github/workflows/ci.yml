@@ -95,9 +95,12 @@ jobs:
           node-version: "20"
 
       - name: Install pnpm
+        # No ``version:`` -- root package.json declares
+        # ``packageManager: pnpm@10.30.3`` for the marketing site, and
+        # pnpm/action-setup@v4 refuses to run if both are set. Letting
+        # it read the version from packageManager keeps the smoke job
+        # aligned with the rest of the repo's pnpm.
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Build SPA so wheel includes it
         working-directory: src/splitsmith/ui_static
