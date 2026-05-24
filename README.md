@@ -76,12 +76,12 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
   `splitsmith ui` checks for both on first launch and prints a copy-pasteable install hint if they're missing.
 
-### Option 1: slim wheel (end users, ~100 MB) -- pending PyPI publish
+### Option 1: slim wheel (end users, ~100 MB) -- pending first PyPI release
 
-The shipped install will be `uv tool install splitsmith` once the wheel is published. Detection models (~440 MB total) download from `models.splitsmith.app` on first detection -- pre-fetch with `splitsmith fetch-models`. No torch, transformers, or panns_inference in the install.
+The shipped install will be `uv tool install splitsmith` once the first release-please release lands on `main` (see [Releases](#releases) below). Detection models (~440 MB total) download from `models.splitsmith.app` on first detection -- pre-fetch with `splitsmith fetch-models`. No torch, transformers, or panns_inference in the install.
 
 ```bash
-uv tool install splitsmith                       # not yet published; see Option 2 below
+uv tool install splitsmith                       # available after the first 0.x.y release; see Option 2 below until then
 splitsmith fetch-models                          # pre-fetch ONNX artifacts (optional)
 splitsmith ui --project ~/matches/your-match
 ```
@@ -257,6 +257,15 @@ Commit the resulting PNGs. The script needs a project that's already been throug
 - **Report shows ">> 32 shots, possible false positives"** -- expected on busy ranges. Cull in the CSV and regenerate the FCPXML.
 - **Last shot is detected after the official stage time** -- usually a neighbouring-bay shot fired during your last shot's echo window. Drop it in the CSV.
 - **No FCPXML markers visible in FCP** -- ensure FCP 11.x or later (FCPXML 1.10 is required). Older versions need an export of the timeline into 1.9.
+
+## Releases
+
+Versioning is driven by [release-please](https://github.com/googleapis/release-please) on `main`:
+
+- Conventional commits (`feat:`, `fix:`, `perf:`, `refactor:`, ...) accumulate into an always-open `chore: release X.Y.Z` PR that bumps `pyproject.toml` and `CHANGELOG.md`. Merging that PR cuts the tag + GitHub Release.
+- The GitHub Release triggers `.github/workflows/release-please.yml`'s `publish-pypi` job, which builds the slim wheel (SPA included via the same SPA-build step as the smoke job) and runs `uv publish --trusted-publishing automatic`.
+- No PyPI API token in repo secrets -- authentication uses [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) (OIDC). One-time setup: at <https://pypi.org/manage/account/publishing/>, add a "pending publisher" for project name `splitsmith`, owner `mandakan`, repo `splitsmith`, workflow `release-please.yml`, environment `pypi`.
+- Model artifacts on R2 are SHA-pinned in `src/splitsmith/data/ensemble_calibration.json` and decoupled from the app version. Re-uploads go through `scripts/upload_model_artifacts.py`; the calibration file is the source of truth that the wheel ships with.
 
 ## Project status
 
