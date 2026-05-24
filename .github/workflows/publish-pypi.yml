@@ -2,12 +2,14 @@ name: Publish to PyPI
 
 on:
   # Tag-triggered: ``git tag v0.2.0 && git push origin v0.2.0`` from a human
-  # (or PAT-authenticated automation) fires this. release-please-created tags
-  # don't trigger this because GitHub's GITHUB_TOKEN can't fire downstream
-  # workflows -- the auto-flow's publish job lives inside release-please.yml
-  # as a same-workflow dependent job instead.
+  # fires this directly.
   push:
     tags: ['v*']
+  # Callable from release-please.yml so the automatic release flow uses the
+  # same publish steps. The OIDC ``job_workflow_ref`` claim points at THIS
+  # workflow when called, so one PyPI trusted publisher
+  # (workflow filename ``publish-pypi.yml``) covers both code paths.
+  workflow_call:
   # Manual on-demand from the Actions tab; honour ``tag`` input so re-publish
   # after a transient PyPI / OIDC outage doesn't need a new tag.
   workflow_dispatch:

@@ -35,59 +35,15 @@ jobs:
           manifest-file: .github/release-please-manifest.json
 
   publish-pypi:
-    # Gated on a real release being cut this run -- not every push
-    # to main. The release-please PR merge is the trigger.
-    name: publish to PyPI
+    # Auto-publish path: release-please cut a release in the previous job.
+    # Calls the same reusable workflow that the tag-push path uses, so the
+    # actual publish steps + PyPI trusted-publisher claims live in exactly
+    # one place (publish-pypi.yml). One PyPI publisher entry suffices because
+    # the OIDC ``job_workflow_ref`` claim points at the CALLED workflow.
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/splitsmith
+    uses: ./.github/workflows/publish-pypi.yml
     permissions:
-      # Required for PyPI trusted publishing (OIDC). No API token in
-      # secrets; PyPI verifies the workflow identity against the
-      # configured publisher on pypi.org/manage/account/publishing/.
       id-token: write
       contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # release-please tagged the release commit; check it out
-          # so the wheel embeds the right version + CHANGELOG.
-          ref: ${{ needs.release-please.outputs.tag_name }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Install Python 3.11
-        run: uv python install 3.11
-
-      - name: Install Node + pnpm (for SPA build)
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install pnpm
-        # Version comes from the root package.json packageManager field.
-        uses: pnpm/action-setup@v4
-
-      - name: Build SPA so wheel includes it
-        working-directory: src/splitsmith/ui_static
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Sync build deps
-        run: uv sync --frozen --all-groups
-
-      - name: Build sdist + wheel
-        run: uv build
-
-      - name: Publish to PyPI
-        # ``--trusted-publishing automatic`` makes uv pick up the
-        # OIDC token from the GitHub Actions runner; no PYPI_TOKEN
-        # needed in repo secrets.
-        run: uv publish --trusted-publishing automatic
+    secrets: inherit
