@@ -86,6 +86,28 @@ class Runtime:
         return path
 
 
+def _honour_xdg(env_var: str) -> Path | None:
+    """Return ``$<env_var>`` if it's set to an absolute path.
+
+    Per the freedesktop XDG basedir spec, ``XDG_*_HOME`` values MUST be
+    absolute. Empty / unset / non-absolute fall through to platform
+    defaults. A non-absolute value is logged once so the user can see
+    why their override didn't take effect.
+    """
+    raw = os.environ.get(env_var)
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        logger.warning(
+            "ignoring %s=%r: XDG basedir values must be absolute paths; falling back to default",
+            env_var,
+            raw,
+        )
+        return None
+    return path
+
+
 def _platform_cache_dir() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "splitsmith"
@@ -94,9 +116,9 @@ def _platform_cache_dir() -> Path:
         if base:
             return Path(base) / "splitsmith"
         return Path.home() / "AppData" / "Local" / "splitsmith"
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return Path(xdg) / "splitsmith"
+    xdg = _honour_xdg("XDG_CACHE_HOME")
+    if xdg is not None:
+        return xdg / "splitsmith"
     return Path.home() / ".cache" / "splitsmith"
 
 
@@ -104,9 +126,9 @@ def _platform_user_config_dir() -> Path:
     # Mirror the convention from ``user_config.py`` so both modules
     # agree on where per-user state lives.
     if sys.platform.startswith("linux"):
-        xdg = os.environ.get("XDG_CONFIG_HOME")
-        if xdg:
-            return Path(xdg) / "splitsmith"
+        xdg = _honour_xdg("XDG_CONFIG_HOME")
+        if xdg is not None:
+            return xdg / "splitsmith"
         return Path.home() / ".config" / "splitsmith"
     return Path.home() / ".splitsmith"
 

@@ -95,7 +95,9 @@ def test_default_binary_is_ffmpeg() -> None:
     assert rt.ffprobe_binary == "ffprobe"
 
 
-def test_default_cache_dir_is_platform_specific() -> None:
+def test_default_cache_dir_is_platform_specific(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    _clear_runtime_cache()
     rt = resolve_runtime()
     if sys.platform == "darwin":
         assert rt.cache_dir == Path.home() / "Library" / "Caches" / "splitsmith"
@@ -104,9 +106,56 @@ def test_default_cache_dir_is_platform_specific() -> None:
         # ``~/AppData/Local/splitsmith``. Either is acceptable.
         assert rt.cache_dir.name == "splitsmith"
     else:
-        # Linux: XDG_CACHE_HOME-aware -- with the env var scrubbed by
-        # the fixture, falls back to ``~/.cache/splitsmith``.
         assert rt.cache_dir == Path.home() / ".cache" / "splitsmith"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG only applies on Linux")
+def test_xdg_cache_home_absolute_path_honoured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    _clear_runtime_cache()
+    rt = resolve_runtime()
+    assert rt.cache_dir == tmp_path / "splitsmith"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG only applies on Linux")
+def test_xdg_cache_home_relative_path_rejected(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Relative XDG values violate the spec; fall through with a warning."""
+    monkeypatch.setenv("XDG_CACHE_HOME", "not-absolute/cache")
+    _clear_runtime_cache()
+    with caplog.at_level("WARNING", logger="splitsmith.runtime"):
+        rt = resolve_runtime()
+    assert rt.cache_dir == Path.home() / ".cache" / "splitsmith"
+    assert any("XDG_CACHE_HOME" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG only applies on Linux")
+def test_xdg_cache_home_empty_string_falls_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", "")
+    _clear_runtime_cache()
+    rt = resolve_runtime()
+    assert rt.cache_dir == Path.home() / ".cache" / "splitsmith"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG only applies on Linux")
+def test_xdg_config_home_absolute_path_honoured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _clear_runtime_cache()
+    rt = resolve_runtime()
+    assert rt.user_config_dir == tmp_path / "splitsmith"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG only applies on Linux")
+def test_xdg_config_home_relative_path_rejected(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", "rel/path")
+    _clear_runtime_cache()
+    with caplog.at_level("WARNING", logger="splitsmith.runtime"):
+        rt = resolve_runtime()
+    assert rt.user_config_dir == Path.home() / ".config" / "splitsmith"
+    assert any("XDG_CONFIG_HOME" in rec.message for rec in caplog.records)
 
 
 def test_hf_and_torch_home_setdefault(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

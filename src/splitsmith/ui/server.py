@@ -6338,6 +6338,39 @@ def create_app(
             message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
+    def _reveal_in_file_manager(resolved: Path) -> None:
+        """Launch the OS file manager for ``resolved``, surfacing failures.
+
+        Without surfacing, a headless / minimal Linux install (no
+        ``xdg-open``) or a Wayland session without DBUS silently
+        swallows the click. Raising on nonzero exit lets the SPA toast.
+        ``explorer /select`` is opted out because it returns 1 even on
+        a successful selection -- treating that as failure would always
+        toast on Windows.
+        """
+        if sys.platform == "darwin":
+            cmd = ["open", "-R", str(resolved)]
+            check_exit = True
+        elif sys.platform.startswith("win"):
+            cmd = ["explorer", f"/select,{resolved}"]
+            check_exit = False
+        else:
+            # xdg-open doesn't support file selection; opening the parent
+            # is the closest cross-distro behaviour.
+            parent = resolved.parent if resolved.is_file() else resolved
+            cmd = ["xdg-open", str(parent)]
+            check_exit = True
+        try:
+            proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
+        if check_exit and proc.returncode != 0:
+            stderr = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+            raise HTTPException(
+                status_code=500,
+                detail=f"file manager refused to open {resolved}: {stderr}",
+            )
+
     @app.post("/api/files/reveal")
     def reveal_file(req: RevealRequest) -> JSONResponse:
         """Reveal a file in the OS file manager.
@@ -6359,18 +6392,7 @@ def create_app(
                 status_code=400,
                 detail="reveal path must be inside the bound project root",
             ) from exc
-        try:
-            if sys.platform == "darwin":
-                subprocess.run(["open", "-R", str(resolved)], check=False)
-            elif sys.platform.startswith("win"):
-                subprocess.run(["explorer", f"/select,{resolved}"], check=False)
-            else:
-                # xdg-open doesn't support file selection; opening the parent
-                # is the closest cross-distro behaviour.
-                parent = resolved.parent if resolved.is_file() else resolved
-                subprocess.run(["xdg-open", str(parent)], check=False)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
+        _reveal_in_file_manager(resolved)
         return JSONResponse({"revealed": str(resolved)})
 
     @app.post("/api/shooters/{slug}/videos/reveal")
@@ -6395,16 +6417,7 @@ def create_app(
             resolved = target.resolve(strict=True)
         except (OSError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=f"not found: {target}") from exc
-        try:
-            if sys.platform == "darwin":
-                subprocess.run(["open", "-R", str(resolved)], check=False)
-            elif sys.platform.startswith("win"):
-                subprocess.run(["explorer", f"/select,{resolved}"], check=False)
-            else:
-                parent = resolved.parent if resolved.is_file() else resolved
-                subprocess.run(["xdg-open", str(parent)], check=False)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
+        _reveal_in_file_manager(resolved)
         return JSONResponse({"revealed": str(resolved)})
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/skip")
