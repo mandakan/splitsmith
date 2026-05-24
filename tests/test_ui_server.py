@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 from unittest.mock import patch
@@ -3981,6 +3982,67 @@ def test_videos_reveal_404_on_unregistered_path(tmp_path: Path) -> None:
 
     resp = client.post("/api/shooters/me/videos/reveal", json={"path": "raw/missing.mp4"})
     assert resp.status_code == 404
+
+
+def test_videos_reveal_surfaces_nonzero_subprocess_exit(tmp_path: Path) -> None:
+    """Regression: a Linux box without ``xdg-open`` (or a Wayland session
+    without DBUS) used to silently succeed -- the helper exited nonzero
+    and we returned 200. The SPA could not toast the failure. Now we
+    propagate as a 500 so the click visibly fails instead of vanishing.
+    """
+    root = tmp_path / "match"
+    src_dir = tmp_path / "external"
+    src_dir.mkdir()
+    src = src_dir / "VID.mp4"
+    src.write_bytes(b"")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    scan = client.post("/api/shooters/me/videos/scan", json={"source_paths": [str(src)]})
+    assert scan.status_code == 200, scan.text
+
+    def _failing_run(cmd, **_kwargs):  # noqa: ANN001
+        class _R:
+            returncode = 3  # xdg-open: "required tool not found"
+            stderr = "xdg-open: no method available for opening"
+
+        return _R()
+
+    with patch("splitsmith.ui.server.subprocess.run", side_effect=_failing_run):
+        resp = client.post("/api/shooters/me/videos/reveal", json={"path": "raw/VID.mp4"})
+
+    if sys.platform.startswith("win"):
+        # explorer.exe returns 1 on success; we deliberately don't gate on
+        # exit code there. Skip the assertion rather than rewriting the
+        # stub to mimic a non-explorer Windows error path.
+        pytest.skip("Windows opts out of subprocess returncode checking for explorer.exe")
+    assert resp.status_code == 500, resp.text
+    assert "refused to open" in resp.text
+
+
+def test_videos_reveal_surfaces_missing_helper_binary(tmp_path: Path) -> None:
+    """``xdg-open`` / ``open`` / ``explorer`` not on PATH must surface a 500."""
+    root = tmp_path / "match"
+    src_dir = tmp_path / "external"
+    src_dir.mkdir()
+    src = src_dir / "VID.mp4"
+    src.write_bytes(b"")
+
+    app = create_app(project_root=root, project_name="x")
+    client = TestClient(app)
+
+    scan = client.post("/api/shooters/me/videos/scan", json={"source_paths": [str(src)]})
+    assert scan.status_code == 200, scan.text
+
+    def _raise_fnf(cmd, **_kwargs):  # noqa: ANN001
+        raise FileNotFoundError(2, "No such file or directory", cmd[0])
+
+    with patch("splitsmith.ui.server.subprocess.run", side_effect=_raise_fnf):
+        resp = client.post("/api/shooters/me/videos/reveal", json={"path": "raw/VID.mp4"})
+
+    assert resp.status_code == 500, resp.text
+    assert "failed to launch file manager" in resp.text
 
 
 def test_fs_probe_resolves_project_relative_paths(tmp_path: Path) -> None:

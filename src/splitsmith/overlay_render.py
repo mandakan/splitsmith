@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import math
 import platform
 import shutil
@@ -42,6 +43,46 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
 from .overlay_theme import OverlayTheme, ThemeName, load_theme
+
+logger = logging.getLogger(__name__)
+
+# Track which (font_name, tier) pairs we've already logged so the
+# resolver doesn't spam one line per frame. Cleared via
+# ``reset_font_log_cache()`` in tests; otherwise process-lifetime.
+_LOGGED_FONT_TIERS: set[tuple[str | None, str]] = set()
+
+
+def reset_font_log_cache() -> None:
+    """Test-only: forget which font-tier choices have been logged."""
+    _LOGGED_FONT_TIERS.clear()
+
+
+def _log_font_choice(font_name: str | None, tier: str, source: str | None) -> None:
+    key = (font_name, tier)
+    if key in _LOGGED_FONT_TIERS:
+        return
+    _LOGGED_FONT_TIERS.add(key)
+    if tier == "explicit":
+        logger.debug("overlay font: using explicit path %s", source)
+    elif tier == "bundled":
+        logger.debug("overlay font %r: using bundled %s", font_name, source)
+    elif tier == "preset-found":
+        logger.info("overlay font %r resolved to system path %s", font_name, source)
+    elif tier == "fallback":
+        logger.warning(
+            "overlay font %r unavailable; using system fallback %s",
+            font_name,
+            source,
+        )
+    elif tier == "pil-default":
+        logger.warning(
+            "overlay font %r unavailable and no system fallback present; "
+            "falling back to PIL's built-in bitmap font (overlay will look low-res). "
+            "Install DejaVu Sans Mono (Debian/Ubuntu: ``apt install fonts-dejavu-core``) "
+            "or pass an explicit ``font_path``.",
+            font_name,
+        )
+
 
 OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
 """Pluggable encoder for the alpha overlay MOV.
@@ -388,11 +429,13 @@ def _load_font(
     font_name: str | None = None,
 ) -> ImageFont.ImageFont:
     if font_path is not None:
+        _log_font_choice(font_name, "explicit", str(font_path))
         return ImageFont.truetype(str(font_path), size=size)
     if font_name is not None:
         key = font_name.lower()
         bundled = _load_bundled_font(key, size)
         if bundled is not None:
+            _log_font_choice(font_name, "bundled", key)
             return bundled
         if key in _BUNDLED_FONTS:
             # Bundled name resolved but the file is missing -- fall through
@@ -406,13 +449,16 @@ def _load_font(
         for candidate in _FONT_PRESETS.get(key, ()):
             p = Path(candidate)
             if p.exists():
+                _log_font_choice(font_name, "preset-found", str(p))
                 return ImageFont.truetype(str(p), size=size)
         # Named preset asked for but no file found -- fall through to the
         # generic discovery list rather than crashing the export.
     for candidate in _FONT_FALLBACKS:
         p = Path(candidate)
         if p.exists():
+            _log_font_choice(font_name, "fallback", str(p))
             return ImageFont.truetype(str(p), size=size)
+    _log_font_choice(font_name, "pil-default", None)
     return ImageFont.load_default()
 
 

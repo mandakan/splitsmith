@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import shutil
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from splitsmith import cli
 from splitsmith.cli import _extract_or_load_audio, _video_to_audio_path
 
 
@@ -77,3 +79,19 @@ def test_extract_or_load_audio_ffmpeg_required_for_non_wav(
 
     with pytest.raises(typer.BadParameter, match="ffmpeg binary not found"):
         _extract_or_load_audio(fake_video, audio_path)
+
+
+def test_detect_csv_open_pins_utf8() -> None:
+    """Regression guard for the candidates CSV write.
+
+    On Linux with ``LANG=C`` / ``LANG=POSIX`` Python's text-mode ``open``
+    picks ``ascii`` from the locale and crashes on non-ASCII shooter or
+    club names. Pinning ``encoding="utf-8"`` at the open site sidesteps
+    that. This test fails if a future refactor drops the encoding kwarg.
+    """
+    src = inspect.getsource(cli.audit_prep)
+    open_lines = [line for line in src.splitlines() if "csv_path.open" in line]
+    assert open_lines, "csv_path.open call not found in cli.audit_prep -- did it get renamed?"
+    assert all(
+        'encoding="utf-8"' in line for line in open_lines
+    ), f'csv_path.open must pin encoding="utf-8"; saw: {open_lines}'

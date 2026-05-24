@@ -54,6 +54,42 @@ def test_xdg_config_home_honoured_on_linux(monkeypatch: pytest.MonkeyPatch, tmp_
     assert user_config.user_config_dir() == xdg / "splitsmith"
 
 
+def test_xdg_config_home_relative_path_rejected_on_linux(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """Per the freedesktop spec, XDG basedir values must be absolute.
+
+    A relative override is malformed; we fall through to the default
+    and log the malformed value so a mistyped env var doesn't fail silently.
+    """
+    if not sys.platform.startswith("linux"):
+        pytest.skip("XDG layout only applies on Linux")
+    monkeypatch.delenv(user_config.ENV_HOME, raising=False)
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setenv(user_config.ENV_XDG, "rel/config")
+
+    with caplog.at_level("WARNING", logger="splitsmith.user_config"):
+        resolved = user_config.user_config_dir()
+
+    assert resolved == fake_home / ".config" / "splitsmith"
+    assert any("XDG_CONFIG_HOME" in rec.message for rec in caplog.records)
+
+
+def test_xdg_config_home_empty_string_falls_through_on_linux(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    if not sys.platform.startswith("linux"):
+        pytest.skip("XDG layout only applies on Linux")
+    monkeypatch.delenv(user_config.ENV_HOME, raising=False)
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setenv(user_config.ENV_XDG, "")
+    assert user_config.user_config_dir() == fake_home / ".config" / "splitsmith"
+
+
 def test_directory_created_lazily_on_first_write(_isolated_user_config: Path, tmp_path: Path) -> None:
     project = tmp_path / "match"
     project.mkdir()

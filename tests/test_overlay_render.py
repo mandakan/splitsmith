@@ -208,6 +208,36 @@ def test_available_font_names_includes_known_presets() -> None:
     assert "dejavu-mono" in names
 
 
+def test_load_font_pil_default_fallback_warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When neither bundled nor any system font is present we land on PIL's
+    bitmap default and the overlay looks bad. The fallback must log a
+    warning so a packaged Linux user sees *why* their overlays look low-res."""
+    # Keep "dejavu-mono" as a known preset name (so the unknown-name guard
+    # doesn't raise) but give it no candidate paths -- forces the full walk.
+    monkeypatch.setattr(overlay_render, "_FONT_PRESETS", {"dejavu-mono": ()})
+    monkeypatch.setattr(overlay_render, "_FONT_FALLBACKS", ())
+    # Force bundled lookup to miss so we walk the full fallback chain.
+    monkeypatch.setattr(overlay_render, "_load_bundled_font", lambda *_args, **_kw: None)
+    overlay_render.reset_font_log_cache()
+
+    with caplog.at_level("WARNING", logger="splitsmith.overlay_render"):
+        font = overlay_render._load_font(None, 24, font_name="dejavu-mono")
+    assert font is not None
+    assert any("PIL's built-in bitmap font" in rec.message for rec in caplog.records)
+
+
+def test_load_font_bundled_emits_debug_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The happy path (bundled font in the wheel) must not warn."""
+    overlay_render.reset_font_log_cache()
+    with caplog.at_level("WARNING", logger="splitsmith.overlay_render"):
+        overlay_render._load_font(None, 24, font_name="splitsmith-mono")
+    assert not [rec for rec in caplog.records if rec.levelname == "WARNING"]
+
+
 def test_default_template_skips_split_after_fade() -> None:
     """Long after the last shot, the split label fades to zero. The N/M
     and total are still drawn, but the split region is empty."""

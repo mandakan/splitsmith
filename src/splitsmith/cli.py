@@ -653,7 +653,8 @@ def audit_prep(
 
     csv_path = output_dir / f"{stem}-candidates.csv"
     stage_end_ms = time * 1000
-    with csv_path.open("w", newline="") as f:
+    # encoding pinned: Linux with LANG=C picks ascii from the locale and crashes on non-ASCII names.
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = _csv.writer(f)
         w.writerow(
             [

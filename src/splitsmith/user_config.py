@@ -130,9 +130,20 @@ def user_config_dir() -> Path:
     if override:
         return Path(override).expanduser()
     if sys.platform.startswith("linux"):
-        xdg = os.environ.get(ENV_XDG)
-        if xdg:
-            return Path(xdg).expanduser() / "splitsmith"
+        # Per the freedesktop XDG basedir spec, ``XDG_CONFIG_HOME`` MUST
+        # be an absolute path. Empty / unset / relative -> fall through
+        # to ``~/.config/splitsmith``. A relative value is logged so a
+        # mistyped override doesn't fail silently.
+        xdg_raw = os.environ.get(ENV_XDG)
+        if xdg_raw:
+            xdg_path = Path(xdg_raw).expanduser()
+            if xdg_path.is_absolute():
+                return xdg_path / "splitsmith"
+            logger.warning(
+                "ignoring %s=%r: XDG basedir values must be absolute paths; falling back to ~/.config",
+                ENV_XDG,
+                xdg_raw,
+            )
         return Path.home() / ".config" / "splitsmith"
     return Path.home() / ".splitsmith"
 
