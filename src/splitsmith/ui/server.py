@@ -128,7 +128,7 @@ from ..runtime import runtime as process_runtime
 from . import audio as audio_helpers
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
-from .jobs import Job, JobCancelled, JobHandle, JobRegistry, ShutdownInProgressError
+from .jobs import Job, JobBackend, JobCancelled, JobHandle, JobRegistry, ShutdownInProgressError
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -583,7 +583,11 @@ class AppState:
     "current open project" state.
     """
 
-    jobs: JobRegistry = field(default_factory=JobRegistry)
+    # The ``JobBackend`` Protocol (see ``splitsmith.ui.jobs``) is
+    # what handlers depend on; ``JobRegistry`` is the local in-memory
+    # implementation. A hosted-mode backend swaps in here per
+    # Tier 2 of doc 10.
+    jobs: JobBackend = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
     # Auth backend. ``LoopbackAuth`` in local mode (every request
     # resolves to the same sentinel user); a hosted-mode backend will

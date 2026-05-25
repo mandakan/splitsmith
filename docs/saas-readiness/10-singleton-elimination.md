@@ -122,18 +122,25 @@ shutdown-drain logic (in `_JobAwareServer`) is a graceful workaround
 for the local case; in hosted mode it doesn't apply (machines
 suspend; replicas come and go).
 
+**Status:** abstraction landed. `JobBackend` Protocol lives next
+to `JobRegistry` in `splitsmith.ui.jobs`; `AppState.jobs` is
+typed against the Protocol so handlers depend on the abstraction.
+`JobRegistry` is the only current implementation; a hosted
+backend swaps in without touching handlers.
+
 **Elimination path:**
 
-1. Pick the backing store per doc 04 -- Postgres `compute_jobs`
+1. **(done)** Define `JobBackend` Protocol; `JobRegistry`
+   satisfies it; `AppState.jobs` widened to the Protocol.
+2. Pick the backing store per doc 04 -- Postgres `compute_jobs`
    table is the spec. `arq` Redis queue is the runtime.
-2. `JobRegistry` becomes a thin facade: `submit` inserts into
+3. Ship a hosted-mode backend: `submit` inserts into
    `compute_jobs`, the worker picks up via `arq`, status writes
    land in Postgres, `list` / `get` / `cancel` read from Postgres.
-3. The local-mode backend stays in-memory (no Postgres dep on the
-   desktop) but presents the same interface, so handlers don't
-   branch. A SQLite-backed `LocalJobRegistry` is the obvious
-   bridge if the desktop ever needs job persistence too -- defer
-   until a user actually loses work to a crash.
+4. The local-mode backend stays in-memory (no Postgres dep on the
+   desktop). A SQLite-backed `PersistentLocalJobBackend` is the
+   obvious bridge if the desktop ever needs job persistence too
+   -- defer until a user actually loses work to a crash.
 
 ### Tier 3 -- per-machine state
 
