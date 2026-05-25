@@ -1178,6 +1178,7 @@ footer.colophon {
     <div class="snippet">
 <pre class="quickstart" data-copy="uv tool install splitsmith
 splitsmith ui"><span class="comment"># Install from PyPI and launch the UI</span>
+<span class="comment"># The UI auto-downloads ~440 MB of detection models in the background on first boot.</span>
 <span class="prompt">$</span> <span class="kw">uv</span> tool install splitsmith
 <span class="prompt">$</span> <span class="kw">splitsmith</span> ui</pre>
       <button class="copy-btn" type="button" aria-label="Copy commands">
@@ -1185,7 +1186,7 @@ splitsmith ui"><span class="comment"># Install from PyPI and launch the UI</span
       </button>
     </div>
 
-    <p class="snippet-alt">Prefer the CLI? Run the full pipeline on a single clip:</p>
+    <p class="snippet-alt">Prefer the CLI? The envelope-only single-clip path needs no model download:</p>
 
     <div class="snippet">
 <pre class="quickstart" data-copy="splitsmith single \

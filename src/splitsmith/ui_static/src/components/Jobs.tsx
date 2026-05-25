@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   ArrowDownToLine,
   ChevronRight,
+  CloudDownload,
   Crosshair,
   Pause,
   Volume2,
@@ -53,6 +54,7 @@ const KIND_LABEL: Record<string, string> = {
   export: "Export stage",
   match_export: "Match export",
   audio_extract: "Audio extract",
+  model_download: "Download models",
 };
 
 const KIND_ICON: Record<string, ReactNode> = {
@@ -62,6 +64,7 @@ const KIND_ICON: Record<string, ReactNode> = {
   export: <ArrowDownToLine className="size-3.5" />,
   match_export: <ArrowDownToLine className="size-3.5" />,
   audio_extract: <Volume2 className="size-3.5" />,
+  model_download: <CloudDownload className="size-3.5" />,
 };
 
 function kindLabel(kind: string): string {

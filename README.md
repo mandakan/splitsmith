@@ -32,8 +32,14 @@ You need: `uv` and `ffmpeg`/`ffprobe` on PATH. See [Install](#install) for OS-sp
 
 ```bash
 uv tool install splitsmith                       # slim runtime, ~100 MB
-splitsmith fetch-models                          # ~440 MB ONNX artifacts; one-time
+splitsmith ui --project ~/matches/your-match     # auto-fetches ~440 MB of models on first launch
+```
 
+The UI kicks off the model prefetch as a background job the moment the server boots; the Jobs panel shows progress and the rest of the app (ingest, beep review) stays responsive while it runs. Shot detection waits on the download to finish.
+
+Prefer the CLI? `splitsmith single` runs the envelope-only detector and needs no model artifacts:
+
+```bash
 # Bring your own head-cam clip and stage time (or use any IPSC video at hand)
 splitsmith single \
     --video path/to/your_stage.mp4 \
@@ -44,12 +50,6 @@ splitsmith single \
 
 ls -la ./demo_analysis/
 cat ./demo_analysis/stage3_per-told-me-to-do-it_report.txt
-```
-
-For the full ingest -> audit -> export workflow with persistent project state, use the UI:
-
-```bash
-splitsmith ui --project ~/matches/your-match
 ```
 
 The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav` (Tallmilan 2026, 14.74s, 14 audited shots) plus its sibling JSON with ground-truth shot times. The companion source MP4 is gitignored -- bring your own video to exercise the full ingest pipeline.
@@ -79,11 +79,10 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
 ```bash
 uv tool install splitsmith                       # from PyPI
-splitsmith fetch-models                          # pre-fetch ONNX artifacts (optional)
 splitsmith ui --project ~/matches/your-match
 ```
 
-Detection models (~440 MB total) download from `models.splitsmith.app` on first detection -- pre-fetch with `splitsmith fetch-models`. No torch, transformers, or panns_inference in the install.
+Detection models (~440 MB total) are auto-fetched from `models.splitsmith.app` into `~/.splitsmith/models/` in the background as soon as `splitsmith ui` starts; the SPA's Jobs panel shows progress. Pre-fetch in a one-shot run with `splitsmith fetch-models` if you'd rather pay the download up front (CI, metered connections, etc.). No torch, transformers, or panns_inference in the install. The CLI `single` / `process` / `detect` commands use only the envelope-based Voter A and need no model artifacts at all.
 
 ### Option 2: from source (required for contributors)
 
@@ -92,8 +91,7 @@ git clone https://github.com/mandakan/splitsmith.git
 cd splitsmith
 uv sync                                          # slim runtime deps only (~100 MB)
 (cd src/splitsmith/ui_static && pnpm install && pnpm build)
-uv run splitsmith fetch-models                   # ~440 MB ONNX artifacts; one-time
-uv run splitsmith --help
+uv run splitsmith --help                         # `splitsmith ui` auto-fetches ~440 MB of models on first launch
 ```
 
 Source checkouts also need **Node.js 20+ and `pnpm`** to build the SPA:
@@ -113,7 +111,7 @@ uv run pytest -q -m integration                  # ffmpeg/ffprobe-backed tests
 
 ## Runtime backends (slim ONNX vs dev torch)
 
-The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). The slim install carries no torch, no transformers, no panns_inference. The first detection downloads ~440 MB of ONNX artifacts from `models.splitsmith.app` into `~/.splitsmith/models/` (pre-fetch with `splitsmith fetch-models`).
+The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). The slim install carries no torch, no transformers, no panns_inference. Artifacts (~440 MB) auto-download from `models.splitsmith.app` into `~/.splitsmith/models/` as a background job the moment `splitsmith ui` boots; `splitsmith fetch-models` is still around for scripted prefetch (CI, metered connections).
 
 The dev backend (torch + transformers + panns_inference) lives in the `[dev]` group and is required for: re-running `scripts/build_ensemble_artifacts.py`, the ONNX export scripts (`scripts/export_pann_onnx.py`, `scripts/export_clap_onnx.py`), and enabling Voter E (CLIP visual probe -- off by default; turn on with `SPLITSMITH_ENABLE_VOTER_E=1` after `uv sync --all-groups`).
 
