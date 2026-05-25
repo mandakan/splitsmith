@@ -43,8 +43,11 @@ abstraction without behavioural change.
 - [~] Extract `Auth` interface; introduce `LoopbackAuth`; route
   every API handler through `auth.authenticate_request`.
   (See 02-tenancy-and-identity.md.) Interface + `LoopbackAuth` +
-  `GET /api/me` landed; routing existing handlers through the
-  backend is the next iteration.
+  `GET /api/me` landed, and every `/api/me/*` route is now gated
+  by the `get_current_user` dep. Remaining: thread the dep through
+  the rest of the API surface (project, stage, video, fixture
+  endpoints) so hosted-mode 401s land at the gate, not the
+  handler.
 - [ ] Extract `ComputeBackend` interface; wrap today's ensemble
   pipeline as `LocalComputeBackend`. The orchestration in
   `cli.py` and the FastAPI server call the backend, not the
