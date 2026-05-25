@@ -757,7 +757,23 @@ export function BeepWaveformPicker({
       .then((p) => {
         if (cancelled) return;
         setPeaks(p);
-        setLocalTime(p.beep_time ?? 0);
+        // Park the playhead at the detected beep so pressing Play
+        // immediately auditions what the detector picked, instead of
+        // making the user scrub from t=0 first. Also seek the
+        // underlying <audio> element when it's already loaded --
+        // otherwise localTime gets out of sync with the audio
+        // element's currentTime, and the first Play snaps the
+        // playhead back to whatever it was last at.
+        const t = p.beep_time ?? 0;
+        setLocalTime(t);
+        const el = audioRef.current;
+        if (el) {
+          try {
+            el.currentTime = t;
+          } catch {
+            /* metadata not loaded yet -- onLoadedMetadata will retry */
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setUnavailable(true);
@@ -987,6 +1003,20 @@ export function BeepWaveformPicker({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
+        onLoadedMetadata={() => {
+          // Retry the initial seek when audio metadata lands after
+          // peaks did. Without this, the picker shows the beep
+          // marker but Play starts at 0.
+          const el = audioRef.current;
+          if (!el) return;
+          if (Math.abs(el.currentTime - localTime) > 0.05) {
+            try {
+              el.currentTime = localTime;
+            } catch {
+              /* unreachable -- metadata is loaded by definition here */
+            }
+          }
+        }}
         controls
         className="w-full"
       />
