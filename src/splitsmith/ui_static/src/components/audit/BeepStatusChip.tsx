@@ -8,13 +8,12 @@ export interface BeepStatusChipProps {
   beepTime: number | null;
   /** Detector confidence in [0, 1], or ``null`` if unknown (manual beep). */
   confidence: number | null;
-  /** Optional explanation surfaced as a tooltip on the chip + Re-pick CTA.
-   *  When confidence < 0.85, the heuristic in Audit.tsx fills this with the
-   *  reason ("First shot lands 5.10s after the beep ..."). */
+  /** Optional explanation surfaced as a tooltip on the chip. When
+   *  confidence < 0.85, the heuristic in Audit.tsx fills this with the
+   *  reason ("First shot lands 5.10s after the beep ..."). The diagnostic
+   *  ALSO drives a banner sibling (BeepAnomalyBanner) with the
+   *  "Review this beep" deep-link; this chip itself is read-only. */
   diagnostic: string | null;
-  /** Open sync mode for the primary cam so the operator can re-pick the
-   *  buzzer on the waveform. */
-  onRePick: () => void;
 }
 
 /** Imperative API on the chip. Surfaces a single ``flash()`` that other
@@ -29,38 +28,34 @@ export interface BeepStatusChipHandle {
 }
 
 /**
- * Confidence-aware beep status chip + Re-pick action.
+ * Confidence-aware beep status chip (read-only).
  *
  * Three tones:
  *
  *   - **done** (cyan beep tint) -- confidence is null or >= 0.85, or detection
- *     hasn't surfaced a confidence number. Re-pick stays quiet.
+ *     hasn't surfaced a confidence number.
  *   - **warn** (live amber) -- confidence < 0.85. The chip is amber, pulses
- *     once every 2.4s, carries the diagnostic in its tooltip, and the Re-pick
- *     button promotes to the tier-2 .btn-led-outline treatment so it reads
- *     as the next action.
- *   - **no_beep** (LED red) -- detection failed; no beep time. Re-pick is
- *     louder still; the chip reads "no beep -- pick manually".
+ *     once every 2.4s, and carries the diagnostic in its tooltip. The amber
+ *     ``BeepAnomalyBanner`` rendered below the toolbar is the action surface.
+ *   - **no_beep** (LED red) -- detection failed; no beep time. Banner sibling
+ *     deep-links the user into /beep-review to set the beep manually.
  *
- * The chip owns beep state -- the diagnostic banner that used to live
- * above the toolbar is gone, and the PrereqGate's beep row no longer
- * renders its own Re-pick (it pings this chip via ``flash()`` instead).
- * One mental model, attached to its trigger.
+ * The chip is read-only; beep work (confirm, re-pick, override) lives in
+ * /beep-review (#396). Audit's role is to flag wrong beeps via the
+ * diagnostic banner and deep-link into the queue for the fix.
  */
 export const BeepStatusChip = forwardRef<BeepStatusChipHandle, BeepStatusChipProps>(
-  function BeepStatusChip({ beepTime, confidence, diagnostic, onRePick }, ref) {
+  function BeepStatusChip({ beepTime, confidence, diagnostic }, ref) {
     type Tone = "done" | "warn" | "no_beep";
     let tone: Tone;
     let glyph: string;
     let suffix: string;
-    let repickLoud: boolean;
 
     const lowConfidence = confidence != null && confidence < 0.85;
     if (beepTime == null) {
       tone = "no_beep";
       glyph = "×";
-      suffix = " · pick manually";
-      repickLoud = true;
+      suffix = " · review";
     } else if (lowConfidence || diagnostic != null) {
       // Either the detector is uncertain *or* the post-audit heuristic
       // ("first shot lands 5.10s after the beep ...") thinks the beep is
@@ -68,12 +63,10 @@ export const BeepStatusChip = forwardRef<BeepStatusChipHandle, BeepStatusChipPro
       tone = "warn";
       glyph = "!";
       suffix = " · likely wrong";
-      repickLoud = true;
     } else {
       tone = "done";
       glyph = "●";
       suffix = "";
-      repickLoud = false;
     }
 
     // Flash state. PrereqGate's beep row (and any future surface that
@@ -140,8 +133,7 @@ export const BeepStatusChip = forwardRef<BeepStatusChipHandle, BeepStatusChipPro
           title={tip}
           role={diagnostic ? "note" : undefined}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-display text-[0.6875rem] font-bold uppercase tracking-[0.06em]",
-            diagnostic ? "cursor-help" : "cursor-default",
+            "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-display text-[0.6875rem] font-bold uppercase tracking-[0.06em] cursor-default",
             chipClasses,
           )}
         >
@@ -170,19 +162,6 @@ export const BeepStatusChip = forwardRef<BeepStatusChipHandle, BeepStatusChipPro
             ) : null}
           </span>
         </span>
-        <button
-          type="button"
-          onClick={onRePick}
-          title={tip ?? "Re-pick the buzzer on the waveform"}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded transition-colors",
-            repickLoud
-              ? "btn-led-outline px-3 py-1"
-              : "border border-rule bg-surface-2 px-2.5 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-rule-strong hover:bg-surface-3 hover:text-ink",
-          )}
-        >
-          Re-pick beep
-        </button>
       </div>
     );
   },

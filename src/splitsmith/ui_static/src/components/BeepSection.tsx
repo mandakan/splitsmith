@@ -50,6 +50,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Waveform } from "@/components/Waveform";
+import { useSpacePlayPause } from "@/lib/keyboard";
+import { modKeyGlyph } from "@/lib/platform";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import {
   ApiError,
@@ -695,6 +697,8 @@ export function BeepWaveformPicker({
   showFallbackBeepMarker = true,
   instructions,
   ariaLabel,
+  externalMediaRef,
+  fillHeight = false,
 }: {
   slug: string;
   stageNumber: number;
@@ -715,17 +719,56 @@ export function BeepWaveformPicker({
   instructions?: string;
   /** Override the canvas aria-label for screen readers. */
   ariaLabel?: string;
+  /** Optional external media element (audio OR video) for the picker
+   *  to drive. When provided, the picker skips rendering its own
+   *  <audio> element -- the parent owns playback (same pattern as
+   *  the audit page's MultiCamColumn <video>). Space, click-to-scrub,
+   *  zoom, and the initial seek all act on this element. When not
+   *  provided, the picker creates its own internal <audio src=
+   *  videoAudioUrl(...)> as before -- StageTimeSection relies on
+   *  that path. */
+  externalMediaRef?: { current: HTMLAudioElement | HTMLVideoElement | null };
+  /** Grow the waveform vertically (200 px instead of 80 px) so the
+   *  picker box fills the row when paired with a taller sibling like
+   *  BeepReview's <video aspect-video>. */
+  fillHeight?: boolean;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [localTime, setLocalTime] = useState<number>(0);
   const [playing, setPlaying] = useState(false);
-  const [pxPerSec, setPxPerSec] = useState<number | null>(null);
+  // Zoom is a multiplier relative to the viewport-fit baseline (null =
+  // fit-to-width). The audit canvas uses the same model -- it
+  // matters because absolute px/s blows up on long clips: a 104 s
+  // primary at 240 px/s renders 25k px wide, so even "first zoom"
+  // shoves the whole clip off-screen.
+  const [zoom, setZoom] = useState<number | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const wrapperCallbackRef = useCallback((el: HTMLDivElement | null) => {
+    viewportRef.current = el;
+    if (!el) return;
+    setViewportWidth(Math.floor(el.getBoundingClientRect().width));
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0) setViewportWidth(w);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const [snapping, setSnapping] = useState(false);
   const [proposal, setProposal] = useState<BeepSnapResult | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  useReleaseMediaOnUnmount(audioRef);
+  // The picker's playback handle. When the parent owns the media
+  // element (BeepReview passes its <video> ref), we just alias the
+  // external ref; otherwise we create our own <audio> below. Either
+  // way, the rest of the picker (togglePlay, scrub, init seek,
+  // Space hook) reads / writes through ``mediaRef``.
+  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRef = externalMediaRef ?? internalAudioRef;
+  useReleaseMediaOnUnmount(internalAudioRef);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -737,7 +780,23 @@ export function BeepWaveformPicker({
       .then((p) => {
         if (cancelled) return;
         setPeaks(p);
-        setLocalTime(p.beep_time ?? 0);
+        // Park the playhead at the detected beep so pressing Play
+        // immediately auditions what the detector picked, instead of
+        // making the user scrub from t=0 first. Also seek the
+        // underlying <audio> element when it's already loaded --
+        // otherwise localTime gets out of sync with the audio
+        // element's currentTime, and the first Play snaps the
+        // playhead back to whatever it was last at.
+        const t = p.beep_time ?? 0;
+        setLocalTime(t);
+        const el = mediaRef.current;
+        if (el) {
+          try {
+            el.currentTime = t;
+          } catch {
+            /* metadata not loaded yet -- onLoadedMetadata will retry */
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setUnavailable(true);
@@ -776,7 +835,7 @@ export function BeepWaveformPicker({
   useEffect(() => {
     if (!playing) return;
     const tick = () => {
-      const el = audioRef.current;
+      const el = mediaRef.current;
       if (el) setLocalTime(el.currentTime);
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -788,7 +847,7 @@ export function BeepWaveformPicker({
   }, [playing]);
 
   const togglePlay = useCallback(() => {
-    const el = audioRef.current;
+    const el = mediaRef.current;
     if (!el) return;
     if (el.paused) {
       el.play().catch(() => {
@@ -797,7 +856,36 @@ export function BeepWaveformPicker({
     } else {
       el.pause();
     }
-  }, []);
+  }, [mediaRef]);
+
+  // Window-level Space → toggle so the user can audition the beep
+  // even when focus is parked on a sidebar link or a queue row
+  // (the common path: click an item, hit Space). Gated by the picker
+  // actually having peaks loaded so Space falls through to the
+  // browser default while the picker is in its empty / loading state.
+  useSpacePlayPause(togglePlay, peaks != null);
+
+  // When the parent owns the media element (BeepReview), the
+  // ``playing`` / ``localTime`` state need a separate event bridge --
+  // the inline ``onPlay``/``onPause`` handlers below only fire on the
+  // internal <audio>. Listen on the external element so the picker's
+  // playhead + Play button label still reflect the truth.
+  useEffect(() => {
+    if (!externalMediaRef) return;
+    const el = externalMediaRef.current;
+    if (!el) return;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    return () => {
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [externalMediaRef, peaks]);
 
   // Click / drag = seek audio AND set the marker. Marker and the
   // numeric input both read from the draft state in the parent, so they
@@ -806,7 +894,7 @@ export function BeepWaveformPicker({
   const handleScrub = useCallback(
     (t: number) => {
       setLocalTime(t);
-      const el = audioRef.current;
+      const el = mediaRef.current;
       if (el) {
         try {
           el.currentTime = t;
@@ -853,19 +941,49 @@ export function BeepWaveformPicker({
 
   const dismissProposal = useCallback(() => setProposal(null), []);
 
+  // Zoom math mirrors the audit canvas: 1.5x per click, capped at
+  // 16x in, 0.25x out (anything below = back to fit).
   const zoomIn = useCallback(() => {
-    setPxPerSec((cur) => {
-      if (cur == null) return 240;
-      return Math.min(2000, cur * 2);
-    });
+    setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
   }, []);
   const zoomOut = useCallback(() => {
-    setPxPerSec((cur) => {
-      if (cur == null) return null;
-      const next = cur / 2;
-      return next < 60 ? null : next;
+    setZoom((z) => {
+      const next = (z ?? 1) / 1.5;
+      return next <= 0.25 ? null : next;
     });
   }, []);
+  const zoomFit = useCallback(() => setZoom(null), []);
+  const pxPerSec = useMemo(() => {
+    if (zoom == null || !peaks) return null;
+    if (peaks.duration <= 0 || viewportWidth <= 0) return null;
+    const fitPps = viewportWidth / peaks.duration;
+    return Math.max(1, fitPps * zoom);
+  }, [zoom, viewportWidth, peaks]);
+
+  // Cmd/Ctrl + 1/2/3 -- same bindings as the audit canvas waveform so
+  // muscle memory carries across surfaces. Cmd+1 = zoom in, Cmd+2 =
+  // fit, Cmd+3 = zoom out. Ignored when typing in an input/textarea so
+  // we don't steal the browser's tab-cycling shortcut from form fields.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key !== "1" && e.key !== "2" && e.key !== "3") return;
+      if (
+        e.target instanceof HTMLElement &&
+        (e.target.tagName === "INPUT" ||
+          e.target.tagName === "TEXTAREA" ||
+          e.target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      if (e.key === "1") zoomIn();
+      else if (e.key === "2") zoomFit();
+      else zoomOut();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomIn, zoomOut, zoomFit]);
 
   if (loading) {
     return (
@@ -898,7 +1016,7 @@ export function BeepWaveformPicker({
             size="icon"
             variant="ghost"
             onClick={zoomOut}
-            disabled={pxPerSec == null}
+            disabled={zoom == null}
             aria-label="Zoom out"
             title="Zoom out"
             className="size-7"
@@ -917,50 +1035,101 @@ export function BeepWaveformPicker({
           </Button>
         </div>
       </div>
-      <Waveform
-        peaks={peaks.peaks}
-        duration={peaks.duration}
-        currentTime={localTime}
-        onScrub={handleScrub}
-        onScrubEnd={handleScrubEnd}
-        beepTime={markerLocal}
-        pixelsPerSecond={pxPerSec}
-        height={80}
-        ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
-      />
-      <audio
-        ref={audioRef}
-        src={api.videoAudioUrl(slug, stageNumber, videoId)}
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        controls
-        className="w-full"
-      />
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={togglePlay}
-          title="Play / pause the audio"
-        >
-          {playing ? <Pause /> : <Play />}
-          {playing ? "Pause" : "Play"}
-        </Button>
-        {snapEnabled ? (
+      <div ref={wrapperCallbackRef}>
+        <Waveform
+          peaks={peaks.peaks}
+          duration={peaks.duration}
+          currentTime={localTime}
+          onScrub={handleScrub}
+          onScrubEnd={handleScrubEnd}
+          beepTime={markerLocal}
+          pixelsPerSecond={pxPerSec}
+          height={fillHeight ? 200 : 80}
+          ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
+        />
+      </div>
+      {/* Zoom-shortcut chrome -- mirrors the time-ruler footer that
+          lives under the audit canvas waveform. Same bindings
+          (modKey+1/2/3) so muscle memory carries between surfaces.
+          Right-aligned; the eyebrow on the left labels the row so the
+          chord doesn't read as orphan keys. */}
+      <div className="-mx-3 mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-surface-3/60 px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-subtle">
+        <span className="tracking-[0.14em] text-muted">Zoom</span>
+        <span className="ml-auto inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+            {modKeyGlyph()}1
+          </kbd>
+          <span>in</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+            {modKeyGlyph()}2
+          </kbd>
+          <span>fit</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+            {modKeyGlyph()}3
+          </kbd>
+          <span>out</span>
+        </span>
+      </div>
+      {externalMediaRef ? null : (
+        <audio
+          ref={internalAudioRef}
+          src={api.videoAudioUrl(slug, stageNumber, videoId)}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+          onLoadedMetadata={() => {
+            // Retry the initial seek when audio metadata lands
+            // after peaks did. Without this, the picker shows the
+            // beep marker but Play starts at 0.
+            const el = internalAudioRef.current;
+            if (!el) return;
+            if (Math.abs(el.currentTime - localTime) > 0.05) {
+              try {
+                el.currentTime = localTime;
+              } catch {
+                /* unreachable -- metadata loaded by definition */
+              }
+            }
+          }}
+          controls
+          className="w-full"
+        />
+      )}
+      {/* Play / Snap buttons live in this row only when the picker
+          owns its own <audio>. When the parent passes an external
+          media element (e.g. BeepReview's <video controls>), the
+          play affordance + Space toggle already exist on that
+          element -- a redundant button row just eats vertical space. */}
+      {externalMediaRef ? null : (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
             size="sm"
-            variant="default"
-            onClick={() => void requestSnap()}
-            disabled={draftSourceTime == null || snapping}
-            title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
+            variant="outline"
+            onClick={togglePlay}
+            title="Play / pause the audio"
           >
-            {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
-            Snap to beep
+            {playing ? <Pause /> : <Play />}
+            {playing ? "Pause" : "Play"}
           </Button>
-        ) : null}
-      </div>
+          {snapEnabled ? (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => void requestSnap()}
+              disabled={draftSourceTime == null || snapping}
+              title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
+            >
+              {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
+              Snap to beep
+            </Button>
+          ) : null}
+        </div>
+      )}
       {proposal != null ? (
         <SnapProposal
           slug={slug}

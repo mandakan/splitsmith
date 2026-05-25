@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, Loader2, Undo2 } from "lucide-react";
 import { Kbd } from "@/components/ui/Kbd";
 import type { ShooterListEntry, StageStatus } from "@/lib/api";
 import type { AuditNextStep } from "@/lib/audit-next-step";
+import { modKeyGlyph, modKeyLabel } from "@/lib/platform";
 import { isTerminal } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +60,8 @@ export function StageActionBar({
   const stage = stageIdx >= 0 ? stages[stageIdx] : null;
   const isFinish = step.kind === "finish";
   const isReview = stage != null && isTerminal(stage.status);
+  const mod = modKeyLabel();
+  const modGlyph = modKeyGlyph();
 
   return (
     <div
@@ -153,14 +156,14 @@ export function StageActionBar({
           type="button"
           onClick={onUndo}
           disabled={!canUndo}
-          aria-label="Undo (Cmd+Z)"
-          title="Undo (Cmd+Z)"
+          aria-label={`Undo (${mod}+Z)`}
+          title={`Undo (${mod}+Z)`}
           className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-3.5 py-2.5 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-rule-strong hover:bg-surface-3 hover:text-ink disabled:opacity-40"
         >
           <Undo2 className="size-3" aria-hidden />
           Undo
           <Kbd size="sm" className="ml-1">
-            ⌘Z
+            {modGlyph}Z
           </Kbd>
         </button>
 
@@ -169,7 +172,7 @@ export function StageActionBar({
           onClick={onSave}
           disabled={saving}
           aria-label={step.label}
-          title={`${step.label} (Cmd+Enter)`}
+          title={`${step.label} (${mod}+Enter)`}
           className={cn(
             "inline-flex items-center gap-2.5 rounded-md border-0 py-2.5 pl-4 pr-4 font-display text-[0.8125rem] font-bold uppercase tracking-[0.08em]",
             "disabled:opacity-60",
@@ -189,7 +192,7 @@ export function StageActionBar({
               size="sm"
               className="border border-white/20 bg-black/25 text-inherit"
             >
-              ⌘↵
+              {modGlyph}↵
             </Kbd>
             {saving ? (
               <Loader2 className="size-3.5 animate-spin" aria-hidden />

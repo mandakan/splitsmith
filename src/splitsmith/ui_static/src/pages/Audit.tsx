@@ -44,6 +44,7 @@ import {
 
 import { AnomalyChips } from "@/components/audit/AnomalyChips";
 import { AnomalyPins } from "@/components/audit/AnomalyPins";
+import { BeepAnomalyBanner } from "@/components/audit/BeepAnomalyBanner";
 import { BeepStatusChip, type BeepStatusChipHandle } from "@/components/audit/BeepStatusChip";
 import { PrereqGate } from "@/components/audit/PrereqGate";
 import {
@@ -53,7 +54,6 @@ import {
 import { CamGridModal } from "@/components/audit/CamGridModal";
 import { MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
 import { SessionSummary } from "@/components/audit/SessionSummary";
-import { SyncBanner } from "@/components/audit/SyncBanner";
 import { StageActionBar } from "@/components/audit/StageActionBar";
 import { StageChipRail } from "@/components/audit/StageChipRail";
 import {
@@ -132,14 +132,6 @@ export function Audit() {
   // single source of truth.
 
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
-  // Source-mode peaks for the cam being re-picked. The audit-page
-  // ``peaks`` are the trimmed clip when trim exists; that's the right
-  // surface for the audit canvas but the WRONG surface for the
-  // beep re-picker because a buzzer that lives outside the trim window
-  // is invisible there. We fetch the per-video peaks (always full
-  // source) when sync starts and use them in the waveform; the
-  // viewfinder reverts to ``peaks`` once sync ends.
-  const [syncPeaks, setSyncPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
 
@@ -207,29 +199,11 @@ export function Audit() {
   // scrubbing.
   const [camLayout, setCamLayout] = useState<CamLayout>("focus");
 
-  // Sync mode state lives up here so callbacks below can close over it;
-  // the handlers that actually call overrideBeepForVideo are declared
-  // further down (after slug + stageNumber are in scope).
-  const [syncMode, setSyncMode] = useState<StageVideo | null>(null);
-  const [syncCandidate, setSyncCandidate] = useState<number | null>(null);
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [syncSnapping, setSyncSnapping] = useState(false);
-  const [syncSnapError, setSyncSnapError] = useState<string | null>(null);
-  const startSync = useCallback((cam: StageVideo) => {
-    setSyncMode(cam);
-    setSyncCandidate(null);
-    setSyncSnapError(null);
-    // Source peaks fetch lives in an effect below so it sees the
-    // latest slug + stageNumber without us threading them through
-    // startSync's deps.
-  }, []);
-  const cancelSync = useCallback(() => {
-    setSyncMode(null);
-    setSyncCandidate(null);
-    setSyncBusy(false);
-    setSyncSnapError(null);
-    setSyncPeaks(null);
-  }, []);
+  // Beep editing previously lived here as a "sync mode" inline picker.
+  // That UI moved to /beep-review (#396); per-cam pills + the toolbar
+  // chip are read-only on this page. The amber BeepAnomalyBanner above
+  // and every per-cam pill deep-link into the queue with this exact
+  // item active -- see ``openBeepReview`` below.
   // Anchor for loop-to-start semantics: the audit-timeline position
   // playback last started from (or where the user last scrubbed). On
   // pause / end-of-clip while loopMode is on, the playhead snaps back
@@ -536,39 +510,6 @@ export function Audit() {
     };
   }, [slug, stageNumber, primary]);
 
-  // Source peaks for sync mode. Fetches the per-video peaks (full
-  // source WAV, regardless of trim cache) when the operator enters
-  // sync mode on a primary cam whose audit peaks are trimmed. Without
-  // this swap the waveform stays anchored to the trim window and the
-  // user can't find a buzzer that lives outside it -- which is the
-  // whole reason re-picking exists. Secondary cams already serve full
-  // source peaks via the same endpoint, so the swap is a no-op cost
-  // but kept for symmetry.
-  useEffect(() => {
-    if (syncMode == null || stageNumber == null) {
-      setSyncPeaks(null);
-      return;
-    }
-    // If the audit peaks aren't trimmed (no trim cache yet) the
-    // waveform is already the source -- skip the extra fetch.
-    if (peaks && !peaks.trimmed) {
-      setSyncPeaks(null);
-      return;
-    }
-    let alive = true;
-    api
-      .getVideoPeaks(slug, stageNumber, syncMode.video_id, PEAK_BINS)
-      .then((p) => {
-        if (alive) setSyncPeaks(p);
-      })
-      .catch(() => {
-        if (alive) setSyncPeaks(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [slug, stageNumber, syncMode?.video_id, peaks?.trimmed]);
-
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
     if (stageNumber == null) {
@@ -705,18 +646,6 @@ export function Audit() {
     },
     [beepOffset],
   );
-
-  // Park the playhead at the existing beep when sync mode opens. Without
-  // this the operator drops into sync at t=0 with no context for what
-  // they're correcting -- they can't press play to hear the detector's
-  // pick, then drag to where it should have been. ``syncMode?.video_id``
-  // in the dep array keeps this from re-seeking on every re-render
-  // while the same cam is in sync.
-  useEffect(() => {
-    if (syncMode?.beep_time == null) return;
-    handleScrub(syncMode.beep_time);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncMode?.video_id]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -1242,97 +1171,17 @@ export function Audit() {
     [navigate, performSave, stageNumber, slugParam],
   );
 
-  // Sync mode commit handler. Lives here so it can close over the
-  // slug/stageNumber + setters; declared below those without churning
-  // every existing useCallback's dep array. See `startSync` / `cancelSync`
-  // up top for the state plumbing.
-  //
-  // Caveat (TODO): the candidate is picked on the primary's waveform
-  // regardless of which cam is selected. For the primary that's right;
-  // for secondaries it's a visual approximation -- swapping the
-  // waveform to the secondary's own audio needs getVideoPeaks plumbing
-  // + a peaks/duration swap on the Waveform component.
-  const applySync = useCallback(async () => {
-    if (syncMode == null || syncCandidate == null || stageNumber == null) return;
-    setSyncBusy(true);
-    try {
-      const updated = await api.overrideBeepForVideo(
-        slug,
-        stageNumber,
-        syncMode.video_id,
-        syncCandidate,
-      );
-      setProject(updated);
-      setSyncMode(null);
-      setSyncCandidate(null);
-    } catch (e) {
-      setProjectError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setSyncBusy(false);
-    }
-  }, [syncMode, syncCandidate, slug, stageNumber]);
-
-  // Snap-to-beep: the operator drops a marker near where the buzzer
-  // sounds, then hits Snap to refine it to the rise-foot of the
-  // strongest tone in a +/-1.5s window. Same backend the legacy
-  // BeepSection uses; reusing it keeps the snap behavior consistent
-  // across surfaces. On success we update the candidate AND seek the
-  // playhead to the snapped time so the operator can immediately hear
-  // / see the refinement.
-  const snapSync = useCallback(async () => {
-    if (syncMode == null || stageNumber == null) return;
-    const hint = syncCandidate ?? syncMode.beep_time;
-    if (hint == null) return;
-    setSyncSnapping(true);
-    setSyncSnapError(null);
-    try {
-      const result = await api.snapBeepForVideo(
-        slug,
-        stageNumber,
-        syncMode.video_id,
-        hint,
-        1.5,
-      );
-      setSyncCandidate(result.snapped_time);
-      handleScrub(result.snapped_time);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) {
-        setSyncSnapError(
-          "No beep candidate within +/-1.5s. Drag the marker closer to the buzzer and try again.",
-        );
-      } else {
-        setSyncSnapError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setSyncSnapping(false);
-    }
-  }, [syncMode, syncCandidate, slug, stageNumber, handleScrub]);
-
-  // "Looks right" -- keeps the current buzzer time but flips
-  // beep_reviewed so the pill drops the "needs sync" flag. No
-  // detection or trim chain is queued. Mirrors the BeepReview page's
-  // ack action but lives next to the cam it applies to.
-  const markSyncReviewed = useCallback(async () => {
-    if (syncMode == null || stageNumber == null || syncMode.beep_time == null) {
-      return;
-    }
-    setSyncBusy(true);
-    try {
-      const updated = await api.setBeepReviewed(
-        slug,
-        stageNumber,
-        syncMode.video_id,
-        true,
-      );
-      setProject(updated);
-      setSyncMode(null);
-      setSyncCandidate(null);
-    } catch (e) {
-      setProjectError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setSyncBusy(false);
-    }
-  }, [syncMode, slug, stageNumber]);
+  // Open the /beep-review queue with this exact item active. Replaces
+  // the old per-cam "start sync" entry; beep editing lives in the
+  // queue now (#396).
+  const openBeepReview = useCallback(
+    (cam: StageVideo) => {
+      if (stageNumber == null) return;
+      const focusKey = `${slug}::${stageNumber}::${cam.video_id}`;
+      navigate(`${href("beep-review")}?focus=${encodeURIComponent(focusKey)}`);
+    },
+    [navigate, href, slug, stageNumber],
+  );
 
   // ---- Global keyboard shortcuts -----------------------------------------
 
@@ -1560,24 +1409,20 @@ export function Audit() {
   const videoSrc = activeVideo
     ? peaks
       ? // Sync mode swaps to the full source stream so the operator can
-        // scrub past the trim window to find the actual buzzer. The
-        // audit peaks may be trimmed (clip anchored to the OLD beep)
-        // but the picker needs the source.
         api.videoStreamUrl(
           slug,
           activeVideo.path,
-          syncMode != null ? "source" : peaks.trimmed ? "trim" : "source",
+          peaks.trimmed ? "trim" : "source",
         )
       : peaksError != null
         ? api.videoStreamUrl(slug, activeVideo.path)
         : ""
     : "";
 
-  // What the waveform actually paints. In sync mode the audit peaks
-  // (trimmed clip) leave the actual buzzer invisible -- swap to the
-  // per-video source peaks once they've landed. Falls back to the
-  // audit peaks until syncPeaks lands so the waveform doesn't blank.
-  const displayPeaks = syncMode != null && syncPeaks ? syncPeaks : peaks;
+  // The trimmed audit clip drives the waveform when present; falls back
+  // to the full source peaks otherwise. Beep-editing surfaces lived
+  // here in a previous iteration; those moved to /beep-review.
+  const displayPeaks = peaks;
 
   // ---- Render ------------------------------------------------------------
 
@@ -1676,52 +1521,19 @@ export function Audit() {
         : null
     : null;
   const prereqActive = prereqKind != null && stage != null && primary != null;
-  // Sync mode (Re-pick beep) needs to take precedence over the prereq
-  // gate -- otherwise clicking Re-pick from inside the gate's amber
-  // beep row sets ``syncMode`` but the sync overlay never renders
-  // because every waveform/PIP/sync condition uses ``!prereqActive``.
-  // Treat the gate as "wants to show, unless we're actively re-picking
-  // the beep" so the operator's click has somewhere to land.
-  const prereqShouldShow = prereqActive && syncMode == null;
-  const syncing = syncMode != null;
+  const prereqShouldShow = prereqActive;
 
   return (
     <div className="relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
-      {/* Sync mode is now signposted by the SyncBanner above the
-          waveform (the readout owns the mode chip), the amber halo on
-          the waveform card border, and the dimmed chip rail. The page-
-          edge rails, radial wash and floating canvas chip were dropped
-          per designer review -- five amber surfaces became three, all
-          anchored to the target instead of the page geometry. */}
-
       {stage && primary ? (
         <>
-          {/* Stage chip rail. The Audit / Compare / Coach view switcher
-              isn't on this page per design -- those views are reached
-              from the sidebar (cross-view nav is shell-level).
-              In sync mode the rail dims to ~55% (per designer review)
-              so focus stays on the re-pick task. Clicks still work,
-              but we intercept with a confirm so the operator isn't
-              silently dropped from sync mode mid-pick. Silent ignore
-              is worse than an interrupt. */}
-          <div
-            className={cn(
-              "border-b border-rule pb-3 transition-opacity",
-              syncing && "opacity-55",
-            )}
-          >
+          {/* Stage chip rail. Audit / Compare / Coach view switching
+              lives in the sidebar; this rail only walks stages. */}
+          <div className="border-b border-rule pb-3">
             <StageChipRail
               stages={stageRailItems}
               activeStage={stageNumber ?? null}
               onPick={(n) => {
-                if (syncing) {
-                  const ok = window.confirm(
-                    "Exit sync without applying? Your unsaved buzzer pick will be discarded.",
-                  );
-                  if (!ok) return;
-                  setSyncMode(null);
-                  setSyncCandidate(null);
-                }
                 void navigateToStage(n);
               }}
             />
@@ -1732,22 +1544,17 @@ export function Audit() {
               sticky bottom action bar; shooter switcher lives in the
               MatchShell breadcrumb. */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Confidence-aware beep status -- absorbs the old
-                "BeepDiagnostic" banner into a chip tooltip + tone shift
-                so the diagnostic lives next to its trigger. Re-pick beep
-                opens sync mode on the primary cam; it also remains
-                available on the per-cam CamSyncPill inside the video column
-                for secondaries. */}
+            {/* Confidence-aware beep status -- read-only chip. Beep work
+                lives in /beep-review (#396); the proactive amber
+                ``BeepAnomalyBanner`` rendered below the toolbar carries
+                the "Review this beep" deep-link when the heuristic
+                thinks the beep is wrong. */}
             <BeepStatusChip
               ref={beepChipRef}
               beepTime={primary.beep_time}
               confidence={primary.beep_confidence ?? null}
               diagnostic={beepDiagnostic?.reason ?? null}
-              onRePick={() => startSync(primary)}
             />
-            {/* Re-pick beep affordance is now the primary cam's
-                CamSyncPill inside the video column. Click the pill to enter
-                sync mode for that cam (or any secondary). */}
             {peaks && !peaks.trimmed && !prereqActive ? (
               <TrimNowBadge
                 slug={slug}
@@ -1766,31 +1573,20 @@ export function Audit() {
               />
             ) : null}
             {peaks && !prereqShouldShow ? (
-              <div
-                className={cn(
-                  "transition-opacity",
-                  // FilterBar manages shot-marker visibility; while
-                  // re-picking the buzzer it's noise. Dim it back so
-                  // the eye knows where the actual task lives. Still
-                  // clickable in case the operator wants to peek.
-                  syncing && "opacity-40",
-                )}
-              >
-                <FilterBar
-                  filters={filters}
-                  counts={{
-                    detected: detectedCount,
-                    rejected: rejectedCount,
-                    manual: manualCount,
-                    // The audit waveform anchors on the primary; the beep
-                    // marker reflects ``auditBeep`` (= peaks.beep_time
-                    // falling back to primary.beep_time). 0 when the
-                    // primary has no beep yet.
-                    beep: auditBeep != null ? 1 : 0,
-                  }}
-                  onChange={setFilters}
-                />
-              </div>
+              <FilterBar
+                filters={filters}
+                counts={{
+                  detected: detectedCount,
+                  rejected: rejectedCount,
+                  manual: manualCount,
+                  // The audit waveform anchors on the primary; the beep
+                  // marker reflects ``auditBeep`` (= peaks.beep_time
+                  // falling back to primary.beep_time). 0 when the
+                  // primary has no beep yet.
+                  beep: auditBeep != null ? 1 : 0,
+                }}
+                onChange={setFilters}
+              />
             ) : null}
             <div className="ml-auto inline-flex items-center gap-2">
               {/* K-auto-step toggle. The transport bar is gone but this
@@ -1865,6 +1661,19 @@ export function Audit() {
             </div>
           </div>
 
+          {/* Proactive "beep looks wrong" banner. Fires only on the active
+              shooter's video (scoping: cross-shooter awareness lives in
+              /beep-review, not here). CTA deep-links into the queue with
+              this exact item already active. */}
+          {beepDiagnostic ? (
+            <BeepAnomalyBanner
+              reason={beepDiagnostic.reason}
+              slug={slug}
+              stageNumber={stage.stage_number}
+              videoId={primary.video_id}
+            />
+          ) : null}
+
           {/* When the stage isn't ready to audit (trim missing, or no
               candidates yet), the entire canvas is replaced by
               PrereqGate. The toolbar's beep / filter chips stay
@@ -1912,11 +1721,10 @@ export function Audit() {
           ) : null}
 
           {/* Audit canvas: two-column layout.
-              left  -- SyncBanner / AnomalyChips + waveform + ShotStepper.
+              left  -- AnomalyChips + waveform + ShotStepper.
               right -- 380px docked MultiCamColumn (video + transport).
-              Replaces the floating video column so the bottom-right corner is
-              just content. The sidebar (in MatchShell) is collapsible to
-              buy back the column's horizontal budget. */}
+              The sidebar (in MatchShell) is collapsible to buy back
+              the column's horizontal budget. */}
           {!prereqShouldShow && displayPeaks ? (
             <div className="flex gap-4">
               <div className="flex min-w-0 flex-1 flex-col gap-4">
@@ -1927,84 +1735,26 @@ export function Audit() {
                   Kept/rejected/manual counts are covered by the filter
                   chips in the toolbar. */}
 
-              {/* Anomaly chips OR sync banner. When the operator is
-                  re-picking a buzzer for a cam, the chips swap out for
-                  the SyncBanner per design. */}
-              {syncMode != null ? (
-                <SyncBanner
-                  camLabel={
-                    videos.findIndex((v) => v.video_id === syncMode.video_id) === 0
-                      ? "Primary"
-                      : `Cam ${videos.findIndex((v) => v.video_id === syncMode.video_id) + 1} · Secondary`
-                  }
-                  oldBeepTime={syncMode.beep_time}
-                  candidateTime={syncCandidate}
-                  onCancel={cancelSync}
-                  onApply={() => void applySync()}
-                  onMarkReviewed={
-                    syncMode.beep_time != null && !syncMode.beep_reviewed
-                      ? () => void markSyncReviewed()
-                      : undefined
-                  }
-                  busy={syncBusy}
-                  onSnap={() => void snapSync()}
-                  snapping={syncSnapping}
-                  snapError={syncSnapError}
-                />
-              ) : (
-                <AnomalyChips
-                  anomalies={anomalyChips}
-                  onJump={(a) => {
-                    if (a.time != null) handleScrub(a.time);
-                  }}
-                />
-              )}
+              <AnomalyChips
+                anomalies={anomalyChips}
+                onJump={(a) => {
+                  if (a.time != null) handleScrub(a.time);
+                }}
+              />
 
               {/* Scope waveform with framed chrome. Header is the
                   design's mono `● PRIMARY · {n} peaks · {d}s` line on
                   the left and a one-line action hint on the right --
                   no Antonio brand header, no legend dot row (the
-                  filter chips in the toolbar own those tones).
-                  During sync mode the frame is tinted live-amber so
-                  the operator can't miss they're in a re-pick flow. */}
-              <div
-                className={cn(
-                  "overflow-hidden rounded-2xl border bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)] transition-colors",
-                  syncMode
-                    ? "border-live shadow-[0_0_0_1px_var(--color-live-glow)_inset,0_0_24px_rgba(251,191,36,0.22)]"
-                    : "border-rule-strong",
-                )}
-              >
-                <div
-                  className={cn(
-                    "flex flex-wrap items-center justify-between gap-3 border-b border-rule px-4 py-2.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle",
-                    // Header turns subtly amber in sync so the
-                    // instrument panel reads as a single re-pick task
-                    // rather than "normal audit with a banner stuck
-                    // on top".
-                    syncing
-                      ? "bg-[linear-gradient(to_right,color-mix(in_srgb,var(--color-live)_8%,var(--color-surface-2)),var(--color-surface-2))]"
-                      : "bg-surface-2",
-                  )}
-                >
+                  filter chips in the toolbar own those tones). */}
+              <div className="overflow-hidden rounded-2xl border border-rule-strong bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface-2 px-4 py-2.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
                   <span className="inline-flex items-center gap-1.5 tabular-nums">
                     <span
                       aria-hidden
-                      className={cn(
-                        "inline-block size-1.5 rounded-full",
-                        syncing
-                          ? "animate-pulse bg-live shadow-[0_0_6px_var(--color-live-glow)]"
-                          : "bg-led shadow-[0_0_6px_var(--color-led-glow)]",
-                      )}
+                      className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_6px_var(--color-led-glow)]"
                     />
-                    <b
-                      className={cn(
-                        "font-bold",
-                        syncing ? "text-live" : "text-led-soft",
-                      )}
-                    >
-                      Primary
-                    </b>
+                    <b className="font-bold text-led-soft">Primary</b>
                     <span aria-hidden className="text-rule-strong">
                       ·
                     </span>
@@ -2025,9 +1775,7 @@ export function Audit() {
                       </span>
                     ) : null}
                     <span className="text-whisper">
-                      {syncing
-                        ? "drag to place the buzzer · play to verify · snap to refine"
-                        : "scrub or double-click to add marker"}
+                      scrub or double-click to add marker
                     </span>
                   </span>
                 </div>
@@ -2035,51 +1783,25 @@ export function Audit() {
                   <Waveform
                     peaks={displayPeaks.peaks}
                     duration={displayPeaks.duration}
-                    // Always reflect the playhead, even in sync mode --
-                    // otherwise pressing play after picking a candidate
-                    // shows playback stuck on the candidate marker
-                    // (because the playhead used to be pinned there)
-                    // and the operator can't see what they're playing
-                    // through. The candidate marker lives on beepTime
-                    // below, so it stays visible independently.
                     currentTime={currentTime}
-                    beepTime={
-                      syncMode != null
-                        ? (syncCandidate ?? syncMode.beep_time)
-                        : filters.beep
-                          ? auditBeep
-                          : null
-                    }
+                    beepTime={filters.beep ? auditBeep : null}
                     pixelsPerSecond={pixelsPerSecond}
-                    onScrub={
-                      syncMode != null
-                        ? (t) => {
-                            // Setting the candidate marker AND seeking
-                            // the video/audio is what makes verification
-                            // possible: pick a position, press play,
-                            // hear+see what's actually there.
-                            setSyncCandidate(t);
-                            handleScrub(t);
-                          }
-                        : handleScrub
-                    }
-                    onDoubleClick={syncMode != null ? undefined : handleAddManual}
+                    onScrub={handleScrub}
+                    onDoubleClick={handleAddManual}
                     height={180}
                   >
-                    {syncMode == null ? (
-                      <MarkerLayer
-                        markers={markers}
-                        duration={displayPeaks.duration}
-                        focusedId={focusedMarkerId}
-                        onFocusChange={setFocusedMarkerId}
-                        onClick={handleMarkerClick}
-                        onDelete={handleMarkerDelete}
-                        onTimeChange={handleMarkerTimeChange}
-                        onTimeChangeBegin={handleMarkerTimeChangeBegin}
-                        onTimeChangeCommit={handleMarkerTimeChangeCommit}
-                        visibleKinds={visibleKinds}
-                      />
-                    ) : null}
+                    <MarkerLayer
+                      markers={markers}
+                      duration={displayPeaks.duration}
+                      focusedId={focusedMarkerId}
+                      onFocusChange={setFocusedMarkerId}
+                      onClick={handleMarkerClick}
+                      onDelete={handleMarkerDelete}
+                      onTimeChange={handleMarkerTimeChange}
+                      onTimeChangeBegin={handleMarkerTimeChangeBegin}
+                      onTimeChangeCommit={handleMarkerTimeChangeCommit}
+                      visibleKinds={visibleKinds}
+                    />
                   </Waveform>
                   {/* Anomaly pins sit on the seam between the legend
                       header and the waveform bars. `inset-x-4` matches
@@ -2135,7 +1857,7 @@ export function Audit() {
                   onActiveIndexChange={setActiveVideoIndex}
                   camSyncStates={camSyncStates}
                   primaryBeepTime={primaryBeep}
-                  onStartSync={startSync}
+                  onStartSync={openBeepReview}
                   onPromote={(cam) => {
                     const idx = videos.findIndex(
                       (v) => v.video_id === cam.video_id,
@@ -2192,7 +1914,7 @@ export function Audit() {
                           beepConfidence={video.beep_confidence}
                           offsetSeconds={offsetSeconds}
                           size="xs"
-                          onClick={() => startSync(video)}
+                          onClick={() => openBeepReview(video)}
                         />
                       );
                     }}

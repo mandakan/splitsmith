@@ -12,6 +12,7 @@ import { Maximize2, Minus, Plus } from "lucide-react";
 
 import { MarkerGlyph, type MarkerKind } from "@/components/MarkerGlyph";
 import { Button } from "@/components/ui/button";
+import { modKeyLabel } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 export interface MarkerFilters {
@@ -152,6 +153,7 @@ export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProp
     const next = base / ZOOM_STEP;
     onZoomChange(next <= MIN_ZOOM ? null : next);
   };
+  const mod = modKeyLabel();
 
   return (
     <div className={cn("inline-flex items-center gap-1", className)} role="group" aria-label="Zoom">
@@ -159,8 +161,8 @@ export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProp
         size="sm"
         variant="ghost"
         onClick={zoomOut}
-        aria-label="Zoom out (Cmd+3)"
-        title="Zoom out (Cmd+3)"
+        aria-label={`Zoom out (${mod}+3)`}
+        title={`Zoom out (${mod}+3)`}
       >
         <Minus className="size-3" />
       </Button>
@@ -168,8 +170,8 @@ export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProp
         size="sm"
         variant="ghost"
         onClick={() => onZoomChange(null)}
-        aria-label="Fit waveform (Cmd+2)"
-        title="Fit waveform (Cmd+2)"
+        aria-label={`Fit waveform (${mod}+2)`}
+        title={`Fit waveform (${mod}+2)`}
         aria-pressed={zoom == null}
       >
         <Maximize2 className="size-3" />
@@ -178,8 +180,8 @@ export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProp
         size="sm"
         variant="ghost"
         onClick={zoomIn}
-        aria-label="Zoom in (Cmd+1)"
-        title="Zoom in (Cmd+1)"
+        aria-label={`Zoom in (${mod}+1)`}
+        title={`Zoom in (${mod}+1)`}
       >
         <Plus className="size-3" />
       </Button>
