@@ -53,7 +53,7 @@ def test_link_status_reports_ok_for_intact_links(tmp_path: Path) -> None:
     root, ids = _setup_project(tmp_path, ["a.mp4"])
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.get(f"{base}/shooters/me/videos/link-status")
     assert resp.status_code == 200
@@ -68,7 +68,7 @@ def test_link_status_reports_broken_after_target_removed(tmp_path: Path) -> None
     (tmp_path / "originals" / "a.mp4").unlink()
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     [entry] = client.get(f"{base}/shooters/me/videos/link-status").json()["entries"]
     assert entry["status"] == "broken"
@@ -81,7 +81,7 @@ def test_relink_scan_reports_unique_candidate(tmp_path: Path) -> None:
     (share / "a.mp4").write_bytes(b"")
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.post(
         f"{base}/shooters/me/videos/relink/scan",
@@ -105,7 +105,7 @@ def test_relink_scan_reports_ambiguous_candidates(tmp_path: Path) -> None:
     (share / "y" / "a.mp4").write_bytes(b"")
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     [entry] = client.post(
         f"{base}/shooters/me/videos/relink/scan",
@@ -120,7 +120,7 @@ def test_relink_scan_400_on_missing_root(tmp_path: Path) -> None:
     root, _ = _setup_project(tmp_path, ["a.mp4"])
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.post(
         f"{base}/shooters/me/videos/relink/scan",
@@ -136,7 +136,7 @@ def test_relink_apply_rewrites_symlinks(tmp_path: Path) -> None:
     new_target.write_bytes(b"")
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.post(
         f"{base}/shooters/me/videos/relink/apply",
@@ -156,7 +156,7 @@ def test_relink_apply_rejects_missing_target(tmp_path: Path) -> None:
     root, ids = _setup_project(tmp_path, ["a.mp4"])
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.post(
         f"{base}/shooters/me/videos/relink/apply",
@@ -170,7 +170,7 @@ def test_relink_apply_rejects_unknown_video_id(tmp_path: Path) -> None:
     target = tmp_path / "originals" / "a.mp4"
     _app = create_app(project_root=root, project_name="x")
     client = TestClient(_app)
-    match_id = _app.state.splitsmith_state.bound_match_id
+    match_id = _app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.post(
         f"{base}/shooters/me/videos/relink/apply",

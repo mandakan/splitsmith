@@ -37,16 +37,30 @@ agnostic shared resources. Not violations.
 
 ## What is a singleton violation (and must come out)
 
-### Tier 1 -- blocks every other migration
+### Tier 1 -- DONE (PRs #409, #410, #411, #412)
 
 **`AppState._bound_root` + `_bound_kind` + `_bound_name` +
-`_bound_match_id`** (`splitsmith.ui.server`).
+`_bound_match_id`** -- all gone. The four cuts:
 
-"The currently open project". A process-wide singleton. Every
-shooter-scoped property (`bound_root`, `match_root`,
-`shooter_root(slug)`, `shooter_project(slug)`) reads it. Two
-concurrent requests for different projects from different tenants
-would race on it -- whichever bind ran last wins.
+- Step 1 (#409): `state.match_root` -> ContextVar-only.
+- Step 2 (#410): `state.shooter_root(slug)` -> ContextVar-only for
+  Match folders.
+- Step 3 (#411): retired the legacy single-shooter layout.
+- Step 4 (#412): deleted `_bound_*` fields, `bind_match`, `unbind`,
+  `is_bound`, `bound_root`, `bound_name`, `bound_match_id`,
+  `_health_after_bind`, `state.unbind`, the
+  `/api/me/recent-projects/unbind` endpoint, and renamed the
+  internal bind helper to `_register_match_at` so its sole job is
+  to register the match in `state.matches` + record the open. The
+  picker bind endpoint still returns a HealthResponse with
+  ``match_id`` + ``default_shooter_slug`` so the SPA can navigate
+  to ``/match/<match_id>`` -- there's no server-side state for it
+  to flip.
+
+What was actually a process-wide singleton (every shooter-scoped
+property `bound_root` / `match_root` / `shooter_root(slug)` /
+`shooter_project(slug)` reading the same fields, racing under
+concurrent multi-tenant requests):
 
 The `current_match_root` / `current_match_id` ContextVars (#353
 Phase 3) were a partial step toward per-request scoping: when a URL

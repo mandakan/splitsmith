@@ -47,12 +47,17 @@ def scaffold_match(
 
 
 def bound_match_id(app) -> str:
-    """Read the bound match id from a test app's state.
-    Tests use it to construct ``/api/matches/{match_id}/...`` URLs.
+    """Read the registered match id from a test app's state.
+
+    Post Tier 1 step 4 of doc 10, the server has no "bound" project --
+    matches are registered in :attr:`AppState.matches` and addressed
+    by URL. Tests typically scaffold a single Match folder; this
+    helper returns that match's id so they can construct
+    ``/api/matches/{match_id}/...`` URLs.
     """
-    mid = app.state.splitsmith_state.bound_match_id
-    assert mid is not None, "expected create_app(project_root=match_folder) to bind a match_id"
-    return mid
+    ids = app.state.splitsmith_state.matches.known_ids()
+    assert len(ids) == 1, f"expected exactly one match registered, got {len(ids)}: {ids}"
+    return ids[0]
 
 
 @pytest.fixture(autouse=True)

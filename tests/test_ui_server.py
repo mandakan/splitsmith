@@ -76,9 +76,14 @@ class _MatchClient:
         return self._app
 
     def _rewrite(self, url: str) -> str:
-        match_id = self._app.state.splitsmith_state.bound_match_id
-        if match_id is None:
+        # Pick the registered match -- tests scaffold a single
+        # match folder per app. With zero (unbound) or more than
+        # one (multi-match alias tests), the rewriter passes the
+        # URL through so the test builds the prefix explicitly.
+        ids = self._app.state.splitsmith_state.matches.known_ids()
+        if len(ids) != 1:
             return url
+        match_id = ids[0]
         for prefix in _SCOPED_PREFIXES:
             if url.startswith(prefix):
                 rest = url[len("/api/") :]
@@ -153,7 +158,13 @@ def _wait_for_job(client, job_id: str, *, timeout: float = 5.0) -> dict:
     raise AssertionError(f"job {job_id} did not finish within {timeout}s")
 
 
-def test_health_returns_project_info(tmp_path: Path) -> None:
+def test_health_reports_unbound(tmp_path: Path) -> None:
+    """Tier 1 step 4 of doc 10 retired the bound-state concept on
+    the server. ``/api/health`` is now purely a "process up" check
+    -- it never reports a bound project, even when one is registered
+    on ``state.matches``. The SPA reads match identity from the URL,
+    not from health.
+    """
     app = _match_create_app(project_root=tmp_path / "match", project_name="Test Match")
     client = _MatchClient(app)
 
@@ -161,8 +172,8 @@ def test_health_returns_project_info(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["project_name"] == "Test Match"
-    assert body["bound"] is True
+    assert body["bound"] is False
+    assert body["project_name"] is None
 
 
 def test_get_project_returns_full_dump(tmp_path: Path) -> None:
@@ -5442,21 +5453,23 @@ def test_bind_recent_project_refuses_non_match_path(tmp_path: Path, _user_config
     assert resp.json()["detail"]["code"] == "not_a_match"
 
 
-def test_unbind_returns_to_unbound_state(tmp_path: Path, _user_config_home: Path) -> None:
-    """Post Tier 1 step 3 of doc 10, `unbind` clears the singleton
-    bind (so /api/health reports unbound) but doesn't unregister
-    the match from ``state.matches`` -- URLs that carry the
-    ``match_id`` continue to resolve. The "current open project"
-    concept is going URL-only; unbind is mostly a picker-UX hook."""
+def test_unbind_endpoint_is_gone(tmp_path: Path, _user_config_home: Path) -> None:
+    """Tier 1 step 4 of doc 10: ``/api/me/recent-projects/unbind``
+    was deleted because there's no server-side bound state to clear
+    anymore -- match identity is per-request via the URL prefix.
+    The SPA picker navigates between matches by URL.
+    """
     app = _match_create_app(project_root=tmp_path / "match", project_name="x")
     raw = TestClient(app)
 
-    assert raw.get("/api/health").json()["bound"] is True
+    assert raw.get("/api/health").json()["bound"] is False
     resp = raw.post("/api/me/recent-projects/unbind")
-    assert resp.status_code == 200
-    assert resp.json()["bound"] is False
-    # Bare-path shooter access still 409s -- the singleton bind is
-    # gone (and was never the resolution path anyway after step 3).
+    # FastAPI returns 405 for an unknown method on a known prefix
+    # or 404 when the path itself is unrouted; either is acceptable
+    # confirmation that the endpoint is gone.
+    assert resp.status_code in (404, 405)
+    # Bare-path shooter access 409s because the singleton fallback
+    # has been gone since step 2.
     assert raw.get("/api/shooters/me/project").status_code == 409
 
 
@@ -5669,7 +5682,7 @@ def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_con
         json={"path": str(target.resolve())},
     )
     assert resp.status_code == 200
-    match_id = app.state.splitsmith_state.bound_match_id
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
 
     listing = client.get(f"/api/matches/{match_id}/match/shooters")
     assert listing.status_code == 200, listing.text
@@ -5693,7 +5706,7 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
-    match_id = app.state.splitsmith_state.bound_match_id
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
     resp = client.post(f"/api/matches/{match_id}/match/shooters", json={"name": "Johan Larsson"})
     assert resp.status_code == 200
     body = resp.json()
@@ -5722,7 +5735,7 @@ def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path)
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
-    match_id = app.state.splitsmith_state.bound_match_id
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
     resp = client.delete(f"/api/matches/{match_id}/match/shooters/jl")
     assert resp.status_code == 200
     assert not match_model.Match.shooter_root(target, "jl").exists()
@@ -6609,7 +6622,11 @@ def _make_match_app(tmp_path: Path):
 
 
 def test_match_id_alias_rewrites_to_existing_route(tmp_path: Path, _user_config_home: Path) -> None:
-    """``/api/matches/{match_id}/health`` resolves to the same health route."""
+    """``/api/matches/{match_id}/health`` resolves to the same health
+    route. Health is identical on both prefixes -- after Tier 1
+    step 4 of doc 10 it doesn't echo back the bound state or the
+    match id; it's a process-level "we're up" check.
+    """
     app, match, _ = _make_match_app(tmp_path)
     client = _MatchClient(app)
 
@@ -6618,10 +6635,9 @@ def test_match_id_alias_rewrites_to_existing_route(tmp_path: Path, _user_config_
 
     assert direct.status_code == 200
     assert aliased.status_code == 200
-    # Same payload on either prefix: the middleware strips the
-    # match-id segment and hands off to the existing handler.
     assert direct.json() == aliased.json()
-    assert aliased.json()["match_id"] == match.match_id
+    assert direct.json()["bound"] is False
+    assert direct.json()["match_id"] is None
 
 
 def test_match_id_alias_resolves_match_level_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
@@ -6657,8 +6673,9 @@ def test_shooter_root_no_match_singleton_fallback(tmp_path: Path, _user_config_h
     app, _bound_match, _ = _make_match_app(tmp_path)
     state = app.state.splitsmith_state
 
-    # The singleton IS bound to a Match folder.
-    assert state.bound_match_id is not None
+    # The match IS registered (`_make_match_app` calls
+    # `_register_match_at`).
+    assert state.matches.known_ids(), "expected the test match to be registered"
 
     # Yet shooter_root refuses to resolve a known slug without the
     # ContextVar set by the alias middleware.
@@ -6680,9 +6697,9 @@ def test_match_root_no_singleton_fallback(tmp_path: Path, _user_config_home: Pat
     app, _bound_match, _ = _make_match_app(tmp_path)
     state = app.state.splitsmith_state
 
-    # The singleton IS bound (matches.bound state is set by
-    # _make_match_app via _match_create_app(project_root=...)).
-    assert state.bound_match_id is not None
+    # The match IS registered (`_make_match_app` calls
+    # `_register_match_at`).
+    assert state.matches.known_ids(), "expected the test match to be registered"
 
     # Yet match_root refuses to resolve without a ContextVar.
     with pytest.raises(HTTPException) as exc:
@@ -6707,7 +6724,7 @@ def test_match_id_alias_unknown_id_returns_404(tmp_path: Path, _user_config_home
 def test_match_id_alias_serves_non_bound_match(tmp_path: Path, _user_config_home: Path) -> None:
     """A non-bound match resolves independently of the bound singleton (#353 Phase 3 PR C).
 
-    PR B briefly enforced ``match_id == state.bound_match_id``; PR C
+    PR B briefly enforced ``match_id == state.matches.known_ids()``; PR C
     drops that check because the middleware sets a per-request
     ContextVar -- two tabs on different matches each get their own
     scope. Both match ids must be served when both are registered.

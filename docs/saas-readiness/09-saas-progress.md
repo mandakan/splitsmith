@@ -92,13 +92,14 @@ Process-level state that must come out before the abstractions can do
 anything useful in a multi-tenant deployment. Ordering matters --
 later steps are blocked on earlier ones.
 
-- [ ] **Tier 1:** kill `AppState._bound_root` + `_bound_kind` +
-  `_bound_name` + `_bound_match_id`. Make
-  `/api/matches/{match_id}/...` the only project-scoped prefix;
-  delete the bare-path fallback in the route table. CLI / picker
-  resolve to a `match_id` and open the browser at
-  `/match/<match_id>` instead of binding server-side. Precondition
-  for storage callsite migration.
+- [x] **Tier 1:** kill `AppState._bound_root` + `_bound_kind` +
+  `_bound_name` + `_bound_match_id`. Done across four steps
+  (PRs #409, #410, #411, #412). Match identity is per-request via
+  the `/api/matches/{match_id}/` URL prefix; the alias middleware
+  sets a ContextVar and `state.shooter_root` / `state.match_root`
+  read it. The picker registers matches in `state.matches` and
+  returns a HealthResponse so the SPA can navigate by URL --
+  there is no server-side bound state to flip.
 - [ ] **Tier 2:** move `JobRegistry` off in-memory `dict` to the
   `compute_jobs` table (Postgres in hosted; SQLite in local if/when
   the desktop needs job persistence). Same handler-facing interface;

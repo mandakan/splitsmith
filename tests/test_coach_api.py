@@ -59,7 +59,7 @@ def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path, str]:
     audit_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     app = create_app(project_root=root, project_name="Coach Match")
-    match_id = app.state.splitsmith_state.bound_match_id
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
     return TestClient(app), audit_file, f"/api/matches/{match_id}"
 
 
@@ -155,7 +155,7 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
 
     app = create_app(project_root=root, project_name="Trimmed Match")
     client = TestClient(app)
-    match_id = app.state.splitsmith_state.bound_match_id
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
@@ -206,7 +206,7 @@ def test_get_coach_returns_null_when_no_audit(tmp_path: Path) -> None:
     project.save(shooter_root)
     app = create_app(project_root=root, project_name="Empty")
     client = TestClient(app)
-    match_id = app.state.splitsmith_state.bound_match_id
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
     base = f"/api/matches/{match_id}"
     resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200
