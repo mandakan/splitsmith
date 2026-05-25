@@ -99,8 +99,12 @@ def test_active_count_excludes_terminal_states() -> None:
 # ----------------------------------------------------------------------
 
 
+from tests.conftest import scaffold_match  # noqa: E402
+
+
 def _make_client(tmp_path: Path) -> TestClient:
-    app = create_app(project_root=tmp_path / "match", project_name="Shutdown Test")
+    root, _ = scaffold_match(tmp_path, name="Shutdown Test")
+    app = create_app(project_root=root, project_name="Shutdown Test")
     return TestClient(app)
 
 
@@ -130,7 +134,8 @@ def test_shutdown_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_shutdown_rejects_non_loopback(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="Shutdown Test")
+    root, _ = scaffold_match(tmp_path, name="Shutdown Test")
+    app = create_app(project_root=root, project_name="Shutdown Test")
     client = TestClient(app, client=("192.168.1.50", 51234))
     resp = client.post("/api/shutdown")
     assert resp.status_code == 403
@@ -169,7 +174,8 @@ def test_shutdown_in_progress_error_mapped_to_503(tmp_path: Path) -> None:
 def test_create_app_registers_shutdown_exception_handler(tmp_path: Path) -> None:
     """create_app registers the ShutdownInProgressError handler so 503s
     work at every submit() callsite without per-route try/except."""
-    app = create_app(project_root=tmp_path / "match", project_name="x")
+    root, _ = scaffold_match(tmp_path, name="x")
+    app = create_app(project_root=root, project_name="x")
     assert ShutdownInProgressError in app.exception_handlers
 
 

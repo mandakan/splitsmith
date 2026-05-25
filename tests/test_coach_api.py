@@ -23,9 +23,14 @@ def _disable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
 
 
-def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path]:
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Coach Match")
+def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path, str]:
+    """Returns ``(client, audit_file, url_base)`` -- url_base is the
+    ``/api/matches/{match_id}`` prefix that every shooter-scoped URL
+    in this module needs after Tier 1 step 3 of doc 10."""
+    from tests.conftest import scaffold_match
+
+    root, shooter_root = scaffold_match(tmp_path, name="Coach Match")
+    project = MatchProject.load(shooter_root)
     project.competitor_name = "Tester"
     project.stages = [
         StageEntry(
@@ -35,9 +40,9 @@ def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path]:
             videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
         )
     ]
-    project.save(root)
+    project.save(shooter_root)
 
-    audit_dir = root / "audit"
+    audit_dir = shooter_root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     audit_file = audit_dir / "stage1.json"
     payload = {
@@ -54,7 +59,8 @@ def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path]:
     audit_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     app = create_app(project_root=root, project_name="Coach Match")
-    return TestClient(app), audit_file
+    match_id = app.state.splitsmith_state.bound_match_id
+    return TestClient(app), audit_file, f"/api/matches/{match_id}"
 
 
 def _read(audit_file: Path) -> dict[str, Any]:
@@ -67,8 +73,8 @@ def _read(audit_file: Path) -> dict[str, Any]:
 
 
 def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/shooters/me/stages/1/coach")
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stage_number"] == 1
@@ -93,8 +99,8 @@ def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
 
 
 def test_get_coach_returns_videos_with_beep_in_clip(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/shooters/me/stages/1/coach")
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "videos" in body
@@ -111,8 +117,10 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
     seek inside the trimmed clip, where the beep sits at min(8, 5)=5 s.
     All shot ``time_absolute`` values follow the same anchor.
     """
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Trimmed Match")
+    from tests.conftest import scaffold_match
+
+    root, shooter_root = scaffold_match(tmp_path, name="Trimmed Match")
+    project = MatchProject.load(shooter_root)
     project.stages = [
         StageEntry(
             stage_number=1,
@@ -121,9 +129,9 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
             videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=8.0)],
         )
     ]
-    project.save(root)
+    project.save(shooter_root)
 
-    audit_dir = root / "audit"
+    audit_dir = shooter_root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stage1.json").write_text(
         json.dumps(
@@ -140,16 +148,16 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    # Place a non-empty file at the trimmed-clip path so the helper
-    # detects "trim exists" without running ffmpeg. Path is per-video in v2.
-    trimmed_dir = project.trimmed_path(root)
+    trimmed_dir = project.trimmed_path(shooter_root)
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     primary_id = project.stages[0].videos[0].video_id
     (trimmed_dir / f"stage1_cam_{primary_id}_trimmed.mp4").write_bytes(b"not really a video, but non-empty")
 
     app = create_app(project_root=root, project_name="Trimmed Match")
     client = TestClient(app)
-    resp = client.get("/api/shooters/me/stages/1/coach")
+    match_id = app.state.splitsmith_state.bound_match_id
+    base = f"/api/matches/{match_id}"
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     # Default trim_pre_buffer_seconds is 5.0; beep clamps to that.
@@ -159,8 +167,8 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
 
 
 def test_get_stage_distributions(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/shooters/me/stages/1/coach/distributions")
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.get(f"{base}/shooters/me/stages/1/coach/distributions")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stage_number"] == 1
@@ -175,8 +183,8 @@ def test_get_stage_distributions(tmp_path: Path) -> None:
 
 
 def test_get_match_distributions_aggregates(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
-    resp = client.get("/api/shooters/me/coach/distributions")
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.get(f"{base}/shooters/me/coach/distributions")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["stage_count"] == 1
@@ -190,13 +198,17 @@ def test_get_coach_returns_null_when_no_audit(tmp_path: Path) -> None:
     """No audit JSON yet -> 200 null. "Stage exists but isn't audited"
     is a normal pre-audit state and shouldn't surface as a failed
     request in DevTools. 404 is reserved for unknown stage numbers."""
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Empty")
+    from tests.conftest import scaffold_match
+
+    root, shooter_root = scaffold_match(tmp_path, name="Empty")
+    project = MatchProject.load(shooter_root)
     project.stages = [StageEntry(stage_number=1, stage_name="x", time_seconds=10.0, videos=[])]
-    project.save(root)
+    project.save(shooter_root)
     app = create_app(project_root=root, project_name="Empty")
     client = TestClient(app)
-    resp = client.get("/api/shooters/me/stages/1/coach")
+    match_id = app.state.splitsmith_state.bound_match_id
+    base = f"/api/matches/{match_id}"
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200
     assert resp.json() is None
 
@@ -207,9 +219,9 @@ def test_get_coach_returns_null_when_no_audit(tmp_path: Path) -> None:
 
 
 def test_reclassify_persists_auto_classes(tmp_path: Path) -> None:
-    client, audit_file = _bootstrap(tmp_path)
+    client, audit_file, base = _bootstrap(tmp_path)
 
-    resp = client.post("/api/shooters/me/stages/1/coach/reclassify")
+    resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     classes = [s["interval_class"] for s in body["shots"]]
@@ -227,17 +239,17 @@ def test_reclassify_persists_auto_classes(tmp_path: Path) -> None:
 
 
 def test_reclassify_preserves_manual(tmp_path: Path) -> None:
-    client, audit_file = _bootstrap(tmp_path)
+    client, audit_file, base = _bootstrap(tmp_path)
 
     # Set a manual override on shot 4 first.
     resp = client.patch(
-        "/api/shooters/me/stages/1/shots/4/coach",
+        f"{base}/shooters/me/stages/1/shots/4/coach",
         json={"interval_class": "reload", "interval_class_source": "manual"},
     )
     assert resp.status_code == 200, resp.text
 
     # Reclassify -- should leave shot 4 alone.
-    resp = client.post("/api/shooters/me/stages/1/coach/reclassify")
+    resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["shots"][3]["interval_class"] == "reload"
@@ -252,10 +264,10 @@ def test_reclassify_preserves_manual(tmp_path: Path) -> None:
 
 
 def test_patch_set_class_and_note_and_flag(tmp_path: Path) -> None:
-    client, audit_file = _bootstrap(tmp_path)
+    client, audit_file, base = _bootstrap(tmp_path)
 
     resp = client.patch(
-        "/api/shooters/me/stages/1/shots/2/coach",
+        f"{base}/shooters/me/stages/1/shots/2/coach",
         json={
             "interval_class": "split",
             "interval_class_source": "manual",
@@ -278,12 +290,12 @@ def test_patch_set_class_and_note_and_flag(tmp_path: Path) -> None:
 
 
 def test_patch_clear_class_drops_pair(tmp_path: Path) -> None:
-    client, audit_file = _bootstrap(tmp_path)
+    client, audit_file, base = _bootstrap(tmp_path)
     client.patch(
-        "/api/shooters/me/stages/1/shots/2/coach",
+        f"{base}/shooters/me/stages/1/shots/2/coach",
         json={"interval_class": "reload", "interval_class_source": "manual"},
     )
-    resp = client.patch("/api/shooters/me/stages/1/shots/2/coach", json={"clear_class": True})
+    resp = client.patch(f"{base}/shooters/me/stages/1/shots/2/coach", json={"clear_class": True})
     assert resp.status_code == 200
     body = resp.json()
     assert body["shots"][1]["interval_class"] is None
@@ -291,38 +303,38 @@ def test_patch_clear_class_drops_pair(tmp_path: Path) -> None:
 
 
 def test_patch_class_without_source_rejected(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
+    client, _audit, base = _bootstrap(tmp_path)
     resp = client.patch(
-        "/api/shooters/me/stages/1/shots/2/coach",
+        f"{base}/shooters/me/stages/1/shots/2/coach",
         json={"interval_class": "split"},
     )
     assert resp.status_code == 400
 
 
 def test_patch_unknown_shot_404(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
+    client, _audit, base = _bootstrap(tmp_path)
     resp = client.patch(
-        "/api/shooters/me/stages/1/shots/999/coach",
+        f"{base}/shooters/me/stages/1/shots/999/coach",
         json={"improvement_flag": True},
     )
     assert resp.status_code == 404
 
 
 def test_patch_clear_note(tmp_path: Path) -> None:
-    client, _audit = _bootstrap(tmp_path)
+    client, _audit, base = _bootstrap(tmp_path)
     client.patch(
-        "/api/shooters/me/stages/1/shots/2/coach",
+        f"{base}/shooters/me/stages/1/shots/2/coach",
         json={"coaching_note": "old note"},
     )
-    resp = client.patch("/api/shooters/me/stages/1/shots/2/coach", json={"clear_note": True})
+    resp = client.patch(f"{base}/shooters/me/stages/1/shots/2/coach", json={"clear_note": True})
     assert resp.status_code == 200
     assert resp.json()["shots"][1]["coaching_note"] is None
 
 
 def test_patch_emits_audit_event(tmp_path: Path) -> None:
-    client, audit_file = _bootstrap(tmp_path)
+    client, audit_file, base = _bootstrap(tmp_path)
     client.patch(
-        "/api/shooters/me/stages/1/shots/2/coach",
+        f"{base}/shooters/me/stages/1/shots/2/coach",
         json={"improvement_flag": True, "coaching_note": "fix me"},
     )
     saved = _read(audit_file)
@@ -338,9 +350,9 @@ def test_patch_emits_audit_event(tmp_path: Path) -> None:
 
 
 def test_stale_after_audit_edit(tmp_path: Path) -> None:
-    client, audit_file = _bootstrap(tmp_path)
+    client, audit_file, base = _bootstrap(tmp_path)
     # First persist auto classes.
-    client.post("/api/shooters/me/stages/1/coach/reclassify")
+    client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
 
     # Simulate an Audit-side timestamp move: shot 2 drifts from 0.30 -> 0.70 s gap.
     saved = _read(audit_file)
@@ -351,7 +363,7 @@ def test_stale_after_audit_edit(tmp_path: Path) -> None:
 
     # GET surfaces stale=True; the stored class is "split" but the rule
     # would now say "transition".
-    resp = client.get("/api/shooters/me/stages/1/coach")
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200
     body = resp.json()
     moved = body["shots"][1]
@@ -359,7 +371,7 @@ def test_stale_after_audit_edit(tmp_path: Path) -> None:
     assert moved["stale"] is True
 
     # Reclassify clears stale.
-    resp = client.post("/api/shooters/me/stages/1/coach/reclassify")
+    resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
     body = resp.json()
     moved = body["shots"][1]
     assert moved["interval_class"] == "transition"
