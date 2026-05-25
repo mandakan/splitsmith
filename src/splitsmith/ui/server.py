@@ -1059,7 +1059,7 @@ class BeepQueueItem(BaseModel):
     beep_time: float | None
     beep_confidence: float | None
     beep_reviewed: bool
-    status: Literal["missing", "low_confidence", "unreviewed"]
+    status: Literal["missing", "low_confidence", "unreviewed", "confirmed"]
     alt_candidates: list[BeepQueueAltCandidate]
     # Auto-computed cross-align suggestion for secondaries lives on the
     # shooter's other videos; the SPA fetches them lazily if needed.
@@ -7257,15 +7257,20 @@ def create_app(
     # ----------------------------------------------------------------------
 
     @app.get("/api/match/beep-queue", response_model=BeepQueueResponse)
-    def get_beep_queue() -> BeepQueueResponse:
+    def get_beep_queue(include_confirmed: bool = Query(default=False)) -> BeepQueueResponse:
         """Pending beep items across every shooter in the bound match.
 
-        Surfaces three states per primary video:
+        Surfaces three pending states per primary video:
           - ``missing``: detector hasn't run or didn't find a beep
           - ``low_confidence``: detector found one but below the project's
             auto-trust threshold
           - ``unreviewed``: detector found one above threshold but the
             user hasn't yet listened + approved
+
+        When ``include_confirmed`` is true the response also includes
+        items whose beep has been reviewed, with ``status="confirmed"``.
+        The SPA uses this for the "Show confirmed" toggle so the user
+        can revisit a settled beep without having to clear-and-redo it.
 
         Items are grouped by stage; per-stage shot detection is gated on
         every shooter's primary in that stage being ``beep_reviewed``.
@@ -7320,12 +7325,15 @@ def create_app(
                 elif primary.beep_reviewed:
                     grp.confirmed += 1
                     total_confirmed += 1
-                    continue
+                    if not include_confirmed:
+                        continue
+                    status = "confirmed"
                 elif primary.beep_confidence is not None and primary.beep_confidence < threshold:
                     status = "low_confidence"
                 else:
                     status = "unreviewed"
-                total_pending += 1
+                if status != "confirmed":
+                    total_pending += 1
                 alts = [
                     BeepQueueAltCandidate(
                         time=cand.time,

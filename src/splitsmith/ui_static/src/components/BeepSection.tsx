@@ -696,7 +696,7 @@ export function BeepWaveformPicker({
   showFallbackBeepMarker = true,
   instructions,
   ariaLabel,
-  audioElementRef,
+  externalMediaRef,
 }: {
   slug: string;
   stageNumber: number;
@@ -717,13 +717,15 @@ export function BeepWaveformPicker({
   instructions?: string;
   /** Override the canvas aria-label for screen readers. */
   ariaLabel?: string;
-  /** Optional external handle for the picker's <audio> element. Callers
-   *  that want to mirror the picker's playback elsewhere (e.g. a paired
-   *  video preview) pass this in -- the picker assigns the live element
-   *  to ``current`` so the caller can listen for ``play`` / ``pause`` /
-   *  ``seeked`` / ``timeupdate`` events and act on them. The picker
-   *  still owns its internal ref + playback semantics. */
-  audioElementRef?: { current: HTMLAudioElement | null };
+  /** Optional external media element (audio OR video) for the picker
+   *  to drive. When provided, the picker skips rendering its own
+   *  <audio> element -- the parent owns playback (same pattern as
+   *  the audit page's MultiCamColumn <video>). Space, click-to-scrub,
+   *  zoom, and the initial seek all act on this element. When not
+   *  provided, the picker creates its own internal <audio src=
+   *  videoAudioUrl(...)> as before -- StageTimeSection relies on
+   *  that path. */
+  externalMediaRef?: { current: HTMLAudioElement | HTMLVideoElement | null };
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -753,8 +755,14 @@ export function BeepWaveformPicker({
   }, []);
   const [snapping, setSnapping] = useState(false);
   const [proposal, setProposal] = useState<BeepSnapResult | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  useReleaseMediaOnUnmount(audioRef);
+  // The picker's playback handle. When the parent owns the media
+  // element (BeepReview passes its <video> ref), we just alias the
+  // external ref; otherwise we create our own <audio> below. Either
+  // way, the rest of the picker (togglePlay, scrub, init seek,
+  // Space hook) reads / writes through ``mediaRef``.
+  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRef = externalMediaRef ?? internalAudioRef;
+  useReleaseMediaOnUnmount(internalAudioRef);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -775,7 +783,7 @@ export function BeepWaveformPicker({
         // playhead back to whatever it was last at.
         const t = p.beep_time ?? 0;
         setLocalTime(t);
-        const el = audioRef.current;
+        const el = mediaRef.current;
         if (el) {
           try {
             el.currentTime = t;
@@ -821,7 +829,7 @@ export function BeepWaveformPicker({
   useEffect(() => {
     if (!playing) return;
     const tick = () => {
-      const el = audioRef.current;
+      const el = mediaRef.current;
       if (el) setLocalTime(el.currentTime);
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -833,7 +841,7 @@ export function BeepWaveformPicker({
   }, [playing]);
 
   const togglePlay = useCallback(() => {
-    const el = audioRef.current;
+    const el = mediaRef.current;
     if (!el) return;
     if (el.paused) {
       el.play().catch(() => {
@@ -842,7 +850,7 @@ export function BeepWaveformPicker({
     } else {
       el.pause();
     }
-  }, []);
+  }, [mediaRef]);
 
   // Window-level Space → toggle so the user can audition the beep
   // even when focus is parked on a sidebar link or a queue row
@@ -851,6 +859,28 @@ export function BeepWaveformPicker({
   // browser default while the picker is in its empty / loading state.
   useSpacePlayPause(togglePlay, peaks != null);
 
+  // When the parent owns the media element (BeepReview), the
+  // ``playing`` / ``localTime`` state need a separate event bridge --
+  // the inline ``onPlay``/``onPause`` handlers below only fire on the
+  // internal <audio>. Listen on the external element so the picker's
+  // playhead + Play button label still reflect the truth.
+  useEffect(() => {
+    if (!externalMediaRef) return;
+    const el = externalMediaRef.current;
+    if (!el) return;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    return () => {
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [externalMediaRef, peaks]);
+
   // Click / drag = seek audio AND set the marker. Marker and the
   // numeric input both read from the draft state in the parent, so they
   // stay in lock-step: dragging the waveform updates the input,
@@ -858,7 +888,7 @@ export function BeepWaveformPicker({
   const handleScrub = useCallback(
     (t: number) => {
       setLocalTime(t);
-      const el = audioRef.current;
+      const el = mediaRef.current;
       if (el) {
         try {
           el.currentTime = t;
@@ -1012,33 +1042,32 @@ export function BeepWaveformPicker({
           ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
         />
       </div>
-      <audio
-        ref={(el) => {
-          audioRef.current = el;
-          if (audioElementRef) audioElementRef.current = el;
-        }}
-        src={api.videoAudioUrl(slug, stageNumber, videoId)}
-        preload="metadata"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        onLoadedMetadata={() => {
-          // Retry the initial seek when audio metadata lands after
-          // peaks did. Without this, the picker shows the beep
-          // marker but Play starts at 0.
-          const el = audioRef.current;
-          if (!el) return;
-          if (Math.abs(el.currentTime - localTime) > 0.05) {
-            try {
-              el.currentTime = localTime;
-            } catch {
-              /* unreachable -- metadata is loaded by definition here */
+      {externalMediaRef ? null : (
+        <audio
+          ref={internalAudioRef}
+          src={api.videoAudioUrl(slug, stageNumber, videoId)}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+          onLoadedMetadata={() => {
+            // Retry the initial seek when audio metadata lands
+            // after peaks did. Without this, the picker shows the
+            // beep marker but Play starts at 0.
+            const el = internalAudioRef.current;
+            if (!el) return;
+            if (Math.abs(el.currentTime - localTime) > 0.05) {
+              try {
+                el.currentTime = localTime;
+              } catch {
+                /* unreachable -- metadata loaded by definition */
+              }
             }
-          }
-        }}
-        controls
-        className="w-full"
-      />
+          }}
+          controls
+          className="w-full"
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <Button
           size="sm"

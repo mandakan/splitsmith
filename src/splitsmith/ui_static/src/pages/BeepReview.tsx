@@ -518,11 +518,11 @@ function ActiveDetail({
     setDraftTime(null);
   }, [item.slug, item.stage_number, item.video_id]);
 
-  // Shared handle on the picker's <audio> element. BeepVideoMini
-  // mirrors its play/pause/seek so Space (which the picker binds to
-  // toggle audio) drives both surfaces in sync against the same
-  // full source timeline.
-  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  // Single source of truth for playback: the right-pane <video>
+  // element. The waveform picker reads from this same element instead
+  // of creating its own audio (same pattern as the audit canvas
+  // MultiCamColumn <video>). One Space press toggles both.
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const mode: DetailMode =
     draftTime != null ? "picking" : item.beep_time == null ? "empty" : "idle";
@@ -680,7 +680,7 @@ function ActiveDetail({
             showFallbackBeepMarker={item.beep_time != null}
             instructions={pickerInstructions}
             ariaLabel={`Beep picker for ${item.shooter_name}, stage ${item.stage_number}`}
-            audioElementRef={audioElementRef}
+            externalMediaRef={videoRef}
           />
         </div>
         <BeepVideoMini
@@ -688,7 +688,7 @@ function ActiveDetail({
           slug={item.slug}
           videoPath={item.video_path}
           initialTime={previewTime}
-          audioElementRef={audioElementRef}
+          videoRef={videoRef}
           mode={mode}
         />
       </div>
@@ -905,27 +905,24 @@ function BeepVideoMini({
   slug,
   videoPath,
   initialTime,
-  audioElementRef,
+  videoRef,
   mode,
 }: {
   slug: string;
-  /** Per-stage video path. We serve the full source MP4 (same one the
-   *  audit canvas streams) so the timeline matches the picker's audio
-   *  waveform 1:1 -- the user can scrub anywhere on the waveform and
-   *  see the corresponding frame. The 1s beep-preview clip we used
-   *  initially was too short to verify against. */
+  /** Per-stage video path. Serve the full source MP4 (same one the
+   *  audit canvas streams) so the timeline matches the picker's
+   *  waveform 1:1. */
   videoPath: string;
   /** Time to park the playhead at when the clip first loads (detector
    *  beep, or the draft if the operator has picked one). */
   initialTime: number | null;
-  /** Handle on the picker's <audio> element. We mirror its play /
-   *  pause / seek so Space drives both surfaces against the same
-   *  source timeline. */
-  audioElementRef: { current: HTMLAudioElement | null };
+  /** Owned by ActiveDetail -- the single source of truth for
+   *  playback. The picker reads scrub + time off this element. */
+  videoRef: { current: HTMLVideoElement | null };
   mode: DetailMode;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  useReleaseMediaOnUnmount(videoRef);
+  const localRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseMediaOnUnmount(localRef);
   const label =
     mode === "picking"
       ? "ON DRAFT BEEP"
@@ -933,10 +930,9 @@ function BeepVideoMini({
         ? "NO ANCHOR"
         : "ON DETECTED BEEP";
 
-  // Park the video at ``initialTime`` once metadata lands -- mirrors
-  // the picker's audio init seek.
+  // Park the video at ``initialTime`` once metadata lands.
   useEffect(() => {
-    const v = videoRef.current;
+    const v = localRef.current;
     if (!v || initialTime == null) return;
     const seek = () => {
       try {
@@ -949,53 +945,6 @@ function BeepVideoMini({
     else v.addEventListener("loadedmetadata", seek, { once: true });
     return () => v.removeEventListener("loadedmetadata", seek);
   }, [initialTime]);
-
-  // Mirror the picker's <audio>: when the user plays / pauses /
-  // seeks on the audio, the video tracks. Tolerance on the seek so
-  // we don't fight ourselves on every rAF tick.
-  useEffect(() => {
-    const a = audioElementRef.current;
-    const v = videoRef.current;
-    if (!a || !v) return;
-    const SEEK_TOLERANCE_S = 0.08;
-    const onPlay = () => {
-      if (v.paused) void v.play().catch(() => {});
-    };
-    const onPause = () => {
-      if (!v.paused) v.pause();
-    };
-    const onSeeked = () => {
-      if (Math.abs(v.currentTime - a.currentTime) > SEEK_TOLERANCE_S) {
-        try {
-          v.currentTime = a.currentTime;
-        } catch {
-          /* metadata not ready yet */
-        }
-      }
-    };
-    const onTimeUpdate = () => {
-      if (a.paused) return;
-      if (Math.abs(v.currentTime - a.currentTime) > 0.25) {
-        try {
-          v.currentTime = a.currentTime;
-        } catch {
-          /* unreachable -- audio is playing so metadata is loaded */
-        }
-      }
-    };
-    a.addEventListener("play", onPlay);
-    a.addEventListener("pause", onPause);
-    a.addEventListener("seeked", onSeeked);
-    a.addEventListener("timeupdate", onTimeUpdate);
-    return () => {
-      a.removeEventListener("play", onPlay);
-      a.removeEventListener("pause", onPause);
-      a.removeEventListener("seeked", onSeeked);
-      a.removeEventListener("timeupdate", onTimeUpdate);
-    };
-    // Re-bind on initialTime change so the audio element swap that
-    // happens on queue-item change reattaches the listeners cleanly.
-  }, [audioElementRef, initialTime]);
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-rule bg-surface-2">
@@ -1015,18 +964,17 @@ function BeepVideoMini({
         </span>
       </div>
       <video
-        ref={videoRef}
+        ref={(el) => {
+          localRef.current = el;
+          videoRef.current = el;
+        }}
         src={api.videoStreamUrl(slug, videoPath)}
-        // ``muted`` because the picker's <audio> element is the source
-        // of truth for sound. Without it the user gets double audio
-        // when the video tracks audio playback.
-        muted
         playsInline
         controls
         preload="metadata"
         className="aspect-video w-full bg-black object-cover"
-        aria-label="Primary cam, full source -- mirrors the picker's playhead"
-        title="Plays in sync with the picker's audio (Space toggles both)"
+        aria-label="Primary cam, full source -- the playback master for both this pane and the waveform"
+        title="Space toggles play/pause"
       />
     </div>
   );

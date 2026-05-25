@@ -1283,7 +1283,7 @@ export interface BeepQueueItem {
   beep_time: number | null;
   beep_confidence: number | null;
   beep_reviewed: boolean;
-  status: "missing" | "low_confidence" | "unreviewed";
+  status: "missing" | "low_confidence" | "unreviewed" | "confirmed";
   alt_candidates: BeepQueueAltCandidate[];
 }
 
@@ -2093,8 +2093,16 @@ export const api = {
   shooterVideoStreamUrl: (slug: string, path: string): string =>
     `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`,
 
-  /** Cross-shooter beep review queue (#326). */
-  getBeepQueue: () => request<BeepQueueResponse>("/api/match/beep-queue"),
+  /** Cross-shooter beep review queue (#326). Pass
+   *  ``includeConfirmed`` to also receive already-reviewed items so
+   *  the operator can revisit a settled beep -- the SPA wires this
+   *  to the "Show confirmed" toggle. */
+  getBeepQueue: (includeConfirmed = false) =>
+    request<BeepQueueResponse>(
+      includeConfirmed
+        ? "/api/match/beep-queue?include_confirmed=true"
+        : "/api/match/beep-queue",
+    ),
 
   /** Confirm one beep in the queue without changing the active
    *  shooter; writes through to the named shooter's project (#326). */
