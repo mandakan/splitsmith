@@ -696,6 +696,7 @@ export function BeepWaveformPicker({
   showFallbackBeepMarker = true,
   instructions,
   ariaLabel,
+  audioElementRef,
 }: {
   slug: string;
   stageNumber: number;
@@ -716,6 +717,13 @@ export function BeepWaveformPicker({
   instructions?: string;
   /** Override the canvas aria-label for screen readers. */
   ariaLabel?: string;
+  /** Optional external handle for the picker's <audio> element. Callers
+   *  that want to mirror the picker's playback elsewhere (e.g. a paired
+   *  video preview) pass this in -- the picker assigns the live element
+   *  to ``current`` so the caller can listen for ``play`` / ``pause`` /
+   *  ``seeked`` / ``timeupdate`` events and act on them. The picker
+   *  still owns its internal ref + playback semantics. */
+  audioElementRef?: { current: HTMLAudioElement | null };
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1005,7 +1013,10 @@ export function BeepWaveformPicker({
         />
       </div>
       <audio
-        ref={audioRef}
+        ref={(el) => {
+          audioRef.current = el;
+          if (audioElementRef) audioElementRef.current = el;
+        }}
         src={api.videoAudioUrl(slug, stageNumber, videoId)}
         preload="metadata"
         onPlay={() => setPlaying(true)}

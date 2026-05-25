@@ -43,7 +43,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type VideoHTMLAttributes,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -493,17 +492,6 @@ function StatusGlyph({
 /* Active detail                                                              */
 /* -------------------------------------------------------------------------- */
 
-// Wraps a <video> with the buffer-release hook so the per-item preview
-// clip doesn't leak decoded frames when the user steps to the next
-// queue item (the parent rerenders with a new src + key).
-function ReleasingPreviewVideo(
-  props: VideoHTMLAttributes<HTMLVideoElement>,
-) {
-  const ref = useRef<HTMLVideoElement | null>(null);
-  useReleaseMediaOnUnmount(ref);
-  return <video ref={ref} {...props} />;
-}
-
 type DetailMode = "idle" | "picking" | "empty";
 
 function ActiveDetail({
@@ -529,6 +517,12 @@ function ActiveDetail({
   useEffect(() => {
     setDraftTime(null);
   }, [item.slug, item.stage_number, item.video_id]);
+
+  // Shared handle on the picker's <audio> element. BeepVideoMini
+  // mirrors its play/pause/seek so Space (which the picker binds to
+  // toggle audio) drives both surfaces in sync against the same
+  // full source timeline.
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
   const mode: DetailMode =
     draftTime != null ? "picking" : item.beep_time == null ? "empty" : "idle";
@@ -686,13 +680,15 @@ function ActiveDetail({
             showFallbackBeepMarker={item.beep_time != null}
             instructions={pickerInstructions}
             ariaLabel={`Beep picker for ${item.shooter_name}, stage ${item.stage_number}`}
+            audioElementRef={audioElementRef}
           />
         </div>
         <BeepVideoMini
+          key={`${item.slug}::${item.stage_number}::${item.video_id}`}
           slug={item.slug}
-          stageNumber={item.stage_number}
-          videoId={item.video_id}
-          previewTime={previewTime}
+          videoPath={item.video_path}
+          initialTime={previewTime}
+          audioElementRef={audioElementRef}
           mode={mode}
         />
       </div>
@@ -907,23 +903,100 @@ function ActiveDetail({
 
 function BeepVideoMini({
   slug,
-  stageNumber,
-  videoId,
-  previewTime,
+  videoPath,
+  initialTime,
+  audioElementRef,
   mode,
 }: {
   slug: string;
-  stageNumber: number;
-  videoId: string;
-  previewTime: number | null;
+  /** Per-stage video path. We serve the full source MP4 (same one the
+   *  audit canvas streams) so the timeline matches the picker's audio
+   *  waveform 1:1 -- the user can scrub anywhere on the waveform and
+   *  see the corresponding frame. The 1s beep-preview clip we used
+   *  initially was too short to verify against. */
+  videoPath: string;
+  /** Time to park the playhead at when the clip first loads (detector
+   *  beep, or the draft if the operator has picked one). */
+  initialTime: number | null;
+  /** Handle on the picker's <audio> element. We mirror its play /
+   *  pause / seek so Space drives both surfaces against the same
+   *  source timeline. */
+  audioElementRef: { current: HTMLAudioElement | null };
   mode: DetailMode;
 }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  useReleaseMediaOnUnmount(videoRef);
   const label =
     mode === "picking"
       ? "ON DRAFT BEEP"
       : mode === "empty"
         ? "NO ANCHOR"
         : "ON DETECTED BEEP";
+
+  // Park the video at ``initialTime`` once metadata lands -- mirrors
+  // the picker's audio init seek.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || initialTime == null) return;
+    const seek = () => {
+      try {
+        v.currentTime = initialTime;
+      } catch {
+        /* metadata not loaded yet -- loadedmetadata listener handles it */
+      }
+    };
+    if (v.readyState >= 1 /* HAVE_METADATA */) seek();
+    else v.addEventListener("loadedmetadata", seek, { once: true });
+    return () => v.removeEventListener("loadedmetadata", seek);
+  }, [initialTime]);
+
+  // Mirror the picker's <audio>: when the user plays / pauses /
+  // seeks on the audio, the video tracks. Tolerance on the seek so
+  // we don't fight ourselves on every rAF tick.
+  useEffect(() => {
+    const a = audioElementRef.current;
+    const v = videoRef.current;
+    if (!a || !v) return;
+    const SEEK_TOLERANCE_S = 0.08;
+    const onPlay = () => {
+      if (v.paused) void v.play().catch(() => {});
+    };
+    const onPause = () => {
+      if (!v.paused) v.pause();
+    };
+    const onSeeked = () => {
+      if (Math.abs(v.currentTime - a.currentTime) > SEEK_TOLERANCE_S) {
+        try {
+          v.currentTime = a.currentTime;
+        } catch {
+          /* metadata not ready yet */
+        }
+      }
+    };
+    const onTimeUpdate = () => {
+      if (a.paused) return;
+      if (Math.abs(v.currentTime - a.currentTime) > 0.25) {
+        try {
+          v.currentTime = a.currentTime;
+        } catch {
+          /* unreachable -- audio is playing so metadata is loaded */
+        }
+      }
+    };
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
+    a.addEventListener("seeked", onSeeked);
+    a.addEventListener("timeupdate", onTimeUpdate);
+    return () => {
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
+      a.removeEventListener("seeked", onSeeked);
+      a.removeEventListener("timeupdate", onTimeUpdate);
+    };
+    // Re-bind on initialTime change so the audio element swap that
+    // happens on queue-item change reattaches the listeners cleanly.
+  }, [audioElementRef, initialTime]);
+
   return (
     <div className="relative overflow-hidden rounded-2xl border border-rule bg-surface-2">
       <div className="flex items-center justify-between border-b border-rule px-3 py-2">
@@ -941,25 +1014,20 @@ function BeepVideoMini({
           {label}
         </span>
       </div>
-      {previewTime != null ? (
-        <ReleasingPreviewVideo
-          key={`${slug}:${stageNumber}:${videoId}:${previewTime.toFixed(3)}`}
-          src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, previewTime)}
-          className="aspect-video w-full bg-black object-cover"
-          playsInline
-          controls
-          preload="metadata"
-          aria-label="Preview clip around the candidate beep"
-          title="1s clip centred on the candidate -- press play to verify before applying"
-        />
-      ) : (
-        <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 text-center text-live">
-          <Crosshair className="size-7 opacity-70" strokeWidth={1.4} />
-          <span className="font-mono text-[0.6875rem] uppercase tracking-[0.18em]">
-            Awaiting beep
-          </span>
-        </div>
-      )}
+      <video
+        ref={videoRef}
+        src={api.videoStreamUrl(slug, videoPath)}
+        // ``muted`` because the picker's <audio> element is the source
+        // of truth for sound. Without it the user gets double audio
+        // when the video tracks audio playback.
+        muted
+        playsInline
+        controls
+        preload="metadata"
+        className="aspect-video w-full bg-black object-cover"
+        aria-label="Primary cam, full source -- mirrors the picker's playhead"
+        title="Plays in sync with the picker's audio (Space toggles both)"
+      />
     </div>
   );
 }
