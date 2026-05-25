@@ -48,6 +48,7 @@ Endpoints (locked v1 surface):
   GET  /api/fixture/peaks?path=...  -- waveform peaks for a fixture's sibling WAV
   GET  /api/fixture/audio?path=...  -- serve the fixture's sibling WAV (Range)
   GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
+  GET  /api/me                      -- current operator (LoopbackAuth user in local mode)
   GET  /api/user/recent-projects    -- recently-opened MatchProject roots (#75)
   POST /api/user/recent-projects/forget -- drop one entry from the list
   POST /api/user/recent-projects/bind   -- switch the in-memory project
@@ -104,6 +105,7 @@ from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
+from ..auth import AuthBackend, LoopbackAuth, User
 from ..config import (
     BeepDetectConfig,
     CoachAutoClassifyConfig,
@@ -567,6 +569,10 @@ class AppState:
     _bound_match_id: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
+    # Auth backend. ``LoopbackAuth`` in local mode (every request
+    # resolves to the same sentinel user); a hosted-mode backend will
+    # be injected here when SaaS lands. See ``splitsmith.auth``.
+    auth: AuthBackend = field(default_factory=LoopbackAuth)
     # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
     # so the /api/shutdown route can ask uvicorn to exit. None under the
     # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
@@ -4223,6 +4229,20 @@ def create_app(
             fn=lambda h, sl=slug, r=reset: _run_shot_detect(h, sl, stage_number, reset=r),
         )
         return JSONResponse(job.model_dump(mode="json"))
+
+    @app.get("/api/me", response_model=User)
+    async def get_me(request: Request) -> User:
+        """Return the operator behind this request.
+
+        Local mode always resolves to the ``LoopbackAuth`` sentinel
+        user (id ``"local"``); hosted mode will resolve cookies to a
+        real database user. The SPA reads this once on mount so the
+        same code path works in both modes.
+        """
+        user = await state.auth.authenticate_request(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="not authenticated")
+        return user
 
     @app.get("/api/me/jobs", response_model=list[Job])
     def list_jobs() -> list[Job]:
