@@ -122,3 +122,69 @@ def test_me_route_coverage_matches_app() -> None:
     covered = {(m, tmpl) for m, tmpl, _ in _ME_ROUTES_REQUIRING_AUTH}
     missing = registered - covered
     assert not missing, f"new /api/me/* routes not covered by the 401 gate test: {sorted(missing)}"
+
+
+# The auth gate middleware sits in front of every /api/* route, not
+# just /api/me/*. Picking a few representative non-/api/me endpoints
+# proves the middleware (rather than per-route Depends) is what does
+# the gating. If the middleware regresses, ``/api/me/*`` would still
+# pass via Depends and only these would fail -- which is the point.
+_NON_ME_AUTHED_ROUTES: list[tuple[str, str]] = [
+    ("GET", "/api/project"),
+    ("GET", "/api/jobs"),
+    ("GET", "/api/fs/list"),
+    ("GET", "/api/stages/1/audit"),
+]
+
+
+@pytest.mark.parametrize("method,url", _NON_ME_AUTHED_ROUTES)
+def test_anonymous_request_gets_401_on_non_me_routes(method: str, url: str) -> None:
+    app = create_app()
+    app.state.splitsmith_state.auth = _AnonymousAuth()
+    client = TestClient(app)
+
+    resp = client.request(method, url)
+
+    assert resp.status_code == 401, (
+        f"{method} {url} returned {resp.status_code}, expected 401 -- "
+        "did the _auth_gate middleware regress?"
+    )
+
+
+# Paths the gate must let through anonymously. Health + features are
+# read before any user is established; ``/api/shutdown`` carries its
+# own loopback gate and answers 202 / 403 on its own terms. The list
+# is duplicated from ``_PUBLIC_API_PATHS`` on purpose -- this test
+# fails loudly if someone trims the allowlist without thinking about
+# what depends on it.
+_PUBLIC_PATHS: list[tuple[str, str]] = [
+    ("GET", "/api/health"),
+    ("GET", "/api/server/features"),
+]
+
+
+@pytest.mark.parametrize("method,url", _PUBLIC_PATHS)
+def test_public_paths_bypass_auth_gate(method: str, url: str) -> None:
+    app = create_app()
+    app.state.splitsmith_state.auth = _AnonymousAuth()
+    client = TestClient(app)
+
+    resp = client.request(method, url)
+
+    # Anything but 401 is fine -- the handler's own response (200,
+    # 4xx, etc.) just proves auth didn't short-circuit it.
+    assert resp.status_code != 401, f"{method} {url} returned 401; the public allowlist should let it through"
+
+
+def test_non_api_paths_bypass_auth_gate() -> None:
+    """SPA static assets (and anything not under /api/*) are served
+    without an auth check -- auth lives at the API layer."""
+    app = create_app()
+    app.state.splitsmith_state.auth = _AnonymousAuth()
+    client = TestClient(app)
+
+    # The SPA may or may not be built in the test env; either way the
+    # auth gate should not be the one rejecting the request.
+    resp = client.get("/")
+
+    assert resp.status_code != 401

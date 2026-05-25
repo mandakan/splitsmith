@@ -496,6 +496,19 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
+# /api/* paths the auth gate lets through without resolving a user.
+# Anything else under /api/* requires ``state.auth.authenticate_request``
+# to return a non-None User -- see the ``_auth_gate`` middleware inside
+# ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
+# prefix, not by this list.
+_PUBLIC_API_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/health",
+        "/api/server/features",
+        "/api/shutdown",
+    }
+)
+
 
 def _is_loopback(request: Request) -> bool:
     """Reject /api/shutdown from non-loopback callers.
@@ -2143,6 +2156,36 @@ def create_app(
         finally:
             current_match_root.reset(root_token)
             current_match_id.reset(id_token)
+
+    # ----------------------------------------------------------------------
+    # Auth gate middleware (saas-readiness step)
+    # ----------------------------------------------------------------------
+    #
+    # Every ``/api/*`` request is resolved through ``state.auth`` before
+    # the route handler runs. ``LoopbackAuth`` always returns a user, so
+    # in local mode this middleware never 401s -- the wiring exists so a
+    # hosted-mode backend can swap in and the 401 path activates without
+    # touching any route. Non-``/api/*`` paths (SPA static, ``/docs``,
+    # ``/openapi.json``) pass through untouched -- auth happens at the
+    # API layer, not the asset layer. The allowlist below names the few
+    # ``/api/*`` endpoints that must stay anonymous: process health and
+    # the feature flag the SPA reads on mount (both are needed before a
+    # user is established) plus ``/api/shutdown`` (which has its own
+    # loopback gate that's stricter than auth).
+    @app.middleware("http")
+    async def _auth_gate(request, call_next):
+        path = request.url.path
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        if path in _PUBLIC_API_PATHS:
+            return await call_next(request)
+        user = await state.auth.authenticate_request(request)
+        if user is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "not authenticated"},
+            )
+        return await call_next(request)
 
     # ----------------------------------------------------------------------
     # API
