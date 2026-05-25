@@ -1,7 +1,13 @@
 /**
  * Beep review queue (/beep-review) -- cross-shooter, grouped by stage (#326).
  *
- * Two-pane per polished/06:
+ * Single home for all per-video beep work (#396). The right-pane detail owns
+ * the real waveform picker + a small video preview around the candidate
+ * beep, so the user never has to jump to Audit to adjust a beep. Audit's
+ * anomaly banner deep-links here via ``?focus=slug::stage::video`` and
+ * the queue opens with that item active.
+ *
+ * Two-pane:
  *
  *   Left -- review list:
  *     - Header card with progress bar (confirmed / pending) + legend
@@ -12,8 +18,12 @@
  *     - Compact stage + shooter + camera summary
  *     - Stage-gating note: shot detection is blocked on this stage until
  *       every shooter's beep is confirmed
- *     - Mini oscilloscope waveform around the detected beep (SVG)
- *     - Detected beep card with Confirm / Adjust / Skip actions
+ *     - Real BeepWaveformPicker fed by per-video peaks + audio
+ *     - Small video preview around the detected (or draft) beep
+ *     - State-driven action card:
+ *         idle    -> Confirm beep
+ *         picking -> Apply & confirm (+ discard-shots warning)
+ *         empty   -> Pick a beep to continue (disabled)
  *     - Side panels: alternative candidates + keyboard reference
  *
  * Mounted under MatchShell so the per-match sidebar carries over.
@@ -22,14 +32,22 @@
 import {
   Check,
   ChevronLeft,
-  ChevronRight,
   Crosshair,
   Loader2,
+  Undo2,
   Volume2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type VideoHTMLAttributes,
+} from "react";
+import { useSearchParams } from "react-router-dom";
 
+import { BeepWaveformPicker } from "@/components/BeepSection";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,16 +56,19 @@ import {
   type BeepQueueItem,
   type BeepQueueResponse,
 } from "@/lib/api";
-import { useMatchHref } from "@/lib/matchHref";
-import { cn } from "@/lib/utils";
+import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 
 export function BeepReview() {
-  const navigate = useNavigate();
-  const href = useMatchHref();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<BeepQueueResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Deep-link from Audit's anomaly banner: ?focus=slug::stage::video.
+  // Honored once on first queue load; cleared from the URL afterwards so
+  // the focus doesn't keep snapping back as the user works the queue.
+  const focusParam = searchParams.get("focus");
+  const focusConsumedRef = useRef(false);
 
   const reload = useCallback(async () => {
     try {
@@ -68,27 +89,60 @@ export function BeepReview() {
     [data],
   );
 
-  // Pick the first pending if nothing's selected.
+  // Pick the first pending if nothing's selected -- or the deep-link
+  // target if ?focus=slug::stage::video matches a pending item.
   useEffect(() => {
-    if (!activeKey && flatItems.length > 0) {
-      setActiveKey(keyOf(flatItems[0]));
+    if (activeKey || flatItems.length === 0) return;
+    if (focusParam && !focusConsumedRef.current) {
+      focusConsumedRef.current = true;
+      const match = flatItems.find((it) => keyOf(it) === focusParam);
+      if (match) {
+        setActiveKey(focusParam);
+        const next = new URLSearchParams(searchParams);
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+        return;
+      }
+      // Item not in the queue (already confirmed, missing, or wrong
+      // slug). Fall through to the first-pending default and surface a
+      // note so the user knows their link didn't land where they aimed.
+      setError(
+        `Beep ${focusParam} isn't in the queue right now -- it may already be confirmed or have been removed.`,
+      );
+      const next = new URLSearchParams(searchParams);
+      next.delete("focus");
+      setSearchParams(next, { replace: true });
     }
-  }, [flatItems, activeKey]);
+    setActiveKey(keyOf(flatItems[0]));
+  }, [flatItems, activeKey, focusParam, searchParams, setSearchParams]);
 
   const active = activeKey
     ? flatItems.find((it) => keyOf(it) === activeKey) ?? null
     : null;
 
+  // Single confirm path: when ``draftTime`` is provided we first push it
+  // through the per-video override endpoint (sets source=manual, fires
+  // the trim + shot-detect re-run chain, discarding stale processed
+  // state), then mark the queue item reviewed. The detector candidate
+  // path (no draft) just marks reviewed, no chain to re-run.
   const confirm = useCallback(
-    async (item: BeepQueueItem, alt?: number) => {
+    async (item: BeepQueueItem, draftTime?: number) => {
       setBusy(true);
       try {
+        if (draftTime != null) {
+          await api.overrideBeepForVideo(
+            item.slug,
+            item.stage_number,
+            item.video_id,
+            draftTime,
+          );
+        }
         const next = await api.confirmBeepInQueue({
           slug: item.slug,
           stage_number: item.stage_number,
           video_id: item.video_id,
-          time: alt ?? null,
-          source: alt != null ? "manual" : "detected",
+          time: draftTime ?? null,
+          source: draftTime != null ? "manual" : "detected",
         });
         setData(next);
         // Move to next pending item in the same stage if any, else next overall.
@@ -215,12 +269,11 @@ export function BeepReview() {
           <ActiveDetail
             item={active}
             busy={busy}
-            onConfirm={() => void confirm(active)}
-            onConfirmAlt={(t) => void confirm(active, t)}
-            onSkip={skip}
-            onOpenAudit={() =>
-              navigate(href("audit", active.slug, String(active.stage_number)))
+            onConfirm={(draftTime) =>
+              void confirm(active, draftTime ?? undefined)
             }
+            onSkip={skip}
+            onError={setError}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-center text-sm text-muted">
@@ -439,23 +492,96 @@ function StatusGlyph({
 /* Active detail                                                              */
 /* -------------------------------------------------------------------------- */
 
+// Wraps a <video> with the buffer-release hook so the per-item preview
+// clip doesn't leak decoded frames when the user steps to the next
+// queue item (the parent rerenders with a new src + key).
+function ReleasingPreviewVideo(
+  props: VideoHTMLAttributes<HTMLVideoElement>,
+) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useReleaseMediaOnUnmount(ref);
+  return <video ref={ref} {...props} />;
+}
+
+type DetailMode = "idle" | "picking" | "empty";
+
 function ActiveDetail({
   item,
   busy,
   onConfirm,
-  onConfirmAlt,
   onSkip,
-  onOpenAudit,
+  onError,
 }: {
   item: BeepQueueItem;
   busy: boolean;
-  onConfirm: () => void;
-  onConfirmAlt: (t: number) => void;
+  /** ``draftTime`` is the operator's manually-picked beep time (null
+   *  when confirming the detector's candidate as-is). When set, the
+   *  parent fires the override + re-trim chain before marking reviewed. */
+  onConfirm: (draftTime: number | null) => void;
   onSkip: () => void;
-  onOpenAudit: () => void;
+  onError: (msg: string | null) => void;
 }) {
+  // Reset the draft whenever the active item changes. The key forces
+  // BeepWaveformPicker to remount so its internal audio element + peaks
+  // load against the new video instead of the previous one's state.
+  const [draftTime, setDraftTime] = useState<number | null>(null);
+  useEffect(() => {
+    setDraftTime(null);
+  }, [item.slug, item.stage_number, item.video_id]);
+
+  const mode: DetailMode =
+    draftTime != null ? "picking" : item.beep_time == null ? "empty" : "idle";
+
+  // The preview MP4 centres on whichever time is "live": the draft when
+  // the operator has picked one, otherwise the detector's candidate.
+  // When there's no beep at all (empty mode) we have nothing to centre
+  // on, so the preview is suppressed and replaced with a hint.
+  const previewTime = draftTime ?? item.beep_time;
+  const detectedSeconds = item.beep_time;
+  const delta =
+    draftTime != null && detectedSeconds != null
+      ? draftTime - detectedSeconds
+      : null;
+
+  const handleConfirm = useCallback(() => {
+    if (mode === "empty") return;
+    onConfirm(draftTime);
+  }, [mode, draftTime, onConfirm]);
+
+  // Keyboard:
+  //   Enter -> confirm (with or without draft, gated by mode)
+  //   U     -> revert draft
+  //   S     -> skip
+  //   J/K / ↓/↑ are handled at the page level for next/prev item
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (
+        e.target instanceof HTMLElement &&
+        (e.target.tagName === "INPUT" ||
+          e.target.tagName === "TEXTAREA" ||
+          e.target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "Enter" && !busy && mode !== "empty") {
+        e.preventDefault();
+        handleConfirm();
+      } else if ((e.key === "u" || e.key === "U") && draftTime != null) {
+        e.preventDefault();
+        setDraftTime(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, mode, draftTime, handleConfirm]);
+
+  const pickerInstructions =
+    mode === "empty"
+      ? "Click the waveform where the beep should be. Trim + shot detection won't run on this video until a beep is set."
+      : "Click the waveform to set a new beep, or confirm the detector's candidate as-is.";
+
   return (
-    <div className="flex max-w-[1100px] flex-col gap-5">
+    <div className="flex max-w-[1280px] flex-col gap-5">
       {/* Detail head */}
       <div className="flex flex-wrap items-center gap-3 border-b border-rule pb-3 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
         <span className="font-bold text-ink-2">
@@ -465,33 +591,75 @@ function ActiveDetail({
           <ShooterDot initials={initials(item.shooter_name)} slug={item.slug} />
           <span className="text-ink-2">{item.shooter_name}</span>
         </span>
-        <span className="text-subtle">Camera A &middot; primary</span>
-        <button
-          type="button"
-          onClick={onOpenAudit}
-          className="ml-auto inline-flex items-center gap-1.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
+        <span className="text-subtle">Primary camera</span>
+        <span
+          className={cn(
+            "ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[0.625rem] tracking-[0.12em]",
+            mode === "picking"
+              ? "border-led/60 bg-led/[0.08] text-led"
+              : mode === "empty"
+                ? "border-live/50 bg-live/[0.08] text-live"
+                : "border-rule-strong bg-surface-2 text-muted",
+          )}
         >
-          Open in audit <ChevronRight className="size-3" />
-        </button>
+          {mode === "picking"
+            ? "• unsaved draft"
+            : mode === "empty"
+              ? "• awaiting input"
+              : "· clean"}
+        </span>
       </div>
 
-      <div>
-        <Kicker className="mb-2">Beep review &middot; current</Kicker>
-        <h1 className="mb-2 font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink">
-          Confirm the beep
-        </h1>
-        <p className="max-w-xl text-sm text-muted">
-          {item.beep_time != null
-            ? `Detector found ${item.status === "low_confidence" ? "a low-confidence" : "a"} candidate at ${item.beep_time.toFixed(3)}s. Verify the marker lands on the beep before shot detection runs.`
-            : "No beep was detected on this video. Open the audit page to set it manually."}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Kicker className="mb-2">Beep review &middot; current</Kicker>
+          <h1 className="mb-2 font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink">
+            {mode === "picking"
+              ? "Pick the new beep"
+              : mode === "empty"
+                ? "No beep detected"
+                : "Confirm the beep"}
+          </h1>
+          <p className="max-w-2xl text-sm text-muted">
+            {mode === "picking" && draftTime != null ? (
+              <>
+                Draft set to{" "}
+                <b className="font-mono text-led tabular-nums">
+                  {draftTime.toFixed(3)}s
+                </b>
+                . Applying will discard any kept shots on this stage and
+                re-run trim + shot detection on the new beep.
+              </>
+            ) : mode === "empty" ? (
+              <>
+                The detector didn&apos;t find a beep on this video. Click
+                the waveform where the beep should be -- trim and shot
+                detection won&apos;t run on this video until a beep is
+                set.
+              </>
+            ) : (
+              <>
+                Detector found{" "}
+                {item.status === "low_confidence"
+                  ? "a low-confidence"
+                  : "a"}{" "}
+                candidate at{" "}
+                <b className="font-mono text-ink-2 tabular-nums">
+                  {detectedSeconds!.toFixed(3)}s
+                </b>
+                . Verify the marker lands on the beep, or click the
+                waveform to pick a different one.
+              </>
+            )}
+          </p>
+        </div>
       </div>
 
       <div className="flex items-start gap-3 rounded-xl border border-live/40 bg-live/[0.08] px-4 py-3 text-[0.8125rem] text-ink-2">
         <Crosshair className="mt-0.5 size-4 shrink-0 text-live" />
         <div>
           <b className="font-bold text-live">
-            Stage {pad2(item.stage_number)} is gated on every shooter's
+            Stage {pad2(item.stage_number)} is gated on every shooter&apos;s
             beep being confirmed
           </b>{" "}
           before shot detection runs. Confirming the queue clears the
@@ -499,67 +667,174 @@ function ActiveDetail({
         </div>
       </div>
 
-      {/* Mini oscilloscope */}
-      {item.beep_time != null && <MiniScope item={item} />}
+      {/* Real waveform picker + small video preview. The picker remounts
+          on item change via its key prop so the audio element resets and
+          peaks reload against the new video. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="overflow-hidden rounded-2xl border border-rule bg-surface-2 p-3">
+          <BeepWaveformPicker
+            key={`${item.slug}::${item.stage_number}::${item.video_id}`}
+            slug={item.slug}
+            stageNumber={item.stage_number}
+            videoId={item.video_id}
+            videoBeepTime={item.beep_time}
+            draftSourceTime={draftTime}
+            onPick={(t) => setDraftTime(t)}
+            setError={onError}
+            snapEnabled={false}
+            showFallbackBeepMarker={item.beep_time != null}
+            instructions={pickerInstructions}
+            ariaLabel={`Beep picker for ${item.shooter_name}, stage ${item.stage_number}`}
+          />
+        </div>
+        <BeepVideoMini
+          slug={item.slug}
+          stageNumber={item.stage_number}
+          videoId={item.video_id}
+          previewTime={previewTime}
+          mode={mode}
+        />
+      </div>
 
-      {/* Two-col bottom */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_320px]">
-        {/* Primary card */}
-        <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface px-5 py-4">
-          <div className="mb-3 flex items-center gap-3">
-            <span className="inline-flex size-11 items-center justify-center rounded-full bg-beep/10 text-beep">
-              <Volume2 className="size-5" />
+      {/* Action card + alt candidates */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div
+          className={cn(
+            "overflow-hidden rounded-2xl border bg-surface px-5 py-4",
+            mode === "picking"
+              ? "border-led-deep"
+              : mode === "empty"
+                ? "border-live/40"
+                : "border-rule-strong",
+          )}
+        >
+          <div className="mb-3 flex flex-wrap items-center gap-4">
+            <span
+              className={cn(
+                "inline-flex size-10 items-center justify-center rounded-full",
+                mode === "picking"
+                  ? "bg-led/10 text-led"
+                  : mode === "empty"
+                    ? "bg-live/10 text-live"
+                    : "bg-beep/10 text-beep",
+              )}
+            >
+              <Volume2 className="size-4.5" />
             </span>
-            <div>
-              <div className="font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
-                Detected beep
+            <div className="flex flex-1 flex-wrap items-baseline gap-4">
+              <div>
+                <Kicker>{mode === "picking" ? "Detected" : mode === "empty" ? "Detected" : "Detected beep"}</Kicker>
+                <div
+                  className={cn(
+                    "font-mono text-xl font-bold leading-none tabular-nums",
+                    mode === "empty" ? "text-live" : "text-ink",
+                  )}
+                >
+                  {detectedSeconds != null
+                    ? `${detectedSeconds.toFixed(3)}s`
+                    : "———"}
+                </div>
               </div>
-              <div className="font-mono text-2xl font-bold tabular-nums text-ink">
-                {item.beep_time != null ? `${item.beep_time.toFixed(3)}s` : "--"}
-              </div>
-              <div className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted tabular-nums">
-                {item.beep_confidence != null
-                  ? `${item.beep_confidence.toFixed(2)} confidence · ${
-                      item.beep_confidence >= 0.85
-                        ? "high"
-                        : item.beep_confidence >= 0.6
-                          ? "medium"
-                          : "low"
-                    }`
-                  : item.status === "missing"
-                    ? "missing"
-                    : "no detector confidence"}
+              {mode === "picking" && draftTime != null ? (
+                <>
+                  <span className="font-mono text-base text-subtle">→</span>
+                  <div>
+                    <Kicker className="text-led">Draft</Kicker>
+                    <div className="font-mono text-xl font-bold leading-none text-led tabular-nums">
+                      {draftTime.toFixed(3)}s
+                    </div>
+                  </div>
+                </>
+              ) : null}
+              <div className="ml-auto text-right">
+                <Kicker>
+                  {mode === "picking" ? "Delta" : mode === "empty" ? "Status" : "Confidence"}
+                </Kicker>
+                <div
+                  className={cn(
+                    "font-mono text-[0.8125rem] tabular-nums",
+                    mode === "empty" ? "text-live" : "text-ink-2",
+                  )}
+                >
+                  {mode === "picking" && delta != null
+                    ? `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}s`
+                    : mode === "empty"
+                      ? "awaiting input"
+                      : item.beep_confidence != null
+                        ? `${item.beep_confidence.toFixed(2)} · ${
+                            item.beep_confidence >= 0.85
+                              ? "high"
+                              : item.beep_confidence >= 0.6
+                                ? "medium"
+                                : "low"
+                          }`
+                        : "—"}
+                </div>
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={onConfirm}
-              disabled={busy || item.beep_time == null}
-              className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
-            >
-              <Check className="size-3.5" strokeWidth={3} />
-              <span className="font-display uppercase tracking-[0.08em]">
-                Confirm beep
+
+          {mode === "picking" ? (
+            <div className="mb-3 flex items-start gap-2.5 rounded-md border border-live/40 bg-live/[0.08] px-3 py-2 text-[0.8125rem] text-ink-2">
+              <span
+                aria-hidden
+                className="mt-px inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-live/60 bg-live/10 font-mono text-[0.625rem] font-bold text-live"
+              >
+                !
               </span>
-              <kbd className="ml-1.5 rounded border border-current/40 px-1 font-mono text-[0.625rem]">
-                Enter
-              </kbd>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onOpenAudit}
-              title="Open this stage in audit to fine-tune"
-            >
-              <span className="font-display uppercase tracking-[0.08em]">
-                Adjust in audit
+              <span>
+                Applying will discard any kept shots on this stage and
+                re-run trim + shot detection. The queue moves on once
+                the chain completes.
               </span>
-              <kbd className="ml-1.5 rounded border border-current/40 px-1 font-mono text-[0.625rem]">
-                A
-              </kbd>
-            </Button>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {mode === "empty" ? (
+              <Button
+                type="button"
+                disabled
+                variant="outline"
+                title="Click the waveform to pick a beep"
+              >
+                <Check className="size-3.5" strokeWidth={3} />
+                <span className="font-display uppercase tracking-[0.08em]">
+                  Pick a beep to continue
+                </span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={handleConfirm}
+                disabled={busy}
+                className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
+              >
+                <Check className="size-3.5" strokeWidth={3} />
+                <span className="font-display uppercase tracking-[0.08em]">
+                  {mode === "picking" ? "Apply & confirm" : "Confirm beep"}
+                </span>
+                <kbd className="ml-1.5 rounded border border-current/40 px-1 font-mono text-[0.625rem]">
+                  Enter
+                </kbd>
+              </Button>
+            )}
+            {draftTime != null ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDraftTime(null)}
+                title="Discard the draft and revert to the detector's candidate"
+              >
+                <Undo2 className="size-3.5" />
+                <span className="font-display uppercase tracking-[0.08em]">
+                  Revert draft
+                </span>
+                <kbd className="ml-1.5 rounded border border-current/40 px-1 font-mono text-[0.625rem]">
+                  U
+                </kbd>
+              </Button>
+            ) : null}
             <Button type="button" variant="ghost" onClick={onSkip}>
               Skip
               <kbd className="ml-1.5 rounded border border-current/40 px-1 font-mono text-[0.625rem]">
@@ -569,8 +844,8 @@ function ActiveDetail({
           </div>
           <p className="mt-3 text-[0.75rem] text-muted">
             Skipping leaves this beep pending. You can come back to it;
-            shot detection will not start for this stage until all beeps
-            are confirmed.
+            shot detection won&apos;t start for this stage until all
+            beeps are confirmed.
           </p>
         </div>
 
@@ -598,7 +873,7 @@ function ActiveDetail({
                   </div>
                   <button
                     type="button"
-                    onClick={() => onConfirmAlt(alt.time)}
+                    onClick={() => setDraftTime(alt.time)}
                     className="rounded-md border border-rule bg-surface-3 px-3 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-ink-2 hover:border-led hover:bg-led/10 hover:text-led"
                   >
                     Use this
@@ -609,7 +884,11 @@ function ActiveDetail({
           </SidePanel>
           <SidePanel title="Keyboard">
             <div className="flex flex-col gap-1 px-3 py-2 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-              <KbdRow what="Confirm" keys={["Enter"]} />
+              <KbdRow
+                what={mode === "picking" ? "Apply" : mode === "empty" ? "Pick beep" : "Confirm"}
+                keys={mode === "empty" ? ["click waveform"] : ["Enter"]}
+              />
+              <KbdRow what="Revert draft" keys={["U"]} />
               <KbdRow what="Skip" keys={["S"]} />
               <KbdRow what="Next" keys={["↓", "J"]} />
               <KbdRow what="Prev" keys={["↑", "K"]} />
@@ -617,6 +896,65 @@ function ActiveDetail({
           </SidePanel>
         </div>
       </div>
+    </div>
+  );
+}
+
+function BeepVideoMini({
+  slug,
+  stageNumber,
+  videoId,
+  previewTime,
+  mode,
+}: {
+  slug: string;
+  stageNumber: number;
+  videoId: string;
+  previewTime: number | null;
+  mode: DetailMode;
+}) {
+  const label =
+    mode === "picking"
+      ? "ON DRAFT BEEP"
+      : mode === "empty"
+        ? "NO ANCHOR"
+        : "ON DETECTED BEEP";
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-rule bg-surface-2">
+      <div className="flex items-center justify-between border-b border-rule px-3 py-2">
+        <Kicker>Preview &middot; primary cam</Kicker>
+        <span
+          className={cn(
+            "font-mono text-[0.625rem] uppercase tracking-[0.12em]",
+            mode === "picking"
+              ? "text-led"
+              : mode === "empty"
+                ? "text-live"
+                : "text-beep",
+          )}
+        >
+          {label}
+        </span>
+      </div>
+      {previewTime != null ? (
+        <ReleasingPreviewVideo
+          key={`${slug}:${stageNumber}:${videoId}:${previewTime.toFixed(3)}`}
+          src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, previewTime)}
+          className="aspect-video w-full bg-black object-cover"
+          playsInline
+          controls
+          preload="metadata"
+          aria-label="Preview clip around the candidate beep"
+          title="1s clip centred on the candidate -- press play to verify before applying"
+        />
+      ) : (
+        <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 text-center text-live">
+          <Crosshair className="size-7 opacity-70" strokeWidth={1.4} />
+          <span className="font-mono text-[0.6875rem] uppercase tracking-[0.18em]">
+            Awaiting beep
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -652,90 +990,6 @@ function KbdRow({ what, keys }: { what: string; keys: string[] }) {
           </kbd>
         ))}
       </span>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Mini oscilloscope                                                          */
-/* -------------------------------------------------------------------------- */
-
-function MiniScope({ item: _item }: { item: BeepQueueItem }) {
-  // We don't have audio peaks here; render the polished design's
-  // schematic envelope around the beep. The mini scope is informational
-  // -- "Adjust in audit" jumps the user to the full waveform.
-  const W = 1000;
-  const H = 110;
-  const beepX = W * 0.475;
-  return (
-    <div className="overflow-hidden rounded-xl border border-rule bg-bg-glow">
-      <div className="flex items-center justify-between border-b border-rule px-4 py-2 text-xs">
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          Waveform · near detected beep
-        </span>
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-          schematic preview
-        </span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="env-beep" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-beep)" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="var(--color-beep)" stopOpacity="0.05" />
-          </linearGradient>
-        </defs>
-        <line
-          x1="0"
-          y1={H / 2}
-          x2={W}
-          y2={H / 2}
-          stroke="var(--color-rule-strong)"
-          strokeWidth={0.5}
-          strokeDasharray="2 3"
-        />
-        <path
-          d={`M0 ${H / 2} L${beepX - 30} ${H / 2 - 1} L${beepX - 10} 30 L${beepX} 70 L${beepX + 5} 22 L${beepX + 10} 78 L${beepX + 15} 28 L${beepX + 25} ${H / 2 + 1} L${W} ${H / 2}`}
-          fill="url(#env-beep)"
-          stroke="var(--color-beep)"
-          strokeWidth={0.7}
-        />
-        <line
-          x1={beepX}
-          y1={0}
-          x2={beepX}
-          y2={H}
-          stroke="var(--color-beep)"
-          strokeWidth={2.5}
-          strokeDasharray="6 3"
-        />
-        <rect x={beepX - 30} y={2} width={60} height={16} rx={4} fill="var(--color-beep)" />
-        <text
-          x={beepX}
-          y={14}
-          textAnchor="middle"
-          fill="var(--color-bg)"
-          fontFamily="JetBrains Mono"
-          fontSize={9}
-          fontWeight={700}
-        >
-          BEEP
-        </text>
-      </svg>
-      <div className="grid grid-cols-7 gap-0 px-4 py-1.5 font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-subtle">
-        {["-1.5s", "-1.0s", "-0.5s", "BEEP", "+0.5s", "+1.0s", "+1.5s"].map(
-          (l, i) => (
-            <span
-              key={l}
-              className={cn(
-                "text-center",
-                i === 3 && "font-bold text-beep",
-              )}
-            >
-              {l}
-            </span>
-          ),
-        )}
-      </div>
     </div>
   );
 }
