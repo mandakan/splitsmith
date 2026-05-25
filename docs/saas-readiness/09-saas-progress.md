@@ -50,11 +50,19 @@ abstraction without behavioural change.
   (`/api/health`, `/api/server/features`, `/api/shutdown`). In
   local mode `LoopbackAuth` never 401s; the wiring activates when
   a hosted backend swaps in.
-- [ ] Extract `ComputeBackend` interface; wrap today's ensemble
+- [~] Extract `ComputeBackend` interface; wrap today's ensemble
   pipeline as `LocalComputeBackend`. The orchestration in
   `cli.py` and the FastAPI server call the backend, not the
   ensemble directly.
-  (See 04-compute-backends.md.)
+  (See 04-compute-backends.md.) Protocol + `LocalComputeBackend`
+  shipped; `state.compute` wired in `create_app`; the shot-
+  detect worker (per-stage + bulk) goes through
+  `state.compute.detect_stage`. CLI orchestration (``splitsmith
+  cli.py``) and `splitsmith.mcp.detect_tools` still call the
+  ensemble directly. Auxiliary endpoints that use the runtime
+  for non-detect purposes (CLAP probes for promote-secondary,
+  calibrated-camera-models) keep direct runtime access until the
+  Protocol exposes those methods.
 - [ ] Add a `splitsmith serve` entry point alongside `splitsmith ui`.
   Same code; different mode wiring at startup.
 - [ ] Add `docker compose` for hosted-mode dev (Postgres + LocalStack
