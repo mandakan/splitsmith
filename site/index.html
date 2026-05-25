@@ -784,6 +784,12 @@ h1.title .accent {
    margin on the snippet container -- gaps come from .snippet + .snippet. */
 .snippet { position: relative; }
 .snippet + .snippet { margin-top: 14px; }
+.snippet-alt {
+  margin: 28px 0 10px;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
 pre.quickstart {
   margin: 0;
   background: var(--surface);
@@ -1170,23 +1176,49 @@ footer.colophon {
     </div>
 
     <div class="snippet">
-<pre class="quickstart" data-copy="git clone https://github.com/mandakan/splitsmith.git
-cd splitsmith
-uv sync
-(cd src/splitsmith/ui_static && pnpm install && pnpm build)"><span class="comment"># Clone, sync, build the UI</span>
-<span class="prompt">$</span> <span class="kw">git</span> clone https://github.com/mandakan/splitsmith.git
-<span class="prompt">$</span> <span class="kw">cd</span> splitsmith
-<span class="prompt">$</span> <span class="kw">uv</span> sync
-<span class="prompt">$</span> (<span class="kw">cd</span> src/splitsmith/ui_static &amp;&amp; pnpm install &amp;&amp; pnpm build)</pre>
+<pre class="quickstart" data-copy="uv tool install splitsmith
+splitsmith ui"><span class="comment"># Install from PyPI and launch the UI</span>
+<span class="prompt">$</span> <span class="kw">uv</span> tool install splitsmith
+<span class="prompt">$</span> <span class="kw">splitsmith</span> ui</pre>
       <button class="copy-btn" type="button" aria-label="Copy commands">
         <span class="copy-label">Copy</span>
       </button>
     </div>
 
+    <p class="snippet-alt">Prefer the CLI? Run the full pipeline on a single clip:</p>
+
     <div class="snippet">
-<pre class="quickstart" data-copy="uv run splitsmith ui"><span class="comment"># Launch the UI and create your first match from the picker</span>
+<pre class="quickstart" data-copy="splitsmith single \
+    --video path/to/your_stage.mp4 \
+    --time 14.74 \
+    --output ./demo_analysis \
+    --stage-name &quot;Per told me to do it&quot; \
+    --stage-number 3"><span class="comment"># One-shot pipeline: detect shots, write report + FCPXML</span>
+<span class="prompt">$</span> <span class="kw">splitsmith</span> single \
+    --video path/to/your_stage.mp4 \
+    --time 14.74 \
+    --output ./demo_analysis \
+    --stage-name "Per told me to do it" \
+    --stage-number 3</pre>
+      <button class="copy-btn" type="button" aria-label="Copy commands">
+        <span class="copy-label">Copy</span>
+      </button>
+    </div>
+
+    <p class="snippet-alt">Building from source instead? Clone, sync, and build the UI:</p>
+
+    <div class="snippet">
+<pre class="quickstart" data-copy="git clone https://github.com/mandakan/splitsmith.git
+cd splitsmith
+uv sync
+(cd src/splitsmith/ui_static && pnpm install && pnpm build)
+uv run splitsmith ui"><span class="comment"># Source checkout -- contributors / latest main</span>
+<span class="prompt">$</span> <span class="kw">git</span> clone https://github.com/mandakan/splitsmith.git
+<span class="prompt">$</span> <span class="kw">cd</span> splitsmith
+<span class="prompt">$</span> <span class="kw">uv</span> sync
+<span class="prompt">$</span> (<span class="kw">cd</span> src/splitsmith/ui_static &amp;&amp; pnpm install &amp;&amp; pnpm build)
 <span class="prompt">$</span> <span class="kw">uv</span> run splitsmith ui</pre>
-      <button class="copy-btn" type="button" aria-label="Copy command">
+      <button class="copy-btn" type="button" aria-label="Copy commands">
         <span class="copy-label">Copy</span>
       </button>
     </div>
