@@ -70,6 +70,20 @@ export function BeepReview() {
   const focusParam = searchParams.get("focus");
   const focusConsumedRef = useRef(false);
 
+  // The sidebar link we just clicked is still the focused element on
+  // mount; the focus ring lingers and the next Space press wants to
+  // activate it (and would, if our shortcut hook didn't preventDefault).
+  // Blur it once so the ring goes away and Space reads like a global
+  // shortcut. Audit happens to dodge this because the operator usually
+  // clicks the waveform / video before hitting Space, moving focus
+  // off the nav -- we just do it explicitly here.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) {
+      active.blur();
+    }
+  }, []);
+
   const reload = useCallback(async () => {
     try {
       const q = await api.getBeepQueue();
