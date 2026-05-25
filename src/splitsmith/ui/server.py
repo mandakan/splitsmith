@@ -106,6 +106,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..auth import AuthBackend, LoopbackAuth, User
+from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
     CoachAutoClassifyConfig,
@@ -586,6 +587,14 @@ class AppState:
     # resolves to the same sentinel user); a hosted-mode backend will
     # be injected here when SaaS lands. See ``splitsmith.auth``.
     auth: AuthBackend = field(default_factory=LoopbackAuth)
+    # Compute backend. ``LocalComputeBackend`` runs the shot-detection
+    # ensemble in this process; a hosted ``RemoteComputeBackend`` will
+    # ship audio to a cloud worker. See ``splitsmith.compute`` and
+    # ``docs/saas-readiness/04-compute-backends.md``. The default uses
+    # ``load_ensemble_runtime`` directly; ``create_app`` overrides this
+    # with one wired to the local ``_get_ensemble_runtime`` so test
+    # monkeypatches and the shared model cache still work.
+    compute: ComputeBackend = field(default_factory=LocalComputeBackend)
     # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
     # so the /api/shutdown route can ask uvicorn to exit. None under the
     # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
@@ -2038,6 +2047,14 @@ def create_app(
     nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
     """
     state = AppState()
+    # Route the compute backend through the module-level lazy loader so
+    # the shared cache + existing test monkeypatches on
+    # ``_get_ensemble_runtime`` still apply. The lambda re-resolves the
+    # name on every call so ``monkeypatch.setattr(server, "_get_ensemble_runtime", ...)``
+    # in tests takes effect even though the backend was constructed
+    # before the patch ran. When the hosted backend lands this swap
+    # point is where the picker would inject a ``RemoteComputeBackend``.
+    state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
     # Populate the match-id registry from recent projects so id -> path
     # lookups resolve without waiting for a picker bind. Cheap (one
     # match.json read per recent entry; legacy projects are skipped).
@@ -4077,8 +4094,6 @@ def create_app(
                 expected_rounds = raw
 
         handle.update(progress=0.2, message="Loading ensemble models...")
-        runtime = _get_ensemble_runtime()
-
         handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
         audio_array, sr = beep_detect.load_audio(audit.audio_path)
         # Camera-class dispatch (issue #143). When the primary's mount
@@ -4091,12 +4106,11 @@ def create_app(
         # AND the source video to be reachable.
         enable_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
         ensemble_cfg = ensemble_module.EnsembleConfig(enable_voter_e=enable_e)
-        result = ensemble_module.detect_shots_ensemble(
-            audio_array,
-            sr,
-            beep_in_clip,
-            stg.time_seconds,
-            runtime,
+        result = state.compute.detect_stage(
+            audio=audio_array,
+            sample_rate=sr,
+            beep_time_in_clip=beep_in_clip,
+            stage_time_seconds=stg.time_seconds,
             expected_rounds=expected_rounds,
             ensemble_config=ensemble_cfg,
             camera_class=cam_class,
