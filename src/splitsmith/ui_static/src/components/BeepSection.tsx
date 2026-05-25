@@ -50,6 +50,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Waveform } from "@/components/Waveform";
+import { useSpacePlayPause } from "@/lib/keyboard";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import {
   ApiError,
@@ -834,6 +835,13 @@ export function BeepWaveformPicker({
       el.pause();
     }
   }, []);
+
+  // Window-level Space → toggle so the user can audition the beep
+  // even when focus is parked on a sidebar link or a queue row
+  // (the common path: click an item, hit Space). Gated by the picker
+  // actually having peaks loaded so Space falls through to the
+  // browser default while the picker is in its empty / loading state.
+  useSpacePlayPause(togglePlay, peaks != null);
 
   // Click / drag = seek audio AND set the marker. Marker and the
   // numeric input both read from the draft state in the parent, so they

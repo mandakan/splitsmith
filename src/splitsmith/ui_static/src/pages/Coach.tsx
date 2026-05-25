@@ -52,6 +52,7 @@ import {
   type CoachStageResponse,
   type MatchProject,
 } from "@/lib/api";
+import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
@@ -1095,6 +1096,10 @@ function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
     if (v.paused) void v.play().catch(() => {});
     else v.pause();
   }, []);
+  // Space toggles play/pause from anywhere on the page (focus on a
+  // shot row, nav link, etc) so the user doesn't have to click the
+  // video first.
+  useSpacePlayPause(togglePlay);
 
   if (error) {
     return (
