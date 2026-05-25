@@ -679,8 +679,8 @@ function ActiveDetail({
       {/* Real waveform picker + small video preview. The picker remounts
           on item change via its key prop so the audio element resets and
           peaks reload against the new video. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="overflow-hidden rounded-2xl border border-rule bg-surface-2 p-3">
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="flex flex-col overflow-hidden rounded-2xl border border-rule bg-surface-2 p-3">
           <BeepWaveformPicker
             key={`${item.slug}::${item.stage_number}::${item.video_id}`}
             slug={item.slug}
@@ -695,6 +695,7 @@ function ActiveDetail({
             instructions={pickerInstructions}
             ariaLabel={`Beep picker for ${item.shooter_name}, stage ${item.stage_number}`}
             externalMediaRef={videoRef}
+            fillHeight
           />
         </div>
         <BeepVideoMini
@@ -708,7 +709,7 @@ function ActiveDetail({
       </div>
 
       {/* Action card + alt candidates */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_420px]">
         <div
           className={cn(
             "overflow-hidden rounded-2xl border bg-surface px-5 py-4",

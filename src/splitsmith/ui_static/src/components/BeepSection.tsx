@@ -697,6 +697,7 @@ export function BeepWaveformPicker({
   instructions,
   ariaLabel,
   externalMediaRef,
+  fillHeight = false,
 }: {
   slug: string;
   stageNumber: number;
@@ -726,6 +727,10 @@ export function BeepWaveformPicker({
    *  videoAudioUrl(...)> as before -- StageTimeSection relies on
    *  that path. */
   externalMediaRef?: { current: HTMLAudioElement | HTMLVideoElement | null };
+  /** Grow the waveform vertically (200 px instead of 80 px) so the
+   *  picker box fills the row when paired with a taller sibling like
+   *  BeepReview's <video aspect-video>. */
+  fillHeight?: boolean;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1038,7 +1043,7 @@ export function BeepWaveformPicker({
           onScrubEnd={handleScrubEnd}
           beepTime={markerLocal}
           pixelsPerSecond={pxPerSec}
-          height={80}
+          height={fillHeight ? 200 : 80}
           ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
         />
       </div>
@@ -1068,29 +1073,36 @@ export function BeepWaveformPicker({
           className="w-full"
         />
       )}
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={togglePlay}
-          title="Play / pause the audio"
-        >
-          {playing ? <Pause /> : <Play />}
-          {playing ? "Pause" : "Play"}
-        </Button>
-        {snapEnabled ? (
+      {/* Play / Snap buttons live in this row only when the picker
+          owns its own <audio>. When the parent passes an external
+          media element (e.g. BeepReview's <video controls>), the
+          play affordance + Space toggle already exist on that
+          element -- a redundant button row just eats vertical space. */}
+      {externalMediaRef ? null : (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
             size="sm"
-            variant="default"
-            onClick={() => void requestSnap()}
-            disabled={draftSourceTime == null || snapping}
-            title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
+            variant="outline"
+            onClick={togglePlay}
+            title="Play / pause the audio"
           >
-            {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
-            Snap to beep
+            {playing ? <Pause /> : <Play />}
+            {playing ? "Pause" : "Play"}
           </Button>
-        ) : null}
-      </div>
+          {snapEnabled ? (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => void requestSnap()}
+              disabled={draftSourceTime == null || snapping}
+              title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
+            >
+              {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
+              Snap to beep
+            </Button>
+          ) : null}
+        </div>
+      )}
       {proposal != null ? (
         <SnapProposal
           slug={slug}
