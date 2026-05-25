@@ -484,9 +484,7 @@ def test_create_app_auto_submits_model_download_when_missing(
     assert kinds == ["model_download"]
 
 
-def test_run_model_download_job_aggregates_progress(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_run_model_download_job_aggregates_progress(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Worker normalizes per-artifact bytes into a single 0..1 fraction.
 
     Builds a two-artifact spec, hijacks ``download_to`` so each call
