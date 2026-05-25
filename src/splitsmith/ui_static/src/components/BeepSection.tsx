@@ -721,7 +721,27 @@ export function BeepWaveformPicker({
   const [unavailable, setUnavailable] = useState(false);
   const [localTime, setLocalTime] = useState<number>(0);
   const [playing, setPlaying] = useState(false);
-  const [pxPerSec, setPxPerSec] = useState<number | null>(null);
+  // Zoom is a multiplier relative to the viewport-fit baseline (null =
+  // fit-to-width). The audit canvas uses the same model -- it
+  // matters because absolute px/s blows up on long clips: a 104 s
+  // primary at 240 px/s renders 25k px wide, so even "first zoom"
+  // shoves the whole clip off-screen.
+  const [zoom, setZoom] = useState<number | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const wrapperCallbackRef = useCallback((el: HTMLDivElement | null) => {
+    viewportRef.current = el;
+    if (!el) return;
+    setViewportWidth(Math.floor(el.getBoundingClientRect().width));
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        if (w > 0) setViewportWidth(w);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const [snapping, setSnapping] = useState(false);
   const [proposal, setProposal] = useState<BeepSnapResult | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -853,20 +873,24 @@ export function BeepWaveformPicker({
 
   const dismissProposal = useCallback(() => setProposal(null), []);
 
+  // Zoom math mirrors the audit canvas: 1.5x per click, capped at
+  // 16x in, 0.25x out (anything below = back to fit).
   const zoomIn = useCallback(() => {
-    setPxPerSec((cur) => {
-      if (cur == null) return 240;
-      return Math.min(2000, cur * 2);
-    });
+    setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
   }, []);
   const zoomOut = useCallback(() => {
-    setPxPerSec((cur) => {
-      if (cur == null) return null;
-      const next = cur / 2;
-      return next < 60 ? null : next;
+    setZoom((z) => {
+      const next = (z ?? 1) / 1.5;
+      return next <= 0.25 ? null : next;
     });
   }, []);
-  const zoomFit = useCallback(() => setPxPerSec(null), []);
+  const zoomFit = useCallback(() => setZoom(null), []);
+  const pxPerSec = useMemo(() => {
+    if (zoom == null || !peaks) return null;
+    if (peaks.duration <= 0 || viewportWidth <= 0) return null;
+    const fitPps = viewportWidth / peaks.duration;
+    return Math.max(1, fitPps * zoom);
+  }, [zoom, viewportWidth, peaks]);
 
   // Cmd/Ctrl + 1/2/3 -- same bindings as the audit canvas waveform so
   // muscle memory carries across surfaces. Cmd+1 = zoom in, Cmd+2 =
@@ -924,7 +948,7 @@ export function BeepWaveformPicker({
             size="icon"
             variant="ghost"
             onClick={zoomOut}
-            disabled={pxPerSec == null}
+            disabled={zoom == null}
             aria-label="Zoom out"
             title="Zoom out"
             className="size-7"
@@ -943,17 +967,19 @@ export function BeepWaveformPicker({
           </Button>
         </div>
       </div>
-      <Waveform
-        peaks={peaks.peaks}
-        duration={peaks.duration}
-        currentTime={localTime}
-        onScrub={handleScrub}
-        onScrubEnd={handleScrubEnd}
-        beepTime={markerLocal}
-        pixelsPerSecond={pxPerSec}
-        height={80}
-        ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
-      />
+      <div ref={wrapperCallbackRef}>
+        <Waveform
+          peaks={peaks.peaks}
+          duration={peaks.duration}
+          currentTime={localTime}
+          onScrub={handleScrub}
+          onScrubEnd={handleScrubEnd}
+          beepTime={markerLocal}
+          pixelsPerSecond={pxPerSec}
+          height={80}
+          ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
+        />
+      </div>
       <audio
         ref={audioRef}
         src={api.videoAudioUrl(slug, stageNumber, videoId)}
