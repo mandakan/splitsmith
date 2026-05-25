@@ -56,6 +56,7 @@ import {
   type BeepQueueItem,
   type BeepQueueResponse,
 } from "@/lib/api";
+import { modKeyGlyph } from "@/lib/platform";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 
 export function BeepReview() {
@@ -892,6 +893,10 @@ function ActiveDetail({
               <KbdRow what="Skip" keys={["S"]} />
               <KbdRow what="Next" keys={["↓", "J"]} />
               <KbdRow what="Prev" keys={["↑", "K"]} />
+              <KbdRow
+                what="Zoom in / fit / out"
+                keys={[`${modKeyGlyph()}1`, `${modKeyGlyph()}2`, `${modKeyGlyph()}3`]}
+              />
             </div>
           </SidePanel>
         </div>

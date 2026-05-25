@@ -24,6 +24,7 @@ import { Tick, TickStrip, type TickState } from "@/components/ui/Tick";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMode } from "@/lib/mode";
+import { modKeyGlyph } from "@/lib/platform";
 
 /* ---------------------------------------------------------------------------
  * Token tables -- kept in step with styles/index.css.
@@ -262,10 +263,10 @@ export function Design() {
         </Block>
         <Block>
           <span className="flex items-center gap-1.5 text-sm text-muted">
-            Save with <Kbd>⌘</Kbd> <Kbd>S</Kbd>
+            Save with <Kbd>{modKeyGlyph()}</Kbd> <Kbd>S</Kbd>
           </span>
           <span className="flex items-center gap-1.5 text-sm text-muted">
-            Quick switch <Kbd size="md">⌘</Kbd> <Kbd size="md">K</Kbd>
+            Quick switch <Kbd size="md">{modKeyGlyph()}</Kbd> <Kbd size="md">K</Kbd>
           </span>
         </Block>
       </Section>

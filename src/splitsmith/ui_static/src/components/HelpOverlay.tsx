@@ -14,6 +14,7 @@ import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { modKeyGlyph } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 export type HelpMode = "audit" | "review";
@@ -35,6 +36,7 @@ interface Section {
 }
 
 function sections(mode: HelpMode): Section[] {
+  const mod = modKeyGlyph();
   const playback: ShortcutRow[] = [
     { keys: ["Space"], desc: "Play / pause" },
     { keys: ["←", "→"], desc: "Nudge playhead 250 ms" },
@@ -54,14 +56,14 @@ function sections(mode: HelpMode): Section[] {
   ];
   const view: ShortcutRow[] = [
     { keys: ["L"], desc: "Toggle the marker list drawer" },
-    { keys: ["⌘", "1"], desc: "Zoom in" },
-    { keys: ["⌘", "2"], desc: "Fit waveform to view" },
-    { keys: ["⌘", "3"], desc: "Zoom out" },
+    { keys: [mod, "1"], desc: "Zoom in" },
+    { keys: [mod, "2"], desc: "Fit waveform to view" },
+    { keys: [mod, "3"], desc: "Zoom out" },
   ];
   const edit: ShortcutRow[] = [
-    { keys: ["⌘", "Z"], desc: "Undo last marker change" },
+    { keys: [mod, "Z"], desc: "Undo last marker change" },
     {
-      keys: ["⌘", "S"],
+      keys: [mod, "S"],
       desc:
         mode === "audit"
           ? "Save audit JSON and jump to the next stage"

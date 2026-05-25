@@ -866,6 +866,32 @@ export function BeepWaveformPicker({
       return next < 60 ? null : next;
     });
   }, []);
+  const zoomFit = useCallback(() => setPxPerSec(null), []);
+
+  // Cmd/Ctrl + 1/2/3 -- same bindings as the audit canvas waveform so
+  // muscle memory carries across surfaces. Cmd+1 = zoom in, Cmd+2 =
+  // fit, Cmd+3 = zoom out. Ignored when typing in an input/textarea so
+  // we don't steal the browser's tab-cycling shortcut from form fields.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key !== "1" && e.key !== "2" && e.key !== "3") return;
+      if (
+        e.target instanceof HTMLElement &&
+        (e.target.tagName === "INPUT" ||
+          e.target.tagName === "TEXTAREA" ||
+          e.target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      if (e.key === "1") zoomIn();
+      else if (e.key === "2") zoomFit();
+      else zoomOut();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomIn, zoomOut, zoomFit]);
 
   if (loading) {
     return (
