@@ -51,6 +51,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Waveform } from "@/components/Waveform";
 import { useSpacePlayPause } from "@/lib/keyboard";
+import { modKeyGlyph } from "@/lib/platform";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import {
   ApiError,
@@ -1046,6 +1047,30 @@ export function BeepWaveformPicker({
           height={fillHeight ? 200 : 80}
           ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
         />
+      </div>
+      {/* Zoom-shortcut hint row -- same bindings as the audit canvas
+          (modKey+1/2/3). Lives directly under the waveform so the
+          operator's eye doesn't have to leave the scrub surface to
+          remember the chord. */}
+      <div className="mt-1 flex flex-wrap items-center justify-end gap-3 px-1 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-subtle">
+        <span className="inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+            {modKeyGlyph()}1
+          </kbd>
+          <span>zoom in</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+            {modKeyGlyph()}2
+          </kbd>
+          <span>fit</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+            {modKeyGlyph()}3
+          </kbd>
+          <span>zoom out</span>
+        </span>
       </div>
       {externalMediaRef ? null : (
         <audio
