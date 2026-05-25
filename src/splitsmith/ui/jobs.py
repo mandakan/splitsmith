@@ -54,7 +54,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -251,8 +251,73 @@ class JobHandle:
         self._registry._detach_subprocess(self._job_id)
 
 
+class JobBackend(Protocol):
+    """The slice of :class:`JobRegistry` that handlers and the SPA
+    actually depend on.
+
+    Tier 2 of doc 10 (singleton elimination): in-memory job state
+    survives only as long as the process. A hosted-mode backend
+    will persist jobs to ``compute_jobs`` (doc 04) and rely on an
+    arq worker pool, but it still presents the same surface to
+    request handlers. Defining this Protocol lets us drop in that
+    alternative without per-handler branching.
+
+    The shutdown-related methods are part of the contract because
+    "stop accepting new jobs and let in-flight ones drain" is
+    meaningful in both modes -- only the implementation differs
+    (in-process executor await vs. arq queue drain).
+    """
+
+    @property
+    def is_shutting_down(self) -> bool: ...
+
+    def active_count(self) -> int: ...
+
+    def begin_shutdown(self) -> None: ...
+
+    def wait_for_drain(self, timeout_s: float) -> bool: ...
+
+    def submit(
+        self,
+        *,
+        kind: str,
+        fn: Callable[[JobHandle], None],
+        stage_number: int | None = None,
+        video_id: str | None = None,
+    ) -> Job: ...
+
+    def get(self, job_id: str) -> Job | None: ...
+
+    def list(self) -> list[Job]: ...
+
+    def cancel(self, job_id: str) -> Job | None: ...
+
+    def acknowledge(self, job_id: str) -> Job | None: ...
+
+    def acknowledge_all_failures(self) -> list[Job]: ...
+
+    def find_active(
+        self,
+        *,
+        kind: str | None = None,
+        stage_number: int | None = None,
+        video_id: str | None = None,
+    ) -> Job | None: ...
+
+
 class JobRegistry:
-    """Thread-safe in-memory job tracker."""
+    """Thread-safe in-memory job backend.
+
+    Implements :class:`JobBackend` plus local-only orchestration
+    (the in-process ``ThreadPoolExecutor``, ``begin_shutdown`` /
+    ``wait_for_drain`` for clean uvicorn exit, subprocess
+    attachment for cooperative ffmpeg cancellation).
+
+    The hosted-mode alternative (Tier 2 of doc 10) will persist
+    jobs to ``compute_jobs`` and dispatch via arq; it satisfies
+    :class:`JobBackend` but skips the executor + drain machinery
+    because workers live in separate processes.
+    """
 
     def __init__(self, *, max_concurrent: int = 2, retain_recent: int = 50) -> None:
         self._jobs: dict[str, Job] = {}

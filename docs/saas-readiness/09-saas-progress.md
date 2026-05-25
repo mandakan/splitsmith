@@ -100,10 +100,12 @@ later steps are blocked on earlier ones.
   read it. The picker registers matches in `state.matches` and
   returns a HealthResponse so the SPA can navigate by URL --
   there is no server-side bound state to flip.
-- [ ] **Tier 2:** move `JobRegistry` off in-memory `dict` to the
+- [~] **Tier 2:** move `JobRegistry` off in-memory `dict` to the
   `compute_jobs` table (Postgres in hosted; SQLite in local if/when
   the desktop needs job persistence). Same handler-facing interface;
-  different backend.
+  different backend. Abstraction landed -- `JobBackend` Protocol +
+  `AppState.jobs` typed against it; hosted backend land alongside
+  the actual hosted PR.
 - [ ] **Tier 3:** `user_config.recent_projects` and
   `scoreboard_identity` become per-user Postgres rows in hosted
   mode; introduce a `RecentProjectsStore` / `ScoreboardIdentityStore`
