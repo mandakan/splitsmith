@@ -59,20 +59,30 @@ singleton. The fallback IS the violation.
 
 **Elimination path:**
 
-0. **(in progress)** Two cuts landed so far:
+0. **(in progress)** Three cuts landed so far:
    - `state.match_root` reads ContextVar only -- the singleton
      fallback for match-level operations is gone. `/api/match/*`
      endpoints 409 ``no_project`` unless the request comes through
      `/api/matches/{match_id}/`.
-   - `state.shooter_root(slug)` drops the **Match-folder** singleton
-     fallback. A bound Match folder no longer answers
-     `/api/shooters/{slug}/...` bare-path requests. The **legacy
-     single-shooter** fallback survives because legacy projects
-     don't have a `match_id` and can't be addressed via the URL
-     prefix; legacy elimination is a separate question (migrate
-     to Match folders, or drop legacy support entirely).
-   Both cuts had remarkably small blast radius -- the bulk of
-   tests use legacy projects and were unaffected.
+   - `state.shooter_root(slug)` dropped the **Match-folder**
+     singleton fallback. A bound Match folder no longer answers
+     `/api/shooters/{slug}/...` bare-path requests.
+   - **Legacy single-shooter projects retired entirely.** The
+     `_bind_legacy_root_to_state`, `state.bind_legacy`,
+     `_bound_kind == "legacy"`, and `legacy_slug` paths are gone.
+     `_bind_project_to_state` now 400s ``not_a_match`` for any
+     path without a ``match.json``; the picker bind endpoint
+     refuses non-match paths and pushes users through
+     ``POST /api/match/create-manual`` instead. Per [[clean-no-fallbacks]]
+     and [[stateless-multitenant]], no production shim survives.
+     ContextVar propagation for the ``JobRegistry`` worker thread
+     was needed so jobs submitted from a URL-scoped request can
+     resolve ``state.shooter_root(slug)`` from their executor.
+   Per [[delete-obsolete-tests]], two `test_bind_recent_project_*`
+   tests covering legacy scaffolding were deleted; the
+   `_make_match_app` and `_seed_*` helpers + a new
+   `tests/conftest.py::scaffold_match` were updated to land
+   shooter state under `<match>/shooters/<slug>/`.
 1. Make `/api/matches/{match_id}/...` the only accepted prefix for
    project-scoped routes. Delete the bare-path route table or have
    it 404. The middleware becomes mandatory rather than a fallback.

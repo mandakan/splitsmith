@@ -37,7 +37,103 @@ def _enable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SPLITSMITH_AUTO_BEEP_DISABLED", raising=False)
 
 
-def _wait_for_job(client: TestClient, job_id: str, *, timeout: float = 5.0) -> dict:
+from tests.conftest import scaffold_match as _scaffold_match  # noqa: E402
+
+_SCOPED_PREFIXES = (
+    "/api/shooters/",
+    "/api/stages/",
+    "/api/match/shooters",
+    "/api/match/beep-queue",
+    "/api/project",
+    "/api/assignments/",
+    "/api/videos/",
+    "/api/fs/",
+    "/api/fixture/",
+    "/api/thumbnails/",
+    "/api/automation",
+    "/api/dev/",
+    "/api/lab/",
+    "/api/calibrated-camera-models",
+    "/api/jobs",
+)
+
+
+class _MatchClient:
+    """TestClient wrapper that prefixes match-scoped URLs with
+    ``/api/matches/{match_id}/`` after Tier 1 step 3 of doc 10.
+
+    Reads ``bound_match_id`` lazily on every request so tests that
+    bind via the picker endpoint after constructing the client see
+    the correct match_id once the bind lands.
+    """
+
+    def __init__(self, app, **kwargs) -> None:
+        self._client = TestClient(app, **kwargs)
+        self._app = app
+
+    @property
+    def app(self):
+        return self._app
+
+    def _rewrite(self, url: str) -> str:
+        match_id = self._app.state.splitsmith_state.bound_match_id
+        if match_id is None:
+            return url
+        for prefix in _SCOPED_PREFIXES:
+            if url.startswith(prefix):
+                rest = url[len("/api/") :]
+                return f"/api/matches/{match_id}/{rest}"
+        return url
+
+    def get(self, url, **kw):
+        return self._client.get(self._rewrite(url), **kw)
+
+    def post(self, url, **kw):
+        return self._client.post(self._rewrite(url), **kw)
+
+    def put(self, url, **kw):
+        return self._client.put(self._rewrite(url), **kw)
+
+    def patch(self, url, **kw):
+        return self._client.patch(self._rewrite(url), **kw)
+
+    def delete(self, url, **kw):
+        return self._client.delete(self._rewrite(url), **kw)
+
+    def request(self, method, url, **kw):
+        return self._client.request(method, self._rewrite(url), **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def _match_create_app(*, project_root, project_name=None, **kwargs):
+    """create_app wrapper that scaffolds a Match folder at
+    ``project_root`` (with one default shooter ``"me"``) if one
+    isn't already there. Post Tier 1 step 3 of doc 10 the bind
+    path refuses non-match paths -- tests that used to scaffold
+    a legacy MatchProject inline now get a no-op-when-existing
+    scaffold here for free.
+    """
+    from pathlib import Path as _Path
+
+    from splitsmith import match_model
+
+    project_root = _Path(project_root)
+    project_root.mkdir(parents=True, exist_ok=True)
+    if not (project_root / "match.json").exists():
+        match = match_model.Match.init(project_root, name=project_name or "Test Match")
+        match.add_shooter(project_root, match_model.Shooter(slug="me", name="Me"))
+        MatchProject.init(
+            match_model.Match.shooter_root(project_root, "me"),
+            name=project_name or "Test Match",
+        )
+    from splitsmith.ui.server import create_app as _real_create_app
+
+    return _real_create_app(project_root=project_root, project_name=project_name, **kwargs)
+
+
+def _wait_for_job(client, job_id: str, *, timeout: float = 5.0) -> dict:
     """Poll /api/jobs/{id} until the job is no longer running.
 
     Returns the final job snapshot. Raises ``AssertionError`` if the job
@@ -58,8 +154,8 @@ def _wait_for_job(client: TestClient, job_id: str, *, timeout: float = 5.0) -> d
 
 
 def test_health_returns_project_info(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="Test Match")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="Test Match")
+    client = _MatchClient(app)
 
     resp = client.get("/api/health")
     assert resp.status_code == 200
@@ -70,8 +166,8 @@ def test_health_returns_project_info(tmp_path: Path) -> None:
 
 
 def test_get_project_returns_full_dump(tmp_path: Path) -> None:
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Get Project Match")
+    root, _shooter_root = _scaffold_match(tmp_path, name="Get Project Match", subdir="match")
+    project = MatchProject.load(_shooter_root)
     project.competitor_name = "API Tester"
     project.stages = [
         StageEntry(
@@ -81,10 +177,10 @@ def test_get_project_returns_full_dump(tmp_path: Path) -> None:
             videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
         )
     ]
-    project.save(root)
+    project.save(_shooter_root)
 
-    app = create_app(project_root=root, project_name="ignored, project already exists")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored, project already exists")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/project")
     assert resp.status_code == 200
@@ -107,8 +203,8 @@ def test_get_project_marks_stage_audited_after_save_event(tmp_path: Path) -> Non
     contract we have to keep."""
     import json as _json
 
-    root = tmp_path / "match-audited"
-    project = MatchProject.init(root, name="Audited Match")
+    root, _shooter_root = _scaffold_match(tmp_path, name="Audited Match", subdir="match-audited")
+    project = MatchProject.load(_shooter_root)
     project.stages = [
         StageEntry(
             stage_number=1,
@@ -117,8 +213,8 @@ def test_get_project_marks_stage_audited_after_save_event(tmp_path: Path) -> Non
             videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
         )
     ]
-    project.save(root)
-    audit_dir = project.audit_path(root)
+    project.save(_shooter_root)
+    audit_dir = project.audit_path(_shooter_root)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stage1.json").write_text(
         _json.dumps(
@@ -133,8 +229,8 @@ def test_get_project_marks_stage_audited_after_save_event(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
     body = client.get("/api/shooters/me/project").json()
     assert body["stages"][0]["status"] == "audited"
 
@@ -153,8 +249,8 @@ def test_spa_serves_index_html_when_built(tmp_path: Path) -> None:
 
         _pytest.skip("SPA not built; run `pnpm build` in src/splitsmith/ui_static/")
 
-    app = create_app(project_root=tmp_path / "match", project_name="SPA Match")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="SPA Match")
+    client = _MatchClient(app)
 
     # The /api/health route always works.
     assert client.get("/api/health").status_code == 200
@@ -175,8 +271,8 @@ def test_spa_serves_index_html_when_built(tmp_path: Path) -> None:
 
 
 def test_import_scoreboard_endpoint(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     sb = {
         "match": {"id": "27046", "name": "Imported Match"},
@@ -205,8 +301,8 @@ def test_import_scoreboard_endpoint(tmp_path: Path) -> None:
 
 
 def test_import_scoreboard_409_on_conflict(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     sb = {
         "match": {"id": "1", "name": "First"},
@@ -259,8 +355,9 @@ def test_scoreboard_loads_token_from_project_env_local(
     project_root = tmp_path / "match"
     project_root.mkdir(parents=True)
     (project_root / ".env.local").write_text("SPLITSMITH_SSI_TOKEN=token-from-env-local\n", encoding="utf-8")
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     src = client.get("/api/shooters/me/scoreboard/source").json()
     assert src["http_token_set"] is True
 
@@ -276,15 +373,16 @@ def test_scoreboard_loads_token_from_cwd_env(tmp_path: Path, monkeypatch: pytest
     project_root.mkdir(parents=True)
     (launch_dir / ".env").write_text("SPLITSMITH_SSI_TOKEN=token-from-cwd\n", encoding="utf-8")
     monkeypatch.chdir(launch_dir)
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     src = client.get("/api/shooters/me/scoreboard/source").json()
     assert src["http_token_set"] is True
 
 
 def test_scoreboard_source_reports_online_when_no_local_file(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.get("/api/shooters/me/scoreboard/source")
     assert resp.status_code == 200
     assert resp.json()["mode"] == "online"
@@ -293,8 +391,9 @@ def test_scoreboard_source_reports_online_when_no_local_file(tmp_path: Path) -> 
 
 def test_scoreboard_upload_writes_local_json_and_populates_project(tmp_path: Path) -> None:
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
 
     fixture = _load_v1_match_fixture()
     resp = client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
@@ -308,7 +407,7 @@ def test_scoreboard_upload_writes_local_json_and_populates_project(tmp_path: Pat
     assert all(s["placeholder"] for s in body["stages"])
 
     # File was written to <project>/scoreboard/match.json.
-    local_path = project_root / "scoreboard" / "match.json"
+    local_path = _shooter_root / "scoreboard" / "match.json"
     assert local_path.exists()
 
     # Source endpoint now reports local mode (the offline path is active).
@@ -318,8 +417,8 @@ def test_scoreboard_upload_writes_local_json_and_populates_project(tmp_path: Pat
 
 
 def test_scoreboard_upload_rejects_non_v1_payload(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     # Legacy ``examples/`` shape is *not* MatchData -- the upload endpoint
     # should bounce it with a 400 rather than silently misparsing.
     legacy = {"match": {"id": "1", "name": "Legacy"}, "competitors": []}
@@ -331,8 +430,9 @@ def test_scoreboard_search_uses_local_when_match_json_present(tmp_path: Path) ->
     """DI: with a local match.json on disk, the search endpoint must serve
     from LocalJsonScoreboard (no SPLITSMITH_SSI_TOKEN required, no network)."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
 
     fixture = _load_v1_match_fixture()
     upload = client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
@@ -355,8 +455,8 @@ def test_scoreboard_search_returns_401_when_no_token_and_no_local(
     # chdir to a clean dir so the splitsmith repo's own ``.env.local``
     # (which carries a real token) doesn't leak into the test process.
     monkeypatch.chdir(tmp_path)
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/scoreboard/search", params={"q": "anything"})
     assert resp.status_code == 401
@@ -374,8 +474,8 @@ def test_scoreboard_search_unbound_returns_401_without_token(
     bound variant does so the SPA can route to the offline fallback."""
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     resp = client.get("/api/scoreboard/search", params={"q": "anything"})
     assert resp.status_code == 401
@@ -391,7 +491,7 @@ def test_scoreboard_search_unbound_works_with_no_bound_project(
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)
     app = create_app()  # no project bound
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     resp = client.get("/api/scoreboard/search", params={"q": "anything"})
     assert resp.status_code == 401  # token missing, not no_project (409)
@@ -408,7 +508,7 @@ def test_scoreboard_match_data_unbound_returns_401_without_token(
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     resp = client.get("/api/scoreboard/matches/22/27190")
     assert resp.status_code == 401
@@ -430,7 +530,7 @@ def test_fs_list_dirs_unbound_returns_directories(
     (parent / ".hidden").mkdir()
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     resp = client.get("/api/fs/list-dirs", params={"path": str(parent)})
     assert resp.status_code == 200, resp.text
@@ -443,7 +543,7 @@ def test_fs_list_dirs_unbound_returns_directories(
 
 def test_fs_list_dirs_404_for_missing_path(tmp_path: Path) -> None:
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.get("/api/fs/list-dirs", params={"path": str(tmp_path / "nope")})
     assert resp.status_code == 404
 
@@ -454,7 +554,7 @@ def test_create_from_scoreboard_rejects_empty_competitor_list(
     """Multi-shooter create requires at least one competitor; rejecting
     an empty list early avoids creating an orphan match folder."""
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.post(
         "/api/match/create-from-scoreboard",
         json={
@@ -475,7 +575,7 @@ def test_create_from_scoreboard_rejects_duplicate_competitor(
     """Same competitor twice in the pick list is a caller bug; 400 with
     a clear message rather than silently de-duping."""
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     body = {
         "project_folder": str(tmp_path / "match"),
         "name": "Test Match",
@@ -515,7 +615,7 @@ def test_create_from_scoreboard_creates_n_shooters_from_local(
     (scoreboard_dir / "match.json").write_text(_json.dumps(fixture), encoding="utf-8")
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.post(
         "/api/match/create-from-scoreboard",
         json={
@@ -564,8 +664,9 @@ def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Pat
     import json as _json
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     legacy = _json.loads((_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8"))
     resp = client.post("/api/shooters/me/scoreboard/upload", json={"data": legacy})
     assert resp.status_code == 200
@@ -581,8 +682,9 @@ def test_scoreboard_upload_pure_v1_does_not_auto_merge(tmp_path: Path) -> None:
     """Pure ``MatchData`` carries no per-competitor stages -- the upload
     populates placeholders only, leaving the user to pin themselves."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     fixture = _load_v1_match_fixture()
     resp = client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
     assert resp.status_code == 200
@@ -600,8 +702,9 @@ def test_scoreboard_upload_combined_v1_auto_merges_when_single_competitor(
     import json as _json
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     combined = _json.loads(
         (_SCOREBOARD_FIXTURES_DIR / "match_22_27190_with_stages.json").read_text(encoding="utf-8")
     )
@@ -620,8 +723,9 @@ def test_scoreboard_select_shooter_blocked_on_pure_v1(tmp_path: Path) -> None:
     returns a 400 with the offline-pure-matchdata code so the UI can hint
     "drop a richer JSON" instead of a generic upstream banner."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     fixture = _load_v1_match_fixture()
     client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
 
@@ -643,8 +747,9 @@ def test_scoreboard_refresh_times_re_merges(tmp_path: Path) -> None:
     import json as _json
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     legacy = _json.loads((_EXAMPLES_DIR / "blacksmith-handgun-open-2026.json").read_text(encoding="utf-8"))
     client.post("/api/shooters/me/scoreboard/upload", json={"data": legacy})
     resp = client.post("/api/shooters/me/scoreboard/refresh-times")
@@ -656,8 +761,9 @@ def test_scoreboard_match_data_endpoint_exposes_competitors(tmp_path: Path) -> N
     """The SPA needs ``competitors[]`` to map a picked shooter id to a
     competitor id before calling /select-shooter."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     fixture = _load_v1_match_fixture()
     client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
 
@@ -671,15 +777,15 @@ def test_scoreboard_match_data_endpoint_exposes_competitors(tmp_path: Path) -> N
 
 
 def test_scoreboard_match_data_404_when_no_match_loaded(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.get("/api/shooters/me/scoreboard/match-data")
     assert resp.status_code == 404
 
 
 def test_scoreboard_select_shooter_409_when_no_match(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/scoreboard/select-shooter",
         json={"shooter_id": 1, "competitor_id": 1},
@@ -689,8 +795,9 @@ def test_scoreboard_select_shooter_409_when_no_match(tmp_path: Path) -> None:
 
 def test_scoreboard_refresh_times_409_when_no_pin(tmp_path: Path) -> None:
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     fixture = _load_v1_match_fixture()
     client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
     resp = client.post("/api/shooters/me/scoreboard/refresh-times")
@@ -711,11 +818,12 @@ def test_scoreboard_select_shooter_rejects_competitor_not_in_match(
     monkeypatch.chdir(tmp_path)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     fixture = _load_v1_match_fixture()
     client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
-    (project_root / "scoreboard" / "match.json").unlink()
+    (_shooter_root / "scoreboard" / "match.json").unlink()
 
     # Mock the live API: get_match returns the fixture so the validate
     # step has a competitor list to check against. The stages path
@@ -769,11 +877,12 @@ def test_scoreboard_select_shooter_uses_live_stage_times_when_available(
     monkeypatch.chdir(tmp_path)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     fixture = _load_v1_match_fixture()
     client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
-    (project_root / "scoreboard" / "match.json").unlink()
+    (_shooter_root / "scoreboard" / "match.json").unlink()
 
     stage_results = {
         "ct": 22,
@@ -831,8 +940,9 @@ def test_scoreboard_fetch_uses_local_match_when_present(tmp_path: Path) -> None:
     token (LocalJsonScoreboard doesn't need it) and asking for the same
     (ct, id) that the dropped file claims to be."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
 
     fixture = _load_v1_match_fixture()
     client.post("/api/shooters/me/scoreboard/upload", json={"data": fixture})
@@ -847,8 +957,8 @@ def test_scoreboard_fetch_uses_local_match_when_present(tmp_path: Path) -> None:
 
 
 def test_placeholder_stages_endpoint_creates_stages(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/project/placeholder-stages",
         json={"stage_count": 5, "match_name": "Test Match", "match_date": "2026-04-12"},
@@ -862,8 +972,8 @@ def test_placeholder_stages_endpoint_creates_stages(tmp_path: Path) -> None:
 
 
 def test_placeholder_stages_endpoint_409_when_real_stages_exist(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     # Real scoreboard import first.
     sb = {
         "match": {"id": "1", "name": "Real"},
@@ -897,8 +1007,9 @@ def test_scan_videos_registers_and_auto_assigns(tmp_path: Path) -> None:
     from datetime import datetime
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="Scan Match")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="Scan Match")
+    client = _MatchClient(app)
 
     scorecard_iso = "2026-04-12T11:30:00+00:00"
     scorecard_dt = datetime.fromisoformat(scorecard_iso)
@@ -944,8 +1055,8 @@ def test_scan_videos_registers_and_auto_assigns(tmp_path: Path) -> None:
 
 
 def test_scan_videos_400_on_missing_dir(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/videos/scan",
         json={"source_dir": str(tmp_path / "does-not-exist")},
@@ -956,8 +1067,9 @@ def test_scan_videos_400_on_missing_dir(tmp_path: Path) -> None:
 def test_move_assignment_endpoint(tmp_path: Path) -> None:
     """Set role to ignored, verify, then move back to a stage."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="Move Match")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="Move Match")
+    client = _MatchClient(app)
 
     # Set up: 1 stage, 1 video assigned as primary.
     sb = {
@@ -1030,8 +1142,8 @@ def test_move_assignment_endpoint(tmp_path: Path) -> None:
 
 
 def test_move_assignment_404_on_unknown_video(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/assignments/move",
         json={"video_path": "raw/nope.mp4", "to_stage_number": None},
@@ -1040,8 +1152,8 @@ def test_move_assignment_404_on_unknown_video(tmp_path: Path) -> None:
 
 
 def test_fs_list_returns_directory_entries(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     listing_root = tmp_path / "browseable"
     listing_root.mkdir()
@@ -1068,8 +1180,8 @@ def test_fs_list_returns_directory_entries(tmp_path: Path) -> None:
 
 
 def test_fs_list_video_count_for_directories(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     parent = tmp_path / "p"
     inner = parent / "match-day"
@@ -1088,14 +1200,15 @@ def test_fs_list_video_count_for_directories(tmp_path: Path) -> None:
 def test_fs_list_default_path_uses_last_scanned_dir(tmp_path: Path) -> None:
     """Saving last_scanned_dir on the project should change the default path."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
 
     seeded = tmp_path / "videos"
     seeded.mkdir()
-    project = MatchProject.load(project_root)
+    project = MatchProject.load(_shooter_root)
     project.last_scanned_dir = str(seeded.resolve())
-    project.save(project_root)
+    project.save(_shooter_root)
 
     resp = client.get("/api/shooters/me/fs/list")
     assert resp.status_code == 200
@@ -1108,16 +1221,17 @@ def test_fs_list_default_path_uses_last_scanned_dir(tmp_path: Path) -> None:
 
 
 def test_fs_list_404_on_missing_path(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.get("/api/shooters/me/fs/list", params={"path": str(tmp_path / "nope")})
     assert resp.status_code == 404
 
 
 def test_scan_persists_last_scanned_dir(tmp_path: Path) -> None:
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
 
     src_dir = tmp_path / "videos"
     src_dir.mkdir()
@@ -1134,18 +1248,22 @@ def test_scan_persists_last_scanned_dir(tmp_path: Path) -> None:
 
 
 def _primary_cache_paths(project_root: Path, stage_number: int = 1) -> tuple[Path, Path, Path]:
-    """Schema v2 cache paths for the stage's primary.
+    """Schema v2 cache paths for the stage's primary, inside the
+    Match folder's default shooter slot (``shooters/me``).
 
-    Returns ``(full_wav, audit_wav, trimmed_mp4)`` keyed by the primary's
-    ``video_id`` so tests don't have to hard-code the legacy
-    ``stage<N>_primary.wav`` filename (which was retired in v2).
+    Returns ``(full_wav, audit_wav, trimmed_mp4)`` keyed by the
+    primary's ``video_id`` so tests don't have to hard-code the
+    legacy ``stage<N>_primary.wav`` filename (which was retired in
+    v2). Post Tier 1 step 3 of doc 10, per-shooter caches live under
+    ``<match_root>/shooters/<slug>/``.
     """
-    project = MatchProject.load(project_root)
+    shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
     primary = project.stage(stage_number).primary()
     assert primary is not None, f"stage {stage_number} has no primary"
     vid = primary.video_id
-    audio_dir = project_root / "audio"
-    trimmed_dir = project_root / "trimmed"
+    audio_dir = shooter_root / "audio"
+    trimmed_dir = shooter_root / "trimmed"
     return (
         audio_dir / f"stage{stage_number}_cam_{vid}.wav",
         audio_dir / f"stage{stage_number}_cam_{vid}_audit.wav",
@@ -1158,8 +1276,8 @@ def _seed_project_with_primary(tmp_path: Path) -> tuple[TestClient, Path]:
     ``(client, video_source_path)`` so the caller can mutate the source if
     needed (e.g. to control mtime for video_match)."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="Beep Match")
-    client = TestClient(app)
+    app = _match_create_app(project_root=project_root, project_name="Beep Match")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "Beep Match"},
         "competitors": [
@@ -1271,8 +1389,9 @@ def test_detect_beep_409_over_manual_unless_forced(tmp_path: Path, monkeypatch) 
 
 def test_detect_beep_400_when_no_primary(tmp_path: Path) -> None:
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -1328,8 +1447,8 @@ def test_set_stage_time_manual_unblocks_no_scoreboard_project(tmp_path: Path) ->
     """Placeholder stage with no scoreboard data: manual time entry stamps
     time_seconds + flags it so a later sync won't clobber, and unblocks the
     trim / shot-detect gates that look at ``time_seconds > 0``."""
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     client.post(
         "/api/shooters/me/project/placeholder-stages",
         json={"stage_count": 1, "match_name": "Manual Times"},
@@ -1342,8 +1461,8 @@ def test_set_stage_time_manual_unblocks_no_scoreboard_project(tmp_path: Path) ->
 
 
 def test_set_stage_time_null_clears_back_to_placeholder(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     client.post("/api/shooters/me/project/placeholder-stages", json={"stage_count": 1})
     client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 12.0})
     resp = client.post("/api/shooters/me/stages/1/time", json={"time_seconds": None})
@@ -1354,8 +1473,8 @@ def test_set_stage_time_null_clears_back_to_placeholder(tmp_path: Path) -> None:
 
 
 def test_set_stage_time_400_on_non_positive(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     client.post("/api/shooters/me/project/placeholder-stages", json={"stage_count": 1})
     for bad in (0.0, -1.0):
         resp = client.post("/api/shooters/me/stages/1/time", json={"time_seconds": bad})
@@ -1600,14 +1719,15 @@ def test_beep_preview_serves_cached_clip(tmp_path: Path, monkeypatch) -> None:
 
     # Set beep_time on the primary so the endpoint has something to anchor on.
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 12.5
-    project.save(project_root)
+    project.save(_shooter_root)
 
     # Drop a fake clip in the thumbs cache and stub ensure_clip to return it.
-    thumbs_dir = project_root / "thumbs"
+    thumbs_dir = _shooter_root / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     fake_clip = thumbs_dir / "fake_t12500_d1000.mp4"
     fake_clip.write_bytes(b"\x00\x00\x00\x18ftypmp42fake-mp4")
@@ -1639,13 +1759,14 @@ def test_beep_preview_t_query_overrides_center(tmp_path: Path, monkeypatch) -> N
     """
     client, src = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 12.5
-    project.save(project_root)
+    project.save(_shooter_root)
 
-    thumbs_dir = project_root / "thumbs"
+    thumbs_dir = _shooter_root / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     fake_clip = thumbs_dir / "fake_t27500_d1000.mp4"
     fake_clip.write_bytes(b"\x00\x00\x00\x18ftypmp42fake-mp4")
@@ -1673,11 +1794,12 @@ def test_beep_preview_t_query_overrides_center(tmp_path: Path, monkeypatch) -> N
 def test_beep_preview_400_on_negative_t(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
-    project.save(project_root)
+    project.save(_shooter_root)
 
     resp = client.get("/api/shooters/me/stages/1/beep-preview?t=-1")
     assert resp.status_code == 400
@@ -1695,8 +1817,9 @@ def test_beep_preview_404_when_no_beep(tmp_path: Path) -> None:
 def test_beep_preview_404_when_no_primary(tmp_path: Path) -> None:
     """A stage without a primary has no source video to clip from."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -1724,11 +1847,12 @@ def test_beep_preview_500_on_ffmpeg_failure(tmp_path: Path, monkeypatch) -> None
     500 so the SPA can fall back to the 'preview unavailable' hint."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
-    project.save(project_root)
+    project.save(_shooter_root)
 
     from splitsmith import thumbnail
     from splitsmith.ui import server as server_module
@@ -1751,24 +1875,25 @@ def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypa
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
 
     # Stage primary already has beep_time set by the seeder. Force-set to a
     # known value so we can assert the clip-local beep math.
-    project = MatchProject.load(project_root)
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 30.0  # source-time beep; trim default buffer is 5s
-    project.save(project_root)
+    project.save(_shooter_root)
 
     # Create a fake "trimmed" mp4 placeholder so the existence check passes.
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     _full, audit_wav, trimmed_mp4 = _primary_cache_paths(project_root)
     trimmed_mp4.write_bytes(b"\x00fake_mp4")
 
     # Stub _extract_audio so we don't actually shell out; drop a known WAV
     # at the audit-cache path.
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     audio = np.zeros(48_000, dtype="float32")
     audio[20_000:21_000] = 0.7
@@ -1802,7 +1927,8 @@ def test_video_peaks_endpoint_serves_secondary_full_wav(tmp_path: Path, monkeypa
 
     client, _ = _seed_project_with_secondary(tmp_path)
     project_root = tmp_path / "match"
-    audio_dir = project_root / "audio"
+    _shooter_root = project_root / "shooters" / "me"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
     sec_id = _video_id_for(client, 1, "secondary")
@@ -1841,7 +1967,8 @@ def test_video_audio_endpoint_serves_secondary_wav(tmp_path: Path, monkeypatch) 
     """The per-video audio endpoint returns the secondary's own WAV bytes."""
     client, _ = _seed_project_with_secondary(tmp_path)
     project_root = tmp_path / "match"
-    audio_dir = project_root / "audio"
+    _shooter_root = project_root / "shooters" / "me"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
     sec_id = _video_id_for(client, 1, "secondary")
@@ -1877,7 +2004,8 @@ def test_video_peaks_endpoint_serves_primary_full_wav_even_when_trimmed_exists(
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    audio_dir = project_root / "audio"
+    _shooter_root = project_root / "shooters" / "me"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
 
     primary = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]
@@ -1890,7 +2018,7 @@ def test_video_peaks_endpoint_serves_primary_full_wav_even_when_trimmed_exists(
     sf.write(audit_wav, np.zeros(48_000, dtype="float32"), 48_000)
     sf.write(primary_wav, np.zeros(96_000, dtype="float32"), 48_000)
 
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     trimmed_mp4.write_bytes(b"\x00fake_mp4")
 
@@ -1924,7 +2052,8 @@ def test_peaks_endpoint_falls_back_to_full_when_no_trim(tmp_path: Path, monkeypa
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    audio_dir = project_root / "audio"
+    _shooter_root = project_root / "shooters" / "me"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav, _audit, _trim = _primary_cache_paths(project_root)
     audio = np.zeros(24_000, dtype="float32")
@@ -1950,14 +2079,15 @@ def test_stream_video_serves_trimmed_for_primary(tmp_path: Path) -> None:
     short-GOP scrub-friendly playback."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved = project.resolve_video_path(_shooter_root, primary.path).resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_bytes(b"SOURCE_MP4")
 
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     _full, _audit, trimmed_mp4 = _primary_cache_paths(project_root)
     trimmed_mp4.write_bytes(b"TRIMMED_MP4")
@@ -1974,14 +2104,15 @@ def test_stream_video_kind_pins_source_even_when_trim_exists(tmp_path: Path) -> 
     and the next request would fall past the trim's (shorter) EOF."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved = project.resolve_video_path(_shooter_root, primary.path).resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_bytes(b"SOURCE_MP4")
 
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     _full, _audit, trimmed_mp4 = _primary_cache_paths(project_root)
     trimmed_mp4.write_bytes(b"TRIMMED_MP4")
@@ -1997,10 +2128,11 @@ def test_stream_video_kind_trim_404_when_not_built(tmp_path: Path) -> None:
     for the (frame-accurate) trim."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved = project.resolve_video_path(_shooter_root, primary.path).resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_bytes(b"SOURCE_MP4")
 
@@ -2020,7 +2152,8 @@ def test_peaks_endpoint_returns_normalized_bins(tmp_path: Path, monkeypatch) -> 
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    audio_dir = project_root / "audio"
+    _shooter_root = project_root / "shooters" / "me"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav, _audit, _trim = _primary_cache_paths(project_root)
     audio = np.zeros(48_000, dtype="float32")
@@ -2046,11 +2179,12 @@ def test_peaks_endpoint_returns_normalized_bins(tmp_path: Path, monkeypatch) -> 
 def test_peaks_endpoint_404_when_no_primary(tmp_path: Path) -> None:
     """A stage without a primary video can't have peaks; surface 404 cleanly."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
+    project = MatchProject.load(_shooter_root)
     project.init_placeholder_stages(2)
-    project.save(project_root)
+    project.save(_shooter_root)
 
     resp = client.get("/api/shooters/me/stages/1/peaks")
     assert resp.status_code == 404
@@ -2062,13 +2196,14 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     trim inline so the audit screen lands with frame-accurate scrubbing."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     project.stages[0].time_seconds = 12.0
-    project.save(project_root)
+    project.save(_shooter_root)
 
-    resolved = project.resolve_video_path(project_root, primary.path).resolve()
+    resolved = project.resolve_video_path(_shooter_root, primary.path).resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_bytes(b"FAKE_SOURCE_MP4")
 
@@ -2116,12 +2251,13 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
     """confidence >= threshold flips beep_reviewed to True without a click (#219)."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 12.0
-    project.save(project_root)
+    project.save(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"X")
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"X")
 
     from splitsmith import beep_detect, trim
     from splitsmith.ui import audio as audio_helpers
@@ -2142,7 +2278,7 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
         "trim_video",
         lambda **kw: trim.TrimResult(output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0),
     )
-    Path(project_root / "trimmed").mkdir(parents=True, exist_ok=True)
+    Path(_shooter_root / "trimmed").mkdir(parents=True, exist_ok=True)
 
     resp = client.post("/api/shooters/me/stages/1/detect-beep")
     assert resp.status_code == 200
@@ -2156,12 +2292,13 @@ def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeyp
     """Below-threshold beep keeps beep_reviewed=False so it lands in HITL queue."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 12.0
-    project.save(project_root)
+    project.save(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"X")
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"X")
 
     from splitsmith import beep_detect, trim
     from splitsmith.ui import audio as audio_helpers
@@ -2182,7 +2319,7 @@ def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeyp
         "trim_video",
         lambda **kw: trim.TrimResult(output_path=Path(kw["output_path"]), start_time=1.0, end_time=20.0),
     )
-    Path(project_root / "trimmed").mkdir(parents=True, exist_ok=True)
+    Path(_shooter_root / "trimmed").mkdir(parents=True, exist_ok=True)
 
     resp = client.post("/api/shooters/me/stages/1/detect-beep")
     assert resp.status_code == 200
@@ -2202,13 +2339,14 @@ def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch
     until a stage time is known."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 0.0
-    project.save(project_root)
+    project.save(_shooter_root)
 
     primary = project.stages[0].primary()
     assert primary is not None
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"X")
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"X")
 
     from splitsmith import beep_detect, trim
     from splitsmith.ui import audio as audio_helpers
@@ -2242,13 +2380,14 @@ def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
     """Manual /trim endpoint runs audit-mode trim and flips processed.trim."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import trim
 
@@ -2275,13 +2414,14 @@ def test_trim_invalidates_when_beep_changes(tmp_path: Path, monkeypatch) -> None
     detected even when the source mtime is unchanged."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import trim
 
@@ -2329,13 +2469,14 @@ def test_trim_partial_filename_keeps_mp4_extension(tmp_path: Path, monkeypatch) 
     an output format". Regression test for that bug."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import trim
 
@@ -2370,13 +2511,14 @@ def test_trim_endpoint_returns_existing_job_when_one_is_running(tmp_path: Path, 
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import trim
 
@@ -2412,13 +2554,14 @@ def test_cancel_endpoint_aborts_running_trim(tmp_path: Path, monkeypatch) -> Non
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import trim
 
@@ -2504,20 +2647,21 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     # Pretend the trim already produced an audit WAV.
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
 
@@ -2548,7 +2692,7 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert resp.status_code == 200
     final = _wait_for_job(client, resp.json()["id"])
     assert final["status"] == "succeeded", final
-    audit_file = project_root / "audit" / "stage1.json"
+    audit_file = _shooter_root / "audit" / "stage1.json"
     assert audit_file.exists()
     saved = _json.loads(audit_file.read_text(encoding="utf-8"))
     block = saved["_candidates_pending_audit"]
@@ -2582,15 +2726,16 @@ def test_shot_detect_endpoint_ensures_trim_before_detection(tmp_path: Path, monk
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
@@ -2647,20 +2792,21 @@ def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(tmp_path: P
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     primary.camera_mount = "hand"  # iPhone-style; should map to handheld class
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
 
@@ -2698,20 +2844,21 @@ def test_shot_detect_endpoint_passes_default_class_when_mount_missing(tmp_path: 
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     primary.camera_mount = None
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
 
@@ -2751,8 +2898,9 @@ def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, mon
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
 
-    project = MatchProject.load(project_root)
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
@@ -2781,14 +2929,14 @@ def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, mon
     s2_primary.beep_time = 4.0
     project.assign_video(Path("raw") / "VID_S3.mp4", to_stage_number=3, role="primary")
 
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     for n in (1, 2):
         sf.write(audio_dir / f"stage{n}_audit.wav", np.zeros(48_000, dtype="float32"), 48_000)
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     for n in (1, 2):
         (trimmed_dir / f"stage{n}_trimmed.mp4").write_bytes(b"\x00")
@@ -2839,20 +2987,21 @@ def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(tmp_path: Path
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
     project.stages[0].stage_rounds = StageRounds(expected=12, paper_targets=6, steel_targets=0)
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    audio_dir = project_root / "audio"
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
-    trimmed_dir = project_root / "trimmed"
+    trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
 
@@ -2883,7 +3032,7 @@ def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(tmp_path: Path
 
     assert captured.get("expected_rounds") == 12
 
-    audit = _json.loads((project_root / "audit" / "stage1.json").read_text())
+    audit = _json.loads((_shooter_root / "audit" / "stage1.json").read_text())
     assert audit["stage_rounds"]["expected"] == 12
     assert audit["stage_rounds"]["paper_targets"] == 6
 
@@ -2892,7 +3041,8 @@ def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
     """PATCH /camera-mount validates against the CameraMount enum and persists."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     video_id = primary.video_id
@@ -2903,7 +3053,7 @@ def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
         json={"mount": "hand"},
     )
     assert resp.status_code == 200, resp.text
-    refreshed = MatchProject.load(project_root)
+    refreshed = MatchProject.load(_shooter_root)
     assert refreshed.stages[0].primary().camera_mount == "hand"
 
     # Bad value rejected.
@@ -2919,7 +3069,7 @@ def test_camera_mount_patch_endpoint_round_trips(tmp_path: Path) -> None:
         json={"mount": None},
     )
     assert resp.status_code == 200
-    refreshed = MatchProject.load(project_root)
+    refreshed = MatchProject.load(_shooter_root)
     assert refreshed.stages[0].primary().camera_mount is None
 
 
@@ -2927,7 +3077,8 @@ def test_camera_model_patch_endpoint_round_trips(tmp_path: Path) -> None:
     """PATCH /camera-model writes both make and model and clears them together."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     video_id = primary.video_id
@@ -2937,7 +3088,7 @@ def test_camera_model_patch_endpoint_round_trips(tmp_path: Path) -> None:
         json={"make": "Meta", "model": "Vanguard"},
     )
     assert resp.status_code == 200, resp.text
-    refreshed = MatchProject.load(project_root)
+    refreshed = MatchProject.load(_shooter_root)
     refreshed_primary = refreshed.stages[0].primary()
     assert refreshed_primary.camera_make == "Meta"
     assert refreshed_primary.camera_model == "Vanguard"
@@ -2948,7 +3099,7 @@ def test_camera_model_patch_endpoint_round_trips(tmp_path: Path) -> None:
         json={"make": None, "model": None},
     )
     assert resp.status_code == 200, resp.text
-    refreshed = MatchProject.load(project_root)
+    refreshed = MatchProject.load(_shooter_root)
     refreshed_primary = refreshed.stages[0].primary()
     assert refreshed_primary.camera_make is None
     assert refreshed_primary.camera_model is None
@@ -2958,7 +3109,8 @@ def test_camera_model_patch_rejects_half_filled_pair(tmp_path: Path) -> None:
     """Per-model lookup keys both fields, so a half-filled body is meaningless."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     video_id = primary.video_id
@@ -3002,9 +3154,10 @@ def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) 
 def test_shot_detect_endpoint_400_when_no_beep(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
+    project.save(_shooter_root)
     resp = client.post("/api/shooters/me/stages/1/shot-detect")
     assert resp.status_code == 400
     assert "beep_time" in resp.json()["detail"]
@@ -3019,14 +3172,15 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
-    audio_dir = project_root / "audio"
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+    audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     wav = audio_dir / "stage1_audit.wav"
     sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
@@ -3068,12 +3222,13 @@ def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
     and trim both surface here so the SPA has a single status surface."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 5.0
-    project.save(project_root)
+    project.save(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import beep_detect, trim
     from splitsmith.ui import audio as audio_helpers
@@ -3175,12 +3330,13 @@ def test_acknowledge_endpoint_noop_for_succeeded_job(tmp_path: Path, monkeypatch
     optimistic flow doesn't have to special-case statuses."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 5.0
-    project.save(project_root)
+    project.save(_shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    project.resolve_video_path(project_root, primary.path).resolve().write_bytes(b"S")
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
     from splitsmith import beep_detect
     from splitsmith.ui import audio as audio_helpers
@@ -3242,9 +3398,10 @@ def test_acknowledge_failures_bulk_endpoint(tmp_path: Path, monkeypatch) -> None
 def test_post_trim_400_when_no_beep(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
     project.stages[0].time_seconds = 10.0
-    project.save(project_root)
+    project.save(_shooter_root)
     resp = client.post("/api/shooters/me/stages/1/trim")
     assert resp.status_code == 400
     assert "beep_time" in resp.json()["detail"]
@@ -3256,7 +3413,8 @@ def test_get_stage_audit_returns_payload_when_file_exists(tmp_path: Path) -> Non
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    audit_dir = project_root / "audit"
+    _shooter_root = project_root / "shooters" / "me"
+    audit_dir = _shooter_root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "stage_number": 1,
@@ -3309,7 +3467,7 @@ def test_put_stage_audit_writes_payload_and_returns_it(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["shots"][0]["candidate_number"] == 4
-    on_disk = (tmp_path / "match" / "audit" / "stage1.json").read_text(encoding="utf-8")
+    on_disk = (tmp_path / "match" / "shooters" / "me" / "audit" / "stage1.json").read_text(encoding="utf-8")
     import json as _json
 
     assert _json.loads(on_disk)["shots"][0]["candidate_number"] == 4
@@ -3321,7 +3479,7 @@ def test_put_stage_audit_keeps_previous_version_as_bak(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     first = {"stage_number": 1, "shots": [{"shot_number": 1, "time": 0.5}]}
     second = {"stage_number": 1, "shots": [{"shot_number": 1, "time": 1.5}]}
-    audit_path = tmp_path / "match" / "audit"
+    audit_path = tmp_path / "match" / "shooters" / "me" / "audit"
 
     assert client.put("/api/shooters/me/stages/1/audit", json=first).status_code == 200
     assert client.put("/api/shooters/me/stages/1/audit", json=second).status_code == 200
@@ -3361,7 +3519,8 @@ def test_get_stage_anomalies_flags_double_detection_with_shot_number(
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
-    audit_dir = project_root / "audit"
+    _shooter_root = project_root / "shooters" / "me"
+    audit_dir = _shooter_root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     # Two shots 50 ms apart -> double-detection rule fires on shot 2.
     payload = {
@@ -3492,10 +3651,11 @@ def test_fixture_video_serves_arbitrary_path(tmp_path: Path) -> None:
 def test_stream_video_serves_registered_file(tmp_path: Path) -> None:
     """Stream endpoint serves bytes for a path that's registered with the project."""
     client, _ = _seed_project_with_primary(tmp_path)
-    project = MatchProject.load(tmp_path / "match")
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    resolved = project.resolve_video_path(tmp_path / "match", primary.path).resolve()
+    resolved = project.resolve_video_path(shooter_root, primary.path).resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_bytes(b"FAKE_MP4_BYTES")
 
@@ -3522,10 +3682,11 @@ def test_stream_video_424_when_target_missing(tmp_path: Path) -> None:
     "reconnect the USB / SD card" message across detect-beep, trim,
     beep preview, video stream, and export."""
     client, _ = _seed_project_with_primary(tmp_path)
-    project = MatchProject.load(tmp_path / "match")
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
     primary = project.stages[0].primary()
     assert primary is not None
-    resolved = project.resolve_video_path(tmp_path / "match", primary.path).resolve()
+    resolved = project.resolve_video_path(shooter_root, primary.path).resolve()
     if resolved.exists() or resolved.is_symlink():
         resolved.unlink()
     resp = client.get(f"/api/shooters/me/videos/stream?path={primary.path}")
@@ -3545,8 +3706,9 @@ def test_scan_videos_with_explicit_source_paths(tmp_path: Path) -> None:
     """source_paths picks specific files (USB-cam workflow). Only the listed
     files are registered, even if other videos sit in the same directory."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -3595,8 +3757,9 @@ def test_scan_videos_walks_subdirectories(tmp_path: Path) -> None:
     folder whose videos live inside dated/per-card subdirectories
     (mirrors the relink scanner's behaviour)."""
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
 
     src_dir = tmp_path / "videos"
     (src_dir / "card-a").mkdir(parents=True)
@@ -3618,15 +3781,15 @@ def test_scan_videos_walks_subdirectories(tmp_path: Path) -> None:
 
 
 def test_scan_400_when_neither_source_dir_nor_paths(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post("/api/shooters/me/videos/scan", json={"auto_assign_primary": False})
     assert resp.status_code == 400
 
 
 def test_scan_400_when_both_source_dir_and_paths(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/videos/scan",
         json={"source_dir": str(tmp_path), "source_paths": [str(tmp_path / "a.mp4")]},
@@ -3635,8 +3798,8 @@ def test_scan_400_when_both_source_dir_and_paths(tmp_path: Path) -> None:
 
 
 def test_settings_endpoint_persists_overrides(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/project/settings",
         json={
@@ -3657,8 +3820,8 @@ def test_settings_endpoint_persists_overrides(tmp_path: Path) -> None:
 
 
 def test_settings_empty_string_clears_override(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     client.post(
         "/api/shooters/me/project/settings",
         json={"audio_dir": str(tmp_path / "audio-config")},
@@ -3671,11 +3834,11 @@ def test_settings_409_when_old_dir_non_empty(tmp_path: Path) -> None:
     """Changing a path field must surface a 409 ``non_empty_old_dirs`` warning
     when the old directory still has files -- splitsmith does not migrate."""
     root = tmp_path / "match"
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
-    # Default audio_dir is <project>/audio. Drop a stray cache file there.
-    audio_default = root / "audio"
+    # Default audio_dir is <shooter_root>/audio. Drop a stray cache file there.
+    audio_default = root / "shooters" / "me" / "audio"
     audio_default.mkdir(parents=True, exist_ok=True)
     (audio_default / "stage_1.wav").write_bytes(b"fake")
 
@@ -3692,7 +3855,7 @@ def test_settings_409_when_old_dir_non_empty(tmp_path: Path) -> None:
     assert detail["dirs"][0]["path"] == str(audio_default)
     assert detail["dirs"][0]["file_count"] == 1
     # Project unchanged on disk.
-    assert MatchProject.load(root).audio_dir is None
+    assert MatchProject.load(root / "shooters" / "me").audio_dir is None
 
     # With confirm=true the change goes through, leaving old files behind.
     resp = client.post(
@@ -3707,8 +3870,8 @@ def test_settings_409_when_old_dir_non_empty(tmp_path: Path) -> None:
 def test_settings_no_warning_when_old_dir_empty(tmp_path: Path) -> None:
     """An empty old directory should not trigger the warning."""
     root = tmp_path / "match"
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
     # Default <project>/audio doesn't even exist yet.
     resp = client.post(
         "/api/shooters/me/project/settings",
@@ -3727,15 +3890,15 @@ def test_remove_video_unassigned(tmp_path: Path) -> None:
     src = src_dir / "clip.mp4"
     src.write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/videos/scan",
         json={"source_paths": [str(src)], "auto_assign_primary": False},
     )
     assert resp.status_code == 200
     registered_path = resp.json()["registered"][0]
-    raw_link = root / "raw" / "clip.mp4"
+    raw_link = root / "shooters" / "me" / "raw" / "clip.mp4"
     assert raw_link.is_symlink()
 
     resp = client.post("/api/shooters/me/videos/remove", json={"video_path": registered_path})
@@ -3754,8 +3917,8 @@ def test_remove_primary_clears_caches_and_keeps_audit(tmp_path: Path) -> None:
     src = src_dir / "clip.mp4"
     src.write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "M"},
         "competitors": [
@@ -3778,16 +3941,17 @@ def test_remove_primary_clears_caches_and_keeps_audit(tmp_path: Path) -> None:
         "/api/shooters/me/videos/scan",
         json={"source_paths": [str(src)], "auto_assign_primary": False},
     )
-    project = MatchProject.load(root)
+    shooter_root = root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
     project.assign_video(Path("raw/clip.mp4"), to_stage_number=1, role="primary")
-    project.save(root)
+    project.save(shooter_root)
     # Simulate processed state: write fake cached files audit/audio/trimmed.
     audio_cache, _audit_wav, trimmed_cache = _primary_cache_paths(root)
     audio_cache.parent.mkdir(parents=True, exist_ok=True)
     audio_cache.write_bytes(b"wav")
     trimmed_cache.parent.mkdir(parents=True, exist_ok=True)
     trimmed_cache.write_bytes(b"mp4")
-    audit = root / "audit" / "stage1.json"
+    audit = shooter_root / "audit" / "stage1.json"
     audit.parent.mkdir(parents=True, exist_ok=True)
     audit.write_text("{}")
     project.stages[0].videos[0].processed = {
@@ -3795,7 +3959,7 @@ def test_remove_primary_clears_caches_and_keeps_audit(tmp_path: Path) -> None:
         "shot_detect": True,
         "trim": True,
     }
-    project.save(root)
+    project.save(shooter_root)
 
     resp = client.post(
         "/api/shooters/me/videos/remove",
@@ -3817,8 +3981,8 @@ def test_remove_primary_with_reset_audit_clears_audit(tmp_path: Path) -> None:
     src = src_dir / "clip.mp4"
     src.write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "M"},
         "competitors": [
@@ -3841,10 +4005,11 @@ def test_remove_primary_with_reset_audit_clears_audit(tmp_path: Path) -> None:
         "/api/shooters/me/videos/scan",
         json={"source_paths": [str(src)], "auto_assign_primary": False},
     )
-    project = MatchProject.load(root)
+    shooter_root = root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
     project.assign_video(Path("raw/clip.mp4"), to_stage_number=1, role="primary")
-    project.save(root)
-    audit = root / "audit" / "stage1.json"
+    project.save(shooter_root)
+    audit = shooter_root / "audit" / "stage1.json"
     audit.parent.mkdir(parents=True, exist_ok=True)
     audit.write_text("{}")
 
@@ -3858,8 +4023,8 @@ def test_remove_primary_with_reset_audit_clears_audit(tmp_path: Path) -> None:
 
 
 def test_remove_video_404_when_unknown(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/shooters/me/videos/remove",
         json={"video_path": "raw/no-such.mp4"},
@@ -3875,8 +4040,8 @@ def test_fs_list_probe_populates_duration_and_thumbnail(tmp_path: Path) -> None:
     clip = folder / "clip.mp4"
     clip.write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -3909,8 +4074,8 @@ def test_fs_probe_endpoint_runs_on_demand(tmp_path: Path) -> None:
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -3947,8 +4112,8 @@ def test_videos_reveal_runs_on_registered_path(tmp_path: Path) -> None:
     src = src_dir / "VID.mp4"
     src.write_bytes(b"")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     scan = client.post("/api/shooters/me/videos/scan", json={"source_paths": [str(src)]})
     assert scan.status_code == 200, scan.text
@@ -3977,8 +4142,8 @@ def test_videos_reveal_runs_on_registered_path(tmp_path: Path) -> None:
 
 def test_videos_reveal_404_on_unregistered_path(tmp_path: Path) -> None:
     root = tmp_path / "match"
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     resp = client.post("/api/shooters/me/videos/reveal", json={"path": "raw/missing.mp4"})
     assert resp.status_code == 404
@@ -3996,8 +4161,8 @@ def test_videos_reveal_surfaces_nonzero_subprocess_exit(tmp_path: Path) -> None:
     src = src_dir / "VID.mp4"
     src.write_bytes(b"")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     scan = client.post("/api/shooters/me/videos/scan", json={"source_paths": [str(src)]})
     assert scan.status_code == 200, scan.text
@@ -4029,8 +4194,8 @@ def test_videos_reveal_surfaces_missing_helper_binary(tmp_path: Path) -> None:
     src = src_dir / "VID.mp4"
     src.write_bytes(b"")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     scan = client.post("/api/shooters/me/videos/scan", json={"source_paths": [str(src)]})
     assert scan.status_code == 200, scan.text
@@ -4047,15 +4212,16 @@ def test_videos_reveal_surfaces_missing_helper_binary(tmp_path: Path) -> None:
 
 def test_fs_probe_resolves_project_relative_paths(tmp_path: Path) -> None:
     # StageVideo.path is stored project-relative (e.g. "raw/foo.mp4"); the
-    # probe endpoint must resolve it via the project root, not process CWD.
+    # probe endpoint must resolve it via the shooter project root, not
+    # process CWD.
     root = tmp_path / "match"
-    raw_dir = root / "raw"
+    raw_dir = root / "shooters" / "me" / "raw"
     raw_dir.mkdir(parents=True)
     clip = raw_dir / "clip.mp4"
     clip.write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     def _fake_probe(path: Path, *, cache_dir: Path, **kwargs):  # noqa: ANN001
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -4081,10 +4247,10 @@ def test_fs_probe_resolves_project_relative_paths(tmp_path: Path) -> None:
 
 def test_thumbnail_endpoint_serves_cached(tmp_path: Path) -> None:
     root = tmp_path / "match"
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
-    thumbs_dir = root / "thumbs"
+    thumbs_dir = root / "shooters" / "me" / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     (thumbs_dir / "abc123.jpg").write_bytes(b"\xff\xd8\xff jpeg")
 
@@ -4097,8 +4263,8 @@ def test_thumbnail_endpoint_serves_cached(tmp_path: Path) -> None:
 
 
 def test_thumbnail_endpoint_rejects_path_traversal(tmp_path: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
     # Slashes in the path component aren't possible thanks to FastAPI's
     # path matcher, but '..' as a key should be rejected by our shape check.
     resp = client.get("/api/shooters/me/thumbnails/..jpg")
@@ -4113,8 +4279,8 @@ def test_fs_list_probe_skipped_when_falsy(tmp_path: Path) -> None:
     folder.mkdir()
     (folder / "clip.mp4").write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     with (
         patch(
@@ -4141,8 +4307,8 @@ def test_fs_list_probe_failure_swallowed(tmp_path: Path) -> None:
     folder.mkdir()
     (folder / "clip.mp4").write_bytes(b"fake")
 
-    app = create_app(project_root=root, project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
 
     with (
         patch(
@@ -4165,14 +4331,15 @@ def test_external_edit_visible_without_restart(tmp_path: Path) -> None:
     """External edits to project.json must appear on the next request -- the
     server doesn't cache the model in memory."""
     root = tmp_path / "match"
-    app = create_app(project_root=root, project_name="External Edit Match")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="External Edit Match")
+    client = _MatchClient(app)
 
     assert client.get("/api/shooters/me/project").json()["competitor_name"] is None
 
-    project = MatchProject.load(root)
+    shooter_root = root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
     project.competitor_name = "Edited Externally"
-    project.save(root)
+    project.save(shooter_root)
 
     assert client.get("/api/shooters/me/project").json()["competitor_name"] == "Edited Externally"
 
@@ -4642,8 +4809,9 @@ def test_auto_beep_queued_on_move_to_stage(tmp_path: Path, monkeypatch) -> None:
     _stub_detect(monkeypatch, beep_time=8.42)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -4694,8 +4862,9 @@ def test_auto_beep_fires_for_secondaries_too(tmp_path: Path, monkeypatch) -> Non
     _stub_detect(monkeypatch, beep_time=8.42)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -4753,8 +4922,9 @@ def test_auto_beep_skipped_for_unassigned_destination(tmp_path: Path, monkeypatc
     _stub_detect(monkeypatch, beep_time=8.42)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -4806,8 +4976,9 @@ def test_auto_beep_skipped_when_already_processed(tmp_path: Path, monkeypatch) -
     _stub_detect(monkeypatch, beep_time=8.42)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -4863,8 +5034,9 @@ def test_auto_beep_disabled_via_env_var(tmp_path: Path, monkeypatch) -> None:
     _stub_detect(monkeypatch, beep_time=8.42)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -4907,8 +5079,9 @@ def test_auto_beep_queued_on_scan_auto_assign(tmp_path: Path, monkeypatch) -> No
     _stub_detect(monkeypatch, beep_time=4.5)
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="x")
-    client = TestClient(app)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
     sb = {
         "match": {"id": "1", "name": "x"},
         "competitors": [
@@ -5141,7 +5314,7 @@ def _user_config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_create_app_records_recent_project(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import user_config
 
-    create_app(project_root=tmp_path / "match", project_name="Recent Match")
+    _match_create_app(project_root=tmp_path / "match", project_name="Recent Match")
     recent = user_config.get_recent_projects()
     assert len(recent) == 1
     assert recent[0].name == "Recent Match"
@@ -5149,9 +5322,9 @@ def test_create_app_records_recent_project(tmp_path: Path, _user_config_home: Pa
 
 
 def test_recent_projects_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
-    create_app(project_root=tmp_path / "alpha", project_name="Alpha")
-    app = create_app(project_root=tmp_path / "beta", project_name="Beta")
-    client = TestClient(app)
+    _match_create_app(project_root=tmp_path / "alpha", project_name="Alpha")
+    app = _match_create_app(project_root=tmp_path / "beta", project_name="Beta")
+    client = _MatchClient(app)
 
     resp = client.get("/api/me/recent-projects")
     assert resp.status_code == 200
@@ -5162,9 +5335,9 @@ def test_recent_projects_endpoint(tmp_path: Path, _user_config_home: Path) -> No
 
 
 def test_forget_recent_project_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
-    create_app(project_root=tmp_path / "alpha", project_name="Alpha")
-    app = create_app(project_root=tmp_path / "beta", project_name="Beta")
-    client = TestClient(app)
+    _match_create_app(project_root=tmp_path / "alpha", project_name="Alpha")
+    app = _match_create_app(project_root=tmp_path / "beta", project_name="Beta")
+    client = _MatchClient(app)
 
     resp = client.post(
         "/api/me/recent-projects/forget",
@@ -5180,7 +5353,7 @@ def test_unbound_create_app_health_reports_unbound() -> None:
     """`splitsmith ui` with no --project boots unbound; /api/health
     reports it so the SPA can route to the picker."""
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     body = client.get("/api/health").json()
     assert body["bound"] is False
@@ -5192,7 +5365,7 @@ def test_unbound_project_endpoints_return_409_no_project(tmp_path: Path) -> None
     """Every project-bound route returns the structured 409 the SPA
     listens for to redirect to the picker."""
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/project")
     assert resp.status_code == 409
@@ -5208,10 +5381,10 @@ def test_bind_recent_project_switches_in_memory(tmp_path: Path, _user_config_hom
     from splitsmith import user_config
 
     alpha = tmp_path / "alpha"
-    create_app(project_root=alpha, project_name="Alpha")
+    _match_create_app(project_root=alpha, project_name="Alpha")
     # Now boot unbound and bind via the endpoint.
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     assert client.get("/api/health").json()["bound"] is False
 
@@ -5234,7 +5407,7 @@ def test_bind_recent_project_switches_in_memory(tmp_path: Path, _user_config_hom
 
 def test_bind_recent_project_404_when_path_missing(tmp_path: Path, _user_config_home: Path) -> None:
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.post(
         "/api/me/recent-projects/bind",
         json={"path": str(tmp_path / "does-not-exist")},
@@ -5243,56 +5416,53 @@ def test_bind_recent_project_404_when_path_missing(tmp_path: Path, _user_config_
     assert resp.json()["detail"]["code"] == "project_path_missing"
 
 
-def test_bind_recent_project_create_scaffolds_new_dir(tmp_path: Path, _user_config_home: Path) -> None:
-    """``create=true`` mkdirs the destination and scaffolds project.json so
-    the picker's "Create new project" flow can target a fresh folder.
+# ``test_bind_recent_project_create_scaffolds_new_dir`` and
+# ``test_bind_recent_project_scaffolds_empty_existing_folder`` were
+# deleted in Tier 1 step 3 of doc 10. The picker bind endpoint used
+# to scaffold a legacy single-shooter MatchProject at any path; that
+# behavior is gone -- the bind path now refuses non-match paths
+# with 400 ``not_a_match`` and the picker pushes users through
+# ``POST /api/match/create-manual`` or ``/api/match/create-from-
+# scoreboard`` instead. The "create new project" UX moves to those
+# explicit create endpoints; this test family had nothing to test.
+
+
+def test_bind_recent_project_refuses_non_match_path(tmp_path: Path, _user_config_home: Path) -> None:
+    """Post Tier 1 step 3 of doc 10: bind endpoint refuses any path
+    that isn't already a Match folder. Picker UX redirects to the
+    explicit create-match endpoints instead of inline scaffolding.
     """
-    app = create_app()
-    client = TestClient(app)
-    target = tmp_path / "fresh" / "new-match"
-    assert not target.exists()
-
-    resp = client.post(
-        "/api/me/recent-projects/bind",
-        json={"path": str(target), "name": "Fresh Match", "create": True},
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["bound"] is True
-    assert body["project_name"] == "Fresh Match"
-    assert (target / "project.json").exists()
-
-
-def test_bind_recent_project_scaffolds_empty_existing_folder(tmp_path: Path, _user_config_home: Path) -> None:
-    """An existing folder without project.json is scaffolded in place; the
-    Pick page's updated copy promises this works."""
     app = create_app()
     client = TestClient(app)
     target = tmp_path / "empty-folder"
     target.mkdir()
 
-    resp = client.post(
-        "/api/me/recent-projects/bind",
-        json={"path": str(target)},
-    )
-    assert resp.status_code == 200
-    assert (target / "project.json").exists()
+    resp = client.post("/api/me/recent-projects/bind", json={"path": str(target)})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "not_a_match"
 
 
 def test_unbind_returns_to_unbound_state(tmp_path: Path, _user_config_home: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    """Post Tier 1 step 3 of doc 10, `unbind` clears the singleton
+    bind (so /api/health reports unbound) but doesn't unregister
+    the match from ``state.matches`` -- URLs that carry the
+    ``match_id`` continue to resolve. The "current open project"
+    concept is going URL-only; unbind is mostly a picker-UX hook."""
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    raw = TestClient(app)
 
-    assert client.get("/api/health").json()["bound"] is True
-    resp = client.post("/api/me/recent-projects/unbind")
+    assert raw.get("/api/health").json()["bound"] is True
+    resp = raw.post("/api/me/recent-projects/unbind")
     assert resp.status_code == 200
     assert resp.json()["bound"] is False
-    assert client.get("/api/shooters/me/project").status_code == 409
+    # Bare-path shooter access still 409s -- the singleton bind is
+    # gone (and was never the resolution path anyway after step 3).
+    assert raw.get("/api/shooters/me/project").status_code == 409
 
 
 def test_scoreboard_identity_round_trip(tmp_path: Path, _user_config_home: Path) -> None:
-    app = create_app(project_root=tmp_path / "match", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
 
     # Empty: 200 null. "Not pinned yet" is a normal state, not an error,
     # so the SPA doesn't have to catch a 404 on every page load.
@@ -5327,10 +5497,10 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     """`?detail=true` returns kind + stage/shooter counts for the redesign picker (#322)."""
     from splitsmith import match_model, user_config
 
-    # Set up one legacy project + one match folder, both recorded.
-    legacy_root = tmp_path / "legacy"
-    create_app(project_root=legacy_root, project_name="Legacy Match")
-
+    # Post Tier 1 step 3 of doc 10, only Match folders are
+    # enumerable as a real project kind in the picker. A pre-Tier-1
+    # legacy ``project.json`` shows up as ``kind="unknown"`` so
+    # the user can prune it; the metadata block stays empty.
     match_root = tmp_path / "fancy-match"
     match = match_model.Match.init(match_root, name="Fancy Match")
     match.stages = [
@@ -5340,10 +5510,11 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     match.save(match_root)
     shooter = match_model.Shooter(slug="ma", name="Mathias")
     match.add_shooter(match_root, shooter)
+    MatchProject.init(match_model.Match.shooter_root(match_root, "ma"), name="Fancy Match")
     user_config.record_project_open(match_root, match.name, kind="match")
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     resp = client.get("/api/me/recent-projects?detail=true")
     assert resp.status_code == 200
@@ -5355,9 +5526,6 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     assert by_kind["match"]["stage_count"] == 2
     assert by_kind["match"]["status"] == "in_progress"
 
-    assert by_kind["legacy"]["name"] == "Legacy Match"
-    assert by_kind["legacy"]["shooter_count"] == 1
-
 
 def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import user_config
@@ -5368,7 +5536,7 @@ def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_
     ghost.rmdir()
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.get("/api/me/recent-projects?detail=true")
     kinds = [p["kind"] for p in resp.json()["projects"]]
     assert kinds == ["missing"]
@@ -5382,7 +5550,7 @@ def test_create_match_manual_scaffolds_match_and_binds_shooter(
 
     target = tmp_path / "new-match"
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     body = {
         "name": "Bromma Practice",
@@ -5432,7 +5600,7 @@ def test_create_match_manual_refuses_existing_match_folder(tmp_path: Path, _user
     target = tmp_path / "occupied"
     match_model.Match.init(target, name="Already here")
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     body = {
         "name": "Bromma",
@@ -5458,7 +5626,7 @@ def test_bind_match_folder_binds_match_root(tmp_path: Path, _user_config_home: P
     match.add_shooter(target, shooter)
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.post(
         "/api/me/recent-projects/bind",
         json={"path": str(target)},
@@ -5495,7 +5663,7 @@ def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_con
         legacy.save(sroot)
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     resp = client.post(
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
@@ -5520,7 +5688,7 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
     MatchProject.init(match_model.Match.shooter_root(target, "ma"), name="Add Test")
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     client.post(
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
@@ -5549,7 +5717,7 @@ def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path)
         MatchProject.init(match_model.Match.shooter_root(target, slug), name="Rm Test")
 
     app = create_app()
-    client = TestClient(app)
+    client = _MatchClient(app)
     client.post(
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
@@ -5566,8 +5734,8 @@ def test_user_config_disable_flag_makes_endpoints_safe(
     from splitsmith import user_config
 
     monkeypatch.setenv(user_config.ENV_DISABLE, "1")
-    app = create_app(project_root=tmp_path / "match", project_name="Disabled")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match", project_name="Disabled")
+    client = _MatchClient(app)
 
     # Recording was a no-op.
     body = client.get("/api/me/recent-projects").json()
@@ -5610,8 +5778,8 @@ def test_load_env_files_picks_up_user_config_env(tmp_path: Path, monkeypatch: py
 
 def test_promote_against_fixture_endpoint_lab_gated(tmp_path: Path) -> None:
     """Without ``lab_enabled``, the new endpoint isn't registered (404 / 405)."""
-    app = create_app(project_root=tmp_path / "match-noflag", project_name="x")
-    client = TestClient(app)
+    app = _match_create_app(project_root=tmp_path / "match-noflag", project_name="x")
+    client = _MatchClient(app)
     resp = client.post(
         "/api/lab/projects/1/videos/abc/promote-against-fixture",
         json={"anchor_slug": "stage-shots-foo-2026-stage1", "mount": "hand", "position": "shooter"},
@@ -5625,28 +5793,30 @@ def test_promote_against_fixture_endpoint_validates_anchor_exists(
     tmp_path: Path,
 ) -> None:
     """Lab-enabled, but the anchor slug doesn't exist on disk -> 404."""
+    from splitsmith.ui.project import MatchProject, StageEntry
+
     project_root = tmp_path / "match-anchor"
-    app = create_app(
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(
         project_root=project_root,
         project_name="x",
         lab_enabled=True,
     )
-    client = TestClient(app)
+    client = _MatchClient(app)
     # Seed a stage + a video with a beep_time so we get past the
     # earlier validation gates.
-    from splitsmith.ui.project import MatchProject, StageEntry
 
-    project = MatchProject.load(project_root)
+    project = MatchProject.load(_shooter_root)
     project.stages = [StageEntry(stage_number=1, stage_name="A", time_seconds=10.0)]
-    src = project_root / "raw" / "VID.mp4"
+    src = _shooter_root / "raw" / "VID.mp4"
     src.parent.mkdir(parents=True, exist_ok=True)
     src.write_bytes(b"\x00")
-    video = project.register_video(src, project_root)
+    video = project.register_video(src, _shooter_root)
     project.assign_video(video.path, to_stage_number=1, role="primary")
     primary = project.stages[0].primary()
     assert primary is not None
     primary.beep_time = 5.0
-    project.save(project_root)
+    project.save(_shooter_root)
 
     resp = client.post(
         f"/api/lab/projects/me/1/videos/{primary.video_id}/promote-against-fixture",
@@ -5672,13 +5842,14 @@ def _seed_match_export_project(tmp_path: Path, *, stage_count: int = 2) -> tuple
     from splitsmith.ui.project import MatchProject, StageEntry
 
     project_root = tmp_path / "match"
-    app = create_app(project_root=project_root, project_name="Match Export Test")
-    client = TestClient(app)
-    project = MatchProject.load(project_root)
+    _shooter_root = project_root / "shooters" / "me"
+    app = _match_create_app(project_root=project_root, project_name="Match Export Test")
+    client = _MatchClient(app)
+    project = MatchProject.load(_shooter_root)
     project.stages = []
     for n in range(1, stage_count + 1):
         project.stages.append(StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=10.0))
-        src = project_root / "raw" / f"VID{n}.mp4"
+        src = _shooter_root / "raw" / f"VID{n}.mp4"
         src.parent.mkdir(parents=True, exist_ok=True)
         src.write_bytes(b"\x00")
         video = project.register_video(src, project_root)
@@ -5686,11 +5857,11 @@ def _seed_match_export_project(tmp_path: Path, *, stage_count: int = 2) -> tuple
         primary = project.stages[n - 1].primary()
         assert primary is not None
         primary.beep_time = 5.0
-    project.save(project_root)
+    project.save(_shooter_root)
 
-    audit_dir = project_root / "audit"
+    audit_dir = _shooter_root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
-    exports_dir = project_root / "exports"
+    exports_dir = _shooter_root / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, stage_count + 1):
         (audit_dir / f"stage{n}.json").write_text(
@@ -5794,11 +5965,12 @@ def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
     pre-staged trim. The endpoint's source-reachability check then 424s."""
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     _stub_match_export_probe(monkeypatch)
-    (project_root / "exports" / "stage1_stage-1_trimmed.mp4").unlink()
+    shooter_root = project_root / "shooters" / "me"
+    (shooter_root / "exports" / "stage1_stage-1_trimmed.mp4").unlink()
     # Make the source unreachable by removing the underlying file (the
     # symlink in raw/ stays). The endpoint pre-flight surfaces this as a
     # structured 424.
-    (project_root / "raw" / "VID1.mp4").unlink()
+    (shooter_root / "raw" / "VID1.mp4").unlink()
     resp = client.post(
         "/api/shooters/me/export/match",
         json={"stage_numbers": [1], "include_overlay": False},
@@ -5814,24 +5986,24 @@ def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
 # ---------------------------------------------------------------------------
 
 
-def _seed_cleanup_project(tmp_path: Path) -> tuple[TestClient, Path]:
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Cleanup")
+def _seed_cleanup_project(tmp_path: Path) -> tuple[_MatchClient, Path]:
+    root, _shooter_root = _scaffold_match(tmp_path, name="Cleanup", subdir="match")
+    project = MatchProject.load(_shooter_root)
 
-    audio = project.audio_path(root)
+    audio = project.audio_path(_shooter_root)
     audio.mkdir(parents=True, exist_ok=True)
     (audio / "stage1_primary.wav").write_bytes(b"\x00" * 1024)
 
-    exp = project.exports_path(root)
+    exp = project.exports_path(_shooter_root)
     exp.mkdir(parents=True, exist_ok=True)
     (exp / "stage1_one_overlay.mov").write_bytes(b"\x00" * 4096)
 
-    audit = project.audit_path(root)
+    audit = project.audit_path(_shooter_root)
     audit.mkdir(parents=True, exist_ok=True)
     (audit / "stage1.json").write_text("{}")
 
-    app = create_app(project_root=root, project_name="Cleanup")
-    return TestClient(app), root
+    app = _match_create_app(project_root=root, project_name="Cleanup")
+    return _MatchClient(app), root
 
 
 def test_cleanup_plan_returns_per_category_totals(tmp_path: Path) -> None:
@@ -5868,6 +6040,7 @@ def test_cleanup_plan_unknown_category_silently_dropped(tmp_path: Path) -> None:
 
 def test_cleanup_apply_deletes_and_returns_result(tmp_path: Path) -> None:
     client, root = _seed_cleanup_project(tmp_path)
+    shooter_root = root / "shooters" / "me"
     resp = client.post(
         "/api/shooters/me/project/cleanup",
         json={"categories": ["audio", "exports-overlays"]},
@@ -5876,17 +6049,18 @@ def test_cleanup_apply_deletes_and_returns_result(tmp_path: Path) -> None:
     body = resp.json()
     assert body["result"]["bytes_freed"] == 1024 + 4096
     assert len(body["result"]["deleted"]) == 2
-    assert not (root / "audio" / "stage1_primary.wav").exists()
-    assert not (root / "exports" / "stage1_one_overlay.mov").exists()
+    assert not (shooter_root / "audio" / "stage1_primary.wav").exists()
+    assert not (shooter_root / "exports" / "stage1_one_overlay.mov").exists()
     # Audit JSON survives unless explicitly requested
-    assert (root / "audit" / "stage1.json").exists()
+    assert (shooter_root / "audit" / "stage1.json").exists()
 
 
 def test_cleanup_apply_audit_data_destructive(tmp_path: Path) -> None:
     client, root = _seed_cleanup_project(tmp_path)
+    shooter_root = root / "shooters" / "me"
     resp = client.post("/api/shooters/me/project/cleanup", json={"categories": ["audit-data"]})
     assert resp.status_code == 200
-    assert not (root / "audit" / "stage1.json").exists()
+    assert not (shooter_root / "audit" / "stage1.json").exists()
 
 
 def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
@@ -5935,7 +6109,7 @@ def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
 def test_cleanup_endpoints_409_when_no_project_bound(tmp_path: Path) -> None:
     """Picker-mode (no bound project) -> both endpoints return 409 no_project."""
     app = create_app()  # unbound
-    client = TestClient(app)
+    client = _MatchClient(app)
     assert client.get("/api/shooters/me/project/cleanup/plan?categories=audio").status_code == 409
     cleanup_resp = client.post(
         "/api/shooters/me/project/cleanup",
@@ -5953,8 +6127,8 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     SettingProvenance component expects."""
     root = tmp_path / "match"
     MatchProject.init(root, name="Auto Match").save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/automation")
     assert resp.status_code == 200
@@ -5976,12 +6150,12 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
 def test_get_automation_reports_project_provenance_when_overridden(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Override Match")
+    root, _shooter_root = _scaffold_match(tmp_path, name="Override Match", subdir="match")
+    project = MatchProject.load(_shooter_root)
     project.automation = AutomationOverride(shot_detect_on_beep_verified=False)
-    project.save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    project.save(_shooter_root)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/automation")
     assert resp.status_code == 200
@@ -5996,8 +6170,8 @@ def test_get_automation_reports_project_provenance_when_overridden(
 def test_dismiss_nudge_persists_stage_number(tmp_path: Path) -> None:
     """#218 phase 4 -- POST adds the stage to nudges_dismissed_stages
     and the response carries the updated project."""
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Nudge Match")
+    root, _shooter_root = _scaffold_match(tmp_path, name="Nudge Match", subdir="match")
+    project = MatchProject.load(_shooter_root)
     project.stages = [
         StageEntry(
             stage_number=1,
@@ -6006,9 +6180,9 @@ def test_dismiss_nudge_persists_stage_number(tmp_path: Path) -> None:
             videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
         )
     ]
-    project.save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    project.save(_shooter_root)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.post(
         "/api/shooters/me/project/nudges/dismiss",
@@ -6020,8 +6194,8 @@ def test_dismiss_nudge_persists_stage_number(tmp_path: Path) -> None:
 
 
 def test_dismiss_nudge_idempotent(tmp_path: Path) -> None:
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Idempotent")
+    root, _shooter_root = _scaffold_match(tmp_path, name="Idempotent", subdir="match")
+    project = MatchProject.load(_shooter_root)
     project.stages = [
         StageEntry(
             stage_number=2,
@@ -6031,9 +6205,9 @@ def test_dismiss_nudge_idempotent(tmp_path: Path) -> None:
         )
     ]
     project.nudges_dismissed_stages = [2]
-    project.save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    project.save(_shooter_root)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.post(
         "/api/shooters/me/project/nudges/dismiss",
@@ -6044,8 +6218,8 @@ def test_dismiss_nudge_idempotent(tmp_path: Path) -> None:
 
 
 def test_dismiss_nudge_clears_when_dismissed_false(tmp_path: Path) -> None:
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="Reset")
+    root, _shooter_root = _scaffold_match(tmp_path, name="Reset", subdir="match")
+    project = MatchProject.load(_shooter_root)
     project.stages = [
         StageEntry(
             stage_number=3,
@@ -6055,9 +6229,9 @@ def test_dismiss_nudge_clears_when_dismissed_false(tmp_path: Path) -> None:
         )
     ]
     project.nudges_dismissed_stages = [3]
-    project.save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    project.save(_shooter_root)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.post(
         "/api/shooters/me/project/nudges/dismiss",
@@ -6070,8 +6244,8 @@ def test_dismiss_nudge_clears_when_dismissed_false(tmp_path: Path) -> None:
 def test_dismiss_nudge_404_for_unknown_stage(tmp_path: Path) -> None:
     root = tmp_path / "match"
     MatchProject.init(root, name="NoStage").save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.post(
         "/api/shooters/me/project/nudges/dismiss",
@@ -6090,8 +6264,18 @@ def _build_project_with_primary(
     beep_reviewed: bool,
     beep_auto_detect_failed: bool = False,
 ) -> MatchProject:
-    """Helper for HITL queue tests -- builds a project with one stage / primary."""
-    project = MatchProject.init(root, name=name)
+    """Helper for HITL queue tests -- builds a Match folder + one
+    shooter ``me`` + one stage / primary.
+
+    ``root`` is the match-folder root; the shooter project lives at
+    ``<root>/shooters/me/`` post Tier 1 step 3 of doc 10.
+    """
+    from splitsmith import match_model
+
+    match = match_model.Match.init(root, name=name)
+    match.add_shooter(root, match_model.Shooter(slug="me", name="Me"))
+    shooter_root = match_model.Match.shooter_root(root, "me")
+    project = MatchProject.init(shooter_root, name=name)
     primary = StageVideo(
         path=root / "primary.mp4",
         role="primary",
@@ -6102,7 +6286,7 @@ def _build_project_with_primary(
         beep_auto_detect_failed=beep_auto_detect_failed,
     )
     project.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.0, videos=[primary])]
-    project.save(root)
+    project.save(shooter_root)
     return project
 
 
@@ -6117,8 +6301,8 @@ def test_hitl_queue_lists_low_confidence_auto_beep(tmp_path: Path) -> None:
         beep_confidence=0.4,
         beep_reviewed=False,
     )
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/hitl-queue")
     assert resp.status_code == 200
@@ -6144,8 +6328,8 @@ def test_hitl_queue_lists_missing_beep(tmp_path: Path) -> None:
         beep_reviewed=False,
         beep_auto_detect_failed=True,
     )
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/hitl-queue")
     item = resp.json()["items"][0]
@@ -6165,8 +6349,8 @@ def test_hitl_queue_omits_high_confidence_reviewed_beep(tmp_path: Path) -> None:
         beep_confidence=0.85,
         beep_reviewed=True,  # auto-trusted via threshold gate
     )
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/hitl-queue")
     assert resp.json()["items"] == []
@@ -6182,8 +6366,8 @@ def test_hitl_queue_omits_manual_beep(tmp_path: Path) -> None:
         beep_confidence=1.0,
         beep_reviewed=True,
     )
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/hitl-queue")
     assert resp.json()["items"] == []
@@ -6191,8 +6375,8 @@ def test_hitl_queue_omits_manual_beep(tmp_path: Path) -> None:
 
 def test_hitl_queue_orders_by_stage_number(tmp_path: Path) -> None:
     """Stages 3, 1, 2 with all-needs-review beeps come back in 1, 2, 3 order."""
-    root = tmp_path / "match"
-    project = MatchProject.init(root, name="HITL Order")
+    root, _shooter_root = _scaffold_match(tmp_path, name="HITL Order", subdir="match")
+    project = MatchProject.load(_shooter_root)
     project.stages = []
     for n in (3, 1, 2):
         v = StageVideo(
@@ -6204,9 +6388,9 @@ def test_hitl_queue_orders_by_stage_number(tmp_path: Path) -> None:
             beep_reviewed=False,
         )
         project.stages.append(StageEntry(stage_number=n, stage_name=f"S{n}", time_seconds=12.0, videos=[v]))
-    project.save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    project.save(_shooter_root)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/hitl-queue")
     stages = [item["stage_number"] for item in resp.json()["items"]]
@@ -6225,9 +6409,9 @@ def test_hitl_queue_threshold_respects_project_override(tmp_path: Path) -> None:
         beep_reviewed=False,
     )
     project.automation = AutomationOverride(beep_low_confidence_threshold=0.9)
-    project.save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    project.save(root / "shooters" / "me")
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     body = client.get("/api/shooters/me/hitl-queue").json()
     assert body["threshold"] == 0.9
@@ -6239,8 +6423,8 @@ def test_post_settings_patches_automation_override(tmp_path: Path) -> None:
     sees it as the project layer."""
     root = tmp_path / "match"
     MatchProject.init(root, name="Patch Match").save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.post(
         "/api/shooters/me/project/settings",
@@ -6262,8 +6446,8 @@ def test_dev_model_endpoint_returns_calibration_metadata(tmp_path: Path) -> None
     needs the model version on every page load."""
     root = tmp_path / "match"
     MatchProject.init(root, name="Dev Match").save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/dev/model")
     assert resp.status_code == 200
@@ -6281,8 +6465,8 @@ def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
     so the dev review page can render its three queue sections."""
     root = tmp_path / "match"
     MatchProject.init(root, name="Dev Match").save(root)
-    app = create_app(project_root=root, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
 
     resp = client.get("/api/dev/review-queue")
     assert resp.status_code == 200
@@ -6302,8 +6486,8 @@ def test_merge_plan_returns_reconciled_plan_for_legacy_inputs(tmp_path: Path) ->
     without touching the filesystem."""
     sink = tmp_path / "sink"
     MatchProject.init(sink, name="ignored").save(sink)
-    app = create_app(project_root=sink, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=sink, project_name="ignored")
+    client = _MatchClient(app)
 
     a = tmp_path / "proj-a"
     b = tmp_path / "proj-b"
@@ -6330,8 +6514,8 @@ def test_merge_plan_returns_409_on_conflicting_names(tmp_path: Path) -> None:
     MergeConflictError message so the SPA can surface it."""
     sink = tmp_path / "sink"
     MatchProject.init(sink, name="ignored").save(sink)
-    app = create_app(project_root=sink, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=sink, project_name="ignored")
+    client = _MatchClient(app)
 
     a = tmp_path / "proj-a"
     b = tmp_path / "proj-b"
@@ -6352,8 +6536,8 @@ def test_merge_execute_writes_match_folder_and_binds_first_shooter(tmp_path: Pat
     navigate to / and resume work immediately."""
     sink = tmp_path / "sink"
     MatchProject.init(sink, name="ignored").save(sink)
-    app = create_app(project_root=sink, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=sink, project_name="ignored")
+    client = _MatchClient(app)
 
     a = tmp_path / "proj-a"
     b = tmp_path / "proj-b"
@@ -6383,8 +6567,8 @@ def test_merge_execute_refuses_destination_with_existing_match(tmp_path: Path) -
     merged match."""
     sink = tmp_path / "sink"
     MatchProject.init(sink, name="ignored").save(sink)
-    app = create_app(project_root=sink, project_name="ignored")
-    client = TestClient(app)
+    app = _match_create_app(project_root=sink, project_name="ignored")
+    client = _MatchClient(app)
 
     a = tmp_path / "proj-a"
     b = tmp_path / "proj-b"
@@ -6415,14 +6599,19 @@ def _make_match_app(tmp_path: Path):
     match = match_model.Match.init(match_root, name="Scoped Match")
     shooter = match_model.Shooter(slug="mathias", name="Mathias")
     match.add_shooter(match_root, shooter)
-    app = create_app(project_root=match_root, project_name=match.name)
+    # Post Tier 1 step 3 of doc 10, every Match folder must carry a
+    # ``project.json`` inside each shooter dir; the bind path
+    # otherwise warns "no project.json" and the shooter is invisible
+    # to the listing endpoints.
+    MatchProject.init(match_model.Match.shooter_root(match_root, "mathias"), name=match.name)
+    app = _match_create_app(project_root=match_root, project_name=match.name)
     return app, match, match_root
 
 
 def test_match_id_alias_rewrites_to_existing_route(tmp_path: Path, _user_config_home: Path) -> None:
     """``/api/matches/{match_id}/health`` resolves to the same health route."""
     app, match, _ = _make_match_app(tmp_path)
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     direct = client.get("/api/health")
     aliased = client.get(f"/api/matches/{match.match_id}/health")
@@ -6439,7 +6628,12 @@ def test_match_id_alias_resolves_match_level_endpoint(tmp_path: Path, _user_conf
     """A real match-level endpoint works through the /api/matches/
     prefix; the bare-path form 409s after Tier 1 of the singleton-
     elimination work (doc 10) -- match-level operations are
-    addressable only by URL, never via a process-level bind."""
+    addressable only by URL, never via a process-level bind.
+
+    Uses a raw ``TestClient`` (not the ``_MatchClient`` wrapper) so
+    the bare-path call actually reaches the server bare; the wrapper
+    would auto-prefix and defeat the point of the test.
+    """
     app, match, _ = _make_match_app(tmp_path)
     client = TestClient(app)
 
@@ -6487,7 +6681,7 @@ def test_match_root_no_singleton_fallback(tmp_path: Path, _user_config_home: Pat
     state = app.state.splitsmith_state
 
     # The singleton IS bound (matches.bound state is set by
-    # _make_match_app via create_app(project_root=...)).
+    # _make_match_app via _match_create_app(project_root=...)).
     assert state.bound_match_id is not None
 
     # Yet match_root refuses to resolve without a ContextVar.
@@ -6502,7 +6696,7 @@ def test_match_root_no_singleton_fallback(tmp_path: Path, _user_config_home: Pat
 
 def test_match_id_alias_unknown_id_returns_404(tmp_path: Path, _user_config_home: Path) -> None:
     app, _, _ = _make_match_app(tmp_path)
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     resp = client.get("/api/matches/nope-deadbeef/health")
     assert resp.status_code == 404
@@ -6525,7 +6719,7 @@ def test_match_id_alias_serves_non_bound_match(tmp_path: Path, _user_config_home
     other = match_model.Match.init(other_root, name="Other Match")
     user_config.record_project_open(other_root, other.name, kind="match")
 
-    client = TestClient(app)
+    client = _MatchClient(app)
     # The bound match still resolves via its own id.
     resp = client.get(f"/api/matches/{bound_match.match_id}/health")
     assert resp.status_code == 200
@@ -6582,7 +6776,7 @@ def test_match_id_alias_contextvar_isolates_per_request(tmp_path: Path, _user_co
 
 def test_match_id_alias_missing_segment_returns_400(tmp_path: Path, _user_config_home: Path) -> None:
     app, _, _ = _make_match_app(tmp_path)
-    client = TestClient(app)
+    client = _MatchClient(app)
 
     # No trailing segment after /api/matches/{id} -- the middleware can't
     # rewrite to a real route without one.

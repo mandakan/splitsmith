@@ -177,10 +177,21 @@ def _setup_promote_endpoint_project(
     camera_mount: str | None,
     beep_time: float | None = 1.0,
 ) -> tuple[MatchProject, Path]:
-    """Build a project + stub audit WAV/trimmed MP4 so /api/lab/promote
-    runs without invoking ffmpeg. Returns the project and the fixtures
-    root the test should point promote at."""
-    project = MatchProject.init(root, name="Promote Test Match")
+    """Build a Match folder + one shooter + stub audit WAV/trimmed MP4
+    so /api/lab/promote runs without invoking ffmpeg. Returns the
+    shooter's project and the fixtures root the test should point
+    promote at.
+
+    Post Tier 1 step 3 of doc 10, all per-shooter caches live under
+    ``<match>/shooters/<slug>/``; the previous version of this helper
+    wrote them at the match root (legacy single-shooter layout).
+    """
+    from splitsmith import match_model
+
+    match = match_model.Match.init(root, name="Promote Test Match")
+    match.add_shooter(root, match_model.Shooter(slug="me", name="Me"))
+    shooter_root = match_model.Match.shooter_root(root, "me")
+    project = MatchProject.init(shooter_root, name="Promote Test Match")
     project.selected_shooter_id = 12345
     project.stages = [
         StageEntry(
@@ -199,27 +210,22 @@ def _setup_promote_endpoint_project(
             ],
         )
     ]
-    project.save(root)
-    # Drop a primary stub + trimmed MP4 stub + audit WAV stub so
-    # ``_resolve_audit_audio`` finds the trimmed-video branch and skips
-    # ffmpeg re-extraction (audit WAV mtime newer than trim). Caches are
-    # keyed per-video in v2 so derive the names from the primary's id.
-    raw = root / "raw"
+    project.save(shooter_root)
+    raw = shooter_root / "raw"
     raw.mkdir(exist_ok=True)
     (raw / "v.mp4").write_bytes(b"\x00" * 16)
     primary_id = project.stages[0].videos[0].video_id
-    trimmed = root / "trimmed"
+    trimmed = shooter_root / "trimmed"
     trimmed.mkdir(exist_ok=True)
     trim_path = trimmed / f"stage1_cam_{primary_id}_trimmed.mp4"
     trim_path.write_bytes(b"\x00" * 16)
-    audio = root / "audio"
+    audio = shooter_root / "audio"
     audio.mkdir(exist_ok=True)
     audit_wav = audio / f"stage1_cam_{primary_id}_audit.wav"
     audit_wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
-    # Make audit WAV newer than the trimmed MP4 so ffmpeg-extract is skipped.
     future = time.time() + 10
     os.utime(audit_wav, (future, future))
-    audit_dir = root / "audit"
+    audit_dir = shooter_root / "audit"
     audit_dir.mkdir(exist_ok=True)
     (audit_dir / "stage1.json").write_text(
         json.dumps(
@@ -238,14 +244,17 @@ def _setup_promote_endpoint_project(
 
 
 def test_lab_promote_endpoint_400s_when_camera_mount_missing(tmp_path: Path) -> None:
+    from tests.conftest import bound_match_id
+
     root = tmp_path / "match"
     _setup_promote_endpoint_project(root, camera_mount=None)
     app = create_app(project_root=root, project_name="ignored", lab_enabled=True)
     client = TestClient(app)
+    match_id = bound_match_id(app)
 
     resp = client.post(
-        "/api/lab/promote",
-        json={"stage_number": 1, "slug": "stage-shots-promote-test-2026-stage1"},
+        f"/api/matches/{match_id}/lab/promote",
+        json={"stage_number": 1, "slug": "me"},
     )
     assert resp.status_code == 400
     assert "camera_mount" in resp.json()["detail"]
@@ -263,13 +272,15 @@ def test_lab_promote_endpoint_writes_full_provenance(tmp_path: Path, monkeypatch
     # Redirect lab promote output away from the repo's tests/fixtures/.
     monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures_root)
 
+    from tests.conftest import bound_match_id
+
     app = create_app(project_root=root, project_name="ignored", lab_enabled=True)
     client = TestClient(app)
+    match_id = bound_match_id(app)
 
-    slug = "stage-shots-promote-test-2026-stage1"
     resp = client.post(
-        "/api/lab/promote",
-        json={"stage_number": 1, "slug": slug},
+        f"/api/matches/{match_id}/lab/promote",
+        json={"stage_number": 1, "slug": "me"},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()

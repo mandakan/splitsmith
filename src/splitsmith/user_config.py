@@ -252,10 +252,11 @@ def record_project_open(path: Path, name: str, *, kind: str | None = None) -> No
     of the list and trims to ``RECENT_PROJECTS_LIMIT``. No-op if the
     user-config directory is disabled or unwritable.
 
-    ``kind`` records the layout at write time: ``"match"`` for a
-    redesign-era match folder, ``"legacy"`` for a single-shooter
-    project, ``None`` to leave the field unset (the picker resolves
-    on open). Issue #320 -- new merges should pass ``kind="match"``.
+    ``kind`` records the layout at write time. Today only
+    ``"match"`` is written; ``None`` and ``"legacy"`` survive in
+    existing on-disk indexes from before Tier 1 step 3 of doc 10
+    retired the single-shooter layout, and the picker treats them
+    as ``"unknown"`` so the user can prune them.
     """
     if is_disabled():
         return

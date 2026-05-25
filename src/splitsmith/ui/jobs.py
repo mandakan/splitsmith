@@ -45,6 +45,7 @@ Design notes
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import subprocess
 import threading
@@ -337,6 +338,14 @@ class JobRegistry:
 
         Raises :class:`ShutdownInProgressError` if :meth:`begin_shutdown`
         has been called -- the HTTP layer maps this to a 503.
+
+        The submitting HTTP request's ``contextvars`` (notably
+        ``current_match_root`` / ``current_match_id`` set by the
+        ``/api/matches/{match_id}/`` alias middleware) are captured
+        here and replayed inside the worker thread. Without this the
+        ContextVars are unset on the executor thread and any
+        ``state.shooter_root(...)`` call inside the worker 409s
+        ``no_project``. See Tier 1 step 3 of doc 10.
         """
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
@@ -350,10 +359,15 @@ class JobRegistry:
             created_at=now,
             updated_at=now,
         )
+        captured_ctx = contextvars.copy_context()
+
+        def _ctx_fn(handle: JobHandle) -> None:
+            captured_ctx.run(fn, handle)
+
         with self._lock:
             self._jobs[job.id] = job
             self._order.append(job.id)
-            self._pending.append((job.id, fn))
+            self._pending.append((job.id, _ctx_fn))
             self._trim_retained_locked()
             # Snapshot before releasing the lock + dispatching to the
             # executor; otherwise the worker may have already flipped

@@ -557,16 +557,18 @@ current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_
 
 @dataclass
 class AppState:
-    """Process state. One bound project at a time (#353).
+    """Process state. One bound Match folder at a time.
 
-    A bound project is either a **Match folder** (multi-shooter) or a
-    **legacy single-shooter project**. The two layouts share a single
-    state record but expose different resolution paths:
+    The bound project is always a Match folder; the legacy single-
+    shooter layout was retired in Tier 1 step 3 of doc 10.
 
     - Match-level operations (list shooters, merge, export the whole
-      match) read :attr:`match_root` directly.
+      match) read :attr:`match_root`, which resolves from the per-
+      request ``current_match_root`` ContextVar set by the
+      ``/api/matches/{match_id}/`` alias middleware.
     - Shooter-scoped operations require a slug from the URL path and
-      resolve via :meth:`shooter_root` / :meth:`shooter_project`.
+      resolve via :meth:`shooter_root` / :meth:`shooter_project`,
+      which also read the same ContextVar.
 
     There is no notion of an "active" or "current" shooter on the
     server. Every shooter-scoped request must carry the slug in its
@@ -575,10 +577,14 @@ class AppState:
     The server can boot without a bound project (``splitsmith ui`` with
     no ``--project``); in that mode every scoped property raises 409
     ``no_project`` and the SPA stays on the picker.
+
+    The singleton bind that survives (``_bound_root`` + ``bind_match``)
+    is purely a holdover for the picker + CLI boot path. Tier 1 step 4
+    will retire it entirely; for now it doesn't influence request
+    resolution at all -- only the URL prefix does.
     """
 
     _bound_root: Path | None = None
-    _bound_kind: Literal["match", "legacy"] | None = None
     _bound_name: str | None = None
     _bound_match_id: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
@@ -609,16 +615,12 @@ class AppState:
         return self._bound_root is not None
 
     @property
-    def bound_kind(self) -> Literal["match", "legacy"] | None:
-        return self._bound_kind
-
-    @property
     def bound_name(self) -> str | None:
         return self._bound_name
 
     @property
     def bound_root(self) -> Path:
-        """The bound project's on-disk root (match folder OR legacy project)."""
+        """The bound Match folder's on-disk root."""
         if self._bound_root is None:
             raise _no_project_error()
         return self._bound_root
@@ -644,65 +646,37 @@ class AppState:
     def shooter_root(self, slug: str) -> Path:
         """Resolve ``slug`` to the shooter's project directory on disk.
 
-        For a Match folder: validates the slug is registered and the
-        directory exists, then returns ``<match>/shooters/<slug>``.
-
-        For a legacy single-shooter project: there is exactly one shooter
-        and its data lives at the bound root. The slug is accepted as-is
-        (the SPA derives it from ``competitor_name`` via :func:`legacy_slug`)
-        so callers don't need to special-case the legacy layout.
-
-        Resolution order (Tier 1 of doc 10, in progress):
-
-        1. ``current_match_root`` ContextVar -- set by the
-           ``/api/matches/{match_id}/...`` alias middleware. The
-           authoritative path for Match-folder projects; multiple
-           tabs on different matches stay isolated because each
-           request carries its own context.
-        2. ``self._bound_root`` when ``_bound_kind == "legacy"``
-           -- single-shooter pre-redesign projects don't have a
-           ``match_id`` so they can't be addressed via URL prefix.
-           This fallback stays until legacy projects are either
-           migrated to Match folders or dropped.
-
-        Notably absent: the Match-folder singleton fallback. After
-        this step, Match-folder requests MUST come through the
-        ``/api/matches/{match_id}/`` prefix; a bare-path request
-        against a bound Match folder 409s ``no_project``.
+        The path is always ``<match_root>/shooters/<slug>``. The
+        match root comes from the per-request ``current_match_root``
+        ContextVar set by the ``/api/matches/{match_id}/`` alias
+        middleware -- there is no process-level singleton fallback,
+        and there is no legacy single-shooter layout to support
+        (Tier 1 step 3 of doc 10 retired both). Bare-path requests
+        without the URL prefix get 409 ``no_project``.
         """
         scoped_root = current_match_root.get()
-        if scoped_root is not None:
-            # Per-request scope is always a Match folder (the middleware
-            # rejects legacy projects upstream). Validate the slug and
-            # resolve under that root.
-            match = match_model.Match.load(scoped_root)
-            if slug not in match.shooters:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"shooter {slug!r} is not registered on this match",
-                )
-            return match_model.Match.shooter_root(scoped_root, slug)
-        if self._bound_root is None:
+        if scoped_root is None:
             raise _no_project_error()
-        if self._bound_kind == "legacy":
-            return self._bound_root
-        # Match folder bound on the singleton but no URL prefix on
-        # this request -- refuse rather than silently resolving via
-        # the bound singleton. See doc 10 Tier 1.
-        raise _no_project_error()
+        match = match_model.Match.load(scoped_root)
+        if slug not in match.shooters:
+            raise HTTPException(
+                status_code=404,
+                detail=f"shooter {slug!r} is not registered on this match",
+            )
+        return match_model.Match.shooter_root(scoped_root, slug)
 
     def shooter_project(self, slug: str) -> MatchProject:
-        """Load the legacy ``MatchProject`` for ``slug``."""
+        """Load the per-shooter ``MatchProject`` (each shooter slot
+        inside a Match folder owns its own ``project.json``)."""
         return MatchProject.load(self.shooter_root(slug))
 
     @property
     def bound_match_id(self) -> str | None:
-        """The bound match's stable id, or ``None`` when unbound / legacy."""
+        """The bound match's stable id, or ``None`` when unbound."""
         return self._bound_match_id
 
     def bind_match(self, root: Path, name: str) -> None:
         self._bound_root = root
-        self._bound_kind = "match"
         self._bound_name = name
         # Load to ensure ``match_id`` is materialised (Match.load runs the
         # v3 -> v4 migration on the fly), then pin it into the registry so
@@ -712,31 +686,10 @@ class AppState:
         if match.match_id:
             self.matches.register(match.match_id, root)
 
-    def bind_legacy(self, root: Path, name: str) -> None:
-        self._bound_root = root
-        self._bound_kind = "legacy"
-        self._bound_name = name
-        self._bound_match_id = None
-
     def unbind(self) -> None:
         self._bound_root = None
-        self._bound_kind = None
         self._bound_name = None
         self._bound_match_id = None
-
-
-def legacy_slug(project: MatchProject) -> str:
-    """Synthesise a shooter slug for a legacy single-shooter project.
-
-    Legacy projects predate the Match -> Shooter split; their on-disk
-    layout has no ``shooters/<slug>/`` subdir. To keep every shooter-
-    scoped URL slug-bearing (no second URL family for legacy projects),
-    we mint a deterministic *opaque* slug from the project's metadata
-    (name + scoreboard ids) so the URL is stable across reloads but
-    doesn't carry the competitor name. The SPA reads it via
-    ``/api/health.default_shooter_slug`` after binding.
-    """
-    return match_model._legacy_view_slug(project)
 
 
 def _any_active_job(state: AppState) -> Job | None:
@@ -921,17 +874,17 @@ class HealthResponse(BaseModel):
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
-    # Stable match identifier (issue #353 Phase 3 PR A). ``None`` when
-    # unbound or bound to a legacy single-shooter project. The SPA will
-    # start scoping URLs on this in a follow-up PR.
+    # Stable match identifier. ``None`` when unbound.
     match_id: str | None = None
-    # Layout discriminator + a default slug for shooter-scoped URLs (#353).
-    # Match-bound: the alphabetically-first registered shooter, or ``None``
-    # when the match is empty. Legacy-bound: the deterministic legacy slug.
-    # Lets the SPA build /audit/<slug>/... links from any slugless surface
-    # (Home, sidebar Audit/Coach/Export rows) without forcing the user to
-    # pick a shooter when there's only one sensible default.
-    kind: str | None = None  # "match" | "legacy" | None when unbound
+    # ``"match"`` when bound, ``None`` when unbound. The field is kept
+    # as a discriminator for forward compatibility (visibility ==
+    # 'public' / squad-shared projects per doc 02 v2/v3) even though
+    # the only live value today is ``"match"``.
+    kind: str | None = None
+    # Alphabetically-first registered shooter slug, or ``None`` when
+    # the match is empty. Lets the SPA build /audit/<slug>/... links
+    # from slugless surfaces without forcing the user to pick when
+    # there's only one sensible default.
     default_shooter_slug: str | None = None
 
 
@@ -978,13 +931,13 @@ class PromoteAgainstFixtureBody(BaseModel):
 
 
 class RecentProjectDetail(BaseModel):
-    """Enriched RecentProject for the redesigned match picker (#322).
+    """Enriched RecentProject for the match picker (#322).
 
     Mirrors :class:`user_config.RecentProject` plus derived metadata read
-    from disk at listing time. ``kind`` is ``"match"`` for a redesign-era
-    Match folder, ``"legacy"`` for a single-shooter project, ``"missing"``
-    when the path no longer exists, ``"unknown"`` for an existing path that
-    is neither.
+    from disk at listing time. ``kind`` is ``"match"`` for a Match folder,
+    ``"missing"`` when the path no longer exists, ``"unknown"`` for an
+    existing path that isn't a Match folder (a stale legacy entry from
+    pre-Tier-1 days; the user can prune it from the picker).
 
     Derived fields are best-effort: a stale or unreadable project still
     shows up with ``kind="unknown"`` so the user can find and remove it
@@ -994,9 +947,9 @@ class RecentProjectDetail(BaseModel):
     path: str
     name: str
     last_opened_at: datetime
-    kind: Literal["match", "legacy", "missing", "unknown"]
-    # Stable match identifier (#353 Phase 3). Populated for ``kind="match"``
-    # via the load-time migration; ``None`` on legacy / missing / unknown.
+    kind: Literal["match", "missing", "unknown"]
+    # Stable match identifier. Populated for ``kind="match"`` via the
+    # load-time migration; ``None`` otherwise.
     match_id: str | None = None
     # The five fields below only populate for resolved kinds.
     shooter_count: int = 0
@@ -1879,59 +1832,47 @@ def _bind_project_to_state(
     (when the SPA POSTs to /api/user/recent-projects/bind). Returns the
     on-disk display name so the caller can echo it back.
 
-    When ``root`` is a redesign-era Match folder (has ``match.json``),
-    the match itself is bound (``state.bind_match``) and the SPA addresses
-    individual shooters via slug-bearing URLs. Otherwise we bind the
-    legacy single-shooter project directly.
+    ``root`` must be a Match folder (carries ``match.json``). The legacy
+    single-shooter ``MatchProject`` layout was retired in Tier 1 step 3
+    of doc 10 -- a hosted-mode user cannot ship a bare on-disk project,
+    and the local-mode picker is going URL-only too. Non-match paths
+    return 400 ``not_a_match``.
     """
     resolved = root.resolve()
-    if match_model.is_match_folder(resolved):
-        try:
-            match = match_model.Match.load(resolved)
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(
-                status_code=400,
-                detail=f"failed to load match at {resolved}: {exc}",
-            ) from exc
-        if not match.shooters:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "match_empty",
-                    "message": (
-                        f"Match {resolved} has no shooters yet. " "Add a shooter or recreate the match."
-                    ),
-                },
-            )
-        name = match.name or fallback_name
-        user_config.record_project_open(resolved, name, kind="match")
-        loaded_env = _load_env_files(resolved)
-        if loaded_env:
-            logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
-        state.bind_match(resolved, name)
-        return name
-    return _bind_legacy_root_to_state(state, resolved, fallback_name=fallback_name)
-
-
-def _bind_legacy_root_to_state(
-    state: AppState,
-    root: Path,
-    fallback_name: str,
-) -> str:
-    """Bind a legacy MatchProject directory (project.json layout)."""
-    MatchProject.init(root, name=fallback_name)
-    resolved = root.resolve()
+    if not match_model.is_match_folder(resolved):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "not_a_match",
+                "message": (
+                    f"{resolved} is not a Match folder. Use the "
+                    "create-match flow (POST /api/match/create-manual or "
+                    "/api/match/create-from-scoreboard) to scaffold one."
+                ),
+            },
+        )
+    try:
+        match = match_model.Match.load(resolved)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail=f"failed to load match at {resolved}: {exc}",
+        ) from exc
+    if not match.shooters:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "match_empty",
+                "message": (f"Match {resolved} has no shooters yet. " "Add a shooter or recreate the match."),
+            },
+        )
+    name = match.name or fallback_name
+    user_config.record_project_open(resolved, name, kind="match")
     loaded_env = _load_env_files(resolved)
     if loaded_env:
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
-    try:
-        loaded_project = MatchProject.load(resolved)
-        recorded_name = loaded_project.name or fallback_name
-    except Exception:  # pragma: no cover -- defensive: never block boot
-        recorded_name = fallback_name
-    user_config.record_project_open(resolved, recorded_name, kind="legacy")
-    state.bind_legacy(resolved, recorded_name)
-    return recorded_name
+    state.bind_match(resolved, name)
+    return name
 
 
 def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail:
@@ -1994,17 +1935,11 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
             metadata_path = path / match_model.MATCH_FILE
         else:
-            project = MatchProject.load(path)
-            detail.kind = "legacy"
-            detail.name = project.name or rp.name
-            detail.shooter_count = 1
-            detail.stage_count = len(project.stages)
-            detail.match_date = project.match_date.isoformat() if project.match_date else None
-            detail.manual = project.scoreboard_match_id is None
-            detail.stages_audited = project.audited_count(path)
-            if project.competitor_name:
-                detail.shooter_names = [project.competitor_name]
-            metadata_path = path / "project.json"
+            # Path exists but is not a Match folder -- a pre-Tier-1
+            # legacy single-shooter project, or a stale entry. Leave
+            # ``kind="unknown"`` and skip the metadata block so the
+            # user can prune it from the picker.
+            return detail
 
         if metadata_path.exists():
             mtime = metadata_path.stat().st_mtime
@@ -2238,24 +2173,15 @@ def create_app(
         return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
 
     def _health_after_bind(recorded_name: str) -> HealthResponse:
-        """Build a HealthResponse from the currently-bound project."""
-        default_slug: str | None = None
-        kind = state.bound_kind
-        if kind == "match":
-            match = match_model.Match.load(state.bound_root)
-            shooters = sorted(match.shooters)
-            default_slug = shooters[0] if shooters else None
-        elif kind == "legacy":
-            try:
-                project = MatchProject.load(state.bound_root)
-                default_slug = legacy_slug(project)
-            except Exception:  # noqa: BLE001 -- defensive
-                default_slug = None
+        """Build a HealthResponse from the currently-bound match."""
+        match = match_model.Match.load(state.bound_root)
+        shooters = sorted(match.shooters)
+        default_slug = shooters[0] if shooters else None
         return HealthResponse(
             bound=True,
             project_name=recorded_name,
             project_root=str(state.bound_root),
-            kind=kind,
+            kind="match",
             default_shooter_slug=default_slug,
             match_id=state.bound_match_id,
         )
@@ -7820,10 +7746,12 @@ def create_app(
             # SSI ID + competitor name stay in the private project file.
             token = lab_module.shooter_token(project.selected_shooter_id)
             shooter_payload: dict[str, Any] = {"id": token}
-            # Defence in depth: ensure the slug carries the token even
-            # when an older client builds a slug from project.name alone.
-            if token not in slug:
-                slug = f"{slug}-{token}"
+            # Defence in depth: ensure the fixture slug carries the
+            # token even when an older client builds a slug from
+            # project.name alone. The shooter lookup slug stays
+            # untouched -- it's the URL identity, not the fixture
+            # filename.
+            fixture_slug = slug if token in slug else f"{slug}-{token}"
 
             # Visual/source provenance (#220 follow-up). The audit JSON
             # the SPA writes only carries shot/beep data; the calibrator
@@ -7892,7 +7820,7 @@ def create_app(
                     lab_module.PromoteRequest(
                         audit_json_path=audit_json,
                         audit_wav_path=audit_wav,
-                        fixture_slug=slug,
+                        fixture_slug=fixture_slug,
                         overwrite=overwrite,
                         extra_metadata={
                             "stage_number": stage_n,

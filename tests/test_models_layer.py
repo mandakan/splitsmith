@@ -409,7 +409,10 @@ def test_models_status_endpoint_reports_unavailable_when_no_block(
     monkeypatch.setattr(registry_mod, "_default_registry", None)
     monkeypatch.setattr(registry_mod, "load_spec_from_calibration", lambda: None)
 
-    app = create_app(project_root=tmp_path / "match", project_name="x")
+    from tests.conftest import scaffold_match
+
+    _root, _ = scaffold_match(tmp_path, name="x")
+    app = create_app(project_root=_root, project_name="x")
     client = TestClient(app)
     resp = client.get("/api/models/status")
     assert resp.status_code == 200
@@ -435,7 +438,10 @@ def test_models_status_endpoint_lists_artifacts(monkeypatch: pytest.MonkeyPatch,
     registry = ModelRegistry(spec, root=tmp_path / "cache")
     monkeypatch.setattr(registry_mod, "_default_registry", registry)
 
-    app = create_app(project_root=tmp_path / "match", project_name="x")
+    from tests.conftest import scaffold_match
+
+    _root, _ = scaffold_match(tmp_path, name="x")
+    app = create_app(project_root=_root, project_name="x")
     client = TestClient(app)
     resp = client.get("/api/models/status")
     assert resp.status_code == 200
@@ -475,7 +481,10 @@ def test_create_app_auto_submits_model_download_when_missing(
         lambda handle: invoked.append(handle.id),
     )
 
-    app = create_app(project_root=tmp_path / "match", project_name="x")
+    from tests.conftest import scaffold_match
+
+    _root, _ = scaffold_match(tmp_path, name="x")
+    app = create_app(project_root=_root, project_name="x")
     state = app.state.splitsmith_state
     # Wait for the executor to pick up the queued job and the worker to run.
     state.jobs.wait_for_drain(timeout_s=2.0)
@@ -561,7 +570,10 @@ def test_create_app_skips_model_download_when_all_present(
     registry = ModelRegistry(spec, root=tmp_path / "cache")
     monkeypatch.setattr(registry_mod, "_default_registry", registry)
 
-    app = create_app(project_root=tmp_path / "match", project_name="x")
+    from tests.conftest import scaffold_match
+
+    _root, _ = scaffold_match(tmp_path, name="x")
+    app = create_app(project_root=_root, project_name="x")
     client = TestClient(app)
     body = client.get("/api/models/status").json()
     assert body["active_job"] is None

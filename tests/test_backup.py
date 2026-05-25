@@ -202,53 +202,48 @@ def test_export_missing_project_file_raises(tmp_path: Path) -> None:
 
 
 def test_export_endpoint_streams_archive(tmp_path: Path) -> None:
-    src = tmp_path / "match"
-    _seed_project(src, name="HTTP Match")
-    app = create_app(project_root=src, project_name="HTTP Match")
-    client = TestClient(app)
+    # Per Tier 1 step 3 of doc 10: the export endpoint streams a
+    # single shooter's directory from inside a Match folder; tarball
+    # entries are keyed on the shooter slug, not the match root name.
+    from splitsmith import match_model
+    from tests.conftest import bound_match_id
 
-    resp = client.get("/api/shooters/me/project/export")
+    root = tmp_path / "match"
+    match = match_model.Match.init(root, name="HTTP Match")
+    match.add_shooter(root, match_model.Shooter(slug="me", name="Me"))
+    shooter_root = match_model.Match.shooter_root(root, "me")
+    _seed_project(shooter_root, name="HTTP Match")
+
+    app = create_app(project_root=root, project_name="HTTP Match")
+    client = TestClient(app)
+    match_id = bound_match_id(app)
+
+    resp = client.get(f"/api/matches/{match_id}/shooters/me/project/export")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/gzip"
-    assert "match-backup-" in resp.headers.get(
+    assert "me-backup-" in resp.headers.get("content-disposition", "") or "me.tar.gz" in resp.headers.get(
         "content-disposition", ""
-    ) or "match.tar.gz" in resp.headers.get("content-disposition", "")
+    )
     with tarfile.open(fileobj=io.BytesIO(resp.content)) as tf:
         names = tf.getnames()
-    assert f"match/{PROJECT_FILE}" in names
-    assert any(n.startswith("match/audit/") for n in names)
-    assert any(n.startswith("match/scoreboard/") for n in names)
+    assert f"me/{PROJECT_FILE}" in names
+    assert any(n.startswith("me/audit/") for n in names)
+    assert any(n.startswith("me/scoreboard/") for n in names)
     # Defaults exclude raw/audio/trimmed/exports.
-    assert not any(n.startswith("match/raw/") for n in names)
-    assert not any(n.startswith("match/trimmed/") for n in names)
-    assert not any(n.startswith("match/exports/") for n in names)
+    assert not any(n.startswith("me/raw/") for n in names)
+    assert not any(n.startswith("me/trimmed/") for n in names)
+    assert not any(n.startswith("me/exports/") for n in names)
 
 
-def test_import_endpoint_extracts_and_optionally_binds(tmp_path: Path) -> None:
-    # Build an archive offline first.
-    src = tmp_path / "match"
-    _seed_project(src, name="Imported Match")
-    archive = export_project(src, tmp_path / "out").archive_path
-
-    app = create_app()  # unbound
-    client = TestClient(app)
-    dest = tmp_path / "incoming"
-
-    with archive.open("rb") as fh:
-        resp = client.post(
-            "/api/me/projects/import",
-            files={"archive": ("backup.tar.gz", fh, "application/gzip")},
-            data={"dest_root": str(dest), "bind": "true"},
-        )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["project_name"] == "Imported Match"
-    assert Path(body["project_root"]) == dest / "match"
-    assert (dest / "match" / PROJECT_FILE).exists()
-
-    # bind=true should make /api/health report the imported project.
-    health = client.get("/api/health").json()
-    assert health["project_name"] == "Imported Match"
+# ``test_import_endpoint_extracts_and_optionally_binds`` was deleted
+# in Tier 1 step 3 of doc 10. The /api/me/projects/import endpoint
+# imports a per-shooter MatchProject archive and (with bind=true)
+# bound it as a standalone project. With the legacy single-shooter
+# bind path retired, the imported archive needs to land inside a
+# Match folder; that's a backup/import redesign question, not a
+# tier-1 demolition concern. The endpoint's no-bind behaviour is
+# still exercised by ``test_import_endpoint_refuses_overwrite``
+# below.
 
 
 def test_import_endpoint_refuses_overwrite(tmp_path: Path) -> None:
