@@ -37,9 +37,16 @@ These can ship before any hosted-mode infrastructure exists. Each is
 a refactor that makes today's local-mode code pass through the
 abstraction without behavioural change.
 
-- [ ] Extract `Storage` interface; replace direct `pathlib.Path` use
+- [~] Extract `Storage` interface; replace direct `pathlib.Path` use
   in project layout with `FilesystemStorage` calls.
-  (See 03-storage-layer.md.)
+  (See 03-storage-layer.md.) Protocol + `FilesystemStorage` shipped
+  with atomic temp+rename writes and a path-traversal guard. Not
+  yet wired into `AppState` -- local mode opens projects at
+  arbitrary user-chosen paths, so the right scope is per-project
+  rather than a process singleton. Migration of existing callsites
+  (recent-projects index, audit JSON, project state) is iterative
+  follow-up work; the Protocol is sync today and goes async if
+  ``S3Storage`` ever needs it.
 - [x] Extract `Auth` interface; introduce `LoopbackAuth`; route
   every API handler through `auth.authenticate_request`.
   (See 02-tenancy-and-identity.md.) Interface + `LoopbackAuth` +
