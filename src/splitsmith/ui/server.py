@@ -574,19 +574,15 @@ class AppState:
     server. Every shooter-scoped request must carry the slug in its
     path; the SPA's URL is the single source of truth.
 
-    The server can boot without a bound project (``splitsmith ui`` with
-    no ``--project``); in that mode every scoped property raises 409
-    ``no_project`` and the SPA stays on the picker.
-
-    The singleton bind that survives (``_bound_root`` + ``bind_match``)
-    is purely a holdover for the picker + CLI boot path. Tier 1 step 4
-    will retire it entirely; for now it doesn't influence request
-    resolution at all -- only the URL prefix does.
+    There is no notion of a "bound" project on the server -- the URL
+    prefix ``/api/matches/{match_id}/`` carries match identity per
+    request, and the alias middleware resolves it via
+    :class:`MatchRegistry`. ``splitsmith ui --project <path>`` and
+    the SPA picker register matches in :attr:`matches` and emit a
+    URL the browser navigates to; the server itself never has a
+    "current open project" state.
     """
 
-    _bound_root: Path | None = None
-    _bound_name: str | None = None
-    _bound_match_id: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
     # Auth backend. ``LoopbackAuth`` in local mode (every request
@@ -609,21 +605,6 @@ class AppState:
     # Idempotency latch for /api/shutdown: first call kicks the drain
     # thread, subsequent calls return 202 without rescheduling.
     shutdown_initiated: bool = False
-
-    @property
-    def is_bound(self) -> bool:
-        return self._bound_root is not None
-
-    @property
-    def bound_name(self) -> str | None:
-        return self._bound_name
-
-    @property
-    def bound_root(self) -> Path:
-        """The bound Match folder's on-disk root."""
-        if self._bound_root is None:
-            raise _no_project_error()
-        return self._bound_root
 
     @property
     def match_root(self) -> Path:
@@ -670,26 +651,15 @@ class AppState:
         inside a Match folder owns its own ``project.json``)."""
         return MatchProject.load(self.shooter_root(slug))
 
-    @property
-    def bound_match_id(self) -> str | None:
-        """The bound match's stable id, or ``None`` when unbound."""
-        return self._bound_match_id
-
-    def bind_match(self, root: Path, name: str) -> None:
-        self._bound_root = root
-        self._bound_name = name
-        # Load to ensure ``match_id`` is materialised (Match.load runs the
-        # v3 -> v4 migration on the fly), then pin it into the registry so
-        # the id resolves immediately even before the next recents refresh.
+    def register_match(self, root: Path) -> str | None:
+        """Load the match at ``root`` and pin its ``match_id`` into
+        the registry so the alias middleware can resolve it
+        immediately. Returns the match_id (``None`` if the on-disk
+        file somehow lacks one)."""
         match = match_model.Match.load(root)
-        self._bound_match_id = match.match_id
         if match.match_id:
             self.matches.register(match.match_id, root)
-
-    def unbind(self) -> None:
-        self._bound_root = None
-        self._bound_name = None
-        self._bound_match_id = None
+        return match.match_id
 
 
 def _any_active_job(state: AppState) -> Job | None:
@@ -1820,23 +1790,24 @@ class FsListing(BaseModel):
     suggested_starts: list[SuggestedStart]
 
 
-def _bind_project_to_state(
+def _register_match_at(
     state: AppState,
     root: Path,
     fallback_name: str,
-) -> str:
-    """Initialise ``root`` on disk if needed, load its env files, record
-    the open in ``~/.splitsmith/projects.json``, and bind it on ``state``.
+) -> tuple[str, str | None]:
+    """Validate ``root`` is a Match folder, record its open in
+    ``~/.splitsmith/projects.json``, load its env files, and pin its
+    ``match_id`` into :attr:`AppState.matches`. Returns
+    ``(display_name, match_id)``.
 
-    Used both at startup (when ``--project`` was passed) and at runtime
-    (when the SPA POSTs to /api/user/recent-projects/bind). Returns the
-    on-disk display name so the caller can echo it back.
+    Tier 1 step 4 of doc 10: this used to bind the match on the
+    process singleton. The singleton is gone -- a request resolves
+    its match via the URL prefix instead, and the SPA navigates to
+    ``/match/<match_id>`` after this call returns.
 
-    ``root`` must be a Match folder (carries ``match.json``). The legacy
-    single-shooter ``MatchProject`` layout was retired in Tier 1 step 3
-    of doc 10 -- a hosted-mode user cannot ship a bare on-disk project,
-    and the local-mode picker is going URL-only too. Non-match paths
-    return 400 ``not_a_match``.
+    ``root`` must be a Match folder (carries ``match.json``). The
+    legacy single-shooter layout was retired in step 3. Non-match
+    paths return 400 ``not_a_match``.
     """
     resolved = root.resolve()
     if not match_model.is_match_folder(resolved):
@@ -1871,8 +1842,9 @@ def _bind_project_to_state(
     loaded_env = _load_env_files(resolved)
     if loaded_env:
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
-    state.bind_match(resolved, name)
-    return name
+    if match.match_id:
+        state.matches.register(match.match_id, resolved)
+    return name, match.match_id
 
 
 def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail:
@@ -2007,7 +1979,7 @@ def create_app(
     # so per-project overrides still win.
     _load_env_files(project_root)
     if project_root is not None:
-        _bind_project_to_state(
+        _register_match_at(
             state,
             project_root,
             fallback_name=project_name or project_root.name or "match",
@@ -2172,25 +2144,37 @@ def create_app(
         cached = CachingScoreboardClient(http, cache_dir)
         return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
 
-    def _health_after_bind(recorded_name: str) -> HealthResponse:
-        """Build a HealthResponse from the currently-bound match."""
-        match = match_model.Match.load(state.bound_root)
+    def _register_response(root: Path, name: str, match_id: str | None) -> HealthResponse:
+        """Build a HealthResponse for a freshly-registered match.
+
+        Tier 1 step 4 of doc 10 retired the bound-state concept on
+        the server, but the picker / create-match flow still need a
+        way to learn the resolved ``match_id`` + default shooter so
+        the SPA can navigate to ``/match/<match_id>``. That's what
+        this response is for; the live ``/api/health`` route never
+        returns these fields anymore.
+        """
+        match = match_model.Match.load(root)
         shooters = sorted(match.shooters)
         default_slug = shooters[0] if shooters else None
         return HealthResponse(
             bound=True,
-            project_name=recorded_name,
-            project_root=str(state.bound_root),
+            project_name=name,
+            project_root=str(root),
             kind="match",
             default_shooter_slug=default_slug,
-            match_id=state.bound_match_id,
+            match_id=match_id,
         )
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        if not state.is_bound:
-            return HealthResponse(bound=False)
-        return _health_after_bind(state.bound_name or "")
+        """Process-level health. Tier 1 step 4 of doc 10 retired
+        the bound-state concept on the server -- match identity is
+        per-request via the URL prefix, not per-process. The SPA
+        relies on the URL for navigation; ``/api/health`` is now
+        purely a "the server is up" check (plus version + status).
+        """
+        return HealthResponse(bound=False)
 
     @app.get("/api/models/status")
     def models_status() -> dict[str, Any]:
@@ -2376,7 +2360,7 @@ def create_app(
             shutil.rmtree(tmp, ignore_errors=True)
 
         if bind:
-            _bind_project_to_state(state, result.project_root, fallback_name=result.project_name)
+            _register_match_at(state, result.project_root, fallback_name=result.project_name)
 
         return JSONResponse(
             {
@@ -6512,10 +6496,15 @@ def create_app(
     def reveal_file(req: RevealRequest) -> JSONResponse:
         """Reveal a file in the OS file manager.
 
-        Restricted to paths inside the current project root so the endpoint
-        can never be coerced into opening arbitrary locations. macOS uses
-        ``open -R`` (selects the file in Finder); Linux uses ``xdg-open``
+        Restricted to paths inside the request-scoped match root so
+        the endpoint can never be coerced into opening arbitrary
+        locations. macOS uses ``open -R``; Linux uses ``xdg-open``
         on the parent dir; Windows uses ``explorer /select``.
+
+        Tier 1 step 4 of doc 10 dropped the singleton bound root --
+        callers must hit this through ``/api/matches/{match_id}/files/reveal``
+        so the alias middleware sets ``current_match_root``; bare-path
+        callers 409 ``no_project``.
         """
         target = Path(req.path).expanduser()
         try:
@@ -6523,11 +6512,11 @@ def create_app(
         except (OSError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=f"not found: {target}") from exc
         try:
-            resolved.relative_to(state.bound_root.resolve())
+            resolved.relative_to(state.match_root.resolve())
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
-                detail="reveal path must be inside the bound project root",
+                detail="reveal path must be inside the match folder",
             ) from exc
         _reveal_in_file_manager(resolved)
         return JSONResponse({"revealed": str(resolved)})
@@ -6649,14 +6638,14 @@ def create_app(
             except OSError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
-            recorded = _bind_project_to_state(
+            recorded, match_id = _register_match_at(
                 state,
                 target,
                 fallback_name=req.name or target.name or "match",
             )
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _health_after_bind(recorded)
+        return _register_response(target.resolve(), recorded, match_id)
 
     @app.post("/api/match/create-manual")
     def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
@@ -6736,14 +6725,14 @@ def create_app(
                 )
         legacy.save(shooter_root)
 
-        # Bind via the match folder so _bind_project_to_state records it as
-        # kind="match" and binds the first shooter without registering the
-        # shooter subdir as a separate legacy project in recent-projects.
+        # Register the match folder so the alias middleware can
+        # resolve its id immediately; record it in recent-projects
+        # so the picker has the entry pinned to the top.
         try:
-            recorded = _bind_project_to_state(state, target, fallback_name=req.name)
+            recorded, match_id = _register_match_at(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _health_after_bind(recorded)
+        return _register_response(target.resolve(), recorded, match_id)
 
     @app.post("/api/match/create-from-scoreboard")
     def create_match_from_scoreboard(
@@ -6856,13 +6845,13 @@ def create_app(
                     exc.detail,
                 )
 
-        # See create_match_manual: bind via the match folder, not a
-        # shooter dir, so recent-projects only gets a kind="match" entry.
+        # Register the match folder so recent-projects gets a
+        # kind="match" entry and the alias middleware resolves the id.
         try:
-            recorded = _bind_project_to_state(state, target, fallback_name=req.name)
+            recorded, match_id = _register_match_at(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _health_after_bind(recorded)
+        return _register_response(target.resolve(), recorded, match_id)
 
     # ----------------------------------------------------------------------
     # Shooters management (#324)
@@ -7048,14 +7037,13 @@ def create_app(
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        # Bind the new match. ``_bind_project_to_state`` records the match
-        # in recent-projects (kind="match") and switches state.bound_root
-        # to the match folder; shooters are addressed by slug from there.
+        # Register the new match so recent-projects gets a kind="match"
+        # entry and the alias middleware can resolve the id immediately.
         try:
-            recorded = _bind_project_to_state(state, output, fallback_name=match.name)
+            recorded, match_id = _register_match_at(state, output, fallback_name=match.name)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return _health_after_bind(recorded)
+        return _register_response(output.resolve(), recorded, match_id)
 
     @app.get("/api/match/shooters", response_model=ShooterListResponse)
     def list_match_shooters() -> ShooterListResponse:
@@ -7549,16 +7537,9 @@ def create_app(
         proj.save(shooter_root)
         return get_beep_queue()
 
-    @app.post("/api/me/recent-projects/unbind")
-    def unbind_recent_project(user: User = Depends(get_current_user)) -> HealthResponse:
-        """Drop the bound project so the SPA returns to the picker.
-
-        Equivalent to a `splitsmith ui` boot with no ``--project``;
-        useful when the user wants to switch projects without leaving
-        the browser tab.
-        """
-        state.unbind()
-        return HealthResponse(bound=False)
+    # ``/api/me/recent-projects/unbind`` was deleted in Tier 1
+    # step 4 of doc 10. There is no server-side bound state to
+    # clear; the SPA picker navigates between matches by URL.
 
     @app.get("/api/me/scoreboard-identity")
     def get_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
