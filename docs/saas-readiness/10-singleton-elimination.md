@@ -157,12 +157,28 @@ JSON file at `~/.splitsmith/scoreboard.json`. The saved
 `shooter_id` + `display_name` for the SSI Scoreboard. Same per-
 machine problem.
 
-**Elimination path:** in hosted mode both move to per-user Postgres
-rows (`users.recent_project_ids` JSONB or a `recent_projects`
-table; `users.scoreboard_identity` JSONB). The `user_config`
-module gets a `RecentProjectsStore` abstraction with two backends
-(JSON file in local mode, Postgres in hosted mode); the handler
-calls `state.recent_projects.list(user.id)`.
+**Status:** abstraction landed. `RecentProjectsStore` +
+`ScoreboardIdentityStore` Protocols live in
+`splitsmith.user_config`; `JsonRecentProjectsStore` and
+`JsonScoreboardIdentityStore` wrap the existing module functions
+that read/write `~/.splitsmith/*.json`. `AppState.recent_projects`
+and `AppState.scoreboard_identity` are typed against the
+Protocols and the six production handler callsites (`/api/me/
+recent-projects`, `/api/me/recent-projects/forget`,
+`/api/me/scoreboard-identity` GET/PUT/DELETE, plus the
+`_register_match_at` helper) go through `state.*` rather than
+the module functions.
+
+**Elimination path:**
+
+1. **(done)** `RecentProjectsStore` + `ScoreboardIdentityStore`
+   Protocols; JSON impls; `AppState.*` widened to the Protocols;
+   handlers route through the abstraction.
+2. Hosted-mode backend: per-user Postgres rows
+   (`users.recent_project_ids` JSONB or a `recent_projects`
+   table; `users.scoreboard_identity` JSONB). Constructed
+   per-request after the auth check, not as an `AppState`
+   singleton.
 
 `~/.splitsmith/auth.json` (the desktop-link refresh token store
 mentioned in doc 02) is per-machine on purpose -- desktop linking
