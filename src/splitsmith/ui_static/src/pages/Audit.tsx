@@ -54,6 +54,10 @@ import {
 import { CamGridModal } from "@/components/audit/CamGridModal";
 import { MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
 import { SessionSummary } from "@/components/audit/SessionSummary";
+import {
+  ShortcutHints,
+  ShortcutHintsRestore,
+} from "@/components/audit/ShortcutHints";
 import { StageActionBar } from "@/components/audit/StageActionBar";
 import { StageChipRail } from "@/components/audit/StageChipRail";
 import {
@@ -146,6 +150,30 @@ export function Audit() {
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
   const [showDrawer, setShowDrawer] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // Shortcut hints strip below the toolbar. Visible by default; dismiss
+  // persists per-user via localStorage so a returning shooter who has
+  // already memorised the keys doesn't have to dismiss it every session.
+  const [hintsDismissed, setHintsDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("splitsmith.audit.shortcutHints") === "hidden";
+  });
+  const dismissHints = useCallback(() => {
+    setHintsDismissed(true);
+    try {
+      window.localStorage.setItem("splitsmith.audit.shortcutHints", "hidden");
+    } catch {
+      // localStorage can throw (private mode, quota); the in-memory
+      // state still hides the strip for the current session.
+    }
+  }, []);
+  const showHints = useCallback(() => {
+    setHintsDismissed(false);
+    try {
+      window.localStorage.removeItem("splitsmith.audit.shortcutHints");
+    } catch {
+      // see above.
+    }
+  }, []);
 
   // Save flow (Step 5).
   // sessionEventsRef accumulates audit_events for this session; appended
@@ -1660,6 +1688,20 @@ export function Audit() {
               ) : null}
             </div>
           </div>
+
+          {/* Visible-by-default keyboard shortcut strip. Five keys that
+              drive the audit loop -- Space, M/Shift+M, K, Cmd+1/2/3,
+              Cmd+Enter. Dismiss persists per user (localStorage); the
+              compact restore pill lives in the same slot so the user has
+              a clear path back without hunting through the toolbar. */}
+          {hintsDismissed ? (
+            <ShortcutHintsRestore onShow={showHints} />
+          ) : (
+            <ShortcutHints
+              onDismiss={dismissHints}
+              onOpenAll={() => setShowHelp(true)}
+            />
+          )}
 
           {/* Proactive "beep looks wrong" banner. Fires only on the active
               shooter's video (scoping: cross-shooter awareness lives in

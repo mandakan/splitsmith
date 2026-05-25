@@ -7,7 +7,7 @@
 
 Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers.
 
-![audit view](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png)
+![Splitsmith -- Detect. Coach. Cut.](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/hero.png)
 
 Built to do two things from a single stage video: get per-shot splits for analysis and coaching, and prepare frame-marked clips for match-footage review. Your head-mounted cam (Insta360 Go 3S in this case) already captures audio of every shot; the RO's timer only records your total stage time, so the splits live in the video and nowhere else. Splitsmith extracts them and turns them into a CSV plus an FCPXML timeline with per-shot markers you can step through in Final Cut Pro.
 
