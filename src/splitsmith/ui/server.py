@@ -48,6 +48,7 @@ Endpoints (locked v1 surface):
   GET  /api/fixture/peaks?path=...  -- waveform peaks for a fixture's sibling WAV
   GET  /api/fixture/audio?path=...  -- serve the fixture's sibling WAV (Range)
   GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
+  GET  /api/me                      -- current operator (LoopbackAuth user in local mode)
   GET  /api/user/recent-projects    -- recently-opened MatchProject roots (#75)
   POST /api/user/recent-projects/forget -- drop one entry from the list
   POST /api/user/recent-projects/bind   -- switch the in-memory project
@@ -86,7 +87,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -104,6 +105,7 @@ from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
+from ..auth import AuthBackend, LoopbackAuth, User
 from ..config import (
     BeepDetectConfig,
     CoachAutoClassifyConfig,
@@ -494,6 +496,19 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
+# /api/* paths the auth gate lets through without resolving a user.
+# Anything else under /api/* requires ``state.auth.authenticate_request``
+# to return a non-None User -- see the ``_auth_gate`` middleware inside
+# ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
+# prefix, not by this list.
+_PUBLIC_API_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/health",
+        "/api/server/features",
+        "/api/shutdown",
+    }
+)
+
 
 def _is_loopback(request: Request) -> bool:
     """Reject /api/shutdown from non-loopback callers.
@@ -567,6 +582,10 @@ class AppState:
     _bound_match_id: str | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
+    # Auth backend. ``LoopbackAuth`` in local mode (every request
+    # resolves to the same sentinel user); a hosted-mode backend will
+    # be injected here when SaaS lands. See ``splitsmith.auth``.
+    auth: AuthBackend = field(default_factory=LoopbackAuth)
     # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
     # so the /api/shutdown route can ask uvicorn to exit. None under the
     # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
@@ -2055,6 +2074,20 @@ def create_app(
     # shot-detect after the user picks a match finds the cache primed.
     _maybe_submit_model_download(state)
 
+    async def get_current_user(request: Request) -> User:
+        """FastAPI dependency: resolve the operator behind a request.
+
+        Every ``/api/me/*`` handler depends on this so the auth gate
+        lives in the request pipeline, not in handler bodies. In local
+        mode ``LoopbackAuth`` always returns the sentinel user (no 401
+        path is ever exercised); in hosted mode an unauthenticated
+        request short-circuits here before any handler runs.
+        """
+        user = await state.auth.authenticate_request(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="not authenticated")
+        return user
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -2123,6 +2156,36 @@ def create_app(
         finally:
             current_match_root.reset(root_token)
             current_match_id.reset(id_token)
+
+    # ----------------------------------------------------------------------
+    # Auth gate middleware (saas-readiness step)
+    # ----------------------------------------------------------------------
+    #
+    # Every ``/api/*`` request is resolved through ``state.auth`` before
+    # the route handler runs. ``LoopbackAuth`` always returns a user, so
+    # in local mode this middleware never 401s -- the wiring exists so a
+    # hosted-mode backend can swap in and the 401 path activates without
+    # touching any route. Non-``/api/*`` paths (SPA static, ``/docs``,
+    # ``/openapi.json``) pass through untouched -- auth happens at the
+    # API layer, not the asset layer. The allowlist below names the few
+    # ``/api/*`` endpoints that must stay anonymous: process health and
+    # the feature flag the SPA reads on mount (both are needed before a
+    # user is established) plus ``/api/shutdown`` (which has its own
+    # loopback gate that's stricter than auth).
+    @app.middleware("http")
+    async def _auth_gate(request, call_next):
+        path = request.url.path
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        if path in _PUBLIC_API_PATHS:
+            return await call_next(request)
+        user = await state.auth.authenticate_request(request)
+        if user is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "not authenticated"},
+            )
+        return await call_next(request)
 
     # ----------------------------------------------------------------------
     # API
@@ -2340,6 +2403,7 @@ def create_app(
         dest_root: str = Form(...),
         overwrite: bool = Form(False),
         bind: bool = Form(False),
+        user: User = Depends(get_current_user),
     ) -> JSONResponse:
         """Restore an archive produced by ``GET /api/project/export``.
 
@@ -4224,13 +4288,24 @@ def create_app(
         )
         return JSONResponse(job.model_dump(mode="json"))
 
+    @app.get("/api/me", response_model=User)
+    def get_me(user: User = Depends(get_current_user)) -> User:
+        """Return the operator behind this request.
+
+        Local mode always resolves to the ``LoopbackAuth`` sentinel
+        user (id ``"local"``); hosted mode will resolve cookies to a
+        real database user. The SPA reads this once on mount so the
+        same code path works in both modes.
+        """
+        return user
+
     @app.get("/api/me/jobs", response_model=list[Job])
-    def list_jobs() -> list[Job]:
+    def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
         """Snapshot of all retained jobs (active + recently finished)."""
         return state.jobs.list()
 
     @app.get("/api/me/jobs/{job_id}", response_model=Job)
-    def get_job(job_id: str) -> Job:
+    def get_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Poll a single job. SPA polls ~1 Hz while a job is active."""
         job = state.jobs.get(job_id)
         if job is None:
@@ -4238,7 +4313,7 @@ def create_app(
         return job
 
     @app.post("/api/me/jobs/acknowledge-failures", response_model=list[Job])
-    def acknowledge_all_failures() -> list[Job]:
+    def acknowledge_all_failures(user: User = Depends(get_current_user)) -> list[Job]:
         """Mark every currently-unacknowledged FAILED job as seen (issue #73).
 
         Used by the JobsPanel "Dismiss all failures" header action. Returns
@@ -4248,7 +4323,7 @@ def create_app(
         return state.jobs.acknowledge_all_failures()
 
     @app.post("/api/me/jobs/{job_id}/acknowledge", response_model=Job)
-    def acknowledge_job(job_id: str) -> Job:
+    def acknowledge_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Mark a single failed job as seen (issue #73).
 
         No-op for jobs that aren't failed or are already acknowledged --
@@ -4261,7 +4336,7 @@ def create_app(
         return job
 
     @app.post("/api/me/jobs/{job_id}/cancel", response_model=Job)
-    def cancel_job(job_id: str) -> Job:
+    def cancel_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Request cooperative cancellation of a running or pending job.
 
         The registry sets ``cancel_requested=True`` and (for trim jobs)
@@ -6567,7 +6642,10 @@ def create_app(
     # scoreboard import flow can prefill 'me' instead of asking each project.
 
     @app.get("/api/me/recent-projects")
-    def list_recent_projects(detail: bool = Query(False)) -> JSONResponse:
+    def list_recent_projects(
+        detail: bool = Query(False),
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
         """Return the recent-projects list.
 
         ``detail=false`` (default) returns the raw
@@ -6584,7 +6662,10 @@ def create_app(
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
     @app.post("/api/me/recent-projects/forget")
-    def forget_recent_project(req: ForgetRecentProjectRequest) -> JSONResponse:
+    def forget_recent_project(
+        req: ForgetRecentProjectRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
         removed = user_config.remove_recent_project(Path(req.path))
         projects = user_config.get_recent_projects()
         return JSONResponse(
@@ -6595,7 +6676,10 @@ def create_app(
         )
 
     @app.post("/api/me/recent-projects/bind")
-    def bind_recent_project(req: BindRecentProjectRequest) -> HealthResponse:
+    def bind_recent_project(
+        req: BindRecentProjectRequest,
+        user: User = Depends(get_current_user),
+    ) -> HealthResponse:
         """Switch the in-memory project. Used by the SPA picker route.
 
         Accepts a path that already exists on disk (a previously-opened
@@ -7522,7 +7606,7 @@ def create_app(
         return get_beep_queue()
 
     @app.post("/api/me/recent-projects/unbind")
-    def unbind_recent_project() -> HealthResponse:
+    def unbind_recent_project(user: User = Depends(get_current_user)) -> HealthResponse:
         """Drop the bound project so the SPA returns to the picker.
 
         Equivalent to a `splitsmith ui` boot with no ``--project``;
@@ -7533,7 +7617,7 @@ def create_app(
         return HealthResponse(bound=False)
 
     @app.get("/api/me/scoreboard-identity")
-    def get_scoreboard_identity() -> JSONResponse:
+    def get_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
         # "Not pinned yet" is a normal state, not an error -- return a
         # 200 with a null body so the SPA doesn't have to catch a 404
         # on every page load and DevTools doesn't log a failed request.
@@ -7543,7 +7627,10 @@ def create_app(
         return JSONResponse(identity.model_dump(mode="json"))
 
     @app.put("/api/me/scoreboard-identity")
-    def put_scoreboard_identity(req: ScoreboardIdentityRequest) -> JSONResponse:
+    def put_scoreboard_identity(
+        req: ScoreboardIdentityRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
         identity = user_config.ScoreboardIdentity(
             shooter_id=req.shooter_id,
             display_name=req.display_name,
@@ -7555,7 +7642,7 @@ def create_app(
         return JSONResponse(identity.model_dump(mode="json"))
 
     @app.delete("/api/me/scoreboard-identity")
-    def delete_scoreboard_identity() -> JSONResponse:
+    def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
         user_config.clear_scoreboard_identity()
         return JSONResponse({"ok": True})
 
