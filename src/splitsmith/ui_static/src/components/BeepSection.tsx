@@ -1048,28 +1048,30 @@ export function BeepWaveformPicker({
           ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
         />
       </div>
-      {/* Zoom-shortcut hint row -- same bindings as the audit canvas
-          (modKey+1/2/3). Lives directly under the waveform so the
-          operator's eye doesn't have to leave the scrub surface to
-          remember the chord. */}
-      <div className="mt-1 flex flex-wrap items-center justify-end gap-3 px-1 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-subtle">
-        <span className="inline-flex items-center gap-1.5">
-          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+      {/* Zoom-shortcut chrome -- mirrors the time-ruler footer that
+          lives under the audit canvas waveform. Same bindings
+          (modKey+1/2/3) so muscle memory carries between surfaces.
+          Right-aligned; the eyebrow on the left labels the row so the
+          chord doesn't read as orphan keys. */}
+      <div className="-mx-3 mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-surface-3/60 px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-subtle">
+        <span className="tracking-[0.14em] text-muted">Zoom</span>
+        <span className="ml-auto inline-flex items-center gap-1.5">
+          <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
             {modKeyGlyph()}1
           </kbd>
-          <span>zoom in</span>
+          <span>in</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+          <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
             {modKeyGlyph()}2
           </kbd>
           <span>fit</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <kbd className="rounded border border-rule-strong bg-surface-3 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
+          <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
             {modKeyGlyph()}3
           </kbd>
-          <span>zoom out</span>
+          <span>out</span>
         </span>
       </div>
       {externalMediaRef ? null : (
