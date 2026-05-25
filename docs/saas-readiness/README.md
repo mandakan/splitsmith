@@ -77,6 +77,13 @@ touching.
     Status doc with v1/v2/v3 checklists and an append-only decision
     log. Items flip from `[ ]` to `[x]` as work lands.
 
+11. **[10 -- Singleton elimination map](./10-singleton-elimination.md)**
+    The process-level state that must come out before the abstractions
+    in 02/03/04 can do anything useful in a multi-tenant deployment.
+    Names what stays singleton on purpose (ML model cache),
+    what's a violation (`AppState._bound_root`, `JobRegistry`,
+    `user_config.*`), and the order of elimination.
+
 ## Working principle (one-line restate)
 
 Use off-the-shelf frameworks, libraries, and hosted services. Don't

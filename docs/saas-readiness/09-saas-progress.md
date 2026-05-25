@@ -37,6 +37,13 @@ These can ship before any hosted-mode infrastructure exists. Each is
 a refactor that makes today's local-mode code pass through the
 abstraction without behavioural change.
 
+The abstractions are necessary but **not sufficient** for hosted
+mode -- the singleton-elimination work in
+[10-singleton-elimination.md](./10-singleton-elimination.md) is the
+parallel track. Storage callsite migration in particular is blocked
+on Tier 1 of that doc (killing `AppState._bound_root`); doing it
+before that would entrench the singleton.
+
 - [~] Extract `Storage` interface; replace direct `pathlib.Path` use
   in project layout with `FilesystemStorage` calls.
   (See 03-storage-layer.md.) Protocol + `FilesystemStorage` shipped
@@ -78,6 +85,31 @@ abstraction without behavioural change.
 - [ ] Add `docker compose` for hosted-mode dev (Postgres + LocalStack
   S3 + the worker + the API server). Contributors without R2
   credentials can exercise the hosted path locally.
+
+### Singleton elimination (parallel track, see doc 10)
+
+Process-level state that must come out before the abstractions can do
+anything useful in a multi-tenant deployment. Ordering matters --
+later steps are blocked on earlier ones.
+
+- [ ] **Tier 1:** kill `AppState._bound_root` + `_bound_kind` +
+  `_bound_name` + `_bound_match_id`. Make
+  `/api/matches/{match_id}/...` the only project-scoped prefix;
+  delete the bare-path fallback in the route table. CLI / picker
+  resolve to a `match_id` and open the browser at
+  `/match/<match_id>` instead of binding server-side. Precondition
+  for storage callsite migration.
+- [ ] **Tier 2:** move `JobRegistry` off in-memory `dict` to the
+  `compute_jobs` table (Postgres in hosted; SQLite in local if/when
+  the desktop needs job persistence). Same handler-facing interface;
+  different backend.
+- [ ] **Tier 3:** `user_config.recent_projects` and
+  `scoreboard_identity` become per-user Postgres rows in hosted
+  mode; introduce a `RecentProjectsStore` / `ScoreboardIdentityStore`
+  abstraction with a JSON-file backend for local mode.
+- [ ] **Tier 4:** `splitsmith ui --project <path>` resolves the path
+  to a `match_id` via `MatchRegistry` and opens the browser at the
+  URL rather than binding server-side.
 
 ### Hosted infrastructure
 
