@@ -6451,6 +6451,30 @@ def test_match_id_alias_resolves_match_level_endpoint(tmp_path: Path, _user_conf
     assert bare.json()["detail"]["code"] == "no_project"
 
 
+def test_shooter_root_no_match_singleton_fallback(tmp_path: Path, _user_config_home: Path) -> None:
+    """Tier 1 of doc 10 (step 2): with a Match folder bound on the
+    singleton, ``state.shooter_root(slug)`` still refuses to resolve
+    without a per-request ContextVar. The Match-folder singleton
+    fallback is gone; only the legacy single-shooter fallback
+    survives (covered separately by the legacy test pattern).
+    """
+    from splitsmith.ui.server import _no_project_error
+
+    app, _bound_match, _ = _make_match_app(tmp_path)
+    state = app.state.splitsmith_state
+
+    # The singleton IS bound to a Match folder.
+    assert state.bound_match_id is not None
+
+    # Yet shooter_root refuses to resolve a known slug without the
+    # ContextVar set by the alias middleware.
+    with pytest.raises(HTTPException) as exc:
+        state.shooter_root("mathias")
+    assert exc.value.status_code == 409
+    expected_code = _no_project_error().detail["code"]
+    assert exc.value.detail["code"] == expected_code
+
+
 def test_match_root_no_singleton_fallback(tmp_path: Path, _user_config_home: Path) -> None:
     """Tier 1 of doc 10: ``state.match_root`` reads only from the
     per-request ContextVar set by the alias middleware. Even when a
@@ -6511,16 +6535,18 @@ def test_match_id_alias_serves_non_bound_match(tmp_path: Path, _user_config_home
 
 
 def test_match_id_alias_contextvar_isolates_per_request(tmp_path: Path, _user_config_home: Path) -> None:
-    """``state.shooter_root(slug)`` honours the per-request contextvar (#353 Phase 3 PR C).
+    """``state.shooter_root(slug)`` resolves Match-folder requests
+    only via the per-request ``current_match_root`` ContextVar.
 
-    Directly exercises ``current_match_root`` instead of going through
-    HTTP so the assertion can observe the resolved path without coupling
-    to a specific endpoint's storage layout.
+    Tier 1 of doc 10 (step 2): a bound Match folder no longer
+    silently resolves shooter slugs via the singleton when the
+    request didn't carry an ``/api/matches/{match_id}/`` prefix.
+    The ContextVar is the only path; bare access 409s.
     """
     from splitsmith import match_model, user_config
     from splitsmith.ui.server import current_match_root
 
-    app, bound_match, bound_root = _make_match_app(tmp_path)
+    app, _bound_match, _bound_root = _make_match_app(tmp_path)
     other_root = tmp_path / "other-match"
     other = match_model.Match.init(other_root, name="Other Match")
     other_shooter = match_model.Shooter(slug="alice", name="Alice")
@@ -6528,14 +6554,17 @@ def test_match_id_alias_contextvar_isolates_per_request(tmp_path: Path, _user_co
     user_config.record_project_open(other_root, other.name, kind="match")
 
     state = app.state.splitsmith_state
-    # No contextvar set -> falls back to bound singleton; ``alice`` isn't
-    # on the bound match, so 404.
+
+    # No contextvar set -> Match-folder singleton no longer
+    # answers; 409 ``no_project`` regardless of which slug is
+    # requested.
     with pytest.raises(HTTPException) as exc:
         state.shooter_root("alice")
-    assert exc.value.status_code == 404
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "no_project"
 
-    # Set the contextvar to point at the OTHER match (simulating what
-    # the middleware does on /api/matches/{other.match_id}/...). Now
+    # Set the contextvar to point at the OTHER match (simulating
+    # what the middleware does on /api/matches/{other.match_id}/).
     # ``alice`` resolves under the other match's shooter dir.
     token = current_match_root.set(other_root)
     try:
@@ -6544,16 +6573,11 @@ def test_match_id_alias_contextvar_isolates_per_request(tmp_path: Path, _user_co
     finally:
         current_match_root.reset(token)
 
-    # After reset the singleton fallback returns -- ``alice`` 404s on
-    # the bound match again, proving the contextvar didn't leak.
+    # After reset, bare access 409s again -- the contextvar didn't
+    # leak across "requests" and the singleton doesn't paper over.
     with pytest.raises(HTTPException) as exc:
-        state.shooter_root("alice")
-    assert exc.value.status_code == 404
-
-    # The bound match's own shooter ``mathias`` still resolves via the
-    # singleton fallback with no contextvar set.
-    resolved = state.shooter_root("mathias")
-    assert resolved == match_model.Match.shooter_root(bound_root, "mathias")
+        state.shooter_root("mathias")
+    assert exc.value.status_code == 409
 
 
 def test_match_id_alias_missing_segment_returns_400(tmp_path: Path, _user_config_home: Path) -> None:

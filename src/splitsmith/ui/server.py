@@ -652,22 +652,29 @@ class AppState:
         (the SPA derives it from ``competitor_name`` via :func:`legacy_slug`)
         so callers don't need to special-case the legacy layout.
 
-        Resolution order (#353 Phase 3 PR C):
+        Resolution order (Tier 1 of doc 10, in progress):
 
         1. ``current_match_root`` ContextVar -- set by the
-           ``/api/matches/{match_id}/...`` alias middleware. This is the
-           per-request path; multiple tabs on different matches stay
-           isolated because each request carries its own context.
-        2. ``self._bound_root`` -- the legacy singleton. Kept as a
-           fallback for legacy bare ``/api/shooters/{slug}/...`` traffic
-           (clients that haven't migrated to the new prefix yet) and for
-           the picker boot path.
+           ``/api/matches/{match_id}/...`` alias middleware. The
+           authoritative path for Match-folder projects; multiple
+           tabs on different matches stay isolated because each
+           request carries its own context.
+        2. ``self._bound_root`` when ``_bound_kind == "legacy"``
+           -- single-shooter pre-redesign projects don't have a
+           ``match_id`` so they can't be addressed via URL prefix.
+           This fallback stays until legacy projects are either
+           migrated to Match folders or dropped.
+
+        Notably absent: the Match-folder singleton fallback. After
+        this step, Match-folder requests MUST come through the
+        ``/api/matches/{match_id}/`` prefix; a bare-path request
+        against a bound Match folder 409s ``no_project``.
         """
         scoped_root = current_match_root.get()
         if scoped_root is not None:
             # Per-request scope is always a Match folder (the middleware
             # rejects legacy projects upstream). Validate the slug and
-            # resolve under that root, ignoring the singleton.
+            # resolve under that root.
             match = match_model.Match.load(scoped_root)
             if slug not in match.shooters:
                 raise HTTPException(
@@ -679,13 +686,10 @@ class AppState:
             raise _no_project_error()
         if self._bound_kind == "legacy":
             return self._bound_root
-        match = match_model.Match.load(self._bound_root)
-        if slug not in match.shooters:
-            raise HTTPException(
-                status_code=404,
-                detail=f"shooter {slug!r} is not registered on this match",
-            )
-        return match_model.Match.shooter_root(self._bound_root, slug)
+        # Match folder bound on the singleton but no URL prefix on
+        # this request -- refuse rather than silently resolving via
+        # the bound singleton. See doc 10 Tier 1.
+        raise _no_project_error()
 
     def shooter_project(self, slug: str) -> MatchProject:
         """Load the legacy ``MatchProject`` for ``slug``."""
