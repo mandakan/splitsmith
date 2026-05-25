@@ -625,21 +625,21 @@ class AppState:
 
     @property
     def match_root(self) -> Path:
-        """The bound match folder. 409 ``not_a_match`` for legacy projects."""
-        if self._bound_root is None:
+        """The match folder resolved from the request URL's
+        ``/api/matches/{match_id}/`` prefix.
+
+        Tier 1 of the singleton-elimination work (doc 10): match-level
+        operations are addressable only by URL, never via a process-
+        level bind. The alias middleware sets ``current_match_root``
+        after validating ``match_id``; this accessor reads only from
+        there. A bare-path request (no prefix) gets 409 ``no_project``.
+        Legacy single-shooter projects don't have a ``match_id`` and
+        are unreachable via match-level routes by construction.
+        """
+        scoped = current_match_root.get()
+        if scoped is None:
             raise _no_project_error()
-        if self._bound_kind != "match":
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "not_a_match",
-                    "message": (
-                        "Bound project is a legacy single-shooter layout. "
-                        "Match-level operations require a Match folder."
-                    ),
-                },
-            )
-        return self._bound_root
+        return scoped
 
     def shooter_root(self, slug: str) -> Path:
         """Resolve ``slug`` to the shooter's project directory on disk.

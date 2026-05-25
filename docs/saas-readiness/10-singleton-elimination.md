@@ -59,6 +59,14 @@ singleton. The fallback IS the violation.
 
 **Elimination path:**
 
+0. **(in progress)** `state.match_root` reads ContextVar only --
+   the singleton fallback for match-level operations is gone.
+   `/api/match/*` endpoints now 409 ``no_project`` unless the
+   request comes through `/api/matches/{match_id}/`. This was the
+   smallest defensible first cut: only ~10 test callsites needed
+   the prefix, and `shooter_root` still has its singleton fallback
+   so the bulk of shooter-scoped routes are unchanged. Next cuts
+   chip away at `shooter_root` and `shooter_project`.
 1. Make `/api/matches/{match_id}/...` the only accepted prefix for
    project-scoped routes. Delete the bare-path route table or have
    it 404. The middleware becomes mandatory rather than a fallback.
