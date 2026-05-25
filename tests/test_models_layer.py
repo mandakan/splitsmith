@@ -414,7 +414,13 @@ def test_models_status_endpoint_reports_unavailable_when_no_block(
     resp = client.get("/api/models/status")
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"available": False, "artifacts": [], "missing": [], "mismatched": []}
+    assert body == {
+        "available": False,
+        "artifacts": [],
+        "missing": [],
+        "mismatched": [],
+        "active_job": None,
+    }
 
 
 def test_models_status_endpoint_lists_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -439,3 +445,126 @@ def test_models_status_endpoint_lists_artifacts(monkeypatch: pytest.MonkeyPatch,
     assert body["mismatched"] == []
     assert body["artifacts"][0]["slug"] == "clap_audio_encoder"
     assert body["artifacts"][0]["state"] == "present"
+
+
+# ----------------------------------------------------------------------
+# Startup prefetch (auto-submit on `splitsmith ui` boot)
+# ----------------------------------------------------------------------
+
+
+def test_create_app_auto_submits_model_download_when_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Startup hook submits a ``model_download`` job iff something is missing.
+
+    Replaces the worker with a no-op so the test doesn't pull from R2;
+    we only assert that a job is queued + runs.
+    """
+    from splitsmith.ui import server as server_mod
+    from splitsmith.ui.server import create_app
+
+    spec, _artifact, _payload = _make_spec()
+    # Empty cache -> the one artifact in the spec is "missing".
+    registry = ModelRegistry(spec, root=tmp_path / "cache")
+    monkeypatch.setattr(registry_mod, "_default_registry", registry)
+    # Don't actually fetch anything; just record that the worker was called.
+    invoked: list[str] = []
+    monkeypatch.setattr(
+        server_mod,
+        "_run_model_download_job",
+        lambda handle: invoked.append(handle.id),
+    )
+
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    state = app.state.splitsmith_state
+    # Wait for the executor to pick up the queued job and the worker to run.
+    state.jobs.wait_for_drain(timeout_s=2.0)
+    assert invoked, "model_download worker was never invoked"
+    kinds = [j.kind for j in state.jobs.list()]
+    assert kinds == ["model_download"]
+
+
+def test_run_model_download_job_aggregates_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Worker normalizes per-artifact bytes into a single 0..1 fraction.
+
+    Builds a two-artifact spec, hijacks ``download_to`` so each call
+    streams its expected size to the destination + invokes the progress
+    callback once with ``(seen=full, total=full)``. The job's recorded
+    progress samples should march monotonically from 0 toward 1, ending
+    at exactly 1.0 with ``message="Models ready"``.
+    """
+    from splitsmith.ui.server import _run_model_download_job
+
+    payload_a = b"first-artifact-bytes"
+    payload_b = b"second-artifact-larger-payload"
+    spec = ModelArtifactsSpec.model_validate(
+        {
+            "slug_a": {
+                "filename": "a.onnx",
+                "sha256": _sha256(payload_a),
+                "size_bytes": len(payload_a),
+                "url": "https://example.test/a.onnx",
+            },
+            "slug_b": {
+                "filename": "b.onnx",
+                "sha256": _sha256(payload_b),
+                "size_bytes": len(payload_b),
+                "url": "https://example.test/b.onnx",
+            },
+        }
+    )
+    artifact_a = spec.artifact("slug_a")
+    artifact_b = spec.artifact("slug_b")
+    assert artifact_a is not None and artifact_b is not None
+    registry = ModelRegistry(spec, root=tmp_path / "cache")
+    monkeypatch.setattr(registry_mod, "_default_registry", registry)
+
+    payloads = {artifact_a.url: payload_a, artifact_b.url: payload_b}
+
+    def _fake_download(url, dest, *, expected_size, progress, **_kw):  # type: ignore[no-untyped-def]
+        data = payloads[url]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        if progress is not None:
+            progress(len(data), len(data))
+
+    monkeypatch.setattr(registry_mod, "download_to", _fake_download)
+
+    from splitsmith.ui.jobs import JobRegistry
+
+    jobs = JobRegistry()
+    submitted = jobs.submit(kind="model_download", fn=_run_model_download_job)
+    jobs.wait_for_drain(timeout_s=2.0)
+    final = jobs.get(submitted.id)
+    assert final is not None
+    assert final.status == "succeeded"
+    assert final.progress == 1.0
+    assert final.message == "Models ready"
+    assert final.result == {
+        "artifacts": ["slug_a", "slug_b"],
+        "bytes": len(payload_a) + len(payload_b),
+    }
+
+
+def test_create_app_skips_model_download_when_all_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Don't queue a no-op job when every artifact is already cached."""
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import create_app
+
+    spec, artifact, payload = _make_spec()
+    dest = cache_mod.artifact_path(artifact, root=tmp_path / "cache")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(payload)
+    registry = ModelRegistry(spec, root=tmp_path / "cache")
+    monkeypatch.setattr(registry_mod, "_default_registry", registry)
+
+    app = create_app(project_root=tmp_path / "match", project_name="x")
+    client = TestClient(app)
+    body = client.get("/api/models/status").json()
+    assert body["active_job"] is None
+    assert [j.kind for j in app.state.splitsmith_state.jobs.list()] == []

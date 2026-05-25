@@ -100,6 +100,7 @@ from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
+from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
@@ -790,6 +791,96 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
                 with_voter_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
                 _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(with_voter_e=with_voter_e)
     return _ENSEMBLE_RUNTIME
+
+
+def _run_model_download_job(handle: JobHandle) -> None:
+    """Prefetch every missing slim ONNX artifact from R2.
+
+    Submitted by :func:`_maybe_submit_model_download` at server startup
+    when ``registry.status()`` reports anything other than ``present``
+    so the audit hot path doesn't pay a ~440 MB stall on the user's
+    first shot-detect click.
+
+    Progress feeds the job snapshot as a single 0..1 fraction across the
+    sum of pending-artifact sizes; the SPA's Jobs panel renders it from
+    there. The download itself is locked via the registry's cache lock,
+    so a concurrent ``registry.resolve()`` from an early shot-detect
+    will block on this job rather than racing it.
+    """
+    registry = model_layer.get_default_registry()
+    if registry is None:
+        return
+    pending = [s for s in registry.status() if s.state != "present"]
+    if not pending:
+        return
+    total_bytes = sum(s.size_bytes for s in pending)
+    completed_bytes = 0
+    for i, status in enumerate(pending, start=1):
+        handle.check_cancel()
+        slug_bytes = status.size_bytes
+        slug_label = f"({i}/{len(pending)}) {status.slug}"
+        handle.update(
+            progress=completed_bytes / total_bytes if total_bytes else None,
+            message=f"Downloading {slug_label}",
+        )
+
+        def _progress(
+            seen: int,
+            _total: int | None,
+            *,
+            base: int = completed_bytes,
+            cap: int = slug_bytes,
+        ) -> None:
+            if total_bytes:
+                handle.update(progress=(base + min(seen, cap)) / total_bytes)
+
+        try:
+            registry.resolve(status.slug, progress=_progress)
+        except model_layer.NetworkUnreachable as exc:
+            raise RuntimeError(
+                f"network unreachable while fetching {status.slug}: {exc}. "
+                "Reconnect and the next first-detect will retry."
+            ) from exc
+        except model_layer.HashMismatch as exc:
+            raise RuntimeError(
+                f"integrity check failed for {status.slug}: {exc}. "
+                "The mirror may have been updated -- run `uv tool upgrade splitsmith`."
+            ) from exc
+        completed_bytes += slug_bytes
+    handle.update(progress=1.0, message="Models ready")
+    handle.set_result(
+        {
+            "artifacts": [s.slug for s in pending],
+            "bytes": total_bytes,
+        }
+    )
+
+
+def _maybe_submit_model_download(state: AppState) -> None:
+    """Kick off the slim-artifact prefetch on startup when anything is missing.
+
+    No-op when the registry is unavailable (older calibrations without
+    a ``model_artifacts`` block, or the torch dev install), when every
+    artifact is already cached + verified, or when a previous job is
+    still active (idempotent across reloads of an embedded host).
+    """
+    try:
+        registry = model_layer.get_default_registry()
+    except Exception:  # pragma: no cover -- defensive; never block boot on this
+        logger.exception("model registry unavailable; skipping startup prefetch")
+        return
+    if registry is None:
+        return
+    missing = [s for s in registry.status() if s.state != "present"]
+    if not missing:
+        return
+    if state.jobs.find_active(kind="model_download") is not None:
+        return
+    try:
+        state.jobs.submit(kind="model_download", fn=_run_model_download_job)
+    except ShutdownInProgressError:
+        # Server is already winding down; nothing to do.
+        return
 
 
 class HealthResponse(BaseModel):
@@ -1959,6 +2050,11 @@ def create_app(
     # outside the closure.
     app.state.splitsmith_state = state
 
+    # Kick off the slim ONNX prefetch in the background if any artifact
+    # is missing. Runs whether or not a project is bound, so the first
+    # shot-detect after the user picks a match finds the cache primed.
+    _maybe_submit_model_download(state)
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -2095,15 +2191,27 @@ def create_app(
         ship the ``model_artifacts`` calibration block (today's torch
         path) return ``available=False`` so the frontend doesn't draw
         the overlay at all.
-        """
-        from .. import models as model_layer
 
+        ``active_job`` carries the background prefetch job submitted by
+        :func:`_maybe_submit_model_download` when artifacts are missing
+        at startup. The SPA uses ``progress`` + ``message`` to render a
+        non-blocking indicator while the user ingests; the Jobs panel
+        still shows the same job through the regular ``/api/me/jobs``
+        feed.
+        """
         registry = model_layer.get_default_registry()
         if registry is None:
-            return {"available": False, "artifacts": [], "missing": [], "mismatched": []}
+            return {
+                "available": False,
+                "artifacts": [],
+                "missing": [],
+                "mismatched": [],
+                "active_job": None,
+            }
         statuses = registry.status()
         missing = [s.slug for s in statuses if s.state == "missing"]
         mismatched = [s.slug for s in statuses if s.state == "mismatched"]
+        active_job = state.jobs.find_active(kind="model_download")
         return {
             "available": True,
             "cache_root": str(registry.root),
@@ -2118,6 +2226,16 @@ def create_app(
             ],
             "missing": missing,
             "mismatched": mismatched,
+            "active_job": (
+                {
+                    "id": active_job.id,
+                    "status": active_job.status,
+                    "progress": active_job.progress,
+                    "message": active_job.message,
+                }
+                if active_job is not None
+                else None
+            ),
         }
 
     @app.post("/api/shutdown", status_code=202)

@@ -66,6 +66,10 @@ JOB_PRIORITY: dict[str, int] = {
     "trim": 1,
     # Slow ensemble; happily yields its slot to incoming beep/trim work.
     "shot_detect": 2,
+    # Background prefetch of slim ONNX artifacts on first UI launch.
+    # Lower than DEFAULT so any user-initiated work that arrives while
+    # the download is still queued jumps ahead.
+    "model_download": 9,
 }
 DEFAULT_JOB_PRIORITY: int = 3
 
