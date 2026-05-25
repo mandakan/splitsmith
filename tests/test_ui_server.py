@@ -5501,8 +5501,9 @@ def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_con
         json={"path": str(target.resolve())},
     )
     assert resp.status_code == 200
+    match_id = app.state.splitsmith_state.bound_match_id
 
-    listing = client.get("/api/match/shooters")
+    listing = client.get(f"/api/matches/{match_id}/match/shooters")
     assert listing.status_code == 200, listing.text
     body = listing.json()
     assert body["match_name"] == "Multi-shooter"
@@ -5524,7 +5525,8 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
-    resp = client.post("/api/match/shooters", json={"name": "Johan Larsson"})
+    match_id = app.state.splitsmith_state.bound_match_id
+    resp = client.post(f"/api/matches/{match_id}/match/shooters", json={"name": "Johan Larsson"})
     assert resp.status_code == 200
     body = resp.json()
     slugs = [s["slug"] for s in body["shooters"]]
@@ -5552,7 +5554,8 @@ def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path)
         "/api/me/recent-projects/bind",
         json={"path": str(target.resolve())},
     )
-    resp = client.delete("/api/match/shooters/jl")
+    match_id = app.state.splitsmith_state.bound_match_id
+    resp = client.delete(f"/api/matches/{match_id}/match/shooters/jl")
     assert resp.status_code == 200
     assert not match_model.Match.shooter_root(target, "jl").exists()
 
@@ -6433,16 +6436,44 @@ def test_match_id_alias_rewrites_to_existing_route(tmp_path: Path, _user_config_
 
 
 def test_match_id_alias_resolves_match_level_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
-    """A real match-level endpoint works through both prefixes."""
+    """A real match-level endpoint works through the /api/matches/
+    prefix; the bare-path form 409s after Tier 1 of the singleton-
+    elimination work (doc 10) -- match-level operations are
+    addressable only by URL, never via a process-level bind."""
     app, match, _ = _make_match_app(tmp_path)
     client = TestClient(app)
 
-    direct = client.get("/api/match/shooters")
     aliased = client.get(f"/api/matches/{match.match_id}/match/shooters")
+    bare = client.get("/api/match/shooters")
 
-    assert direct.status_code == 200
     assert aliased.status_code == 200
-    assert direct.json() == aliased.json()
+    assert bare.status_code == 409
+    assert bare.json()["detail"]["code"] == "no_project"
+
+
+def test_match_root_no_singleton_fallback(tmp_path: Path, _user_config_home: Path) -> None:
+    """Tier 1 of doc 10: ``state.match_root`` reads only from the
+    per-request ContextVar set by the alias middleware. Even when a
+    project is bound on the singleton, a bare-path request must 409
+    rather than silently resolve via ``_bound_root``.
+    """
+    from splitsmith.ui.server import _no_project_error
+
+    app, _bound_match, _ = _make_match_app(tmp_path)
+    state = app.state.splitsmith_state
+
+    # The singleton IS bound (matches.bound state is set by
+    # _make_match_app via create_app(project_root=...)).
+    assert state.bound_match_id is not None
+
+    # Yet match_root refuses to resolve without a ContextVar.
+    with pytest.raises(HTTPException) as exc:
+        _ = state.match_root
+    assert exc.value.status_code == 409
+    # Mirror the error code _no_project_error emits so a future
+    # rename of the code keeps this test honest.
+    expected_code = _no_project_error().detail["code"]
+    assert exc.value.detail["code"] == expected_code
 
 
 def test_match_id_alias_unknown_id_returns_404(tmp_path: Path, _user_config_home: Path) -> None:
