@@ -48,9 +48,15 @@ COPY pyproject.toml uv.lock README.md ./
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-# Install dependencies + the package itself into a uv-managed venv
-# under ``/app/.venv``. ``--frozen`` ensures the build fails if
-# ``uv.lock`` and ``pyproject.toml`` have drifted.
+# Install dependencies only. ``--no-install-project`` skips the
+# splitsmith package itself, so this layer is invalidated only when
+# ``pyproject.toml`` / ``uv.lock`` change -- a source-only edit reuses
+# the ~500 MB wheel install on the next build.
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Now bring in the source and install the package itself into the
+# already-warm venv. ``--frozen`` ensures the build still fails if
+# the lockfile and pyproject have drifted.
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
