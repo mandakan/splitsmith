@@ -16,6 +16,29 @@ def test_round_trip_write_then_read(tmp_path: Path) -> None:
     assert storage.read_bytes("hello.txt") == b"world"
 
 
+def test_upload_stream_writes_full_payload(tmp_path: Path) -> None:
+    """Streaming write must land the same bytes as ``write_bytes``."""
+    import io
+
+    storage = FilesystemStorage(tmp_path)
+    payload = b"X" * (2 << 20) + b"tail"  # 2 MiB + sentinel; > one read chunk
+    written = storage.upload_stream("raw/clip.bin", io.BytesIO(payload))
+
+    assert written == len(payload)
+    assert storage.read_bytes("raw/clip.bin") == payload
+    # Atomic rename should leave no temp siblings behind.
+    siblings = sorted(p.name for p in (tmp_path / "raw").iterdir())
+    assert siblings == ["clip.bin"]
+
+
+def test_upload_stream_rejects_traversal(tmp_path: Path) -> None:
+    import io
+
+    storage = FilesystemStorage(tmp_path)
+    with pytest.raises(ValueError, match="must be relative"):
+        storage.upload_stream("../escape.bin", io.BytesIO(b"x"))
+
+
 def test_write_creates_parent_directories(tmp_path: Path) -> None:
     """Callers should not have to mkdir themselves -- a project's
     on-disk layout has many nested folders and forcing every writer

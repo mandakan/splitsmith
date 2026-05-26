@@ -159,14 +159,29 @@ later steps are blocked on earlier ones.
 
 ### Storage (doc 03)
 
-- [ ] `S3Storage` implementation (fsspec-backed, R2 endpoint).
-- [ ] `MemoryStorage` for tests.
+- [x] `S3Storage` implementation (boto3 against R2 / S3 / MinIO),
+  shipped in #415 alongside `FilesystemStorage`. Shared
+  path-traversal guard, structural Protocol round-trip tests via
+  ``moto``.
+- [x] `Storage` slot on `AppState`, wired per-user in hosted mode
+  (`users/<user_id>/` prefix) from `SPLITSMITH_S3_*` env vars.
+  Local mode leaves it `None`; the desktop continues to write
+  `raw/<name>` symlinks via `pathlib.Path`.
+- [x] First hosted upload route: `POST /api/me/raw/upload` streams
+  to S3 via `upload_stream` (boto3 multipart), atomic + idempotent
+  overwrite, server-computed sha256 returned to the client, optional
+  `X-Content-SHA256` verifier that rolls back on mismatch. The
+  desktop is unchanged -- this route 503s outside hosted mode.
+- [-] `MemoryStorage` for tests. Deferred: `moto`-backed
+  `S3Storage` + `tmp_path`-backed `FilesystemStorage` cover the
+  test matrix without a third impl.
 - [ ] Per-project storage layout standardised; existing local
   project directories remain compatible.
 - [ ] `signed_url` implementation for both backends.
 - [ ] Reindex helper (rebuild `projects` rows from R2 walk).
-- [ ] Per-user prefix decision (`users/<id>/projects/<id>/` vs
-  `projects/<id>/`) -- pin during implementation.
+- [x] Per-user prefix decision pinned: `users/<user_id>/...`
+  (project-id scoping nests under that once the `projects` table
+  lands).
 
 ### ACL + projects (doc 02)
 
@@ -181,12 +196,18 @@ later steps are blocked on earlier ones.
 
 ### Uploads (doc 05)
 
+- [~] Single-shot raw upload as the v1 stopgap: `POST /api/me/raw/upload`
+  streams an `UploadFile` to S3 via `boto3` multipart, idempotent on
+  retry, server-computed sha256 returned (and verified against an
+  optional `X-Content-SHA256` header). Resume-from-byte-N is out of
+  scope here -- tus is the upgrade path.
 - [ ] tus-py-server wired with S3 backend pointing at R2.
 - [ ] `upload_sessions` table + lifecycle (24h expiry + cron abort).
 - [ ] `POST /api/v1/uploads` to start a session.
 - [ ] tus-js-client integration in the browser SPA.
 - [ ] Browser audio extraction (WebAudio -> 16 kHz mono WAV).
-- [ ] Sha256 verification on upload completion.
+- [x] Sha256 verification on upload completion (single-shot today;
+  tus extends this to the resumed-chunks flow).
 
 ### Compute (doc 04)
 

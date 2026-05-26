@@ -43,6 +43,29 @@ def test_round_trip_write_then_read(s3_client) -> None:
     assert storage.read_bytes("hello.txt") == b"world"
 
 
+def test_upload_stream_round_trip(s3_client) -> None:
+    """boto3 upload_fileobj path must land the same bytes as put_object
+    and report the streamed size back to the caller."""
+    import io
+
+    storage = _storage(s3_client)
+    # Larger than the default 8 MiB multipart threshold would force a
+    # multipart upload against real S3; moto handles either path.
+    payload = b"X" * 17 + b"end"
+    written = storage.upload_stream("raw/clip.bin", io.BytesIO(payload))
+
+    assert written == len(payload)
+    assert storage.read_bytes("raw/clip.bin") == payload
+
+
+def test_upload_stream_rejects_traversal(s3_client) -> None:
+    import io
+
+    storage = _storage(s3_client)
+    with pytest.raises(ValueError, match="must be relative"):
+        storage.upload_stream("../escape.bin", io.BytesIO(b"x"))
+
+
 def test_write_overwrites_existing(s3_client) -> None:
     storage = _storage(s3_client)
     storage.write_bytes("k", b"v1")

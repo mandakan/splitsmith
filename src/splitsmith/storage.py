@@ -31,7 +31,7 @@ import tempfile
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from pydantic import BaseModel
 
@@ -58,6 +58,16 @@ class Storage(Protocol):
 
     def write_bytes(self, path: str, data: bytes) -> None:
         """Atomic write. Replaces an existing object at the same path."""
+
+    def upload_stream(self, path: str, fileobj: BinaryIO) -> int:
+        """Atomic write that streams from ``fileobj`` instead of buffering.
+
+        Returns the byte count consumed from the stream. For
+        multi-GB uploads (raw match footage) this avoids loading
+        the whole payload into memory the way ``write_bytes`` does.
+        ``fileobj`` must be readable in binary mode; the implementation
+        reads to EOF.
+        """
 
     def exists(self, path: str) -> bool:
         """Return True iff an object exists at the path."""
@@ -132,6 +142,32 @@ class FilesystemStorage:
                 pass
             raise
 
+    def upload_stream(self, path: str, fileobj: BinaryIO) -> int:
+        target = self._resolve(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=target.name + ".",
+            suffix=".tmp",
+            dir=target.parent,
+        )
+        total = 0
+        try:
+            with os.fdopen(fd, "wb") as out:
+                while True:
+                    chunk = fileobj.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    total += len(chunk)
+            Path(tmp_name).replace(target)
+        except Exception:
+            try:
+                Path(tmp_name).unlink()
+            except FileNotFoundError:
+                pass
+            raise
+        return total
+
     def exists(self, path: str) -> bool:
         return self._resolve(path).exists()
 
@@ -180,6 +216,25 @@ class FilesystemStorage:
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+
+class _CountingReader:
+    """Wrap a binary file-like so we can report bytes consumed.
+
+    boto3's ``upload_fileobj`` doesn't tell you how many bytes it
+    streamed; callers want the size for the response payload + audit
+    log. We can't trust the source's reported size (UploadFile may
+    advertise -1) so we count what actually went over the wire.
+    """
+
+    def __init__(self, inner: BinaryIO) -> None:
+        self._inner = inner
+        self.bytes_read = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._inner.read(size)
+        self.bytes_read += len(chunk)
+        return chunk
 
 
 def _validate_relative_key(key: str) -> str:
@@ -266,6 +321,17 @@ class S3Storage:
         # full, or the put fails and the old object (if any) survives.
         # No temp-and-rename dance needed.
         self._client.put_object(Bucket=self._bucket, Key=self._key(path), Body=data)
+
+    def upload_stream(self, path: str, fileobj: BinaryIO) -> int:
+        # boto3's ``upload_fileobj`` switches to multipart automatically
+        # for streams larger than the configured threshold (8 MiB by
+        # default), so multi-GB raw footage doesn't sit in memory.
+        # The upload is atomic on completion (the final CompleteMultipart
+        # call commits the object); partial failures leave no visible
+        # object behind, matching the put_object contract.
+        counter = _CountingReader(fileobj)
+        self._client.upload_fileobj(counter, self._bucket, self._key(path))
+        return counter.bytes_read
 
     def exists(self, path: str) -> bool:
         from botocore.exceptions import ClientError
