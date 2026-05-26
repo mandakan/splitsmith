@@ -72,6 +72,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -86,9 +87,20 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, BinaryIO, Literal
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -126,6 +138,7 @@ from ..fixture_schema import (
 )
 from ..match_registry import MatchRegistry
 from ..runtime import runtime as process_runtime
+from ..storage import Storage
 from . import audio as audio_helpers
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
@@ -613,6 +626,15 @@ class AppState:
     # with one wired to the local ``_get_ensemble_runtime`` so test
     # monkeypatches and the shared model cache still work.
     compute: ComputeBackend = field(default_factory=LocalComputeBackend)
+    # Tenant-scoped object storage. ``None`` in local mode -- the
+    # desktop codepaths read/write the user's chosen project folder
+    # directly via ``pathlib.Path`` and never consult this slot. In
+    # hosted mode (``SPLITSMITH_MODE=hosted``) ``_apply_hosted_mode_wiring``
+    # constructs a per-user :class:`S3Storage` scoped to
+    # ``users/<user_id>/`` so the upload endpoints can stream raw
+    # footage into R2 / MinIO without ever touching the API
+    # container's filesystem. See ``docs/saas-readiness/03-storage-layer.md``.
+    storage: Storage | None = None
     # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
     # so the /api/shutdown route can ask uvicorn to exit. None under the
     # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
@@ -1952,6 +1974,58 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
 
 SPLITSMITH_MODE_ENV = "SPLITSMITH_MODE"
 SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
+# S3 / R2 / MinIO wiring. ``SPLITSMITH_S3_BUCKET`` is the single
+# switch: when set in hosted mode, ``_apply_hosted_mode_wiring``
+# constructs an ``S3Storage``. The remaining vars must accompany it
+# (the boot fails loud if the bucket is set but creds are missing).
+SPLITSMITH_S3_BUCKET_ENV = "SPLITSMITH_S3_BUCKET"
+SPLITSMITH_S3_ENDPOINT_URL_ENV = "SPLITSMITH_S3_ENDPOINT_URL"
+SPLITSMITH_S3_REGION_ENV = "SPLITSMITH_S3_REGION"
+SPLITSMITH_S3_ACCESS_KEY_ID_ENV = "SPLITSMITH_S3_ACCESS_KEY_ID"
+SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV = "SPLITSMITH_S3_SECRET_ACCESS_KEY"
+
+
+class _HashingReader:
+    """Wrap a binary stream so we hash the bytes as they're consumed.
+
+    boto3's ``upload_fileobj`` reads from this in chunks; we forward
+    the chunks to the inner hash object so the server can return a
+    sha256 without a second pass. Pairs with ``storage.upload_stream``.
+    """
+
+    def __init__(self, inner: BinaryIO, digest: Any) -> None:
+        self._inner = inner
+        self._digest = digest
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._inner.read(size)
+        if chunk:
+            self._digest.update(chunk)
+        return chunk
+
+
+def _sanitize_raw_filename(name: str | None) -> str:
+    """Validate a user-supplied upload filename.
+
+    Strict: anything that isn't a clean basename is a 400. Browsers
+    pass the result of the OS file picker which is always a basename;
+    a request that includes path separators is almost always a client
+    bug, and failing loud surfaces it before the storage layer guard
+    rewrites the surprise into a confusing 500.
+    """
+    if not name:
+        raise HTTPException(status_code=400, detail="filename is required")
+    stripped = name.strip()
+    if stripped in {"", ".", ".."}:
+        raise HTTPException(status_code=400, detail=f"invalid filename: {name!r}")
+    if "/" in stripped or "\\" in stripped:
+        raise HTTPException(status_code=400, detail=f"invalid filename: {name!r}")
+    # ``Path(name).name`` would silently strip path parts; double-check
+    # the identity holds so we don't accept a weirdly-encoded traversal
+    # the storage guard would later reject mid-write.
+    if Path(stripped).name != stripped:
+        raise HTTPException(status_code=400, detail=f"invalid filename: {name!r}")
+    return stripped
 
 
 def _hosted_mode_active() -> bool:
@@ -2020,6 +2094,54 @@ def _apply_hosted_mode_wiring(state: AppState) -> None:
     state.recent_projects = PostgresRecentProjectsStore(session_factory, user_id=user_id)
     state.scoreboard_identity = PostgresScoreboardIdentityStore(session_factory, user_id=user_id)
     state.jobs = PostgresJobBackend(session_factory, user_id=user_id)
+    state.storage = _build_hosted_storage(user_id)
+
+
+def _build_hosted_storage(user_id: str) -> Storage | None:
+    """Construct the per-user :class:`S3Storage` from ``SPLITSMITH_S3_*``
+    env vars, or return ``None`` if the bucket is unset.
+
+    Hosted mode without S3 wiring is a valid configuration -- a
+    developer iterating on the Postgres-backed stores doesn't need
+    MinIO running just to hit ``/api/me/recent-projects``. The
+    upload endpoint guards on ``state.storage is None`` and returns
+    a 503 in that case, so the contract is "set the bucket to get
+    upload support, leave it unset to disable that surface".
+
+    When the bucket *is* set, the rest of the credentials must be
+    present too -- a half-configured S3 wiring would crash on the
+    first request, which is worse than failing loud at boot.
+    """
+    from ..storage import S3Storage
+
+    bucket = os.environ.get(SPLITSMITH_S3_BUCKET_ENV, "").strip()
+    if not bucket:
+        return None
+    endpoint = os.environ.get(SPLITSMITH_S3_ENDPOINT_URL_ENV, "").strip() or None
+    region = os.environ.get(SPLITSMITH_S3_REGION_ENV, "").strip() or "auto"
+    access_key = os.environ.get(SPLITSMITH_S3_ACCESS_KEY_ID_ENV, "").strip()
+    secret_key = os.environ.get(SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV, "").strip()
+    if not access_key or not secret_key:
+        raise RuntimeError(
+            f"{SPLITSMITH_S3_BUCKET_ENV} is set but "
+            f"{SPLITSMITH_S3_ACCESS_KEY_ID_ENV} / "
+            f"{SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV} are missing"
+        )
+
+    import boto3
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        region_name=region,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+    # Per-user prefix is the multi-tenant isolation boundary: every
+    # caller gets their own ``users/<id>/`` namespace and can't
+    # construct a key that escapes it (the path-traversal guard
+    # inside ``S3Storage._key`` enforces this).
+    return S3Storage(bucket=bucket, prefix=f"users/{user_id}/", client=client)
 
 
 def create_app(
@@ -2471,6 +2593,102 @@ def create_app(
                 "project_root": str(result.project_root),
                 "project_name": result.project_name,
                 "manifest": result.manifest,
+            }
+        )
+
+    @app.post("/api/me/raw/upload")
+    async def upload_raw_video(
+        file: UploadFile = File(...),
+        x_content_sha256: str | None = Header(default=None),
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Stream a raw video into hosted-mode object storage.
+
+        Hosted-only: returns 503 when ``state.storage`` is unwired,
+        which is the local-mode default. The desktop ``splitsmith ui``
+        flow writes raw videos to disk via ``raw/<name>`` symlinks and
+        never calls this endpoint -- the existing path-based codepaths
+        are unchanged.
+
+        Robustness model (doc 05 calls the full tus answer out as the
+        v2 goal; this is the v1 idempotent single-shot):
+
+        - The write is atomic. S3 PUT (or boto3's multipart) only
+          publishes the object on completion; a connection drop
+          leaves no torn object visible. Aborted multiparts get
+          swept by R2's lifecycle rule.
+        - Re-uploads are safe. A successful retry overwrites the
+          previous object atomically; clients that hit a transient
+          error can just POST the same file again.
+        - The server computes sha256 during streaming and returns it
+          in the response so the client can detect transit corruption
+          end-to-end. If the client knows the hash up front it can
+          send ``X-Content-SHA256`` -- mismatch rolls the upload back
+          (deletes the just-written object) and returns 422 so the
+          retry path is "POST again with the corrected bytes".
+
+        Resume-from-byte-N (tus) is deliberately not in this PR; see
+        ``docs/saas-readiness/05-uploads-and-streaming.md``.
+        """
+        storage = state.storage
+        if storage is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "raw video upload is hosted-mode only; "
+                    "local mode writes raw/<name> symlinks via the desktop UI"
+                ),
+            )
+
+        name = _sanitize_raw_filename(file.filename)
+        key = f"raw/{name}"
+
+        # Wrap the spooled body so we count bytes + hash in one pass
+        # while boto3 streams to S3. UploadFile.file is the underlying
+        # sync SpooledTemporaryFile that boto3 can ``.read()`` from
+        # directly -- starlette has already spooled the multipart body
+        # by the time this handler runs.
+        source: BinaryIO = file.file
+        source.seek(0)
+        digest = hashlib.sha256()
+        hashing = _HashingReader(source, digest)
+
+        try:
+            size = storage.upload_stream(key, hashing)
+        except Exception as exc:
+            # boto3's TransferManager aborts the multipart on its
+            # own; re-raise as a clean 500 so the client sees a
+            # retryable failure instead of a half-typed exception.
+            raise HTTPException(status_code=500, detail=f"upload failed: {exc}") from exc
+
+        sha256_hex = digest.hexdigest()
+
+        if x_content_sha256 and x_content_sha256.lower() != sha256_hex:
+            # The bytes that hit S3 don't match what the client said
+            # they were sending. Roll the object back so a subsequent
+            # GET doesn't serve corrupted content.
+            try:
+                storage.delete(key)
+            except Exception:
+                # Best-effort: if delete fails, R2's lifecycle still
+                # has the object; surfacing the original mismatch is
+                # more useful than the cleanup failure.
+                pass
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "sha256_mismatch",
+                    "expected": x_content_sha256,
+                    "actual": sha256_hex,
+                },
+            )
+
+        return JSONResponse(
+            {
+                "path": key,
+                "size": size,
+                "sha256": sha256_hex,
+                "filename": name,
             }
         )
 

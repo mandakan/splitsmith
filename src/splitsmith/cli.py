@@ -544,6 +544,7 @@ def serve(
     """
     import os as _os
     import subprocess as _subprocess
+    import sys as _sys
 
     from .ui.server import serve as _serve
 
@@ -559,16 +560,22 @@ def serve(
 
     if not skip_migrations:
         console.print(f"[green]splitsmith serve[/]: applying migrations against [bold]{db_url}[/]")
+        # Call ``alembic`` directly from this process's venv rather than
+        # ``uv run alembic``. ``uv run`` re-syncs the project before
+        # invoking the script, and without ``--no-dev`` that pulls the
+        # whole dev dep set (torch + CUDA wheels, ~2 GB) every cold
+        # cache -- on a fresh container image it can mask the actual
+        # migration as a multi-minute "hang" and tip the healthcheck
+        # over. The splitsmith CLI is itself running from the venv, so
+        # ``alembic`` lives next to ``sys.executable``.
+        alembic_bin = Path(_sys.executable).parent / "alembic"
         result = _subprocess.run(
-            ["uv", "run", "alembic", "upgrade", "head"],
+            [str(alembic_bin), "upgrade", "head"],
             env={**_os.environ, "SPLITSMITH_DATABASE_URL": db_url},
             cwd=Path(__file__).resolve().parent.parent.parent,
-            capture_output=True,
-            text=True,
         )
         if result.returncode != 0:
-            console.print("[red]alembic upgrade head failed:[/]")
-            console.print(result.stderr)
+            console.print("[red]alembic upgrade head failed[/] -- see the migration output above.")
             raise typer.Exit(2)
 
     console.print(

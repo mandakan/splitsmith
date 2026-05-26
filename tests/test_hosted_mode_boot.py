@@ -114,6 +114,8 @@ def test_create_app_swaps_in_postgres_backends(hosted_db: str) -> None:
     assert isinstance(state.recent_projects, PostgresRecentProjectsStore)
     assert isinstance(state.scoreboard_identity, PostgresScoreboardIdentityStore)
     assert isinstance(state.jobs, PostgresJobBackend)
+    # No S3 env vars set in this fixture -> storage stays unwired.
+    assert state.storage is None
 
     expected_uid = state.auth.user_id
     # Probe the private attr so the test fails loudly if a future
@@ -123,6 +125,54 @@ def test_create_app_swaps_in_postgres_backends(hosted_db: str) -> None:
     assert state.recent_projects._user_id == expected_uid
     assert state.scoreboard_identity._user_id == expected_uid
     assert state.jobs._user_id == expected_uid
+
+
+def test_hosted_storage_wired_when_bucket_env_set(
+    hosted_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``SPLITSMITH_S3_BUCKET`` is set in hosted mode the boot
+    must construct an :class:`S3Storage` scoped under the loopback
+    user's ``users/<id>/`` prefix. Boto3's client construction is
+    lazy -- we don't need a real bucket to assert the wiring landed.
+    """
+    pytest.importorskip("moto")
+    from moto import mock_aws
+
+    from splitsmith.storage import S3Storage
+
+    monkeypatch.setenv("SPLITSMITH_S3_BUCKET", "splitsmith-test")
+    monkeypatch.setenv("SPLITSMITH_S3_ENDPOINT_URL", "http://minio:9000")
+    monkeypatch.setenv("SPLITSMITH_S3_REGION", "us-east-1")
+    monkeypatch.setenv("SPLITSMITH_S3_ACCESS_KEY_ID", "key")
+    monkeypatch.setenv("SPLITSMITH_S3_SECRET_ACCESS_KEY", "secret")
+
+    from splitsmith.ui.server import create_app
+
+    with mock_aws():
+        app = create_app()
+    state = app.state.splitsmith_state
+
+    assert isinstance(state.storage, S3Storage)
+    assert state.storage.bucket == "splitsmith-test"
+    assert state.storage.prefix == f"users/{state.auth.user_id}/"
+
+
+def test_hosted_storage_misconfig_bucket_without_creds_fails_loud(
+    hosted_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Half-configured S3 wiring is worse than no wiring -- the boot
+    must raise so a typo'd creds doesn't 500 the upload endpoint
+    on the first request."""
+    monkeypatch.setenv("SPLITSMITH_S3_BUCKET", "splitsmith-test")
+    monkeypatch.delenv("SPLITSMITH_S3_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("SPLITSMITH_S3_SECRET_ACCESS_KEY", raising=False)
+
+    from splitsmith.ui.server import create_app
+
+    with pytest.raises(RuntimeError, match="SPLITSMITH_S3_ACCESS_KEY_ID"):
+        create_app()
 
 
 def test_recent_projects_round_trip_through_hosted_app(hosted_db: str) -> None:
@@ -177,3 +227,7 @@ def test_create_app_skips_hosted_wiring_when_mode_unset(
     assert isinstance(state.recent_projects, JsonRecentProjectsStore)
     assert isinstance(state.scoreboard_identity, JsonScoreboardIdentityStore)
     assert isinstance(state.jobs, JobRegistry)
+    # Storage stays unwired in local mode regardless of any S3 env
+    # vars that happen to be set -- desktop reads/writes the user's
+    # chosen project folder directly via pathlib.
+    assert state.storage is None

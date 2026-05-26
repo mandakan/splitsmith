@@ -50,6 +50,30 @@ dependencies = [
 splitsmith = "splitsmith.cli:app"
 splitsmith-server = "splitsmith.ui.embedded:main"
 
+[project.optional-dependencies]
+# Hosted-mode runtime deps. ``splitsmith ui`` (local mode) doesn't import
+# any of these -- the SQLAlchemy stores, alembic migration runner, and
+# S3Storage backend are all lazy-imported behind ``SPLITSMITH_MODE=hosted``.
+# Install with ``pip install splitsmith[hosted]`` for the wheel, or
+# ``uv sync --extra hosted`` (which the production Dockerfile does).
+hosted = [
+    # SaaS-foundation DB layer (doc 02). SQLAlchemy 2.x async +
+    # Alembic for migrations. ``aiosqlite`` covers the SQLite-backed
+    # smoke tests + local hosted-mode runs; ``asyncpg`` is the
+    # production dialect.
+    "sqlalchemy[asyncio]>=2.0.30",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "aiosqlite>=0.20.0",
+    "python-ulid>=3.0.0",
+    # ``S3Storage`` backend (doc 03). Wheel-installs ``boto3`` so the
+    # hosted runtime can upload to R2 / S3 / MinIO. The local-mode
+    # wheel still skips this because ``boto3`` only imports inside
+    # ``S3Storage.__init__`` (and ``__init__`` only runs in hosted
+    # mode -- see ``_apply_hosted_mode_wiring``).
+    "boto3>=1.35.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -94,12 +118,22 @@ exclude = [
 
 [dependency-groups]
 dev = [
+    # Self-extra: pulls in the hosted-mode runtime deps so the dev env
+    # can exercise the hosted code paths (alembic, sqlalchemy, asyncpg,
+    # aiosqlite, python-ulid, boto3). Declared once in
+    # ``[project.optional-dependencies].hosted``; contributors don't
+    # have to re-list them here.
+    "splitsmith[hosted]",
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
     "ruff>=0.4.0",
     "black>=24.0.0",
     "mypy>=1.10.0",
     "respx>=0.21.1",
+    # In-memory S3 mock for ``test_s3_storage.py`` +
+    # ``test_hosted_raw_upload.py``. Dev-only; production never
+    # imports moto.
+    "moto[s3]>=5.0.0",
     # Ensemble sweep analysis (issue #281 follow-up). pyarrow for the
     # signals/runs parquet store, matplotlib for the PNG plot layer.
     # Dev-only: the production API does not read these files.
@@ -119,27 +153,6 @@ dev = [
     "torch>=2.11.0",
     "transformers>=5.7.0",
     "panns-inference>=0.1.1",
-    # S3 multipart upload to Cloudflare R2 (scripts/upload_model_artifacts.py)
-    # AND the hosted-mode ``S3Storage`` backend in ``splitsmith.storage``.
-    # wrangler caps single PUTs at 300 MiB; PANN's consolidated ONNX
-    # is ~312 MiB so we route through R2's S3-compatible endpoint.
-    "boto3>=1.35.0",
-    # In-memory S3 mock for ``test_s3_storage.py`` -- lets us verify
-    # the hosted ``S3Storage`` backend round-trips correctly without
-    # standing up a real bucket. Dev-only; the production wheel
-    # pulls boto3 only when ``S3Storage`` is actually constructed.
-    "moto[s3]>=5.0.0",
-    # SaaS-foundation DB layer (doc 02). SQLAlchemy 2.x async +
-    # Alembic for migrations. Tests run against SQLite in-memory
-    # via aiosqlite; the hosted backend will use asyncpg against
-    # Postgres. Lives in the dev group because the local-mode
-    # wheel doesn't need any of them -- hosted backends import
-    # lazily, same shape as boto3 for S3Storage.
-    "sqlalchemy[asyncio]>=2.0.30",
-    "alembic>=1.13.0",
-    "asyncpg>=0.29.0",
-    "aiosqlite>=0.20.0",
-    "python-ulid>=3.0.0",
 ]
 
 [tool.ruff]

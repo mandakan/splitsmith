@@ -489,14 +489,21 @@ function ScoreboardVariant({
     setCreating(true);
     onError(null);
     try {
-      await api.createMatchFromScoreboard({
+      const health = await api.createMatchFromScoreboard({
         project_folder: projectFolder,
         name: selected.name,
         match_id: selected.id,
         content_type: selected.content_type,
         competitors: picks,
       });
-      navigate("/", { replace: true });
+      // Use the match_id from the create response so we land on the
+      // canonical /match/:matchId/ route. Navigating to "/" would
+      // bounce via LegacyMatchRedirect through /api/health, which no
+      // longer carries bound-state (doc 10 Tier 1 step 4) and so falls
+      // through to /pick.
+      navigate(health.match_id ? `/match/${health.match_id}/` : "/pick", {
+        replace: true,
+      });
     } catch (e) {
       setCreating(false);
       onError(e instanceof ApiError ? e.detail : String(e));
@@ -1215,7 +1222,7 @@ function ManualVariant({
     setCreating(true);
     onError(null);
     try {
-      await api.createMatchManual({
+      const health = await api.createMatchManual({
         name: name.trim(),
         project_folder: folder.trim(),
         match_date: matchDate || null,
@@ -1233,7 +1240,9 @@ function ManualVariant({
           division: shooterDivision,
         },
       });
-      navigate("/", { replace: true });
+      navigate(health.match_id ? `/match/${health.match_id}/` : "/pick", {
+        replace: true,
+      });
     } catch (e) {
       setCreating(false);
       onError(e instanceof ApiError ? e.detail : String(e));

@@ -148,19 +148,60 @@ separation.** Anything you POST is owned by the loopback user.
 `MagicLinkAuth` + vendor selection lands separately; until then,
 treat the stack as single-tenant and do not point it at the internet.
 
-### No upload / storage pipeline
+### Upload / storage pipeline (partial)
 
-MinIO is up and the splitsmith container has `SPLITSMITH_S3_*` env
-vars set, but no API codepath consumes them yet. `S3Storage` (the
-class from #415) exists but is not wired into the upload routes.
-Uploads + downloads still go through filesystem paths; in the
-container those paths are container-local and lost on `down -v`.
+MinIO is up, the splitsmith container has `SPLITSMITH_S3_*` env vars
+set, and the hosted boot constructs a per-user `S3Storage` (scoped to
+`users/<user_id>/`). One ingress route is wired today:
 
-Practical effect: workflows that need source video on disk
-(detect-beep, trim, shot-detect, export) don't have a way to
-deliver that video into the container yet. You can scaffold an
-empty Match folder via `POST /api/match/create-manual` but you
-can't ingest footage.
+| Endpoint | Behaviour | Backed by |
+|----------|-----------|-----------|
+| `POST /api/me/raw/upload` | Stream a raw video into `users/<user_id>/raw/<filename>` in MinIO. Returns `{path, size, sha256, filename}`. | `S3Storage.upload_stream` (boto3 multipart) |
+
+Robustness model (doc 05 calls the full tus answer out as the v2
+goal; this is the v1 single-shot):
+
+- The write is atomic. S3 PUT / boto3 multipart only publishes the
+  object on completion; a connection drop leaves no torn object
+  visible. R2's lifecycle rule sweeps aborted multiparts.
+- Re-uploads are safe. A retry with the same filename overwrites
+  the previous object atomically; clients that hit a transient
+  failure can POST the same file again.
+- The server computes sha256 during streaming and returns it so
+  clients can detect transit corruption end-to-end. If the client
+  knows the hash up front, `X-Content-SHA256: <hex>` triggers
+  server-side verification; mismatch rolls the upload back
+  (deletes the just-written object) and returns 422.
+- **Resume-from-byte-N is not implemented** -- a client that loses
+  Wi-Fi at 90% of a 30 GB upload restarts from byte 0. The full tus
+  protocol + `upload_sessions` table lands in a follow-up PR.
+
+What's still **not** wired:
+
+- No GET / signed-URL download path -- the worker can't yet read
+  these uploads back. Bytes go in, nothing reads them out.
+- The rest of the ingest pipeline (detect-beep, trim, shot-detect,
+  export) still expects filesystem paths. A worker download-cache
+  step has to translate `users/<id>/raw/<file>` keys into a local
+  path before ffmpeg / detection runs.
+- `match.json` doesn't know about uploaded files yet; there is no
+  `raw_videos` array per doc 05.
+- Local mode does not call this route. The desktop UI continues to
+  reference user-chosen footage via `raw/<name>` symlinks; the
+  storage slot stays `None` and the endpoint returns 503 outside
+  hosted mode.
+
+Smoke it from the host:
+
+```bash
+echo "fake video bytes" > /tmp/clip.mp4
+curl -F "file=@/tmp/clip.mp4" http://localhost:5174/api/me/raw/upload
+# -> {"path":"raw/clip.mp4","size":17,"sha256":"<hex>","filename":"clip.mp4"}
+
+# Verify the object landed inside MinIO under the loopback user's prefix:
+docker exec splitsmith-minio-1 mc alias set local http://localhost:9000 splitsmith splitsmithsplitsmith
+docker exec splitsmith-minio-1 mc ls -r local/splitsmith-uploads
+```
 
 ### Slim model install -- shot detection partly degraded
 
