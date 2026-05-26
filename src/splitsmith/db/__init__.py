@@ -24,10 +24,12 @@ this DB layer internally without leaking SQL into handler code.
 from .engine import create_engine, sessionmaker
 from .models import Base, RecentProjectRow, User, new_ulid
 from .recent_projects import PostgresRecentProjectsStore
+from .scoreboard_identity import PostgresScoreboardIdentityStore
 
 __all__ = [
     "Base",
     "PostgresRecentProjectsStore",
+    "PostgresScoreboardIdentityStore",
     "RecentProjectRow",
     "User",
     "create_engine",

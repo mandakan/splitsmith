@@ -376,13 +376,19 @@ class RecentProjectsStore(Protocol):
 
 
 class ScoreboardIdentityStore(Protocol):
-    """Per-user SSI Scoreboard binding (shooter_id + display name)."""
+    """Per-user SSI Scoreboard binding (shooter_id + display name).
 
-    def load(self) -> ScoreboardIdentity | None: ...
+    Methods are async for the same reason :class:`RecentProjectsStore`
+    is: the hosted-mode backend issues real DB queries and shouldn't
+    sync-over-async into the FastAPI event loop. The local JSON impl
+    is trivially async-wrapped.
+    """
 
-    def save(self, identity: ScoreboardIdentity) -> None: ...
+    async def load(self) -> ScoreboardIdentity | None: ...
 
-    def clear(self) -> None: ...
+    async def save(self, identity: ScoreboardIdentity) -> None: ...
+
+    async def clear(self) -> None: ...
 
 
 class JsonRecentProjectsStore:
@@ -409,15 +415,19 @@ class JsonRecentProjectsStore:
 class JsonScoreboardIdentityStore:
     """Local-mode :class:`ScoreboardIdentityStore` -- delegates to
     the module-level functions that read/write
-    ``~/.splitsmith/scoreboard.json``."""
+    ``~/.splitsmith/scoreboard.json``.
 
-    def load(self) -> ScoreboardIdentity | None:
+    Methods are ``async`` to satisfy the Protocol; bodies are plain
+    file I/O.
+    """
+
+    async def load(self) -> ScoreboardIdentity | None:
         return load_scoreboard_identity()
 
-    def save(self, identity: ScoreboardIdentity) -> None:
+    async def save(self, identity: ScoreboardIdentity) -> None:
         save_scoreboard_identity(identity)
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         clear_scoreboard_identity()
 
 

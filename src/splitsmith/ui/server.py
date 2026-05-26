@@ -7564,17 +7564,17 @@ def create_app(
     # clear; the SPA picker navigates between matches by URL.
 
     @app.get("/api/me/scoreboard-identity")
-    def get_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
+    async def get_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
         # "Not pinned yet" is a normal state, not an error -- return a
         # 200 with a null body so the SPA doesn't have to catch a 404
         # on every page load and DevTools doesn't log a failed request.
-        identity = state.scoreboard_identity.load()
+        identity = await state.scoreboard_identity.load()
         if identity is None:
             return JSONResponse(None)
         return JSONResponse(identity.model_dump(mode="json"))
 
     @app.put("/api/me/scoreboard-identity")
-    def put_scoreboard_identity(
+    async def put_scoreboard_identity(
         req: ScoreboardIdentityRequest,
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
@@ -7585,12 +7585,12 @@ def create_app(
             club=req.club,
             base_url=req.base_url,
         )
-        state.scoreboard_identity.save(identity)
+        await state.scoreboard_identity.save(identity)
         return JSONResponse(identity.model_dump(mode="json"))
 
     @app.delete("/api/me/scoreboard-identity")
-    def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
-        state.scoreboard_identity.clear()
+    async def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
+        await state.scoreboard_identity.clear()
         return JSONResponse({"ok": True})
 
     @app.get("/api/server/features")
