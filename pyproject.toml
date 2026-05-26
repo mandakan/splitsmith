@@ -129,6 +129,17 @@ dev = [
     # standing up a real bucket. Dev-only; the production wheel
     # pulls boto3 only when ``S3Storage`` is actually constructed.
     "moto[s3]>=5.0.0",
+    # SaaS-foundation DB layer (doc 02). SQLAlchemy 2.x async +
+    # Alembic for migrations. Tests run against SQLite in-memory
+    # via aiosqlite; the hosted backend will use asyncpg against
+    # Postgres. Lives in the dev group because the local-mode
+    # wheel doesn't need any of them -- hosted backends import
+    # lazily, same shape as boto3 for S3Storage.
+    "sqlalchemy[asyncio]>=2.0.30",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "aiosqlite>=0.20.0",
+    "python-ulid>=3.0.0",
 ]
 
 [tool.ruff]
