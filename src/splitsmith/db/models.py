@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import ulid
-from sqlalchemy import DateTime, String, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -99,3 +99,55 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r}>"
+
+
+class RecentProjectRow(Base):
+    """One row per (user, project path) the user has opened.
+
+    Hosted-mode counterpart to the local-mode ``projects.json``
+    file: the picker reads from here ordered by ``last_opened_at``
+    DESC. The (``user_id``, ``path``) pair is unique so re-opening
+    a project bumps the timestamp instead of inserting a duplicate.
+
+    ``path`` is the resolved on-disk path the user picked. In a
+    pure-hosted future this becomes a project id or a bucket key
+    instead; for the local-via-Postgres bridge it stays a literal
+    path so the existing `RecentProject` pydantic shape round-trips
+    without translation.
+
+    ``kind`` mirrors the JSON store: ``"match"`` for redesigned
+    folders, ``None``/``"legacy"`` for pre-redesign rows surfaced
+    from older indexes.
+
+    **Multi-tenant:** ``user_id`` is non-nullable and CASCADEs on
+    user deletion. The unique constraint scopes paths per-user so
+    Alice and Bob can open the same path without colliding. This
+    table is intentionally per-user even after matches become
+    shareable -- a "recently opened" list is personal state.
+    Sharing happens at the (future) ``projects`` + ``project_members``
+    layer; when that lands, this row may gain a nullable
+    ``project_id`` column so shared projects surface in each
+    member's picker without duplicating the underlying record.
+    """
+
+    __tablename__ = "recent_projects"
+    __table_args__ = (UniqueConstraint("user_id", "path", name="uq_recent_projects_user_path"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<RecentProjectRow user_id={self.user_id!r} path={self.path!r}>"

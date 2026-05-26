@@ -71,6 +71,7 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -1805,7 +1806,7 @@ class FsListing(BaseModel):
     suggested_starts: list[SuggestedStart]
 
 
-def _register_match_at(
+async def _register_match_at(
     state: AppState,
     root: Path,
     fallback_name: str,
@@ -1853,7 +1854,7 @@ def _register_match_at(
             },
         )
     name = match.name or fallback_name
-    state.recent_projects.record_open(resolved, name, kind="match")
+    await state.recent_projects.record_open(resolved, name, kind="match")
     loaded_env = _load_env_files(resolved)
     if loaded_env:
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
@@ -1994,10 +1995,16 @@ def create_app(
     # so per-project overrides still win.
     _load_env_files(project_root)
     if project_root is not None:
-        _register_match_at(
-            state,
-            project_root,
-            fallback_name=project_name or project_root.name or "match",
+        # ``create_app`` runs at boot, outside any event loop. The
+        # async store call is wrapped in ``asyncio.run`` so the
+        # ``--project`` startup hook still drops the match into
+        # recent-projects + the alias middleware.
+        asyncio.run(
+            _register_match_at(
+                state,
+                project_root,
+                fallback_name=project_name or project_root.name or "match",
+            )
         )
 
     app = FastAPI(
@@ -2375,7 +2382,7 @@ def create_app(
             shutil.rmtree(tmp, ignore_errors=True)
 
         if bind:
-            _register_match_at(state, result.project_root, fallback_name=result.project_name)
+            await _register_match_at(state, result.project_root, fallback_name=result.project_name)
 
         return JSONResponse(
             {
@@ -6590,7 +6597,7 @@ def create_app(
     # scoreboard import flow can prefill 'me' instead of asking each project.
 
     @app.get("/api/me/recent-projects")
-    def list_recent_projects(
+    async def list_recent_projects(
         detail: bool = Query(False),
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
@@ -6603,19 +6610,19 @@ def create_app(
         match picker (#322). The detailed shape is slightly slower; the
         picker route is the only caller that needs it.
         """
-        projects = state.recent_projects.list()
+        projects = await state.recent_projects.list()
         if detail:
             enriched = [_enrich_recent_project(p) for p in projects]
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
     @app.post("/api/me/recent-projects/forget")
-    def forget_recent_project(
+    async def forget_recent_project(
         req: ForgetRecentProjectRequest,
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
-        removed = state.recent_projects.remove(Path(req.path))
-        projects = state.recent_projects.list()
+        removed = await state.recent_projects.remove(Path(req.path))
+        projects = await state.recent_projects.list()
         return JSONResponse(
             {
                 "removed": removed,
@@ -6624,7 +6631,7 @@ def create_app(
         )
 
     @app.post("/api/me/recent-projects/bind")
-    def bind_recent_project(
+    async def bind_recent_project(
         req: BindRecentProjectRequest,
         user: User = Depends(get_current_user),
     ) -> HealthResponse:
@@ -6653,7 +6660,7 @@ def create_app(
             except OSError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
-            recorded, match_id = _register_match_at(
+            recorded, match_id = await _register_match_at(
                 state,
                 target,
                 fallback_name=req.name or target.name or "match",
@@ -6663,7 +6670,7 @@ def create_app(
         return _register_response(target.resolve(), recorded, match_id)
 
     @app.post("/api/match/create-manual")
-    def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
+    async def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
         """Scaffold a Match folder from the manual create-match form (#322).
 
         Creates ``<project_folder>/match.json`` with the supplied stages,
@@ -6744,13 +6751,13 @@ def create_app(
         # resolve its id immediately; record it in recent-projects
         # so the picker has the entry pinned to the top.
         try:
-            recorded, match_id = _register_match_at(state, target, fallback_name=req.name)
+            recorded, match_id = await _register_match_at(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _register_response(target.resolve(), recorded, match_id)
 
     @app.post("/api/match/create-from-scoreboard")
-    def create_match_from_scoreboard(
+    async def create_match_from_scoreboard(
         req: CreateMatchScoreboardRequest,
     ) -> HealthResponse:
         """Scaffold a Match folder for a scoreboard-imported match (#322).
@@ -6863,7 +6870,7 @@ def create_app(
         # Register the match folder so recent-projects gets a
         # kind="match" entry and the alias middleware resolves the id.
         try:
-            recorded, match_id = _register_match_at(state, target, fallback_name=req.name)
+            recorded, match_id = await _register_match_at(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _register_response(target.resolve(), recorded, match_id)
@@ -7022,7 +7029,7 @@ def create_app(
         return _plan_response_from_model(plan)
 
     @app.post("/api/match/merge/execute", response_model=HealthResponse)
-    def merge_execute(req: MergeExecuteRequest) -> HealthResponse:
+    async def merge_execute(req: MergeExecuteRequest) -> HealthResponse:
         """Execute a merge and bind the new match's first shooter as the
         active project so the user lands on a working session immediately.
 
@@ -7055,7 +7062,7 @@ def create_app(
         # Register the new match so recent-projects gets a kind="match"
         # entry and the alias middleware can resolve the id immediately.
         try:
-            recorded, match_id = _register_match_at(state, output, fallback_name=match.name)
+            recorded, match_id = await _register_match_at(state, output, fallback_name=match.name)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return _register_response(output.resolve(), recorded, match_id)

@@ -360,13 +360,19 @@ def clear_scoreboard_identity() -> None:
 
 
 class RecentProjectsStore(Protocol):
-    """Per-user "recently opened" project index. Powers the picker."""
+    """Per-user "recently opened" project index. Powers the picker.
 
-    def list(self) -> list[RecentProject]: ...
+    Methods are async so the hosted-mode backend can run real
+    database I/O without the sync-over-async footgun. The local
+    JSON impl is trivially async-wrapped -- file I/O is fast enough
+    that the cost of awaiting is irrelevant.
+    """
 
-    def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None: ...
+    async def list(self) -> list[RecentProject]: ...
 
-    def remove(self, path: Path) -> bool: ...
+    async def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None: ...
+
+    async def remove(self, path: Path) -> bool: ...
 
 
 class ScoreboardIdentityStore(Protocol):
@@ -383,15 +389,20 @@ class JsonRecentProjectsStore:
     """Local-mode :class:`RecentProjectsStore` -- delegates to the
     module-level functions that read/write
     ``~/.splitsmith/projects.json``. One instance per process
-    serves the one operator the local app supports."""
+    serves the one operator the local app supports.
 
-    def list(self) -> list[RecentProject]:
+    The methods are ``async`` to satisfy the Protocol; the body is
+    plain synchronous file I/O (fast enough on local disk that
+    offloading to a thread isn't worth the complexity).
+    """
+
+    async def list(self) -> list[RecentProject]:
         return get_recent_projects()
 
-    def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None:
+    async def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None:
         record_project_open(path, name, kind=kind)
 
-    def remove(self, path: Path) -> bool:
+    async def remove(self, path: Path) -> bool:
         return remove_recent_project(path)
 
 

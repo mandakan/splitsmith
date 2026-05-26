@@ -22,6 +22,15 @@ this DB layer internally without leaking SQL into handler code.
 """
 
 from .engine import create_engine, sessionmaker
-from .models import Base, User, new_ulid
+from .models import Base, RecentProjectRow, User, new_ulid
+from .recent_projects import PostgresRecentProjectsStore
 
-__all__ = ["Base", "User", "create_engine", "new_ulid", "sessionmaker"]
+__all__ = [
+    "Base",
+    "PostgresRecentProjectsStore",
+    "RecentProjectRow",
+    "User",
+    "create_engine",
+    "new_ulid",
+    "sessionmaker",
+]
