@@ -2464,11 +2464,15 @@ def test_trim_invalidates_when_beep_changes(tmp_path: Path, monkeypatch) -> None
     # cache and auto-fires a re-trim job; we wait for it to finish.
     resp = client.post("/api/shooters/me/stages/1/beep", json={"beep_time": 7.5})
     assert resp.status_code == 200
-    # The auto-fired job is the active trim job.
+    # Pick the most-recently-submitted trim job, not the first match
+    # in the list. ``_wait_for_job`` on Run #1 (already SUCCEEDED)
+    # would return immediately and race the auto-fired Run #3
+    # worker; the latest entry is the one we actually need to wait
+    # on. (JobRegistry preserves insertion order in ``list()``.)
     jobs = client.get("/api/me/jobs").json()
-    active = next((j for j in jobs if j["kind"] == "trim" and j["stage_number"] == 1), None)
-    assert active is not None, "override_beep should auto-fire a trim job"
-    final = _wait_for_job(client, active["id"])
+    trims = [j for j in jobs if j["kind"] == "trim" and j["stage_number"] == 1]
+    assert trims, "override_beep should auto-fire a trim job"
+    final = _wait_for_job(client, trims[-1]["id"])
     assert final["status"] == "succeeded"
     assert len(invocations) == 2, "new beep_time must invalidate the trim cache"
     assert invocations[1]["beep_time"] == pytest.approx(7.5)
