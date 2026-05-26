@@ -85,6 +85,54 @@ def test_user_round_trip_against_sqlite_in_memory() -> None:
     assert isinstance(found.created_at, datetime)
 
 
+def test_external_auth_pair_is_unique_per_provider() -> None:
+    """Two users can't share the same (provider, vendor_id). Two
+    providers CAN each have their own ``"user_abc"`` because the
+    constraint is on the tuple. NULLs (local-mode rows without a
+    vendor link) don't collide because both Postgres and SQLite
+    treat NULLs as distinct in unique indexes.
+    """
+    engine = _build_in_memory_engine()
+    session_factory = sessionmaker(engine)
+
+    async def _insert_three() -> None:
+        async with session_factory() as s:
+            s.add(
+                User(
+                    email="clerk-a@thias.se",
+                    external_auth_provider="clerk",
+                    external_auth_id="user_abc",
+                )
+            )
+            s.add(
+                User(
+                    email="workos-a@thias.se",
+                    external_auth_provider="workos",
+                    external_auth_id="user_abc",  # same id, different provider -> ok
+                )
+            )
+            # Two NULL rows -- local-mode operators without a vendor.
+            s.add(User(email="local-a@thias.se"))
+            s.add(User(email="local-b@thias.se"))
+            await s.commit()
+
+    asyncio.run(_insert_three())
+
+    async def _duplicate_pair() -> None:
+        async with session_factory() as s:
+            s.add(
+                User(
+                    email="clerk-b@thias.se",
+                    external_auth_provider="clerk",
+                    external_auth_id="user_abc",  # collides with the first row
+                )
+            )
+            await s.commit()
+
+    with pytest.raises(IntegrityError):
+        asyncio.run(_duplicate_pair())
+
+
 def test_email_unique_constraint_rejects_duplicates() -> None:
     """The ``users.email`` column is UNIQUE per doc 02 because
     magic-link auth resolves by email -- two users sharing an

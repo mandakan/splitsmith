@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import ulid
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -47,6 +47,20 @@ class User(Base):
     """
 
     __tablename__ = "users"
+    # The vendor + vendor-id pair is unique across the table -- two
+    # rows can't share the same (provider, id), but two providers
+    # can each have their own "user_abc" since the ids live in
+    # disjoint namespaces. The constraint is partial in spirit
+    # (only meaningful when both columns are non-null) but Postgres
+    # and SQLite both treat NULL as "distinct" in unique indexes
+    # so the local-mode rows with NULLs don't collide.
+    __table_args__ = (
+        UniqueConstraint(
+            "external_auth_provider",
+            "external_auth_id",
+            name="uq_users_external_auth",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
@@ -64,6 +78,20 @@ class User(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     entitlement: Mapped[str] = mapped_column(String, nullable=False, default="free")
     entitlement_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # External auth vendor link. The provider (Clerk / WorkOS /
+    # Auth.js / etc.) owns the authentication; this column carries
+    # the vendor's user id so we can resolve a session back to a
+    # local user. Vendor-agnostic on purpose: ``external_auth_provider``
+    # is the discriminator and the ``external_auth_id`` shape is
+    # whatever string the vendor emits. ``None`` for local-mode
+    # ``LoopbackAuth`` (the operator is implicit; no vendor exists).
+    #
+    # Foreign keys throughout the schema reference ``users.id``
+    # (the local ULID), not this column -- swapping vendors only
+    # rewrites this pair, never the rest of the data graph.
+    external_auth_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_auth_provider: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Soft delete -- the row survives until the 7-day grace
     # expires so the user can recover by re-signing in.

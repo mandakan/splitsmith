@@ -1,8 +1,8 @@
 """create users table
 
-Revision ID: b18398321003
+Revision ID: ba030223ab8b
 Revises:
-Create Date: 2026-05-26 08:34:57.825169
+Create Date: 2026-05-26 08:46:16.051774
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "b18398321003"
+revision: str = "ba030223ab8b"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -37,9 +37,12 @@ def upgrade() -> None:
         sa.Column("stripe_customer_id", sa.String(), nullable=True),
         sa.Column("entitlement", sa.String(), nullable=False),
         sa.Column("entitlement_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("external_auth_id", sa.String(), nullable=True),
+        sa.Column("external_auth_provider", sa.String(), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
+        sa.UniqueConstraint("external_auth_provider", "external_auth_id", name="uq_users_external_auth"),
         sa.UniqueConstraint("stripe_customer_id"),
     )
     # ### end Alembic commands ###
