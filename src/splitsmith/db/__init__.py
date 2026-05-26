@@ -21,6 +21,7 @@ what handlers depend on; the future ``PostgresJobBackend`` /
 this DB layer internally without leaking SQL into handler code.
 """
 
+from .auth import HOSTED_LOOPBACK_EMAIL, HostedLoopbackAuth
 from .engine import create_engine, sessionmaker
 from .job_backend import PostgresJobBackend
 from .models import Base, ComputeJobRow, RecentProjectRow, User, new_ulid
@@ -30,6 +31,8 @@ from .scoreboard_identity import PostgresScoreboardIdentityStore
 __all__ = [
     "Base",
     "ComputeJobRow",
+    "HOSTED_LOOPBACK_EMAIL",
+    "HostedLoopbackAuth",
     "PostgresJobBackend",
     "PostgresRecentProjectsStore",
     "PostgresScoreboardIdentityStore",

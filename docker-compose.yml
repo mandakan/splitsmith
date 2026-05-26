@@ -1,0 +1,94 @@
+# Local hosted-mode stack (doc 01 + memory: next-saas-action-local-docker).
+#
+# `docker compose up` boots a Postgres + MinIO + splitsmith API stack
+# that mirrors production hosted mode: Postgres is the persistence
+# layer for users / recent_projects / scoreboard_identity /
+# compute_jobs, MinIO stands in for R2 / S3 once S3Storage is wired
+# through. The API container runs ``splitsmith serve`` (hosted mode),
+# applies Alembic migrations on boot, and exposes the same FastAPI
+# routes the desktop ``splitsmith ui`` does.
+#
+# Smoke test path:
+#   docker compose up --build
+#   curl -X POST http://localhost:5174/api/me/recent-projects/forget \
+#        -H 'content-type: application/json' \
+#        -d '{"path": "/tmp/x"}'
+#   # then GET /api/me/recent-projects should reflect Postgres state
+#
+# pytest -m docker drives the same flow programmatically.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: splitsmith
+      POSTGRES_PASSWORD: splitsmith
+      POSTGRES_DB: splitsmith
+    ports:
+      # Exposed on the host so the test suite can verify the DB
+      # state directly (e.g. via psql) when debugging the smoke.
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U splitsmith -d splitsmith"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      # ``splitsmith`` / ``splitsmith`` matches the Postgres creds for
+      # symmetry -- nothing in this stack is production-secret.
+      MINIO_ROOT_USER: splitsmith
+      MINIO_ROOT_PASSWORD: splitsmithsplitsmith
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  splitsmith:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # asyncpg dialect so SQLAlchemy's async engine + Alembic align
+      # with the production engine choice.
+      SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@postgres:5432/splitsmith
+      SPLITSMITH_MODE: hosted
+      # S3Storage credentials -- wired once a hosted-mode codepath
+      # actually constructs an S3Storage instance. Left in the compose
+      # file for forward-compat so the smoke env is the same shape
+      # production will use.
+      SPLITSMITH_S3_ENDPOINT_URL: http://minio:9000
+      SPLITSMITH_S3_ACCESS_KEY_ID: splitsmith
+      SPLITSMITH_S3_SECRET_ACCESS_KEY: splitsmithsplitsmith
+      SPLITSMITH_S3_BUCKET: splitsmith-uploads
+      SPLITSMITH_S3_REGION: us-east-1
+    ports:
+      - "5174:5174"
+    # Default CMD already binds 0.0.0.0:5174; override here only when
+    # debugging (e.g. ``--log-level debug``).
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5174/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  postgres-data:
+  minio-data:

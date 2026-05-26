@@ -501,6 +501,92 @@ def ui(
         console.print("\n[yellow]Stopped.[/]")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "0.0.0.0", "--host", help="Bind address (default 0.0.0.0 for container deployment)."
+    ),
+    port: int = typer.Option(5174, "--port"),
+    skip_migrations: bool = typer.Option(
+        False,
+        "--skip-migrations",
+        help=(
+            "Don't run `alembic upgrade head` on boot. Use when migrations "
+            "have already been applied out-of-band."
+        ),
+    ),
+    skip_system_check: bool = typer.Option(
+        False,
+        "--skip-system-check",
+        help="Bypass the first-launch ffmpeg / ffprobe presence check.",
+    ),
+) -> None:
+    """Start the splitsmith API in hosted mode (doc 01).
+
+    Sets ``SPLITSMITH_MODE=hosted`` so :func:`create_app` swaps in
+    Postgres-backed stores (recent_projects, scoreboard_identity,
+    compute_jobs) and the :class:`HostedLoopbackAuth` bootstrap. The
+    hosted user row is upserted on the first call; restarts reuse the
+    same id.
+
+    Required env vars:
+
+    - ``SPLITSMITH_DATABASE_URL`` -- e.g. ``postgresql+asyncpg://``.
+      Asynced engine; the same URL Alembic uses.
+
+    Optional:
+
+    - ``SPLITSMITH_S3_*`` (when the storage backend is swapped to S3).
+
+    No browser auto-open, no ``--project`` (paths live in Postgres).
+    Defaults bind ``0.0.0.0`` because the typical caller is a
+    container; pass ``--host 127.0.0.1`` for single-machine testing.
+    """
+    import os as _os
+    import subprocess as _subprocess
+
+    from .ui.server import serve as _serve
+
+    _os.environ.setdefault("SPLITSMITH_MODE", "hosted")
+    db_url = _os.environ.get("SPLITSMITH_DATABASE_URL")
+    if not db_url:
+        console.print(
+            "[red]SPLITSMITH_DATABASE_URL is not set.[/] "
+            "Hosted mode requires a Postgres / SQLite URL "
+            "(e.g. postgresql+asyncpg://user:pass@host/db)."
+        )
+        raise typer.Exit(2)
+
+    if not skip_migrations:
+        console.print(f"[green]splitsmith serve[/]: applying migrations against [bold]{db_url}[/]")
+        result = _subprocess.run(
+            ["uv", "run", "alembic", "upgrade", "head"],
+            env={**_os.environ, "SPLITSMITH_DATABASE_URL": db_url},
+            cwd=Path(__file__).resolve().parent.parent.parent,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            console.print("[red]alembic upgrade head failed:[/]")
+            console.print(result.stderr)
+            raise typer.Exit(2)
+
+    console.print(
+        f"[green]splitsmith serve[/]: hosted mode on [bold]http://{host}:{port}[/]   (Ctrl+C to stop)"
+    )
+    try:
+        _serve(
+            project_root=None,
+            project_name=None,
+            host=host,
+            port=port,
+            lab_enabled=False,
+            skip_system_check=skip_system_check,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
+
+
 @app.command("audit-prep")
 def audit_prep(
     video: Path = typer.Option(..., "--video", help="Source video file (mp4/mov)."),
