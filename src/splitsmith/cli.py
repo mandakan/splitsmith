@@ -559,16 +559,20 @@ def serve(
 
     if not skip_migrations:
         console.print(f"[green]splitsmith serve[/]: applying migrations against [bold]{db_url}[/]")
+        # Stream stdout/stderr straight through so ``docker compose logs``
+        # shows alembic progress live. ``capture_output`` looked clean but
+        # made a 3-minute cold-cache ``uv run`` invocation look like a
+        # process hang -- the container went unhealthy while alembic was
+        # still chugging silently.
         result = _subprocess.run(
             ["uv", "run", "alembic", "upgrade", "head"],
             env={**_os.environ, "SPLITSMITH_DATABASE_URL": db_url},
             cwd=Path(__file__).resolve().parent.parent.parent,
-            capture_output=True,
-            text=True,
         )
         if result.returncode != 0:
-            console.print("[red]alembic upgrade head failed:[/]")
-            console.print(result.stderr)
+            console.print(
+                "[red]alembic upgrade head failed[/] -- see the migration output above."
+            )
             raise typer.Exit(2)
 
     console.print(

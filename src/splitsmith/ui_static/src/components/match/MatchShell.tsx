@@ -159,60 +159,89 @@ export function MatchShell() {
       window.removeEventListener("splitsmith:no-project", onNoProject);
   }, []);
 
+  // Tracks whether the match_id in the URL resolved against the server.
+  // ``null`` while the first listMatchShooters call is pending so the
+  // bound-check redirect doesn't fire pre-emptively on every mount; flips
+  // to ``true`` on a successful load or ``false`` when the alias
+  // middleware 404s the id (unknown / deleted match).
+  const [matchValid, setMatchValid] = useState<boolean | null>(null);
+
   useEffect(() => {
     let alive = true;
+    // Match-scoped requests inherit the ``urlMatchId`` from
+    // ``window.location`` (see ``scopeRequestPath`` in api.ts), so we
+    // don't read ``/api/health.bound`` to decide whether to fetch --
+    // doc 10 Tier 1 step 4 retired that field and it now always returns
+    // false. The URL prefix is the source of truth; the alias
+    // middleware validates the id on every request and 404s on miss.
     api
       .getHealth()
       .then((h) => {
         if (alive) setHealth(h);
-        if (h?.bound) {
-          // Sidebar stage list needs *some* shooter's project to render
-          // status. URL slug wins; otherwise fall back to the server's
-          // default shooter (alphabetically-first match shooter, or the
-          // legacy slug for single-shooter projects).
-          const fetchSlug = slug ?? h.default_shooter_slug ?? null;
-          if (fetchSlug) {
-            api
-              .getProject(fetchSlug)
-              .then((p) => {
-                if (alive) setProject(p);
-              })
-              .catch(() => {
-                if (alive) setProject(null);
-              });
-          } else {
-            setProject(null);
-          }
-          api
-            .listMatchShooters()
-            .then((r) => {
-              if (alive) setShooters(r.shooters);
-            })
-            .catch(() => {
-              // 409 no_match when the bound project is a standalone legacy
-              // single-shooter project (not a Match). Leave empty.
-              if (alive) setShooters([]);
-            });
-          // Beep-review pending count drives the sidebar badge so the
-          // operator can spot pending beep work without opening the
-          // page. Cheap GET; refresh on every shell load.
-          api
-            .getBeepQueue()
-            .then((q) => {
-              if (alive) setBeepReviewPending(q.pending_count);
-            })
-            .catch(() => {
-              if (alive) setBeepReviewPending(0);
-            });
-        }
       })
       .catch(() => {
         if (alive) setHealth(null);
       });
+
+    // Sidebar stage list needs *some* shooter's project to render
+    // status. URL slug wins; otherwise we wait for the shooter list
+    // below and pick the first one. ``getProject`` is shooter-scoped
+    // so it only fires when we already know which slug to use.
+    if (slug) {
+      api
+        .getProject(slug)
+        .then((p) => {
+          if (alive) setProject(p);
+        })
+        .catch(() => {
+          if (alive) setProject(null);
+        });
+    } else {
+      setProject(null);
+    }
+
+    api
+      .listMatchShooters()
+      .then((r) => {
+        if (!alive) return;
+        setShooters(r.shooters);
+        setMatchValid(true);
+        // No URL slug -> fall back to the alphabetically-first shooter
+        // so the sidebar has stage status to show.
+        if (!slug && r.shooters.length > 0) {
+          api
+            .getProject(r.shooters[0].slug)
+            .then((p) => {
+              if (alive) setProject(p);
+            })
+            .catch(() => {
+              if (alive) setProject(null);
+            });
+        }
+      })
+      .catch(() => {
+        if (!alive) return;
+        setShooters([]);
+        // Unknown match_id (alias middleware 404) -- bounce to picker.
+        // Other failures (409 no_match for legacy single-shooter
+        // projects) also land here; the picker handles both.
+        setMatchValid(false);
+      });
+    // Beep-review pending count drives the sidebar badge so the
+    // operator can spot pending beep work without opening the
+    // page. Cheap GET; refresh on every shell load.
+    api
+      .getBeepQueue()
+      .then((q) => {
+        if (alive) setBeepReviewPending(q.pending_count);
+      })
+      .catch(() => {
+        if (alive) setBeepReviewPending(0);
+      });
     return () => {
       alive = false;
     };
-  }, [refreshKey, slug]);
+  }, [refreshKey, slug, urlMatchId]);
 
   // Currently-viewed stage, parsed from the URL. The shell mounts
   // above several stage-bearing routes (/audit/:slug/:stage,
@@ -252,7 +281,11 @@ export function MatchShell() {
     }));
   }, [project, activeStageFromUrl]);
 
-  if (health && !health.bound) {
+  // Bounce to the picker when the URL's match_id didn't resolve on the
+  // server -- typically a stale bookmark or a deleted match. ``null``
+  // means "still loading", so we render the shell shell-of-loading
+  // states rather than flashing the picker on first paint.
+  if (matchValid === false) {
     return <Navigate to="/pick" replace />;
   }
 
