@@ -455,10 +455,29 @@ def ui(
         resolved = project.expanduser().resolve()
         name = project_name or resolved.name or "match"
 
-    url = f"http://{host}:{port}/"
-    console.print(f"[green]splitsmith UI[/]: [bold]{url}[/]   (Ctrl+C to stop)")
+    # When ``--project`` names an existing Match folder, resolve its
+    # ``match_id`` up front so we can open the browser at
+    # ``/match/<id>/`` instead of the picker. Post Tier 1 step 4 of
+    # doc 10 the server no longer has a "bound project" concept --
+    # the SPA reads match identity from the URL, so the CLI's job is
+    # to put the user on the right URL from the first paint.
+    base_url = f"http://{host}:{port}/"
+    open_url = base_url
+    if resolved is not None and (resolved / "match.json").exists():
+        try:
+            from . import match_model as _match_model
+
+            match = _match_model.Match.load(resolved)
+            if match.match_id:
+                open_url = f"{base_url}match/{match.match_id}/"
+        except Exception:  # noqa: BLE001 -- best-effort URL; bind path will surface the real error
+            pass
+
+    console.print(f"[green]splitsmith UI[/]: [bold]{base_url}[/]   (Ctrl+C to stop)")
     if resolved is not None:
         console.print(f"  project: {resolved}")
+        if open_url != base_url:
+            console.print(f"  opens at: {open_url}")
     else:
         console.print("  project: [dim]none -- showing picker[/]")
     if lab:
@@ -467,7 +486,7 @@ def ui(
     if not no_browser:
         import webbrowser
 
-        webbrowser.open(url)
+        webbrowser.open(open_url)
 
     try:
         serve(

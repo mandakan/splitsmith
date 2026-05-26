@@ -113,9 +113,10 @@ later steps are blocked on earlier ones.
   Protocols + JSON impls landed; `AppState.*` typed against them;
   handlers go through the abstraction. Per-user Postgres
   backend lands alongside the actual hosted PR.
-- [ ] **Tier 4:** `splitsmith ui --project <path>` resolves the path
-  to a `match_id` via `MatchRegistry` and opens the browser at the
-  URL rather than binding server-side.
+- [x] **Tier 4:** `splitsmith ui --project <path>` resolves the path
+  to a `match_id` via `Match.load(path).match_id` and opens the
+  browser at `/match/<match_id>/` directly. No server-side bind
+  involved; the URL carries identity from the first paint.
 
 ### Hosted infrastructure
 
