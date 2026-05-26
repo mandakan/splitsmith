@@ -163,15 +163,20 @@ def test_migration_creates_users_table_on_clean_sqlite(tmp_path) -> None:
     """
     import os
     import subprocess
+    from pathlib import Path
 
     db_path = tmp_path / "smoke.sqlite"
     url = f"sqlite+aiosqlite:///{db_path}"
 
+    # Resolve the repo root from this file's location so the test
+    # works on both the developer's laptop and the CI runner --
+    # not a hard-coded ``/Users/mathias/work/splitsmith``.
+    repo_root = Path(__file__).resolve().parent.parent
     env = {**os.environ, "SPLITSMITH_DATABASE_URL": url}
     result = subprocess.run(
         ["uv", "run", "alembic", "upgrade", "head"],
         env=env,
-        cwd="/Users/mathias/work/splitsmith",
+        cwd=repo_root,
         capture_output=True,
         text=True,
     )
