@@ -2,12 +2,65 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 
 import pytest
 
 from splitsmith.ui.jobs import JobCancelled, JobRegistry, JobStatus, _priority_for_kind
+
+
+class _Sync:
+    """Test-only sync facade over an async :class:`JobBackend`.
+
+    The Protocol's DB-touching methods are async so the hosted-mode
+    backend (:class:`PostgresJobBackend`) can issue real DB I/O without
+    sync-over-async. :class:`JobRegistry`'s bodies are still sync
+    (threading.RLock + ThreadPoolExecutor), so this wrapper exists
+    only to keep the test code line-for-line stable across the
+    async conversion: each test's bare ``JobRegistry(...)`` call site
+    is wrapped as ``_Sync(JobRegistry(...))`` and every ``reg.X(...)`` call
+    drives the coroutine via ``asyncio.run``. The non-async lifecycle
+    methods + properties pass through unchanged.
+    """
+
+    def __init__(self, inner: JobRegistry) -> None:
+        self._inner = inner
+
+    @property
+    def is_shutting_down(self) -> bool:
+        return self._inner.is_shutting_down
+
+    def active_count(self) -> int:
+        return self._inner.active_count()
+
+    def begin_shutdown(self) -> None:
+        return self._inner.begin_shutdown()
+
+    def wait_for_drain(self, timeout_s: float) -> bool:
+        return self._inner.wait_for_drain(timeout_s)
+
+    def submit(self, **kwargs):
+        return asyncio.run(self._inner.submit(**kwargs))
+
+    def get(self, job_id):
+        return asyncio.run(self._inner.get(job_id))
+
+    def list(self):
+        return asyncio.run(self._inner.list())
+
+    def cancel(self, job_id):
+        return asyncio.run(self._inner.cancel(job_id))
+
+    def acknowledge(self, job_id):
+        return asyncio.run(self._inner.acknowledge(job_id))
+
+    def acknowledge_all_failures(self):
+        return asyncio.run(self._inner.acknowledge_all_failures())
+
+    def find_active(self, **kwargs):
+        return asyncio.run(self._inner.find_active(**kwargs))
 
 
 def _wait_until(predicate, *, timeout=2.0, poll=0.01):
@@ -20,7 +73,7 @@ def _wait_until(predicate, *, timeout=2.0, poll=0.01):
 
 
 def test_submit_runs_to_succeeded() -> None:
-    reg = JobRegistry(max_concurrent=2)
+    reg = _Sync(JobRegistry(max_concurrent=2))
     seen = threading.Event()
 
     def work(_handle):
@@ -34,7 +87,7 @@ def test_submit_runs_to_succeeded() -> None:
 
 
 def test_failed_job_records_error() -> None:
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
 
     def boom(_handle):
         raise ValueError("oh no")
@@ -46,7 +99,7 @@ def test_failed_job_records_error() -> None:
 
 
 def test_handle_update_changes_progress_and_message() -> None:
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
     started = threading.Event()
 
@@ -66,7 +119,7 @@ def test_handle_update_changes_progress_and_message() -> None:
 
 
 def test_progress_clamped_to_unit_range() -> None:
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     captured = []
 
     def fn(handle):
@@ -81,7 +134,7 @@ def test_progress_clamped_to_unit_range() -> None:
 
 
 def test_list_preserves_insertion_order() -> None:
-    reg = JobRegistry(max_concurrent=2)
+    reg = _Sync(JobRegistry(max_concurrent=2))
     a = reg.submit(kind="a", fn=lambda _h: None)
     b = reg.submit(kind="b", fn=lambda _h: None)
     c = reg.submit(kind="c", fn=lambda _h: None)
@@ -90,7 +143,7 @@ def test_list_preserves_insertion_order() -> None:
 
 
 def test_finished_jobs_are_evicted_past_retention_limit() -> None:
-    reg = JobRegistry(max_concurrent=2, retain_recent=2)
+    reg = _Sync(JobRegistry(max_concurrent=2, retain_recent=2))
     jobs = []
     for i in range(5):
         jobs.append(reg.submit(kind=f"job-{i}", fn=lambda _h: None))
@@ -110,7 +163,7 @@ def test_finished_jobs_are_evicted_past_retention_limit() -> None:
 
 
 def test_running_jobs_never_evicted() -> None:
-    reg = JobRegistry(max_concurrent=3, retain_recent=1)
+    reg = _Sync(JobRegistry(max_concurrent=3, retain_recent=1))
     proceed = threading.Event()
 
     def slow(_h):
@@ -131,7 +184,7 @@ def test_running_jobs_never_evicted() -> None:
 
 
 def test_get_returns_none_for_unknown_id() -> None:
-    reg = JobRegistry()
+    reg = _Sync(JobRegistry())
     assert reg.get("does-not-exist") is None
 
 
@@ -145,7 +198,7 @@ def test_cancel_pending_job_skips_worker_and_marks_cancelled() -> None:
     observed in ``_run`` and short-circuit straight to CANCELLED. We hold
     the executor with a slow predecessor so the second submit is still
     PENDING when we cancel it."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
     started = threading.Event()
 
@@ -178,7 +231,7 @@ def test_cancel_running_job_via_check_cancel() -> None:
     """A long-running worker observes the cancel via ``check_cancel`` and
     raises ``JobCancelled``; the registry maps that to status=CANCELLED
     instead of FAILED."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     started = threading.Event()
     proceed = threading.Event()
     finished = threading.Event()
@@ -206,7 +259,7 @@ def test_cancel_finished_job_is_noop() -> None:
     """Cancelling an already-succeeded job returns the snapshot unchanged
     -- idempotent behaviour the SPA can rely on when the user clicks
     Cancel right as the job completes."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     job = reg.submit(kind="quick", fn=lambda _h: None)
     assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
     snapshot = reg.cancel(job.id)
@@ -216,7 +269,7 @@ def test_cancel_finished_job_is_noop() -> None:
 
 
 def test_cancel_unknown_job_returns_none() -> None:
-    reg = JobRegistry()
+    reg = _Sync(JobRegistry())
     assert reg.cancel("does-not-exist") is None
 
 
@@ -225,7 +278,7 @@ def test_attach_subprocess_terminates_on_cancel() -> None:
     arrives, the registry calls ``terminate()`` so the encoder unblocks
     promptly. Without this the worker sits inside ``proc.wait()`` until
     the entire 2-4 minute encode finishes."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
 
     class FakePopen:
         def __init__(self) -> None:
@@ -266,7 +319,7 @@ def test_attach_after_cancel_terminates_immediately() -> None:
     """If the worker registers a subprocess after the cancel has already
     been observed (race: cancel between submit and attach), we still
     terminate it and the worker bails out."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
 
     class FakePopen:
         def __init__(self) -> None:
@@ -307,7 +360,7 @@ def test_attach_after_cancel_terminates_immediately() -> None:
 
 
 def test_acknowledge_flips_failed_job_to_seen() -> None:
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
 
     def boom(_h):
         raise ValueError("kaboom")
@@ -324,7 +377,7 @@ def test_acknowledge_flips_failed_job_to_seen() -> None:
 
 
 def test_acknowledge_noop_for_non_failed_job() -> None:
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     job = reg.submit(kind="test", fn=lambda _h: None)
     assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
     snap = reg.acknowledge(job.id)
@@ -333,12 +386,12 @@ def test_acknowledge_noop_for_non_failed_job() -> None:
 
 
 def test_acknowledge_unknown_job_returns_none() -> None:
-    reg = JobRegistry()
+    reg = _Sync(JobRegistry())
     assert reg.acknowledge("does-not-exist") is None
 
 
 def test_acknowledge_all_failures_marks_only_unacked_failures() -> None:
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     fail_a = reg.submit(kind="a", fn=lambda _h: (_ for _ in ()).throw(RuntimeError("a")))
     fail_b = reg.submit(kind="b", fn=lambda _h: (_ for _ in ()).throw(RuntimeError("b")))
     ok = reg.submit(kind="ok", fn=lambda _h: None)
@@ -364,7 +417,7 @@ def test_acknowledge_all_failures_marks_only_unacked_failures() -> None:
 def test_retention_protects_unacked_failures_from_succeeded_flood() -> None:
     """An unacknowledged failure must survive a flurry of successes
     that would otherwise push it past the retention cap."""
-    reg = JobRegistry(max_concurrent=1, retain_recent=2)
+    reg = _Sync(JobRegistry(max_concurrent=1, retain_recent=2))
 
     def boom(_h):
         raise RuntimeError("boom")
@@ -386,7 +439,7 @@ def test_retention_evicts_acked_failure_before_unacked() -> None:
     """When the registry is forced to drop a failure, the dismissed one
     goes first so the user keeps seeing the failures they haven't
     acknowledged yet."""
-    reg = JobRegistry(max_concurrent=1, retain_recent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1, retain_recent=1))
 
     def boom(_h):
         raise RuntimeError("boom")
@@ -424,7 +477,7 @@ def test_pending_jobs_dispatch_in_priority_order() -> None:
     JOB_PRIORITY order rather than FIFO. We pin the executor with a slow
     blocker, queue a mix of kinds, then release the blocker and assert on
     the order they completed."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
     blocker_started = threading.Event()
 
@@ -465,7 +518,7 @@ def test_ties_within_priority_tier_run_fifo() -> None:
     """Two ``detect_beep`` jobs queued behind a blocker dispatch in the
     order they were submitted -- priority is the primary sort key, but
     within a tier we preserve insertion order."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
     started = threading.Event()
 
@@ -501,7 +554,7 @@ def test_high_priority_submitted_after_low_priority_runs_first() -> None:
     worker pool, the user uploads a new video and a detect_beep is
     submitted. As soon as a slot frees the beep runs ahead of the other
     queued shot_detect jobs."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
     started = threading.Event()
 
@@ -538,7 +591,7 @@ def test_high_priority_submitted_after_low_priority_runs_first() -> None:
 def test_cancel_of_pending_job_removes_it_from_dispatch_queue() -> None:
     """A cancel that fires while the job is still queued must transition
     it to CANCELLED immediately (no waiting for a slot to free)."""
-    reg = JobRegistry(max_concurrent=1)
+    reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
     started = threading.Event()
 
@@ -571,7 +624,7 @@ def test_dispatcher_respects_max_concurrent() -> None:
     """With max_concurrent=2 and three slow jobs queued, only two run
     at any moment. This guards against the priority dispatcher
     accidentally overshooting the worker ceiling."""
-    reg = JobRegistry(max_concurrent=2)
+    reg = _Sync(JobRegistry(max_concurrent=2))
     proceed = threading.Event()
     running_now = 0
     peak = 0

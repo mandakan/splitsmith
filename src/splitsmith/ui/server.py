@@ -678,7 +678,7 @@ class AppState:
         return match.match_id
 
 
-def _any_active_job(state: AppState) -> Job | None:
+async def _any_active_job(state: AppState) -> Job | None:
     """Return the first PENDING/RUNNING job, or None.
 
     Used by destructive endpoints (cleanup) to refuse running while
@@ -688,7 +688,7 @@ def _any_active_job(state: AppState) -> Job | None:
     """
     from .jobs import JobStatus
 
-    for job in state.jobs.list():
+    for job in await state.jobs.list():
         if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
             return job
     return None
@@ -827,7 +827,7 @@ def _run_model_download_job(handle: JobHandle) -> None:
     )
 
 
-def _maybe_submit_model_download(state: AppState) -> None:
+async def _maybe_submit_model_download(state: AppState) -> None:
     """Kick off the slim-artifact prefetch on startup when anything is missing.
 
     No-op when the registry is unavailable (older calibrations without
@@ -845,10 +845,10 @@ def _maybe_submit_model_download(state: AppState) -> None:
     missing = [s for s in registry.status() if s.state != "present"]
     if not missing:
         return
-    if state.jobs.find_active(kind="model_download") is not None:
+    if await state.jobs.find_active(kind="model_download") is not None:
         return
     try:
-        state.jobs.submit(kind="model_download", fn=_run_model_download_job)
+        await state.jobs.submit(kind="model_download", fn=_run_model_download_job)
     except ShutdownInProgressError:
         # Server is already winding down; nothing to do.
         return
@@ -2022,7 +2022,9 @@ def create_app(
     # Kick off the slim ONNX prefetch in the background if any artifact
     # is missing. Runs whether or not a project is bound, so the first
     # shot-detect after the user picks a match finds the cache primed.
-    _maybe_submit_model_download(state)
+    # ``create_app`` runs at boot outside any event loop, so the async
+    # JobBackend submission is wrapped in ``asyncio.run`` here.
+    asyncio.run(_maybe_submit_model_download(state))
 
     async def get_current_user(request: Request) -> User:
         """FastAPI dependency: resolve the operator behind a request.
@@ -2199,7 +2201,7 @@ def create_app(
         return HealthResponse(bound=False)
 
     @app.get("/api/models/status")
-    def models_status() -> dict[str, Any]:
+    async def models_status() -> dict[str, Any]:
         """Slim model layer status (issue #377 -- doc 03).
 
         The SPA polls this on mount + after each detect to know whether
@@ -2227,7 +2229,7 @@ def create_app(
         statuses = registry.status()
         missing = [s.slug for s in statuses if s.state == "missing"]
         mismatched = [s.slug for s in statuses if s.state == "mismatched"]
-        active_job = state.jobs.find_active(kind="model_download")
+        active_job = await state.jobs.find_active(kind="model_download")
         return {
             "available": True,
             "cache_root": str(registry.root),
@@ -2966,7 +2968,7 @@ def create_app(
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/videos/scan", response_model=ScanResponse)
-    def scan_videos(slug: str, req: ScanRequest) -> ScanResponse:
+    async def scan_videos(slug: str, req: ScanRequest) -> ScanResponse:
         if req.link_mode not in ("symlink", "copy"):
             raise HTTPException(status_code=400, detail="link_mode must be 'symlink' or 'copy'")
         if (req.source_dir is None) == (req.source_paths is None):
@@ -3049,7 +3051,7 @@ def create_app(
             stage = project.stage(stage_num)
             video = next((v for v in stage.videos if str(v.path) == video_path), None)
             if video is not None:
-                _auto_queue_beep_if_needed(slug, project, stage_num, video)
+                await _auto_queue_beep_if_needed(slug, project, stage_num, video)
 
         return ScanResponse(
             registered=registered,
@@ -3579,30 +3581,35 @@ def create_app(
             resolved = automation_settings.resolve_automation(
                 project_override=fresh.automation,
             )
+            # Worker callback runs in a ThreadPoolExecutor thread with
+            # no event loop; bridge to the async JobBackend via
+            # ``asyncio.run``.
             if (
                 resolved.settings.shot_detect_on_beep_verified
-                and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+                and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
             ):
-                state.jobs.submit(
-                    kind="shot_detect",
-                    stage_number=stage_number,
-                    fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                asyncio.run(
+                    state.jobs.submit(
+                        kind="shot_detect",
+                        stage_number=stage_number,
+                        fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                    )
                 )
         handle.update(progress=1.0, message="Done")
 
-    def _submit_detect_beep(slug: str, stage_number: int, video: StageVideo) -> JSONResponse:
+    async def _submit_detect_beep(slug: str, stage_number: int, video: StageVideo) -> JSONResponse:
         """Validate + dedupe + queue a detect-beep job for ``video``.
 
         Shared by the per-video endpoint and the primary-only legacy
         endpoint so both honour the same reachability + manual-override
         pre-flight checks.
         """
-        existing = state.jobs.find_active(
+        existing = await state.jobs.find_active(
             kind="detect_beep", stage_number=stage_number, video_id=video.video_id
         )
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(
+        job = await state.jobs.submit(
             kind="detect_beep",
             stage_number=stage_number,
             video_id=video.video_id,
@@ -3612,7 +3619,7 @@ def create_app(
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    def _auto_queue_beep_if_needed(
+    async def _auto_queue_beep_if_needed(
         slug: str, project: MatchProject, stage_number: int, video: StageVideo
     ) -> bool:
         """Best-effort auto-queue of detect_beep on a freshly-assigned video.
@@ -3656,11 +3663,11 @@ def create_app(
                 source,
             )
             return False
-        _submit_detect_beep(slug, stage_number, video)
+        await _submit_detect_beep(slug, stage_number, video)
         return True
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/detect-beep")
-    def detect_beep_for_video(
+    async def detect_beep_for_video(
         slug: str, stage_number: int, video_id: str, force: bool = False
     ) -> JSONResponse:
         """Submit a beep-detection job for ``video_id`` on ``stage_number``.
@@ -3684,10 +3691,10 @@ def create_app(
                     "replace it with auto-detected output"
                 ),
             )
-        return _submit_detect_beep(slug, stage_number, video)
+        return await _submit_detect_beep(slug, stage_number, video)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/detect-beep")
-    def detect_beep(slug: str, stage_number: int, force: bool = False) -> JSONResponse:
+    async def detect_beep(slug: str, stage_number: int, force: bool = False) -> JSONResponse:
         """Submit a beep-detection job for the stage's primary.
 
         Backward-compat shim that resolves the primary's id and forwards to
@@ -3717,10 +3724,10 @@ def create_app(
                     "replace it with auto-detected output"
                 ),
             )
-        return _submit_detect_beep(slug, stage_number, primary)
+        return await _submit_detect_beep(slug, stage_number, primary)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/trim")
-    def trim_stage(slug: str, stage_number: int) -> JSONResponse:
+    async def trim_stage(slug: str, stage_number: int) -> JSONResponse:
         """Submit an audit-mode short-GOP trim job for the stage's primary.
 
         Backward-compat shim: forwards to the per-video pipeline. Returns
@@ -3739,9 +3746,9 @@ def create_app(
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        return _submit_trim(slug, stage_number, stage, primary, project)
+        return await _submit_trim(slug, stage_number, stage, primary, project)
 
-    def _submit_trim(
+    async def _submit_trim(
         slug: str,
         stage_number: int,
         stage: StageEntry,
@@ -3770,10 +3777,12 @@ def create_app(
                     "scoreboard or set the stage time before trimming"
                 ),
             )
-        existing = state.jobs.find_active(kind="trim", stage_number=stage_number, video_id=video.video_id)
+        existing = await state.jobs.find_active(
+            kind="trim", stage_number=stage_number, video_id=video.video_id
+        )
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(
+        job = await state.jobs.submit(
             kind="trim",
             stage_number=stage_number,
             video_id=video.video_id,
@@ -3782,10 +3791,10 @@ def create_app(
         return JSONResponse(job.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/trim")
-    def trim_for_video(slug: str, stage_number: int, video_id: str) -> JSONResponse:
+    async def trim_for_video(slug: str, stage_number: int, video_id: str) -> JSONResponse:
         """Submit an audit-mode trim job for ``video_id`` on ``stage_number``."""
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        return _submit_trim(slug, stage_number, stage, video, project)
+        return await _submit_trim(slug, stage_number, stage, video, project)
 
     def _run_trim_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker for the audit-mode trim of a specific video.
@@ -3824,10 +3833,12 @@ def create_app(
         if v_fresh is not None:
             v_fresh.processed["trim"] = True
             fresh.save(state.shooter_root(slug))
+        # Worker callback runs in a ThreadPoolExecutor thread with no
+        # event loop; bridge to the async JobBackend via ``asyncio.run``.
         if (
             video.role == "primary"
             and video.beep_reviewed
-            and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+            and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
         ):
             # Same gate as the detect-then-trim path (#71): don't burn
             # CLAP / GBDT / PANN cycles on a beep the user hasn't
@@ -3842,10 +3853,12 @@ def create_app(
                 project_override=fresh.automation,
             )
             if resolved.settings.shot_detect_on_beep_verified:
-                state.jobs.submit(
-                    kind="shot_detect",
-                    stage_number=stage_number,
-                    fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                asyncio.run(
+                    state.jobs.submit(
+                        kind="shot_detect",
+                        stage_number=stage_number,
+                        fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                    )
                 )
         handle.update(progress=1.0, message="Done")
 
@@ -4151,7 +4164,7 @@ def create_app(
         handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
 
     @app.post("/api/shooters/{slug}/stages/shot-detect")
-    def shot_detect_all_endpoint(slug: str, reset: bool = False) -> JSONResponse:
+    async def shot_detect_all_endpoint(slug: str, reset: bool = False) -> JSONResponse:
         """Submit shot-detection on every eligible stage in the project.
 
         A stage is eligible when it has a primary video with a confirmed
@@ -4180,11 +4193,11 @@ def create_app(
             if stage.time_seconds <= 0:
                 skipped.append({"stage_number": stage_number, "reason": "no_time_seconds"})
                 continue
-            existing = state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+            existing = await state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
             if existing is not None:
                 jobs.append(existing.model_dump(mode="json"))
                 continue
-            job = state.jobs.submit(
+            job = await state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
                 fn=lambda h, sl=slug, n=stage_number, r=reset: _run_shot_detect(h, sl, n, reset=r),
@@ -4193,7 +4206,7 @@ def create_app(
         return JSONResponse({"jobs": jobs, "skipped": skipped})
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/shot-detect")
-    def shot_detect_endpoint(slug: str, stage_number: int, reset: bool = False) -> JSONResponse:
+    async def shot_detect_endpoint(slug: str, stage_number: int, reset: bool = False) -> JSONResponse:
         """Submit a shot-detection job for the stage's audit clip.
 
         Returns a Job snapshot. Idempotent dedupe via the registry: a second
@@ -4228,10 +4241,10 @@ def create_app(
                 ),
             )
 
-        existing = state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+        existing = await state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(
+        job = await state.jobs.submit(
             kind="shot_detect",
             stage_number=stage_number,
             fn=lambda h, sl=slug, r=reset: _run_shot_detect(h, sl, stage_number, reset=r),
@@ -4250,43 +4263,43 @@ def create_app(
         return user
 
     @app.get("/api/me/jobs", response_model=list[Job])
-    def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
+    async def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
         """Snapshot of all retained jobs (active + recently finished)."""
-        return state.jobs.list()
+        return await state.jobs.list()
 
     @app.get("/api/me/jobs/{job_id}", response_model=Job)
-    def get_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
+    async def get_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Poll a single job. SPA polls ~1 Hz while a job is active."""
-        job = state.jobs.get(job_id)
+        job = await state.jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
     @app.post("/api/me/jobs/acknowledge-failures", response_model=list[Job])
-    def acknowledge_all_failures(user: User = Depends(get_current_user)) -> list[Job]:
+    async def acknowledge_all_failures(user: User = Depends(get_current_user)) -> list[Job]:
         """Mark every currently-unacknowledged FAILED job as seen (issue #73).
 
         Used by the JobsPanel "Dismiss all failures" header action. Returns
         the snapshots that actually flipped to acknowledged so the SPA can
         diff against its in-memory list without an extra refetch.
         """
-        return state.jobs.acknowledge_all_failures()
+        return await state.jobs.acknowledge_all_failures()
 
     @app.post("/api/me/jobs/{job_id}/acknowledge", response_model=Job)
-    def acknowledge_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
+    async def acknowledge_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Mark a single failed job as seen (issue #73).
 
         No-op for jobs that aren't failed or are already acknowledged --
         the snapshot is returned unchanged so the SPA can still pin its
         local state to the server response.
         """
-        job = state.jobs.acknowledge(job_id)
+        job = await state.jobs.acknowledge(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
     @app.post("/api/me/jobs/{job_id}/cancel", response_model=Job)
-    def cancel_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
+    async def cancel_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Request cooperative cancellation of a running or pending job.
 
         The registry sets ``cancel_requested=True`` and (for trim jobs)
@@ -4295,7 +4308,7 @@ def create_app(
         ``status=cancelled``. Idempotent: cancelling a finished job
         returns the existing snapshot unchanged.
         """
-        job = state.jobs.cancel(job_id)
+        job = await state.jobs.cancel(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
@@ -4356,7 +4369,7 @@ def create_app(
             state.shooter_root(slug), stage.stage_number, video, project=project
         )
 
-    def _maybe_chain_trim(slug: str, stage: StageEntry, video: StageVideo) -> None:
+    async def _maybe_chain_trim(slug: str, stage: StageEntry, video: StageVideo) -> None:
         """Auto-fire a trim job for ``video`` when conditions allow.
 
         Used after a beep override / candidate select: if the user just
@@ -4367,11 +4380,13 @@ def create_app(
         if video.beep_time is None or stage.time_seconds <= 0:
             return
         if (
-            state.jobs.find_active(kind="trim", stage_number=stage.stage_number, video_id=video.video_id)
+            await state.jobs.find_active(
+                kind="trim", stage_number=stage.stage_number, video_id=video.video_id
+            )
             is not None
         ):
             return
-        state.jobs.submit(
+        await state.jobs.submit(
             kind="trim",
             stage_number=stage.stage_number,
             video_id=video.video_id,
@@ -4426,7 +4441,7 @@ def create_app(
             video.processed["shot_detect"] = False
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep")
-    def override_beep_for_video(
+    async def override_beep_for_video(
         slug: str, stage_number: int, video_id: str, req: BeepOverrideRequest
     ) -> JSONResponse:
         """Manually set or clear ``video``'s beep timestamp.
@@ -4442,11 +4457,11 @@ def create_app(
         _apply_beep_override(slug, project, stage, video, req.beep_time)
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
-            _maybe_chain_trim(slug, stage, video)
+            await _maybe_chain_trim(slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
-    def override_beep(slug: str, stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
+    async def override_beep(slug: str, stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
         """Backward-compat shim: manually set / clear the primary's beep."""
         project = state.shooter_project(slug)
         try:
@@ -4464,7 +4479,7 @@ def create_app(
         _apply_beep_override(slug, project, stage, primary, req.beep_time)
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
-            _maybe_chain_trim(slug, stage, primary)
+            await _maybe_chain_trim(slug, stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/time")
@@ -4600,7 +4615,7 @@ def create_app(
         )
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/select")
-    def select_beep_candidate_for_video(
+    async def select_beep_candidate_for_video(
         slug: str, stage_number: int, video_id: str, req: BeepSelectRequest
     ) -> JSONResponse:
         """Promote one of ``video``'s ranked candidates as authoritative."""
@@ -4610,11 +4625,11 @@ def create_app(
             state.shooter_root(slug), stage_number, video, project=project
         )
         project.save(state.shooter_root(slug))
-        _maybe_chain_trim(slug, stage, video)
+        await _maybe_chain_trim(slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
-    def set_beep_reviewed(
+    async def set_beep_reviewed(
         slug: str, stage_number: int, video_id: str, req: BeepReviewRequest
     ) -> JSONResponse:
         """Flip ``video.beep_reviewed`` (issue #71).
@@ -4645,9 +4660,9 @@ def create_app(
             req.reviewed
             and video.role == "primary"
             and video.processed.get("trim")
-            and state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+            and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
         ):
-            state.jobs.submit(
+            await state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
                 fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
@@ -4745,7 +4760,7 @@ def create_app(
         return JSONResponse({"models": rows})
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep/select")
-    def select_beep_candidate(slug: str, stage_number: int, req: BeepSelectRequest) -> JSONResponse:
+    async def select_beep_candidate(slug: str, stage_number: int, req: BeepSelectRequest) -> JSONResponse:
         """Backward-compat shim: promote a ranked candidate on the primary.
 
         Lets the user fix a wrong auto-pick without typing a timestamp.
@@ -4769,7 +4784,7 @@ def create_app(
             state.shooter_root(slug), stage_number, primary, project=project
         )
         project.save(state.shooter_root(slug))
-        _maybe_chain_trim(slug, stage, primary)
+        await _maybe_chain_trim(slug, stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
 
     def _resolve_audit_audio(
@@ -5873,7 +5888,7 @@ def create_app(
         return JSONResponse(plan.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/project/cleanup")
-    def cleanup_apply(slug: str, req: CleanupRequest) -> JSONResponse:
+    async def cleanup_apply(slug: str, req: CleanupRequest) -> JSONResponse:
         """Apply a cleanup. Refuses while jobs are pending or running.
 
         Re-plans server-side: the client only sends categories, never
@@ -5881,7 +5896,7 @@ def create_app(
         flight ffmpeg writes into ``trimmed/`` or audit JSON saves into
         ``audit/`` would race with the deletes and corrupt state.
         """
-        active = _any_active_job(state)
+        active = await _any_active_job(state)
         if active is not None:
             raise HTTPException(
                 status_code=409,
@@ -5908,7 +5923,7 @@ def create_app(
         )
 
     @app.post("/api/shooters/{slug}/assignments/move")
-    def move_assignment(slug: str, req: MoveRequest) -> JSONResponse:
+    async def move_assignment(slug: str, req: MoveRequest) -> JSONResponse:
         root = state.shooter_root(slug)
         project = state.shooter_project(slug)
         try:
@@ -5928,12 +5943,12 @@ def create_app(
             stage = project.stage(req.to_stage_number)
             video = next((v for v in stage.videos if str(v.path) == req.video_path), None)
             if video is not None:
-                _auto_queue_beep_if_needed(slug, project, req.to_stage_number, video)
+                await _auto_queue_beep_if_needed(slug, project, req.to_stage_number, video)
 
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/assignments/swap-primary")
-    def swap_primary(slug: str, req: SwapPrimaryRequest) -> JSONResponse:
+    async def swap_primary(slug: str, req: SwapPrimaryRequest) -> JSONResponse:
         """Promote ``video_path`` to primary on ``stage_number``.
 
         Audit-safe: when the stage has shots in its audit JSON, refuses with
@@ -5982,7 +5997,7 @@ def create_app(
         # accordingly. No-op when the video already had a current beep.
         new_primary = project.stage(req.stage_number).primary()
         if new_primary is not None:
-            _auto_queue_beep_if_needed(slug, project, req.stage_number, new_primary)
+            await _auto_queue_beep_if_needed(slug, project, req.stage_number, new_primary)
 
         return JSONResponse(project.model_dump(mode="json"))
 
@@ -5999,7 +6014,7 @@ def create_app(
         return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/export")
-    def export_stage(slug: str, stage_number: int, req: ExportStageRequest) -> JSONResponse:
+    async def export_stage(slug: str, stage_number: int, req: ExportStageRequest) -> JSONResponse:
         """Submit a per-stage export job.
 
         Wraps the ``export_helpers.export_stage`` orchestrator (lossless trim
@@ -6046,10 +6061,10 @@ def create_app(
                 stage_number, project.resolve_video_path(state.shooter_root(slug), primary.path)
             )
 
-        existing = state.jobs.find_active(kind="export", stage_number=stage_number)
+        existing = await state.jobs.find_active(kind="export", stage_number=stage_number)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(
+        job = await state.jobs.submit(
             kind="export",
             stage_number=stage_number,
             fn=lambda h, sl=slug, n=stage_number, r=req: _run_export_for_stage(h, sl, n, r),
@@ -6199,7 +6214,7 @@ def create_app(
         return JSONResponse({"templates": payload})
 
     @app.post("/api/shooters/{slug}/export/match")
-    def export_match(slug: str, req: MatchExportRequest) -> JSONResponse:
+    async def export_match(slug: str, req: MatchExportRequest) -> JSONResponse:
         """Stitch N stages into one FCPXML (issue #171, #172).
 
         Job-queued: per-stage trims (and optional overlays) can take
@@ -6269,10 +6284,10 @@ def create_app(
                     project.resolve_video_path(state.shooter_root(slug), primary.path),
                 )
 
-        existing = state.jobs.find_active(kind="match_export")
+        existing = await state.jobs.find_active(kind="match_export")
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
-        job = state.jobs.submit(
+        job = await state.jobs.submit(
             kind="match_export",
             fn=lambda h, sl=slug, r=req: _run_match_export(h, sl, r),
         )
@@ -7147,7 +7162,7 @@ def create_app(
         return list_match_shooters()
 
     @app.post("/api/match/shooters/{slug}/build-trim-caches")
-    def build_shooter_trim_caches(slug: str) -> JSONResponse:
+    async def build_shooter_trim_caches(slug: str) -> JSONResponse:
         """Submit trim-cache jobs for every stage in ``slug``'s project
         where the audit-mode short-GOP MP4 is missing (#351).
 
@@ -7197,7 +7212,7 @@ def create_app(
             # video_id is a hash of the source path so it's unique across
             # shooters -- the JobRegistry dedup key (kind, stage, video_id)
             # won't collide with the same stage on a different shooter.
-            existing = state.jobs.find_active(
+            existing = await state.jobs.find_active(
                 kind="trim",
                 stage_number=stage.stage_number,
                 video_id=primary.video_id,
@@ -7205,7 +7220,7 @@ def create_app(
             if existing is not None:
                 jobs_submitted.append(existing.model_dump(mode="json"))
                 continue
-            job = state.jobs.submit(
+            job = await state.jobs.submit(
                 kind="trim",
                 stage_number=stage.stage_number,
                 video_id=primary.video_id,
@@ -7646,7 +7661,7 @@ def create_app(
             return JSONResponse(last_run.model_dump(mode="json"))
 
         @app.post("/api/lab/eval")
-        def lab_eval(
+        async def lab_eval(
             payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
         ) -> JSONResponse:
             """Submit a lab-eval job. Returns a ``Job`` snapshot immediately;
@@ -7687,7 +7702,7 @@ def create_app(
                 _lab_universe_cache["last_run"] = run
                 handle.update(progress=1.0, message=f"done ({len(run.universe.fixtures)} fixtures)")
 
-            job = state.jobs.submit(kind="lab_eval", fn=_run)
+            job = await state.jobs.submit(kind="lab_eval", fn=_run)
             return JSONResponse(job.model_dump(mode="json"))
 
         @app.post("/api/lab/rescore")
@@ -7947,7 +7962,7 @@ def create_app(
             return JSONResponse({"path": str(target)})
 
         @app.post("/api/lab/rebuild-calibration")
-        def lab_rebuild_calibration(
+        async def lab_rebuild_calibration(
             payload: dict[str, Any] = Body(default_factory=dict),  # noqa: B008
         ) -> JSONResponse:
             """Submit a job that re-runs ``scripts/build_ensemble_artifacts.py``.
@@ -7990,7 +8005,7 @@ def create_app(
                 _lab_runtime_cache.pop("runtime", None)
                 handle.update(progress=1.0, message="calibration rebuilt")
 
-            job = state.jobs.submit(kind="rebuild_calibration", fn=_run)
+            job = await state.jobs.submit(kind="rebuild_calibration", fn=_run)
             return JSONResponse(job.model_dump(mode="json"))
 
         # ------------------------------------------------------------------
@@ -8011,7 +8026,7 @@ def create_app(
             overwrite: bool = False
 
         @app.post("/api/lab/promote-from-anchor")
-        def lab_promote_from_anchor(body: PromoteFromAnchorBody) -> JSONResponse:
+        async def lab_promote_from_anchor(body: PromoteFromAnchorBody) -> JSONResponse:
             """Submit a promote-from-anchor job (issue #125).
 
             Runs cross-align + ensemble detection + snap on the secondary
@@ -8115,7 +8130,7 @@ def create_app(
                     ),
                 )
 
-            job = state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            job = await state.jobs.submit(kind="promote_from_anchor", fn=_run)
             # Return the resolved fixture + anchor paths alongside the job so the
             # SPA can navigate to the review page once the job succeeds without
             # needing a separate result-fetch endpoint.
@@ -8201,7 +8216,7 @@ def create_app(
         # ------------------------------------------------------------------
 
         @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/promote-secondary")
-        def promote_secondary(
+        async def promote_secondary(
             slug: str,
             stage_number: int,
             video_id: str,
@@ -8416,7 +8431,7 @@ def create_app(
                     ),
                 )
 
-            job = state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            job = await state.jobs.submit(kind="promote_from_anchor", fn=_run)
             return JSONResponse(
                 {
                     "job": job.model_dump(mode="json"),
@@ -8437,7 +8452,7 @@ def create_app(
         # ------------------------------------------------------------------
 
         @app.post("/api/lab/projects/{slug}/{stage_number}/videos/{video_id}/promote-against-fixture")
-        def lab_promote_against_fixture(
+        async def lab_promote_against_fixture(
             slug: str,
             stage_number: int,
             video_id: str,
@@ -8622,7 +8637,7 @@ def create_app(
                     ),
                 )
 
-            job = state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            job = await state.jobs.submit(kind="promote_from_anchor", fn=_run)
             return JSONResponse(
                 {
                     "job": job.model_dump(mode="json"),
@@ -9308,7 +9323,9 @@ def _print_active_jobs(app: FastAPI) -> None:
     if state is None:
         return
     try:
-        jobs = state.jobs.list()
+        # Signal handler runs synchronously; no event loop here. Use
+        # ``asyncio.run`` to drive the async JobBackend.list() call.
+        jobs = asyncio.run(state.jobs.list())
     except Exception:  # pragma: no cover -- defensive: never block shutdown
         logger.warning("could not enumerate jobs on shutdown", exc_info=True)
         return

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import threading
@@ -489,7 +490,7 @@ def test_create_app_auto_submits_model_download_when_missing(
     # Wait for the executor to pick up the queued job and the worker to run.
     state.jobs.wait_for_drain(timeout_s=2.0)
     assert invoked, "model_download worker was never invoked"
-    kinds = [j.kind for j in state.jobs.list()]
+    kinds = [j.kind for j in asyncio.run(state.jobs.list())]
     assert kinds == ["model_download"]
 
 
@@ -542,9 +543,9 @@ def test_run_model_download_job_aggregates_progress(monkeypatch: pytest.MonkeyPa
     from splitsmith.ui.jobs import JobRegistry
 
     jobs = JobRegistry()
-    submitted = jobs.submit(kind="model_download", fn=_run_model_download_job)
+    submitted = asyncio.run(jobs.submit(kind="model_download", fn=_run_model_download_job))
     jobs.wait_for_drain(timeout_s=2.0)
-    final = jobs.get(submitted.id)
+    final = asyncio.run(jobs.get(submitted.id))
     assert final is not None
     assert final.status == "succeeded"
     assert final.progress == 1.0
@@ -577,4 +578,4 @@ def test_create_app_skips_model_download_when_all_present(
     client = TestClient(app)
     body = client.get("/api/models/status").json()
     assert body["active_job"] is None
-    assert [j.kind for j in app.state.splitsmith_state.jobs.list()] == []
+    assert [j.kind for j in asyncio.run(app.state.splitsmith_state.jobs.list())] == []

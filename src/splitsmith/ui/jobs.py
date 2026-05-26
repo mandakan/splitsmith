@@ -256,16 +256,26 @@ class JobBackend(Protocol):
     actually depend on.
 
     Tier 2 of doc 10 (singleton elimination): in-memory job state
-    survives only as long as the process. A hosted-mode backend
-    will persist jobs to ``compute_jobs`` (doc 04) and rely on an
-    arq worker pool, but it still presents the same surface to
-    request handlers. Defining this Protocol lets us drop in that
-    alternative without per-handler branching.
+    survives only as long as the process. The hosted-mode backend
+    (:class:`splitsmith.db.PostgresJobBackend`) persists jobs to
+    ``compute_jobs`` (doc 04) and runs work on an in-process executor
+    for now -- multi-machine workers via Procrastinate/arq are a
+    follow-up. Both impls present the same surface to handlers so
+    we don't fork the call sites.
 
-    The shutdown-related methods are part of the contract because
-    "stop accepting new jobs and let in-flight ones drain" is
-    meaningful in both modes -- only the implementation differs
-    (in-process executor await vs. arq queue drain).
+    **Sync vs async split:**
+
+    The DB-touching methods (``submit`` / ``get`` / ``list`` /
+    ``cancel`` / ``acknowledge`` / ``acknowledge_all_failures`` /
+    ``find_active``) are async so the hosted backend can issue
+    real async DB queries without sync-over-async into the FastAPI
+    event loop. The lifecycle methods (``is_shutting_down`` /
+    ``active_count`` / ``begin_shutdown`` / ``wait_for_drain``)
+    stay sync because they're local-process concepts: hosted-mode
+    boots and shuts a thread pool the same way the local
+    :class:`JobRegistry` does, with no DB round-trip in the hot
+    path. Keeping those sync also leaves the boot/shutdown helpers
+    in ``server.py`` and ``embedded.py`` untouched.
     """
 
     @property
@@ -277,7 +287,7 @@ class JobBackend(Protocol):
 
     def wait_for_drain(self, timeout_s: float) -> bool: ...
 
-    def submit(
+    async def submit(
         self,
         *,
         kind: str,
@@ -286,17 +296,17 @@ class JobBackend(Protocol):
         video_id: str | None = None,
     ) -> Job: ...
 
-    def get(self, job_id: str) -> Job | None: ...
+    async def get(self, job_id: str) -> Job | None: ...
 
-    def list(self) -> list[Job]: ...
+    async def list(self) -> list[Job]: ...
 
-    def cancel(self, job_id: str) -> Job | None: ...
+    async def cancel(self, job_id: str) -> Job | None: ...
 
-    def acknowledge(self, job_id: str) -> Job | None: ...
+    async def acknowledge(self, job_id: str) -> Job | None: ...
 
-    def acknowledge_all_failures(self) -> list[Job]: ...
+    async def acknowledge_all_failures(self) -> list[Job]: ...
 
-    def find_active(
+    async def find_active(
         self,
         *,
         kind: str | None = None,
@@ -388,7 +398,7 @@ class JobRegistry:
             return True
         return self._drained.wait(timeout=timeout_s)
 
-    def submit(
+    async def submit(
         self,
         *,
         kind: str,
@@ -441,17 +451,17 @@ class JobRegistry:
             self._dispatch_locked()
         return snapshot
 
-    def get(self, job_id: str) -> Job | None:
+    async def get(self, job_id: str) -> Job | None:
         with self._lock:
             j = self._jobs.get(job_id)
             return j.model_copy(deep=True) if j is not None else None
 
-    def list(self) -> list[Job]:
+    async def list(self) -> list[Job]:
         """Snapshot of all retained jobs in submission order."""
         with self._lock:
             return [self._jobs[jid].model_copy(deep=True) for jid in self._order if jid in self._jobs]
 
-    def cancel(self, job_id: str) -> Job | None:
+    async def cancel(self, job_id: str) -> Job | None:
         """Mark a job for cooperative cancellation.
 
         Idempotent: cancelling an already-finished job is a no-op (the
@@ -497,7 +507,7 @@ class JobRegistry:
                 logger.warning("cancel: terminate() failed for job %s", job_id, exc_info=True)
         return snapshot
 
-    def acknowledge(self, job_id: str) -> Job | None:
+    async def acknowledge(self, job_id: str) -> Job | None:
         """Mark a failed job as seen by the user (issue #73).
 
         No-op for non-FAILED jobs and for failures already acknowledged.
@@ -515,7 +525,7 @@ class JobRegistry:
                 j.updated_at = datetime.now(UTC)
             return j.model_copy(deep=True)
 
-    def acknowledge_all_failures(self) -> list[Job]:
+    async def acknowledge_all_failures(self) -> list[Job]:
         """Mark every currently-unacknowledged FAILED job as seen.
 
         Returns the snapshots that actually changed (already-acknowledged
@@ -536,7 +546,7 @@ class JobRegistry:
                     affected.append(j.model_copy(deep=True))
         return affected
 
-    def find_active(
+    async def find_active(
         self,
         *,
         kind: str,
