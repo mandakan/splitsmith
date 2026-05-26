@@ -575,9 +575,7 @@ def serve(
             cwd=Path(__file__).resolve().parent.parent.parent,
         )
         if result.returncode != 0:
-            console.print(
-                "[red]alembic upgrade head failed[/] -- see the migration output above."
-            )
+            console.print("[red]alembic upgrade head failed[/] -- see the migration output above.")
             raise typer.Exit(2)
 
     console.print(
