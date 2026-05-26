@@ -1950,6 +1950,71 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
     return detail
 
 
+SPLITSMITH_MODE_ENV = "SPLITSMITH_MODE"
+SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
+
+
+def _hosted_mode_active() -> bool:
+    """Return True when ``SPLITSMITH_MODE=hosted`` is in the environment.
+
+    The single switch that picks Postgres-backed stores + the hosted
+    auth bootstrap over the local file-system defaults. Local-mode
+    (``splitsmith ui``) leaves the env var unset; ``splitsmith serve``
+    sets it before constructing the app.
+    """
+    return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
+
+
+def _apply_hosted_mode_wiring(state: AppState) -> None:
+    """Swap AppState's local-mode defaults for Postgres-backed impls.
+
+    Runs only when :func:`_hosted_mode_active` is True. Requires
+    ``SPLITSMITH_DATABASE_URL`` to point at a Postgres (or SQLite)
+    engine the migrations have already applied. Constructs:
+
+    - :class:`HostedLoopbackAuth` (upserts the loopback hosted user
+      row + remembers its id).
+    - :class:`PostgresRecentProjectsStore` bound to that user.
+    - :class:`PostgresScoreboardIdentityStore` bound to that user.
+    - :class:`PostgresJobBackend` bound to that user.
+
+    Single-user binding is deliberate: while :class:`LoopbackAuth`
+    is the only auth backend, every request resolves to the same
+    user, so the stores can be process-singletons. Once
+    :class:`MagicLinkAuth` lands and requests resolve different
+    users, this wiring is replaced with FastAPI ``Depends``-based
+    per-request construction.
+    """
+    from ..db import (
+        HostedLoopbackAuth,
+        PostgresJobBackend,
+        PostgresRecentProjectsStore,
+        PostgresScoreboardIdentityStore,
+        create_engine,
+        sessionmaker,
+    )
+
+    url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV)
+    if not url:
+        raise RuntimeError(
+            f"{SPLITSMITH_MODE_ENV}=hosted requires {SPLITSMITH_DATABASE_URL_ENV} "
+            "to be set (e.g. postgresql+asyncpg://user:pass@host/db)"
+        )
+    engine = create_engine(url)
+    session_factory = sessionmaker(engine)
+
+    # HostedLoopbackAuth's ``__init__`` runs ``asyncio.run`` to
+    # upsert the user row; that's safe here because ``create_app``
+    # itself runs outside any event loop.
+    auth = HostedLoopbackAuth(session_factory)
+    user_id = auth.user_id
+
+    state.auth = auth
+    state.recent_projects = PostgresRecentProjectsStore(session_factory, user_id=user_id)
+    state.scoreboard_identity = PostgresScoreboardIdentityStore(session_factory, user_id=user_id)
+    state.jobs = PostgresJobBackend(session_factory, user_id=user_id)
+
+
 def create_app(
     *,
     project_root: Path | None = None,
@@ -1982,6 +2047,14 @@ def create_app(
     # before the patch ran. When the hosted backend lands this swap
     # point is where the picker would inject a ``RemoteComputeBackend``.
     state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
+    # Hosted-mode swap: when ``SPLITSMITH_MODE=hosted``, replace the
+    # local-mode auth + per-user stores + job backend with their
+    # Postgres-backed equivalents. Must happen before the recent-
+    # projects refresh below -- that call goes through ``state.matches``
+    # which itself reads from ``state.recent_projects`` (the local
+    # JSON file in local mode; Postgres in hosted mode).
+    if _hosted_mode_active():
+        _apply_hosted_mode_wiring(state)
     # Populate the match-id registry from recent projects so id -> path
     # lookups resolve without waiting for a picker bind. Cheap (one
     # match.json read per recent entry; legacy projects are skipped).

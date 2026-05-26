@@ -192,8 +192,14 @@ target-version = ["py311"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# ``addopts`` excludes ``docker`` by default -- the docker-compose
+# smoke pulls images + builds a container, which is a 30-60s setup
+# we don't want CI / dev runs to pay for. Opt in with
+# ``pytest -m docker`` when validating hosted-mode locally.
+addopts = "-m 'not docker'"
 markers = [
     "integration: integration tests requiring external tools (ffmpeg, etc.)",
+    "docker: hosted-mode smoke tests that require docker compose. Skipped by default; run with `pytest -m docker`.",
 ]
 
 [tool.mypy]
