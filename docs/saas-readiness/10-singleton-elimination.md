@@ -157,35 +157,53 @@ JSON file at `~/.splitsmith/scoreboard.json`. The saved
 `shooter_id` + `display_name` for the SSI Scoreboard. Same per-
 machine problem.
 
-**Elimination path:** in hosted mode both move to per-user Postgres
-rows (`users.recent_project_ids` JSONB or a `recent_projects`
-table; `users.scoreboard_identity` JSONB). The `user_config`
-module gets a `RecentProjectsStore` abstraction with two backends
-(JSON file in local mode, Postgres in hosted mode); the handler
-calls `state.recent_projects.list(user.id)`.
+**Status:** abstraction landed. `RecentProjectsStore` +
+`ScoreboardIdentityStore` Protocols live in
+`splitsmith.user_config`; `JsonRecentProjectsStore` and
+`JsonScoreboardIdentityStore` wrap the existing module functions
+that read/write `~/.splitsmith/*.json`. `AppState.recent_projects`
+and `AppState.scoreboard_identity` are typed against the
+Protocols and the six production handler callsites (`/api/me/
+recent-projects`, `/api/me/recent-projects/forget`,
+`/api/me/scoreboard-identity` GET/PUT/DELETE, plus the
+`_register_match_at` helper) go through `state.*` rather than
+the module functions.
+
+**Elimination path:**
+
+1. **(done)** `RecentProjectsStore` + `ScoreboardIdentityStore`
+   Protocols; JSON impls; `AppState.*` widened to the Protocols;
+   handlers route through the abstraction.
+2. Hosted-mode backend: per-user Postgres rows
+   (`users.recent_project_ids` JSONB or a `recent_projects`
+   table; `users.scoreboard_identity` JSONB). Constructed
+   per-request after the auth check, not as an `AppState`
+   singleton.
 
 `~/.splitsmith/auth.json` (the desktop-link refresh token store
 mentioned in doc 02) is per-machine on purpose -- desktop linking
 binds a device to an account, and that's what device-scoped state
 is for. Not a violation.
 
-### Tier 4 -- per-machine paths
+### Tier 4 -- per-machine paths -- DONE
 
-**`splitsmith ui --project <path>`** opens an arbitrary local path.
-The implicit assumption is "the user's filesystem layout is the
-source of truth". In hosted mode there is no local path -- the
-project lives in R2 under a stable prefix.
+**`splitsmith ui --project <path>`** opened an arbitrary local
+path AND relied on the server's now-gone bound-state concept to
+land the SPA on the project. After Tier 1 step 4 retired bound
+state, the SPA loaded the picker even when `--project` was given.
 
-This is not a singleton in the same sense as the others, but it
-**presupposes** the singleton: the path determines `_bound_root`.
-Once Tier 1 is done, the CLI either:
-
-- Resolves the path to a `match_id` via `MatchRegistry` and opens
-  the browser at `/match/<id>`, OR
-- Opens the picker and lets the user select via the UI.
+**Resolution:** the CLI now resolves the path to a `match_id`
+(via `Match.load(path).match_id`) and opens the browser at
+`http://<host>:<port>/match/<match_id>/` directly. The server's
+`create_app(project_root=...)` still registers the match in
+`state.matches` so the alias middleware can resolve it; the URL
+just carries the identity from the first paint instead of waiting
+for a picker click.
 
 Either way the URL carries the project identity, not the boot
-flag.
+flag. Hosted mode has no local path concept at all -- the project
+lives in R2 under a stable prefix and the user navigates by
+match_id from the start.
 
 ## Order of elimination
 

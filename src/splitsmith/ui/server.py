@@ -589,6 +589,17 @@ class AppState:
     # Tier 2 of doc 10.
     jobs: JobBackend = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
+    # Per-user preference stores (Tier 3 of doc 10). Local mode
+    # delegates to the ``~/.splitsmith/*.json`` module functions;
+    # the hosted-mode backend will be per-user Postgres rows
+    # constructed per-request after the auth check. See
+    # ``splitsmith.user_config``.
+    recent_projects: user_config.RecentProjectsStore = field(
+        default_factory=user_config.JsonRecentProjectsStore
+    )
+    scoreboard_identity: user_config.ScoreboardIdentityStore = field(
+        default_factory=user_config.JsonScoreboardIdentityStore
+    )
     # Auth backend. ``LoopbackAuth`` in local mode (every request
     # resolves to the same sentinel user); a hosted-mode backend will
     # be injected here when SaaS lands. See ``splitsmith.auth``.
@@ -1842,7 +1853,7 @@ def _register_match_at(
             },
         )
     name = match.name or fallback_name
-    user_config.record_project_open(resolved, name, kind="match")
+    state.recent_projects.record_open(resolved, name, kind="match")
     loaded_env = _load_env_files(resolved)
     if loaded_env:
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
@@ -6592,7 +6603,7 @@ def create_app(
         match picker (#322). The detailed shape is slightly slower; the
         picker route is the only caller that needs it.
         """
-        projects = user_config.get_recent_projects()
+        projects = state.recent_projects.list()
         if detail:
             enriched = [_enrich_recent_project(p) for p in projects]
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
@@ -6603,8 +6614,8 @@ def create_app(
         req: ForgetRecentProjectRequest,
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
-        removed = user_config.remove_recent_project(Path(req.path))
-        projects = user_config.get_recent_projects()
+        removed = state.recent_projects.remove(Path(req.path))
+        projects = state.recent_projects.list()
         return JSONResponse(
             {
                 "removed": removed,
@@ -7550,7 +7561,7 @@ def create_app(
         # "Not pinned yet" is a normal state, not an error -- return a
         # 200 with a null body so the SPA doesn't have to catch a 404
         # on every page load and DevTools doesn't log a failed request.
-        identity = user_config.load_scoreboard_identity()
+        identity = state.scoreboard_identity.load()
         if identity is None:
             return JSONResponse(None)
         return JSONResponse(identity.model_dump(mode="json"))
@@ -7567,12 +7578,12 @@ def create_app(
             club=req.club,
             base_url=req.base_url,
         )
-        user_config.save_scoreboard_identity(identity)
+        state.scoreboard_identity.save(identity)
         return JSONResponse(identity.model_dump(mode="json"))
 
     @app.delete("/api/me/scoreboard-identity")
     def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
-        user_config.clear_scoreboard_identity()
+        state.scoreboard_identity.clear()
         return JSONResponse({"ok": True})
 
     @app.get("/api/server/features")

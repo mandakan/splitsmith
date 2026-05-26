@@ -39,7 +39,7 @@ import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 from pydantic import BaseModel, Field
@@ -345,6 +345,69 @@ def clear_scoreboard_identity() -> None:
         return
     except OSError as exc:
         logger.warning("Could not delete %s: %s", SCOREBOARD_FILENAME, exc)
+
+
+# ---------------------------------------------------------------------------
+# Per-user preference stores (Tier 3 of doc 10)
+# ---------------------------------------------------------------------------
+#
+# The module-level functions above read/write JSON files under
+# ``~/.splitsmith/`` -- per-machine state, not per-user-account.
+# Hosted SaaS needs these to be per-user Postgres rows; local mode
+# keeps the JSON file. The Protocols + JsonStore classes below let
+# handlers depend on the abstraction so the hosted-mode backend
+# (per-user Postgres rows) can swap in without per-route branching.
+
+
+class RecentProjectsStore(Protocol):
+    """Per-user "recently opened" project index. Powers the picker."""
+
+    def list(self) -> list[RecentProject]: ...
+
+    def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None: ...
+
+    def remove(self, path: Path) -> bool: ...
+
+
+class ScoreboardIdentityStore(Protocol):
+    """Per-user SSI Scoreboard binding (shooter_id + display name)."""
+
+    def load(self) -> ScoreboardIdentity | None: ...
+
+    def save(self, identity: ScoreboardIdentity) -> None: ...
+
+    def clear(self) -> None: ...
+
+
+class JsonRecentProjectsStore:
+    """Local-mode :class:`RecentProjectsStore` -- delegates to the
+    module-level functions that read/write
+    ``~/.splitsmith/projects.json``. One instance per process
+    serves the one operator the local app supports."""
+
+    def list(self) -> list[RecentProject]:
+        return get_recent_projects()
+
+    def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None:
+        record_project_open(path, name, kind=kind)
+
+    def remove(self, path: Path) -> bool:
+        return remove_recent_project(path)
+
+
+class JsonScoreboardIdentityStore:
+    """Local-mode :class:`ScoreboardIdentityStore` -- delegates to
+    the module-level functions that read/write
+    ``~/.splitsmith/scoreboard.json``."""
+
+    def load(self) -> ScoreboardIdentity | None:
+        return load_scoreboard_identity()
+
+    def save(self, identity: ScoreboardIdentity) -> None:
+        save_scoreboard_identity(identity)
+
+    def clear(self) -> None:
+        clear_scoreboard_identity()
 
 
 # ---------------------------------------------------------------------------

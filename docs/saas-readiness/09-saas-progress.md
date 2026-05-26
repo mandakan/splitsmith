@@ -106,13 +106,17 @@ later steps are blocked on earlier ones.
   different backend. Abstraction landed -- `JobBackend` Protocol +
   `AppState.jobs` typed against it; hosted backend land alongside
   the actual hosted PR.
-- [ ] **Tier 3:** `user_config.recent_projects` and
+- [~] **Tier 3:** `user_config.recent_projects` and
   `scoreboard_identity` become per-user Postgres rows in hosted
   mode; introduce a `RecentProjectsStore` / `ScoreboardIdentityStore`
   abstraction with a JSON-file backend for local mode.
-- [ ] **Tier 4:** `splitsmith ui --project <path>` resolves the path
-  to a `match_id` via `MatchRegistry` and opens the browser at the
-  URL rather than binding server-side.
+  Protocols + JSON impls landed; `AppState.*` typed against them;
+  handlers go through the abstraction. Per-user Postgres
+  backend lands alongside the actual hosted PR.
+- [x] **Tier 4:** `splitsmith ui --project <path>` resolves the path
+  to a `match_id` via `Match.load(path).match_id` and opens the
+  browser at `/match/<match_id>/` directly. No server-side bind
+  involved; the URL carries identity from the first paint.
 
 ### Hosted infrastructure
 
