@@ -3291,13 +3291,19 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
-[package.dev-dependencies]
-dev = [
+[package.optional-dependencies]
+hosted = [
     { name = "aiosqlite" },
     { name = "alembic" },
     { name = "asyncpg" },
-    { name = "black" },
     { name = "boto3" },
+    { name = "python-ulid" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
     { name = "matplotlib" },
     { name = "moto", extra = ["s3"] },
     { name = "mypy" },
@@ -3307,16 +3313,19 @@ dev = [
     { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "python-ulid" },
     { name = "respx" },
     { name = "ruff" },
-    { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "splitsmith", extra = ["hosted"] },
     { name = "torch" },
     { name = "transformers" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", marker = "extra == 'hosted'", specifier = ">=0.20.0" },
+    { name = "alembic", marker = "extra == 'hosted'", specifier = ">=1.13.0" },
+    { name = "asyncpg", marker = "extra == 'hosted'", specifier = ">=0.29.0" },
+    { name = "boto3", marker = "extra == 'hosted'", specifier = ">=1.35.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "huggingface-hub", specifier = ">=0.26.0" },
@@ -3329,22 +3338,21 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "python-ulid", marker = "extra == 'hosted'", specifier = ">=3.0.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rich", specifier = ">=13.7.0" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "soundfile", specifier = ">=0.12.1" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'hosted'", specifier = ">=2.0.30" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
 ]
+provides-extras = ["hosted"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "aiosqlite", specifier = ">=0.20.0" },
-    { name = "alembic", specifier = ">=1.13.0" },
-    { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "black", specifier = ">=24.0.0" },
-    { name = "boto3", specifier = ">=1.35.0" },
     { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "mypy", specifier = ">=1.10.0" },
@@ -3354,10 +3362,9 @@ dev = [
     { name = "pyarrow", specifier = ">=17.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
-    { name = "python-ulid", specifier = ">=3.0.0" },
     { name = "respx", specifier = ">=0.21.1" },
     { name = "ruff", specifier = ">=0.4.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30" },
+    { name = "splitsmith", extras = ["hosted"] },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "transformers", specifier = ">=5.7.0" },
 ]

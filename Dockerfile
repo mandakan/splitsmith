@@ -12,10 +12,12 @@
 # What ships:
 # - Python 3.11 (matches the wheel's ``requires-python``).
 # - uv for dependency install (faster + lockfile-aware).
-# - The core dependency set: no ``[dev]`` extras, so torch /
-#   transformers / panns-inference stay out of the hosted-mode
-#   container. The slim ONNX runtime + scikit-learn cover voter
-#   B + C inference paths.
+# - ``[project]`` deps + ``[project.optional-dependencies].hosted``:
+#   the core local-mode set plus the runtime hosted-mode deps
+#   (SQLAlchemy + alembic + asyncpg + aiosqlite + python-ulid +
+#   boto3). The dev group (torch / transformers / panns / mypy / ruff
+#   / moto / etc.) stays out -- the slim ONNX runtime + scikit-learn
+#   cover voter B + C inference paths.
 # - ffmpeg + ffprobe via the OS package manager so trim / shot-detect
 #   workers can still execute when a real shooter / match is uploaded.
 
@@ -51,14 +53,17 @@ COPY alembic ./alembic
 # Install dependencies only. ``--no-install-project`` skips the
 # splitsmith package itself, so this layer is invalidated only when
 # ``pyproject.toml`` / ``uv.lock`` change -- a source-only edit reuses
-# the ~500 MB wheel install on the next build.
-RUN uv sync --frozen --no-dev --no-install-project
+# the wheel install on the next build. ``--extra hosted`` pulls the
+# hosted-mode runtime deps (alembic + sqlalchemy + asyncpg + boto3 +
+# ...). Without it the container would boot with the local-mode wheel
+# only and ``splitsmith serve`` would crash on the first alembic call.
+RUN uv sync --frozen --no-dev --extra hosted --no-install-project
 
 # Now bring in the source and install the package itself into the
 # already-warm venv. ``--frozen`` ensures the build still fails if
 # the lockfile and pyproject have drifted.
 COPY src ./src
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra hosted
 
 # Hand the working directory to the non-root user so anything the
 # server writes (logs, the optional ``~/.splitsmith`` config) lands
