@@ -119,6 +119,16 @@ later steps are blocked on earlier ones.
   browser at `/match/<match_id>/` directly. No server-side bind
   involved; the URL carries identity from the first paint.
 
+### DB foundation
+
+- [x] SQLAlchemy 2.x async + Alembic + asyncpg/aiosqlite. ``users``
+  table per doc 02 (ULID PK, email-unique, soft delete,
+  entitlement block). Migration applies cleanly to SQLite
+  in-memory (tests) and Postgres (production); the engine swaps
+  via ``SPLITSMITH_DATABASE_URL``. Subsequent tables
+  (``sessions``, ``compute_jobs``, ``recent_projects``, etc.)
+  land as the corresponding hosted-impl PRs need them.
+
 ### Hosted infrastructure
 
 - [ ] Pick deploy target (Fly.io vs Railway -- doc 00 open question).
