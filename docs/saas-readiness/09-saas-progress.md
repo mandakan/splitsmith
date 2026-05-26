@@ -46,14 +46,15 @@ before that would entrench the singleton.
 
 - [~] Extract `Storage` interface; replace direct `pathlib.Path` use
   in project layout with `FilesystemStorage` calls.
-  (See 03-storage-layer.md.) Protocol + `FilesystemStorage` shipped
-  with atomic temp+rename writes and a path-traversal guard. Not
-  yet wired into `AppState` -- local mode opens projects at
-  arbitrary user-chosen paths, so the right scope is per-project
-  rather than a process singleton. Migration of existing callsites
-  (recent-projects index, audit JSON, project state) is iterative
-  follow-up work; the Protocol is sync today and goes async if
-  ``S3Storage`` ever needs it.
+  (See 03-storage-layer.md.) Protocol + `FilesystemStorage` (local)
+  + `S3Storage` (hosted, boto3) both shipped, with shared
+  path-traversal guard and structural-Protocol round-trip tests
+  via ``moto``. Not yet wired into `AppState` -- local mode opens
+  projects at arbitrary user-chosen paths and hosted mode wants a
+  per-request per-tenant factory, so the right scope is per-project,
+  not a process singleton. Migration of existing callsites
+  (audit JSON, project state) is iterative follow-up work; the
+  Protocol stays sync today.
 - [x] Extract `Auth` interface; introduce `LoopbackAuth`; route
   every API handler through `auth.authenticate_request`.
   (See 02-tenancy-and-identity.md.) Interface + `LoopbackAuth` +

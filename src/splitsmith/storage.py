@@ -180,3 +180,140 @@ class FilesystemStorage:
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+
+def _validate_relative_key(key: str) -> str:
+    """Reject absolute / traversing keys before we hand them to a
+    backend. The same guard ``FilesystemStorage._resolve`` runs --
+    factored out so ``S3Storage`` doesn't have to reimplement it.
+    """
+    rel = Path(key)
+    if rel.is_absolute() or any(part == ".." for part in rel.parts):
+        raise ValueError(f"path must be relative and contain no '..': {key!r}")
+    return key
+
+
+class S3Storage:
+    """Hosted-mode implementation backed by an S3-compatible bucket.
+
+    Targets Cloudflare R2 in production (doc 03) but works against
+    AWS S3, MinIO, and the ``moto`` in-memory mock used in tests --
+    they're all the same S3 API. Construct one instance per
+    tenant-scoped prefix; the bucket itself is process-wide.
+
+    Path semantics match :class:`FilesystemStorage`: keys are
+    relative to ``prefix``, ``/`` separators (POSIX-style), no
+    leading ``/``, no ``..``. The class uses S3's ``Key`` directly,
+    so a `prefix` of ``"projects/abc/"`` plus a `path` of
+    ``"audit/stage1.json"`` produces the S3 key
+    ``"projects/abc/audit/stage1.json"``.
+
+    boto3 is imported lazily so a local-mode install that never
+    constructs an S3Storage doesn't pay the import cost.
+    """
+
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        prefix: str = "",
+        endpoint_url: str | None = None,
+        region_name: str = "auto",
+        client: object | None = None,
+    ) -> None:
+        self._bucket = bucket
+        # Normalize the prefix: no leading slash, exactly one trailing
+        # slash when non-empty. ``""`` means "the bucket root".
+        prefix = prefix.strip("/")
+        self._prefix = f"{prefix}/" if prefix else ""
+        if client is not None:
+            self._client = client
+        else:
+            import boto3
+
+            self._client = boto3.client(
+                "s3",
+                endpoint_url=endpoint_url,
+                region_name=region_name,
+            )
+
+    @property
+    def bucket(self) -> str:
+        return self._bucket
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    def _key(self, path: str) -> str:
+        _validate_relative_key(path)
+        return f"{self._prefix}{path}"
+
+    def read_bytes(self, path: str) -> bytes:
+        from botocore.exceptions import ClientError
+
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=self._key(path))
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "404"):
+                raise FileNotFoundError(f"no object at {path!r}") from exc
+            raise
+        return response["Body"].read()
+
+    def write_bytes(self, path: str, data: bytes) -> None:
+        # S3 PUT is atomic: either the new object becomes visible in
+        # full, or the put fails and the old object (if any) survives.
+        # No temp-and-rename dance needed.
+        self._client.put_object(Bucket=self._bucket, Key=self._key(path), Body=data)
+
+    def exists(self, path: str) -> bool:
+        from botocore.exceptions import ClientError
+
+        try:
+            self._client.head_object(Bucket=self._bucket, Key=self._key(path))
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "404", "NotFound"):
+                return False
+            raise
+        return True
+
+    def stat(self, path: str) -> StorageObject | None:
+        from botocore.exceptions import ClientError
+
+        try:
+            head = self._client.head_object(Bucket=self._bucket, Key=self._key(path))
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "404", "NotFound"):
+                return None
+            raise
+        return StorageObject(
+            path=path,
+            size=int(head["ContentLength"]),
+            etag=head.get("ETag", "").strip('"') or None,
+            last_modified=head.get("LastModified"),
+        )
+
+    def list(self, prefix: str) -> Iterator[StorageObject]:
+        _validate_relative_key(prefix) if prefix else None
+        full_prefix = self._key(prefix) if prefix else self._prefix
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=full_prefix):
+            for obj in page.get("Contents", []) or []:
+                key = obj["Key"]
+                # Strip the storage-root prefix so callers see paths
+                # relative to their scope, matching FilesystemStorage.
+                rel_key = key[len(self._prefix) :] if self._prefix else key
+                yield StorageObject(
+                    path=rel_key,
+                    size=int(obj["Size"]),
+                    etag=obj.get("ETag", "").strip('"') or None,
+                    last_modified=obj.get("LastModified"),
+                )
+
+    def delete(self, path: str) -> None:
+        # S3 ``delete_object`` is a no-op when the key doesn't exist
+        # (same contract as :class:`FilesystemStorage.delete`).
+        self._client.delete_object(Bucket=self._bucket, Key=self._key(path))
