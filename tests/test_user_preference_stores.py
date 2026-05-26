@@ -42,13 +42,16 @@ def test_json_stores_satisfy_their_protocols() -> None:
 
     asyncio.run(_exercise_recent())
 
-    assert sb.load() is None
-    sb.save(ScoreboardIdentity(shooter_id=123, display_name="Tester"))
-    loaded = sb.load()
-    assert loaded is not None
-    assert loaded.shooter_id == 123
-    sb.clear()
-    assert sb.load() is None
+    async def _exercise_scoreboard() -> None:
+        assert await sb.load() is None
+        await sb.save(ScoreboardIdentity(shooter_id=123, display_name="Tester"))
+        loaded = await sb.load()
+        assert loaded is not None
+        assert loaded.shooter_id == 123
+        await sb.clear()
+        assert await sb.load() is None
+
+    asyncio.run(_exercise_scoreboard())
 
 
 def test_state_recent_projects_is_swappable() -> None:
@@ -97,13 +100,13 @@ def test_state_scoreboard_identity_is_swappable() -> None:
     saved: list[ScoreboardIdentity] = []
 
     class _FakeScoreboardIdentity:
-        def load(self) -> ScoreboardIdentity | None:
+        async def load(self) -> ScoreboardIdentity | None:
             return ScoreboardIdentity(shooter_id=999, display_name="From Fake")
 
-        def save(self, identity: ScoreboardIdentity) -> None:
+        async def save(self, identity: ScoreboardIdentity) -> None:
             saved.append(identity)
 
-        def clear(self) -> None:
+        async def clear(self) -> None:
             pass
 
     app = create_app()
@@ -111,10 +114,10 @@ def test_state_scoreboard_identity_is_swappable() -> None:
     fake: ScoreboardIdentityStore = _FakeScoreboardIdentity()
     state.scoreboard_identity = fake
 
-    loaded = state.scoreboard_identity.load()
+    loaded = asyncio.run(state.scoreboard_identity.load())
     assert loaded is not None
     assert loaded.shooter_id == 999
 
-    state.scoreboard_identity.save(ScoreboardIdentity(shooter_id=42, display_name="x"))
+    asyncio.run(state.scoreboard_identity.save(ScoreboardIdentity(shooter_id=42, display_name="x")))
     assert len(saved) == 1
     assert saved[0].shooter_id == 42
