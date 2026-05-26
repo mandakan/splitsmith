@@ -2000,7 +2000,14 @@ def _apply_hosted_mode_wiring(state: AppState) -> None:
             f"{SPLITSMITH_MODE_ENV}=hosted requires {SPLITSMITH_DATABASE_URL_ENV} "
             "to be set (e.g. postgresql+asyncpg://user:pass@host/db)"
         )
-    engine = create_engine(url)
+    # ``pool_disabled=True`` because the hosted-mode boot path runs
+    # multiple short-lived event loops (HostedLoopbackAuth bootstrap,
+    # PostgresJobBackend sweep, each worker thread's asyncio.run).
+    # asyncpg connections are loop-bound; a pooled connection from
+    # the bootstrap loop would crash on first reuse from the FastAPI
+    # request loop with "attached to a different loop". See
+    # ``splitsmith.db.engine.create_engine`` for the full rationale.
+    engine = create_engine(url, pool_disabled=True)
     session_factory = sessionmaker(engine)
 
     # HostedLoopbackAuth's ``__init__`` runs ``asyncio.run`` to
