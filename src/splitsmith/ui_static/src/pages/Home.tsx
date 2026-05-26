@@ -69,11 +69,18 @@ export function Home() {
   const href = useMatchHref();
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
-  // Slug used for slug-bearing nav links from this page. Lifted off the
-  // health snapshot the shell already loaded, so Home doesn't need its
-  // own fetch. Falls back to "/shooters" routing when no default exists.
-  const navSlug = ctx?.health?.default_shooter_slug ?? null;
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // Slug used for slug-bearing nav links from this page. The
+  // ``/api/health.default_shooter_slug`` field this used to read was
+  // retired with the bound-state singleton (doc 10 Tier 1 step 4) and
+  // now always returns null, which made "Add shooter footage" silently
+  // fall back to the Shooters page even on single-shooter matches.
+  // Pick the alphabetically-first shooter to match the server's old
+  // ``default_shooter_slug`` derivation in ``_register_response``.
+  const navSlug = useMemo<string | null>(() => {
+    if (shooters.length === 0) return null;
+    return [...shooters].sort((a, b) => a.slug.localeCompare(b.slug))[0].slug;
+  }, [shooters]);
 
   useEffect(() => {
     let alive = true;
