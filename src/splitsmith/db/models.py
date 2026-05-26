@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import ulid
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -96,6 +96,19 @@ class User(Base):
     # Soft delete -- the row survives until the 7-day grace
     # expires so the user can recover by re-signing in.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Per-user SSI Scoreboard binding (shooter_id + display name +
+    # division + club + base_url). Hosted-mode counterpart to
+    # ``~/.splitsmith/scoreboard.json``. One identity per user, so
+    # it lives as a JSON column on the user row instead of a
+    # separate table -- saves a join and a migration for what is
+    # structurally a profile field. ``None`` until the user pins
+    # themselves via the SPA's scoreboard import flow.
+    #
+    # Generic ``JSON`` (not ``JSONB``) so SQLite tests work; the
+    # field is read whole + written whole, never queried into, so
+    # JSONB's indexing wins don't apply.
+    scoreboard_identity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r}>"
