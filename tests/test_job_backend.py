@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -27,15 +28,17 @@ def test_job_registry_satisfies_job_backend_protocol() -> None:
     typed against the protocol see the right interface."""
     backend: JobBackend = JobRegistry()
     # Touch every Protocol member so an accidental signature drift
-    # surfaces here, not deep inside a handler under test.
+    # surfaces here, not deep inside a handler under test. Sync
+    # lifecycle methods are called directly; async DB-touching methods
+    # go through ``asyncio.run``.
     assert backend.active_count() == 0
     assert backend.is_shutting_down is False
-    assert backend.list() == []
-    assert backend.get("nope") is None
-    assert backend.cancel("nope") is None
-    assert backend.acknowledge("nope") is None
-    assert backend.acknowledge_all_failures() == []
-    assert backend.find_active(kind="trim") is None
+    assert asyncio.run(backend.list()) == []
+    assert asyncio.run(backend.get("nope")) is None
+    assert asyncio.run(backend.cancel("nope")) is None
+    assert asyncio.run(backend.acknowledge("nope")) is None
+    assert asyncio.run(backend.acknowledge_all_failures()) == []
+    assert asyncio.run(backend.find_active(kind="trim")) is None
 
 
 def test_state_jobs_is_swappable_by_a_fake_backend() -> None:
@@ -60,7 +63,7 @@ def test_state_jobs_is_swappable_by_a_fake_backend() -> None:
         def wait_for_drain(self, timeout_s: float) -> bool:  # pragma: no cover
             return True
 
-        def submit(
+        async def submit(
             self,
             *,
             kind: str,
@@ -71,25 +74,25 @@ def test_state_jobs_is_swappable_by_a_fake_backend() -> None:
             submitted.append({"kind": kind, "stage_number": stage_number, "video_id": video_id})
             return _make_job(id="fake-1", kind=kind, stage_number=stage_number)
 
-        def get(self, job_id: str) -> Job | None:
+        async def get(self, job_id: str) -> Job | None:
             return _make_job(id=job_id, status=JobStatus.SUCCEEDED)
 
-        def list(self) -> list[Job]:
+        async def list(self) -> list[Job]:
             nonlocal listed_called
             listed_called += 1
             return []
 
-        def cancel(self, job_id: str) -> Job | None:
+        async def cancel(self, job_id: str) -> Job | None:
             cancel_called.append(job_id)
             return _make_job(id=job_id, status=JobStatus.CANCELLED)
 
-        def acknowledge(self, job_id: str) -> Job | None:
+        async def acknowledge(self, job_id: str) -> Job | None:
             return None
 
-        def acknowledge_all_failures(self) -> list[Job]:
+        async def acknowledge_all_failures(self) -> list[Job]:
             return []
 
-        def find_active(self, **kwargs) -> Job | None:
+        async def find_active(self, **kwargs) -> Job | None:
             return None
 
     fake: JobBackend = _RecordingBackend()
@@ -100,8 +103,8 @@ def test_state_jobs_is_swappable_by_a_fake_backend() -> None:
     # Use the same accessor path the request handlers use; this proves
     # the swap actually flows through (not just that the field type
     # accepts assignment).
-    assert state.jobs.list() == []
+    assert asyncio.run(state.jobs.list()) == []
     assert listed_called == 1
 
-    state.jobs.cancel("job-42")
+    asyncio.run(state.jobs.cancel("job-42"))
     assert cancel_called == ["job-42"]

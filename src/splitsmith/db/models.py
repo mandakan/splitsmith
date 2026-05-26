@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import ulid
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -164,3 +164,66 @@ class RecentProjectRow(Base):
 
     def __repr__(self) -> str:
         return f"<RecentProjectRow user_id={self.user_id!r} path={self.path!r}>"
+
+
+class ComputeJobRow(Base):
+    """One row per submitted job (doc 04).
+
+    Hosted-mode counterpart to :class:`splitsmith.ui.jobs.JobRegistry`'s
+    in-memory dict. Persists the full :class:`Job` wire shape (status,
+    progress, message, error, result, timestamps, cancel/ack flags) so
+    a server restart doesn't lose the SPA's view of recently-finished
+    work. The dispatch model stays in-process for now -- workers run
+    on a :class:`ThreadPoolExecutor` inside the API server -- but
+    rows that were PENDING/RUNNING at the moment of a restart get
+    swept to FAILED on boot so the SPA doesn't see ghosts that no
+    worker will ever pick up.
+
+    **Multi-tenant:** ``user_id`` is non-nullable and CASCADEs on user
+    delete. Every query in :class:`PostgresJobBackend` filters by
+    ``ComputeJobRow.user_id == self._user_id``. Isolation tests in
+    ``test_job_backend.py`` guard the invariant.
+    """
+
+    __tablename__ = "compute_jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Wire-shape mirror of :class:`splitsmith.ui.jobs.Job`. Status is
+    # a free-form string keyed to ``JobStatus``; the enum lives in
+    # ``jobs.py`` and we don't import it here to keep the DB layer
+    # free of UI dependencies. Stored values: pending/running/
+    # succeeded/failed/cancelled.
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    stage_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    video_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    progress: Mapped[float | None] = mapped_column(Float, nullable=True)
+    message: Mapped[str | None] = mapped_column(String, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ComputeJobRow id={self.id!r} kind={self.kind!r} status={self.status!r}>"

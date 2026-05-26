@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import threading
 from pathlib import Path
@@ -6092,7 +6093,7 @@ def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
         started.set()
         release.wait(timeout=5.0)
 
-    state.jobs.submit(kind="test_block", fn=worker)
+    asyncio.run(state.jobs.submit(kind="test_block", fn=worker))
     assert started.wait(timeout=2.0)
 
     try:
@@ -6106,7 +6107,7 @@ def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
     # Wait until the registry flips it to terminal state.
     deadline_attempts = 0
     while deadline_attempts < 100:
-        snap = state.jobs.list()
+        snap = asyncio.run(state.jobs.list())
         if all(j.status not in (JobStatus.PENDING, JobStatus.RUNNING) for j in snap):
             break
         deadline_attempts += 1
