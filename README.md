@@ -124,6 +124,7 @@ All commands run as `uv run splitsmith <subcommand>`. Pass `--help` for the full
 | command | purpose |
 |---|---|
 | `ui` | Production SPA. Persistent project state on disk; the main entry point. |
+| `serve` | Hosted-mode API server (Postgres-backed). Preview; see [Hosted mode below](#hosted-mode-preview). |
 | `detect` | One-shot beep + shot detection preview. No files written. |
 | `single` | Full pipeline on one video with an explicit stage time. |
 | `process` | Batch over an SSI Scoreboard stage JSON, matching videos to stages by timestamp. |
@@ -133,6 +134,20 @@ All commands run as `uv run splitsmith <subcommand>`. Pass `--help` for the full
 | `audit-apply` | Merge an audited candidates CSV back into a fixture JSON. |
 | `fcpxml` | Regenerate a timeline from a hand-edited splits CSV. |
 | `mcp` | Model Context Protocol server; pairs with the `/splitsmith-match` Claude Code skill. |
+
+## Hosted mode (preview)
+
+The SaaS-foundation ladder ships a Postgres-backed hosted variant of the server alongside the desktop `ui` mode. Workers, jobs, and per-user state persist in Postgres + MinIO instead of `~/.splitsmith/`. The whole stack boots locally via `docker compose up`:
+
+```bash
+docker compose up --build
+curl http://localhost:5174/api/health
+curl http://localhost:5174/api/me/recent-projects
+```
+
+This is **preview-only**: one loopback user, no real authentication, no SPA bundle, no upload pipeline yet. Workers still run in-process inside the API container (no separate `worker` command -- one container is both HTTP and the executor pool).
+
+See [`docs/saas-readiness/HOSTED-LOCAL.md`](docs/saas-readiness/HOSTED-LOCAL.md) for the complete inventory of what works today, what doesn't, validation recipes, teardown, and the architecture diagram. The broader SaaS plan lives under [`docs/saas-readiness/`](docs/saas-readiness/).
 
 ## Configuration
 
