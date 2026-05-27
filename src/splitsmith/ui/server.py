@@ -2959,20 +2959,26 @@ def create_app(
         )
         canonical = project.attach_raw_video(rv)
 
-        # When the caller pre-declared coverage, also wire up the
-        # per-stage StageVideo entries so the worker has something to
-        # detect against. Each stage gets its own StageVideo with the
-        # same ``path`` (one raw -> N stage rows is the doc-05 model);
-        # if the stage already references this path we skip rather than
-        # double-register. Role auto-promotes to primary when the stage
-        # has no primary yet -- same convention as ``assign_video``.
+        # Decide where the per-stage StageVideo entries land:
+        #   - covers_stages given -> one StageVideo per named stage
+        #     (the doc-05 "one raw covers N stages" shape).
+        #   - covers_stages empty -> a single entry in unassigned_videos
+        #     so the ingest tray UI picks it up the same way local-mode
+        #     scan does. The user then drags to stages or runs
+        #     auto-match. Without this, attach + no coverage would
+        #     leave the project's raw_videos manifest populated but
+        #     nothing for the worker to detect against.
         video_path = Path(storage_path)
-        for stage_number in covers:
-            stage = project.stage(stage_number)
-            if any(str(v.path) == storage_path for v in stage.videos):
-                continue
-            role: VideoRole = "secondary" if stage.primary() is not None else "primary"
-            stage.videos.append(StageVideo(path=video_path, role=role))
+        already_registered = project.find_video(video_path) is not None
+        if covers:
+            for stage_number in covers:
+                stage = project.stage(stage_number)
+                if any(str(v.path) == storage_path for v in stage.videos):
+                    continue
+                role: VideoRole = "secondary" if stage.primary() is not None else "primary"
+                stage.videos.append(StageVideo(path=video_path, role=role))
+        elif not already_registered:
+            project.unassigned_videos.append(StageVideo(path=video_path))
 
         project.save(root)
 

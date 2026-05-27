@@ -209,7 +209,13 @@ export function AddFootageModal({
   }
 
   if (hostedMode) {
-    return <HostedUploadSurface onClose={onClose} />;
+    return (
+      <HostedUploadSurface
+        slug={slug}
+        onClose={onClose}
+        onImported={onImported}
+      />
+    );
   }
 
   return (
@@ -732,8 +738,18 @@ function StatusIcon({ state }: { state: ScanState }) {
  *  path. Today the upload terminates at object storage -- attaching
  *  to a project happens once the worker pipeline can read from S3
  *  (separate chunk per the saas-readiness roadmap). */
-function HostedUploadSurface({ onClose }: { onClose: () => void }) {
-  return <HostedUploadBody onClose={onClose} />;
+function HostedUploadSurface({
+  slug,
+  onClose,
+  onImported,
+}: {
+  slug: string;
+  onClose: () => void;
+  onImported: (imported: number) => void;
+}) {
+  return (
+    <HostedUploadBody slug={slug} onClose={onClose} onImported={onImported} />
+  );
 }
 
 interface PendingUpload {
@@ -753,11 +769,32 @@ interface PendingUpload {
   controller?: AbortController;
 }
 
-function HostedUploadBody({ onClose }: { onClose: () => void }) {
+function HostedUploadBody({
+  slug,
+  onClose,
+  onImported,
+}: {
+  slug: string;
+  onClose: () => void;
+  onImported: (imported: number) => void;
+}) {
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Track which uploaded filenames the operator has attached to the
+  // current shooter's project this session, plus any inflight / error
+  // state. Persistent attachment lives on match.json (raw_videos[]);
+  // this state is just the UI flash so the operator sees the action
+  // succeed before closing the modal.
+  const [attachState, setAttachState] = useState<
+    Record<
+      string,
+      | { status: "attaching" }
+      | { status: "attached" }
+      | { status: "error"; message: string }
+    >
+  >({});
 
   // Initial list -- so the surface opens with a real "you've already
   // uploaded X" view instead of looking empty until the operator
@@ -903,6 +940,37 @@ function HostedUploadBody({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const attachToProject = useCallback(
+    async (entry: RawUploadEntry) => {
+      setAttachState((prev) => ({
+        ...prev,
+        [entry.filename]: { status: "attaching" },
+      }));
+      try {
+        await api.attachRawVideo(slug, {
+          filename: entry.filename,
+          sha256: entry.etag,
+          size_bytes: entry.size,
+        });
+        setAttachState((prev) => ({
+          ...prev,
+          [entry.filename]: { status: "attached" },
+        }));
+        // The video now lives in unassigned_videos on the project; tell
+        // the parent so the ingest page refreshes and the operator sees
+        // the new row in the tray when they close the modal.
+        onImported(1);
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.detail : String(err);
+        setAttachState((prev) => ({
+          ...prev,
+          [entry.filename]: { status: "error", message: msg },
+        }));
+      }
+    },
+    [slug, onImported],
+  );
+
   const inFlight = uploads.some(
     (u) => u.status === "queued" || u.status === "hashing" || u.status === "uploading",
   );
@@ -925,8 +993,8 @@ function HostedUploadBody({ onClose }: { onClose: () => void }) {
               Upload raw footage
             </h2>
             <p className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-              Files land in your hosted object storage. Attaching to a
-              project is a separate step.
+              Files land in your hosted storage. Attach to this project
+              to drop them into the unassigned tray.
             </p>
           </div>
           {!inFlight && (
@@ -1015,7 +1083,9 @@ function HostedUploadBody({ onClose }: { onClose: () => void }) {
                   <ExistingRow
                     key={e.path}
                     entry={e}
+                    attachState={attachState[e.filename]}
                     onDelete={() => removeUploaded(e.filename)}
+                    onAttach={() => attachToProject(e)}
                   />
                 ))}
               </ul>
@@ -1104,27 +1174,64 @@ function UploadRow({
 
 function ExistingRow({
   entry,
+  attachState,
   onDelete,
+  onAttach,
 }: {
   entry: RawUploadEntry;
+  attachState:
+    | { status: "attaching" }
+    | { status: "attached" }
+    | { status: "error"; message: string }
+    | undefined;
   onDelete: () => void;
+  onAttach: () => void;
 }) {
+  const isAttaching = attachState?.status === "attaching";
+  const isAttached = attachState?.status === "attached";
+  const attachError =
+    attachState?.status === "error" ? attachState.message : null;
   return (
     <li className="flex items-center justify-between gap-3 rounded-md border border-rule bg-surface-2 px-3 py-2">
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="truncate font-mono text-[0.75rem] text-ink">
           {entry.filename}
         </div>
         <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
           {formatBytes(entry.size)}
           {entry.last_modified && ` . ${formatRelative(entry.last_modified)}`}
+          {isAttached && (
+            <span className="text-done"> . attached to project</span>
+          )}
+          {attachError && (
+            <span className="text-led-text"> . {attachError}</span>
+          )}
         </div>
       </div>
+      {isAttached ? (
+        <span
+          aria-hidden
+          className="inline-flex size-5 items-center justify-center rounded-full bg-done text-bg"
+        >
+          <Check className="size-3" strokeWidth={3} />
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onAttach}
+          disabled={isAttaching}
+          aria-label={`Attach ${entry.filename} to project`}
+          className="rounded-md border border-rule-strong bg-surface px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+        >
+          {isAttaching ? "Attaching..." : "Attach"}
+        </button>
+      )}
       <button
         type="button"
         onClick={onDelete}
+        disabled={isAttaching}
         aria-label={`Delete ${entry.filename}`}
-        className="rounded-md p-1 text-subtle hover:bg-led-tint hover:text-led-text"
+        className="rounded-md p-1 text-subtle hover:bg-led-tint hover:text-led-text disabled:opacity-50"
       >
         <Trash2 className="size-3.5" />
       </button>
