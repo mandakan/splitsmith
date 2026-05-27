@@ -23,6 +23,7 @@ from splitsmith.ui.project import (
     SUBDIRS,
     VIDEO_EXTENSIONS,
     MatchProject,
+    RawVideo,
     StageEntry,
     StageStatus,
     StageVideo,
@@ -102,7 +103,8 @@ def test_load_migrates_v1_caches_to_v2(tmp_path: Path) -> None:
 
     reloaded = MatchProject.load(root)
 
-    assert reloaded.schema_version == 2
+    # v1 chains through v2 + v3 to the current SCHEMA_VERSION.
+    assert reloaded.schema_version == SCHEMA_VERSION
     assert not legacy_full.exists()
     assert not legacy_audit.exists()
     assert not legacy_peaks.exists()
@@ -111,7 +113,168 @@ def test_load_migrates_v1_caches_to_v2(tmp_path: Path) -> None:
     assert survivor.exists()
     # And the version bump is persisted, so a second load is a no-op.
     persisted = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
-    assert persisted["schema_version"] == 2
+    assert persisted["schema_version"] == SCHEMA_VERSION
+
+
+def test_load_backfills_raw_videos_from_existing_stagevideos(tmp_path: Path) -> None:
+    """A v2 project on disk lands on v3 with ``raw_videos[]`` populated from
+    its StageVideo entries -- one RawVideo per unique source path, with
+    ``covers_stages`` aggregated across stages.
+    """
+    root = tmp_path / "v2-project"
+    project = MatchProject.init(root, name="V2 Project")
+    # One source covering stages 1-3 + a second source on stage 1 only +
+    # an unassigned video. The migration should collapse the multi-stage
+    # source into a single RawVideo with covers_stages=[1, 2, 3].
+    shared = Path("raw/headcam.mp4")
+    side = Path("raw/sidecam.mp4")
+    unassigned = Path("raw/leftover.mp4")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=10.0,
+            videos=[
+                StageVideo(path=shared, role="primary"),
+                StageVideo(path=side, role="secondary"),
+            ],
+        ),
+        StageEntry(
+            stage_number=2,
+            stage_name="Two",
+            time_seconds=15.0,
+            videos=[StageVideo(path=shared, role="primary")],
+        ),
+        StageEntry(
+            stage_number=3,
+            stage_name="Three",
+            time_seconds=20.0,
+            videos=[StageVideo(path=shared, role="primary")],
+        ),
+    ]
+    project.unassigned_videos = [StageVideo(path=unassigned)]
+    project.save(root)
+
+    # Materialize one of the sources on disk so the migration can read
+    # its size; leave the others offline to confirm we tolerate that.
+    (root / "raw").mkdir(exist_ok=True)
+    (root / "raw" / "headcam.mp4").write_bytes(b"x" * 4096)
+
+    # Force the on-disk version back to 2 so load() runs the v2->v3 path.
+    data = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+    data["schema_version"] = 2
+    data.pop("raw_videos", None)
+    (root / PROJECT_FILE).write_text(json.dumps(data), encoding="utf-8")
+
+    reloaded = MatchProject.load(root)
+
+    assert reloaded.schema_version == SCHEMA_VERSION
+    by_path = {rv.storage_path: rv for rv in reloaded.raw_videos}
+    assert set(by_path) == {"raw/headcam.mp4", "raw/sidecam.mp4", "raw/leftover.mp4"}
+    assert by_path["raw/headcam.mp4"].covers_stages == [1, 2, 3]
+    assert by_path["raw/sidecam.mp4"].covers_stages == [1]
+    # Unassigned videos have no covers_stages -- they exist but aren't on
+    # any stage yet. Empty list, not missing.
+    assert by_path["raw/leftover.mp4"].covers_stages == []
+    # Source-on-disk has its size populated; offline sources stay at 0.
+    assert by_path["raw/headcam.mp4"].size_bytes == 4096
+    assert by_path["raw/sidecam.mp4"].size_bytes == 0
+    # sha256 is None on legacy backfill -- we never had one to record.
+    assert by_path["raw/headcam.mp4"].sha256 is None
+    # original_filename is the basename for SPA display.
+    assert by_path["raw/headcam.mp4"].original_filename == "headcam.mp4"
+
+
+def test_v2_to_v3_migration_is_idempotent(tmp_path: Path) -> None:
+    """Re-loading a project doesn't duplicate raw_videos[] entries.
+
+    The migration runs once on the first v2 load; subsequent loads see
+    schema_version == 3 on disk and skip the backfill entirely.
+    """
+    root = tmp_path / "idempotent"
+    project = MatchProject.init(root, name="Idempotent")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary")],
+        )
+    ]
+    project.save(root)
+    data = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+    data["schema_version"] = 2
+    data.pop("raw_videos", None)
+    (root / PROJECT_FILE).write_text(json.dumps(data), encoding="utf-8")
+
+    first = MatchProject.load(root)
+    second = MatchProject.load(root)
+
+    assert len(first.raw_videos) == 1
+    assert len(second.raw_videos) == 1
+    assert second.raw_videos[0].covers_stages == [1]
+
+
+def test_attach_raw_video_merges_covers_stages(tmp_path: Path) -> None:
+    """Calling ``attach_raw_video`` twice with the same storage_path unions
+    the covers_stages list rather than appending a duplicate entry.
+    """
+    root = tmp_path / "attach"
+    project = MatchProject.init(root, name="Attach")
+
+    first = project.attach_raw_video(
+        RawVideo(
+            original_filename="clip.mp4",
+            size_bytes=1024,
+            storage_path="raw/clip.mp4",
+            covers_stages=[1, 2],
+        )
+    )
+    second = project.attach_raw_video(
+        RawVideo(
+            original_filename="clip.mp4",
+            size_bytes=1024,
+            storage_path="raw/clip.mp4",
+            covers_stages=[2, 3],
+        )
+    )
+
+    assert first is second
+    assert len(project.raw_videos) == 1
+    assert project.raw_videos[0].covers_stages == [1, 2, 3]
+
+
+def test_attach_raw_video_fills_in_missing_size_and_sha256(tmp_path: Path) -> None:
+    """A legacy backfill entry (size=0, sha256=None) gets upgraded when a
+    real upload lands -- preserves history while filling in the gaps.
+    """
+    root = tmp_path / "upgrade"
+    project = MatchProject.init(root, name="Upgrade")
+    project.attach_raw_video(
+        RawVideo(
+            original_filename="clip.mp4",
+            size_bytes=0,
+            sha256=None,
+            storage_path="raw/clip.mp4",
+        )
+    )
+    project.attach_raw_video(
+        RawVideo(
+            original_filename="clip.mp4",
+            size_bytes=2048,
+            sha256="deadbeef",
+            storage_path="raw/clip.mp4",
+        )
+    )
+
+    assert len(project.raw_videos) == 1
+    assert project.raw_videos[0].size_bytes == 2048
+    assert project.raw_videos[0].sha256 == "deadbeef"
+
+
+def test_find_raw_video_returns_none_when_absent(tmp_path: Path) -> None:
+    project = MatchProject.init(tmp_path / "find", name="Find")
+    assert project.find_raw_video("raw/missing.mp4") is None
 
 
 def test_init_is_idempotent(tmp_path: Path) -> None:
