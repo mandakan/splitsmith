@@ -1619,3 +1619,172 @@ def test_match_analysis_handles_missing_timestamp(tmp_path: Path) -> None:
     analysis = project.match_analysis()
     assert analysis.videos[0].classification == "no_timestamp"
     assert analysis.videos[0].stage_numbers == []
+
+
+# --- resolve_video_path: storage-aware worker resolver ----------------
+#
+# PR 4 of the attach-to-project chunk. resolve_video_path stays the
+# single chokepoint every detection / ffmpeg callsite goes through;
+# hosted mode binds a Storage so the first resolve mirrors the raw
+# video into the project's local cache. Local mode leaves the
+# binding at None and gets the legacy behaviour for free.
+
+
+def test_resolve_local_mode_absolute_path_unchanged(tmp_path: Path) -> None:
+    """Local mode (no storage bound) -- an absolute path is returned
+    as-is. This is the external-drive / FCP-scratch case."""
+    project = MatchProject.init(tmp_path / "m", name="m")
+    abs_path = tmp_path / "elsewhere" / "raw" / "v.mp4"
+    abs_path.parent.mkdir(parents=True)
+    abs_path.write_bytes(b"x")
+
+    resolved = project.resolve_video_path(tmp_path / "m", abs_path)
+    assert resolved == abs_path
+
+
+def test_resolve_local_mode_relative_path_joins_root(tmp_path: Path) -> None:
+    """Local mode -- relative ``raw/v.mp4`` resolves to ``root/raw/v.mp4``
+    even if the file doesn't exist yet (the caller's existence check
+    surfaces missing sources)."""
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+
+    resolved = project.resolve_video_path(root, Path("raw/v.mp4"))
+    assert resolved == root / "raw" / "v.mp4"
+
+
+def test_resolve_hosted_mode_downloads_on_first_access(tmp_path: Path) -> None:
+    """A storage-bound project with no local mirror streams the object
+    from storage into ``<root>/<path>`` on first resolve so the
+    worker's downstream ``open()`` / ffprobe sees real bytes."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    payload = b"raw bytes " * 4096  # 40 KB; enough to exercise copyfileobj chunks
+    (backing / "raw").mkdir()
+    (backing / "raw" / "headcam.mp4").write_bytes(payload)
+    storage = FilesystemStorage(backing)
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.bind_storage(storage)
+
+    local = root / "raw" / "headcam.mp4"
+    assert not local.exists()
+    resolved = project.resolve_video_path(root, Path("raw/headcam.mp4"))
+    assert resolved == local
+    assert local.read_bytes() == payload
+
+
+def test_resolve_hosted_mode_caches_after_first_download(tmp_path: Path) -> None:
+    """Second resolve must NOT re-stream from storage -- the local
+    mirror is the source of truth once written. Multiple detection
+    jobs on the same project share one download per file."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    (backing / "raw").mkdir()
+    (backing / "raw" / "v.mp4").write_bytes(b"original")
+    storage = FilesystemStorage(backing)
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.bind_storage(storage)
+
+    project.resolve_video_path(root, Path("raw/v.mp4"))
+    local = root / "raw" / "v.mp4"
+
+    # Mutate the backing object to a different value; if a second
+    # resolve re-downloaded, the local mirror would change with it.
+    (backing / "raw" / "v.mp4").write_bytes(b"DIFFERENT")
+    project.resolve_video_path(root, Path("raw/v.mp4"))
+    assert local.read_bytes() == b"original"
+
+
+def test_resolve_hosted_mode_absolute_path_bypasses_storage(tmp_path: Path) -> None:
+    """An absolute ``StageVideo.path`` is always a local-disk reference
+    (external drive, FCP scratch) and must NOT trigger a storage
+    download. Belt-and-braces: hosted-mode projects with mixed
+    sources don't accidentally try to fetch ``/Volumes/...`` from S3."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.bind_storage(storage)
+
+    external = tmp_path / "external" / "v.mp4"
+    external.parent.mkdir()
+    external.write_bytes(b"on the drive")
+    resolved = project.resolve_video_path(root, external)
+    assert resolved == external
+
+
+def test_resolve_hosted_mode_missing_key_leaves_no_local_file(tmp_path: Path) -> None:
+    """When the storage object is missing, resolve_video_path is a
+    no-op (no download, no half-written mirror). The caller's
+    existing ``not source.exists()`` checks then surface the missing
+    source -- same shape as offline-drive local-mode failure."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.bind_storage(storage)
+
+    resolved = project.resolve_video_path(root, Path("raw/missing.mp4"))
+    assert resolved == root / "raw" / "missing.mp4"
+    assert not resolved.exists()
+
+
+def test_bind_storage_none_disables_mirror(tmp_path: Path) -> None:
+    """``bind_storage(None)`` reverts a project to local-mode behaviour
+    -- a relative path resolves to root/path without consulting any
+    backend even if one was previously bound."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    (backing / "raw").mkdir()
+    (backing / "raw" / "v.mp4").write_bytes(b"x")
+    storage = FilesystemStorage(backing)
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.bind_storage(storage)
+    project.bind_storage(None)
+
+    local = root / "raw" / "v.mp4"
+    project.resolve_video_path(root, Path("raw/v.mp4"))
+    assert not local.exists()
+
+
+def test_storage_binding_not_persisted_in_project_json(tmp_path: Path) -> None:
+    """The Storage handle is request-scope state, not project-on-disk
+    state -- it must never round-trip through ``project.json``. A
+    bound-then-saved-then-loaded project comes back with no
+    binding (the caller re-binds at load time)."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.bind_storage(storage)
+    project.save(root)
+
+    reloaded = MatchProject.load(root)
+    assert reloaded._storage is None
+    dumped = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
+    assert "_storage" not in dumped
+    assert "storage" not in dumped
