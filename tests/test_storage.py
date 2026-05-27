@@ -39,6 +39,49 @@ def test_upload_stream_rejects_traversal(tmp_path: Path) -> None:
         storage.upload_stream("../escape.bin", io.BytesIO(b"x"))
 
 
+def test_open_stream_yields_full_bytes(tmp_path: Path) -> None:
+    """The streaming-read counterpart to ``upload_stream`` must land the
+    same bytes as ``read_bytes`` for the same key.
+    """
+    storage = FilesystemStorage(tmp_path)
+    payload = b"Y" * (2 << 20) + b"tail"  # 2 MiB + sentinel
+    storage.write_bytes("raw/clip.bin", payload)
+
+    with storage.open_stream("raw/clip.bin") as src:
+        streamed = src.read()
+    assert streamed == payload
+    assert streamed == storage.read_bytes("raw/clip.bin")
+
+
+def test_open_stream_raises_file_not_found(tmp_path: Path) -> None:
+    storage = FilesystemStorage(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        storage.open_stream("raw/missing.bin")
+
+
+def test_open_stream_supports_copyfileobj(tmp_path: Path) -> None:
+    """The worker-side resolver (PR 4) copies via ``shutil.copyfileobj``.
+    Prove the open_stream return value works as the source argument so
+    the worker doesn't have to special-case the backend.
+    """
+    import shutil
+
+    storage = FilesystemStorage(tmp_path)
+    storage.write_bytes("raw/clip.bin", b"copy me" * 4096)
+    dest = tmp_path / "local-cache.bin"
+
+    with storage.open_stream("raw/clip.bin") as src, dest.open("wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+    assert dest.read_bytes() == b"copy me" * 4096
+
+
+def test_open_stream_rejects_traversal(tmp_path: Path) -> None:
+    storage = FilesystemStorage(tmp_path)
+    with pytest.raises(ValueError, match="must be relative"):
+        storage.open_stream("../escape.bin")
+
+
 def test_write_creates_parent_directories(tmp_path: Path) -> None:
     """Callers should not have to mkdir themselves -- a project's
     on-disk layout has many nested folders and forcing every writer
