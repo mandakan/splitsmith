@@ -66,6 +66,61 @@ def test_upload_stream_rejects_traversal(s3_client) -> None:
         storage.upload_stream("../escape.bin", io.BytesIO(b"x"))
 
 
+def test_open_stream_yields_full_bytes(s3_client) -> None:
+    """The streaming-read counterpart to ``upload_stream`` must land the
+    same bytes as ``read_bytes`` so the worker-side download cache (PR 4)
+    can pick either path without observable difference.
+    """
+    storage = _storage(s3_client)
+    payload = b"Z" * 17 + b"tail"
+    storage.write_bytes("raw/clip.bin", payload)
+
+    with storage.open_stream("raw/clip.bin") as src:
+        streamed = src.read()
+    assert streamed == payload
+    assert streamed == storage.read_bytes("raw/clip.bin")
+
+
+def test_open_stream_raises_file_not_found(s3_client) -> None:
+    storage = _storage(s3_client)
+    with pytest.raises(FileNotFoundError):
+        storage.open_stream("raw/missing.bin")
+
+
+def test_open_stream_supports_copyfileobj(s3_client, tmp_path) -> None:
+    """The PR 4 worker resolver pattern: stream an S3 object into a
+    local file via ``shutil.copyfileobj`` so a 500 MB raw video doesn't
+    have to buffer fully into memory.
+    """
+    import shutil
+
+    storage = _storage(s3_client)
+    storage.write_bytes("raw/clip.bin", b"copy me" * 4096)
+    dest = tmp_path / "worker-cache.bin"
+
+    with storage.open_stream("raw/clip.bin") as src, dest.open("wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+    assert dest.read_bytes() == b"copy me" * 4096
+
+
+def test_open_stream_closes_underlying_body(s3_client) -> None:
+    """Exiting the ``with`` block must close the StreamingBody so the
+    HTTPS connection returns to the pool instead of leaking.
+    """
+    storage = _storage(s3_client)
+    storage.write_bytes("raw/clip.bin", b"payload")
+
+    stream = storage.open_stream("raw/clip.bin")
+    with stream as src:
+        assert src.read() == b"payload"
+    # After the context exits, the wrapped body is closed -- further
+    # reads raise. botocore raises ValueError("I/O operation on closed
+    # file") for a closed StreamingBody.
+    with pytest.raises(ValueError):
+        stream.read()
+
+
 def test_write_overwrites_existing(s3_client) -> None:
     storage = _storage(s3_client)
     storage.write_bytes("k", b"v1")
