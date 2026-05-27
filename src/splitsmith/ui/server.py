@@ -963,10 +963,14 @@ class RecentProjectDetail(BaseModel):
     shooter_count: int = 0
     stage_count: int = 0
     stages_audited: int = 0
+    # Total raw videos attached across all shooters. Drives the
+    # "awaiting footage" status the picker renders before the operator
+    # has uploaded anything (#425).
+    video_count: int = 0
     match_date: str | None = None
     club: str | None = None
     last_modified_at: datetime | None = None
-    status: Literal["in_progress", "exported", "archived", "unknown"] = "unknown"
+    status: Literal["awaiting_footage", "in_progress", "exported", "archived", "unknown"] = "unknown"
     # ``True`` for matches the user created without scoreboard data --
     # surfaces the "manual" pill in the polished picker.
     manual: bool = False
@@ -1001,7 +1005,11 @@ class CreateMatchManualRequest(BaseModel):
     """
 
     name: str
-    project_folder: str
+    # Optional in hosted mode: when omitted (or empty/null) the server
+    # synthesizes ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects/<slug>/``.
+    # Local mode still requires the field so the user controls where the
+    # match lands on their disk. See ``_resolve_create_target``.
+    project_folder: str | None = None
     match_date: date | None = None
     club: str | None = None
     match_type: str | None = None
@@ -1037,7 +1045,8 @@ class CreateMatchScoreboardRequest(BaseModel):
     the create flow lands the user on a fully-populated match.
     """
 
-    project_folder: str
+    # Optional in hosted mode (see :class:`CreateMatchManualRequest`).
+    project_folder: str | None = None
     name: str
     match_id: int
     content_type: int
@@ -1885,6 +1894,49 @@ async def _register_match_at(
     return name, match.match_id
 
 
+def _resolve_create_target(
+    state: AppState,
+    *,
+    project_folder: str | None,
+    name: str,
+) -> Path:
+    """Resolve the on-disk match folder for ``POST /api/match/create-*``.
+
+    - **Local mode**: ``project_folder`` is required (the user picks
+      where the match lands on their disk). 400 if missing/blank.
+    - **Hosted mode**: ``project_folder`` may be omitted; the server
+      synthesises ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects/<slug>/``
+      so the SPA never has to expose a host filesystem picker (#425).
+      If a hosted client *does* send a path, it's honoured -- the
+      hosted UI just doesn't expose the input.
+
+    Duplicate-name dedupe is handled by the existing
+    ``match_already_exists`` check downstream, so this function only
+    produces a candidate path.
+    """
+    if project_folder and project_folder.strip():
+        return Path(project_folder).expanduser()
+
+    if not _hosted_mode_active():
+        raise HTTPException(
+            status_code=400,
+            detail="project_folder is required in local mode",
+        )
+
+    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
+    user_id = getattr(state.auth, "user_id", None) if state.auth is not None else None
+    if not user_id:
+        # _apply_hosted_mode_wiring guarantees state.auth.user_id is set
+        # in hosted mode; failing loud here is preferable to silently
+        # writing to a shared prefix.
+        raise HTTPException(
+            status_code=500,
+            detail="hosted mode active but auth.user_id is not set",
+        )
+    slug = match_model._slugify(name)
+    return root / "users" / user_id / "projects" / slug
+
+
 def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail:
     """Read on-disk metadata for one recent-project entry.
 
@@ -1926,6 +1978,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             # operator has to hit Save & next at least once on the
             # stage for it to count. Skipped stages don't qualify.
             audited_total = 0
+            video_total = 0
             shooter_names: list[str] = []
             for slug in match.shooters:
                 shooter_root = match_model.Match.shooter_root(path, slug)
@@ -1940,9 +1993,11 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                     shooter_names.append(shooter.name or slug)
                     continue
                 audited_total += legacy.audited_count(shooter_root)
+                video_total += len(legacy.all_videos())
                 shooter_names.append(shooter.name or slug)
             detail.shooter_names = shooter_names
             detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
+            detail.video_count = video_total
             metadata_path = path / match_model.MATCH_FILE
         else:
             # Path exists but is not a Match folder -- a pre-Tier-1
@@ -1957,16 +2012,17 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
     except Exception:  # noqa: BLE001 -- defensive: never break listing
         return detail
 
-    # Derive status. "exported" = every stage audited (heuristic); "archived"
-    # = no modification in 180 days; "in_progress" otherwise.
+    # Derive status. "exported" = every stage audited (heuristic);
+    # "archived" = no modification in 180 days;
+    # "awaiting_footage" = the operator hasn't attached any footage yet
+    # (drives the picker pill + footage-gated menu treatment per #425);
+    # "in_progress" otherwise.
     if detail.stage_count > 0 and detail.stages_audited >= detail.stage_count:
         detail.status = "exported"
-    elif detail.last_modified_at is not None:
-        age = datetime.now(UTC) - detail.last_modified_at
-        if age.days > 180:
-            detail.status = "archived"
-        else:
-            detail.status = "in_progress"
+    elif detail.last_modified_at is not None and (datetime.now(UTC) - detail.last_modified_at).days > 180:
+        detail.status = "archived"
+    elif detail.kind == "match" and detail.video_count == 0:
+        detail.status = "awaiting_footage"
     else:
         detail.status = "in_progress"
     return detail
@@ -1983,6 +2039,16 @@ SPLITSMITH_S3_ENDPOINT_URL_ENV = "SPLITSMITH_S3_ENDPOINT_URL"
 SPLITSMITH_S3_REGION_ENV = "SPLITSMITH_S3_REGION"
 SPLITSMITH_S3_ACCESS_KEY_ID_ENV = "SPLITSMITH_S3_ACCESS_KEY_ID"
 SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV = "SPLITSMITH_S3_SECRET_ACCESS_KEY"
+# Hosted-mode project-metadata root. ``match.json`` + per-shooter
+# JSON still lives on the container's filesystem (raw videos are the
+# part that ships to S3 today; persisting match metadata to Postgres
+# is doc 09 work). Defaults to the splitsmith user's home so a fresh
+# container is writable; production deployments mount a volume at
+# this path. The directory layout under here is
+# ``users/<user_id>/projects/<slug>/`` -- the same multi-tenant
+# prefix S3 storage uses.
+SPLITSMITH_PROJECTS_DIR_ENV = "SPLITSMITH_PROJECTS_DIR"
+SPLITSMITH_PROJECTS_DIR_DEFAULT = "/home/splitsmith/data"
 
 
 class _HashingReader:
@@ -6992,8 +7058,13 @@ def create_app(
         directory as the active legacy project so existing endpoints keep
         working. Folder is created if missing; refuses if a ``match.json``
         is already present (use bind to open existing matches).
+
+        ``project_folder`` is optional in hosted mode -- the server
+        synthesises ``users/<user_id>/projects/<slug>/`` under
+        ``$SPLITSMITH_PROJECTS_DIR`` so the SPA doesn't have to expose a
+        host filesystem picker (#425).
         """
-        target = Path(req.project_folder).expanduser()
+        target = _resolve_create_target(state, project_folder=req.project_folder, name=req.name)
         if (target / match_model.MATCH_FILE).exists():
             raise HTTPException(
                 status_code=409,
@@ -7096,7 +7167,7 @@ def create_app(
                 )
             comp_ids_seen.add(pick.selected_competitor_id)
 
-        target = Path(req.project_folder).expanduser()
+        target = _resolve_create_target(state, project_folder=req.project_folder, name=req.name)
         if (target / match_model.MATCH_FILE).exists():
             raise HTTPException(
                 status_code=409,
@@ -7910,12 +7981,20 @@ def create_app(
     def server_features() -> JSONResponse:
         """Surface server-side feature flags to the SPA on first load.
 
-        Today: ``lab`` (the developer-facing Algorithm Lab page; off by
-        default, opt-in via ``splitsmith ui --lab``). The SPA hides the
-        Lab nav entry when this is False so end users don't trip into
-        a multi-second model-loading workflow they didn't ask for.
+        Fields:
+
+        - ``lab`` -- the developer-facing Algorithm Lab page; off by
+          default, opt-in via ``splitsmith ui --lab``. The SPA hides
+          the Lab nav entry when this is False so end users don't trip
+          into a multi-second model-loading workflow they didn't ask
+          for.
+        - ``mode`` -- ``"local"`` (default ``splitsmith ui``) or
+          ``"hosted"`` (``splitsmith serve`` + ``SPLITSMITH_MODE=hosted``).
+          The SPA branches on this to suppress filesystem-picker UX
+          that's meaningless against an ephemeral hosted container.
         """
-        return JSONResponse({"lab": lab_enabled})
+        mode = "hosted" if _hosted_mode_active() else "local"
+        return JSONResponse({"lab": lab_enabled, "mode": mode})
 
     # ----------------------------------------------------------------------
     # Lab: fixture management + ensemble eval + tuning

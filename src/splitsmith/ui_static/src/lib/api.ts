@@ -1156,10 +1156,18 @@ export interface RecentProjectDetail {
   shooter_count: number;
   stage_count: number;
   stages_audited: number;
+  /** Total raw videos attached across all shooters. Drives the
+   *  "awaiting footage" pill + footage-aware menu treatment (#425). */
+  video_count: number;
   match_date: string | null;
   club: string | null;
   last_modified_at: string | null;
-  status: "in_progress" | "exported" | "archived" | "unknown";
+  status:
+    | "awaiting_footage"
+    | "in_progress"
+    | "exported"
+    | "archived"
+    | "unknown";
   manual: boolean;
   shooter_names: string[];
 }
@@ -1173,7 +1181,10 @@ export interface CreateMatchStageDraft {
 
 export interface CreateMatchManualBody {
   name: string;
-  project_folder: string;
+  /** Optional in hosted mode -- server synthesizes
+   *  ``users/<user_id>/projects/<slug>/`` under ``$SPLITSMITH_PROJECTS_DIR``
+   *  when omitted/null. Required in local mode. */
+  project_folder?: string | null;
   match_date?: string | null;
   club?: string | null;
   match_type?: string | null;
@@ -1195,7 +1206,8 @@ export interface CreateMatchCompetitorPick {
 }
 
 export interface CreateMatchScoreboardBody {
-  project_folder: string;
+  /** Optional in hosted mode (see :type:`CreateMatchManualBody`). */
+  project_folder?: string | null;
   name: string;
   match_id: number;
   content_type: number;
@@ -2016,10 +2028,12 @@ export const api = {
     );
   },
 
-  /** Server-side feature flags (fetched once on app mount). Today this
-   *  surfaces the ``lab`` flag so the SPA can hide the Lab nav entry
-   *  unless ``splitsmith ui --lab`` was passed. */
-  getServerFeatures: () => request<{ lab: boolean }>("/api/server/features"),
+  /** Server-side feature flags (fetched once on app mount). Surfaces:
+   *  - ``lab`` -- hide the Lab nav entry unless ``splitsmith ui --lab``.
+   *  - ``mode`` -- ``"local"`` vs ``"hosted"``; SPA suppresses host
+   *    filesystem pickers / project-folder inputs in hosted mode. */
+  getServerFeatures: () =>
+    request<{ lab: boolean; mode: "local" | "hosted" }>("/api/server/features"),
 
   /** Server health + bind state. The picker route polls this on mount
    *  to decide whether the user landed in unbound mode (boot with no

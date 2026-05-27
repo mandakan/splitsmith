@@ -69,6 +69,13 @@ interface MatchSidebarProps {
   /** When true the sidebar renders the "no footage yet" sub for the stage
    *  list (matches polished/17). Defaults to false. */
   awaiting?: boolean;
+  /** True when any shooter on this match has at least one video attached.
+   *  When false the footage-dependent nav rows (Audit, Coach, Videos,
+   *  Export) render as disabled rows with an "attach footage first"
+   *  hint instead of dead-ending the operator on an empty surface
+   *  (#425). Defaults to true so callers that haven't been updated
+   *  retain the previous behaviour. */
+  hasFootage?: boolean;
   /** Per-stage click handler. Receives the stage number; the surface that
    *  owns the sidebar decides where to route (audit, compare, ...). */
   onStageClick?: (stage_number: number) => void;
@@ -103,6 +110,7 @@ export function MatchSidebar({
   shooterCount,
   beepReviewPendingCount,
   awaiting = false,
+  hasFootage = true,
   onStageClick,
   shooterSlug,
   matchId,
@@ -110,6 +118,9 @@ export function MatchSidebar({
   onCollapseToggle,
   className,
 }: MatchSidebarProps) {
+  // Footage-dependent rows share the same hint -- centralised so the
+  // copy doesn't drift between Audit / Coach / Videos / Export.
+  const footageHint = "Attach footage to this match before this surface is usable";
   // Prefix every nav row with /match/:matchId when one is in scope, so
   // clicks keep the user inside the match-scoped subtree (#353 Phase 3).
   // Without a match id we fall back to the bare paths -- legacy routes
@@ -192,6 +203,8 @@ export function MatchSidebar({
           to={shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters`}
           icon={<Crosshair className="size-[15px]" />}
           collapsed={collapsed}
+          disabled={!hasFootage}
+          disabledHint={footageHint}
         >
           Audit
         </SidebarLink>
@@ -199,6 +212,8 @@ export function MatchSidebar({
           to={shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters`}
           icon={<ClipboardCheck className="size-[15px]" />}
           collapsed={collapsed}
+          disabled={!hasFootage}
+          disabledHint={footageHint}
         >
           Coach
         </SidebarLink>
@@ -231,6 +246,8 @@ export function MatchSidebar({
           to={shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters`}
           icon={<ArrowDownToLine className="size-[15px]" />}
           collapsed={collapsed}
+          disabled={!hasFootage}
+          disabledHint={footageHint}
         >
           Export
         </SidebarLink>
@@ -358,6 +375,8 @@ function SidebarLink({
   badgeKind = "count",
   end,
   collapsed,
+  disabled = false,
+  disabledHint,
   children,
 }: {
   to: string;
@@ -369,6 +388,12 @@ function SidebarLink({
   badgeKind?: "count" | "pending";
   end?: boolean;
   collapsed: boolean;
+  /** Renders as a non-interactive muted row with ``disabledHint`` as a
+   *  tooltip. Used for footage-dependent surfaces when no shooter has
+   *  any video attached yet (#425): clicking would dead-end, so the
+   *  empty state is the row itself. */
+  disabled?: boolean;
+  disabledHint?: string;
   children: ReactNode;
 }) {
   const { pathname } = useLocation();
@@ -378,6 +403,29 @@ function SidebarLink({
   // Pending badges hide at zero; count badges only render when defined.
   const showBadge =
     typeof count === "number" && (badgeKind === "pending" ? count > 0 : true);
+  if (disabled) {
+    if (collapsed) {
+      return (
+        <span
+          aria-disabled="true"
+          title={disabledHint}
+          className="relative flex h-9 cursor-not-allowed items-center justify-center rounded-md text-subtle opacity-60"
+        >
+          <span className="inline-flex">{icon}</span>
+        </span>
+      );
+    }
+    return (
+      <span
+        aria-disabled="true"
+        title={disabledHint}
+        className="flex min-h-9 cursor-not-allowed items-center gap-3 rounded-md border border-transparent px-2.5 py-2 text-[0.8125rem] font-medium text-subtle opacity-60"
+      >
+        <span className="inline-flex shrink-0 text-subtle">{icon}</span>
+        <span>{children}</span>
+      </span>
+    );
+  }
   if (collapsed) {
     return (
       <NavLink

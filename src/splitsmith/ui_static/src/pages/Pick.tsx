@@ -43,7 +43,7 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type StatusFilter = "all" | "in_progress" | "exported" | "archived";
+type StatusFilter = "all" | "awaiting_footage" | "in_progress" | "exported" | "archived";
 
 /** Build the URL the picker should navigate to after a successful bind.
  *
@@ -119,12 +119,19 @@ export function Pick() {
   }, []);
 
   const counts = useMemo(() => {
-    const c = { all: 0, in_progress: 0, exported: 0, archived: 0 };
+    const c = {
+      all: 0,
+      awaiting_footage: 0,
+      in_progress: 0,
+      exported: 0,
+      archived: 0,
+    };
     if (!recents) return c;
     for (const r of recents) {
       if (r.kind === "missing") continue;
       c.all += 1;
-      if (r.status === "in_progress") c.in_progress += 1;
+      if (r.status === "awaiting_footage") c.awaiting_footage += 1;
+      else if (r.status === "in_progress") c.in_progress += 1;
       else if (r.status === "exported") c.exported += 1;
       else if (r.status === "archived") c.archived += 1;
     }
@@ -434,6 +441,15 @@ export function Pick() {
             >
               All
             </FilterChip>
+            {counts.awaiting_footage > 0 && (
+              <FilterChip
+                active={statusFilter === "awaiting_footage"}
+                count={counts.awaiting_footage}
+                onClick={() => setStatusFilter("awaiting_footage")}
+              >
+                Awaiting footage
+              </FilterChip>
+            )}
             <FilterChip
               active={statusFilter === "in_progress"}
               count={counts.in_progress}
@@ -841,6 +857,8 @@ function MatchRow({
       <div className="flex flex-col gap-1.5">
         {isMissing ? (
           <StatusPill tone="led">Missing</StatusPill>
+        ) : project.status === "awaiting_footage" ? (
+          <StatusPill tone="awaiting">Awaiting Footage</StatusPill>
         ) : project.status === "in_progress" ? (
           <StatusPill tone="in-progress">In Progress</StatusPill>
         ) : project.status === "exported" ? (

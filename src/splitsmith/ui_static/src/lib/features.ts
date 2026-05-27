@@ -19,13 +19,16 @@ import { useEffect, useState } from "react";
 
 import { api } from "./api";
 
-type Features = { lab: boolean };
+export type DeploymentMode = "local" | "hosted";
+type Features = { lab: boolean; mode: DeploymentMode };
 
 let cached: Promise<Features> | null = null;
 
 function fetchFeatures(): Promise<Features> {
   if (cached === null) {
-    cached = api.getServerFeatures().catch(() => ({ lab: false }) as Features);
+    cached = api
+      .getServerFeatures()
+      .catch(() => ({ lab: false, mode: "local" }) as Features);
   }
   return cached;
 }
@@ -45,4 +48,29 @@ export function useLabEnabled(): boolean {
     };
   }, []);
   return enabled;
+}
+
+/** Returns the deployment mode the server is running in.
+ *
+ * - ``"local"`` -- ``splitsmith ui`` against the host filesystem.
+ *   Folder pickers + project-folder inputs are meaningful.
+ * - ``"hosted"`` -- ``splitsmith serve`` against object storage. The
+ *   container filesystem is ephemeral; folder pickers / host paths
+ *   are suppressed and raw uploads go through the upload endpoint.
+ *
+ * Defaults to ``"local"`` while the initial fetch is in flight or on
+ * failure -- the conservative choice that keeps the local SPA usable
+ * if /api/server/features is temporarily unreachable. */
+export function useDeploymentMode(): DeploymentMode {
+  const [mode, setMode] = useState<DeploymentMode>("local");
+  useEffect(() => {
+    let alive = true;
+    fetchFeatures().then((f) => {
+      if (alive) setMode(f.mode === "hosted" ? "hosted" : "local");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return mode;
 }
