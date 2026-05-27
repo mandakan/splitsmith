@@ -798,13 +798,30 @@ class MatchProject(BaseModel):
     # falls back to the legacy path-only resolution -- desktop behavior
     # is unchanged.
     _storage: Storage | None = PrivateAttr(default=None)
+    # Per-project scope under the user's storage prefix. Used to key
+    # derived artifact caches (audio WAVs today; trim outputs in the
+    # future) so two shooters in different matches can't collide on
+    # the same ``video_id``. Typical value:
+    # ``matches/<match_id>/shooters/<slug>``. ``None`` when storage
+    # is unbound (local mode) or when there's no match scope yet.
+    _storage_scope: str | None = PrivateAttr(default=None)
 
-    def bind_storage(self, storage: Storage | None) -> None:
-        """Attach a per-request ``Storage`` so :meth:`resolve_video_path`
-        can mirror hosted-mode raw videos into the project's local
-        cache on first access. Idempotent; ``None`` clears the binding.
+    def bind_storage(self, storage: Storage | None, *, scope: str | None = None) -> None:
+        """Attach a per-request ``Storage`` so resolvers can mirror
+        hosted-mode artifacts into the project's local cache on first
+        access.
+
+        ``scope`` -- per-project prefix for derived-artifact caches
+        (audio, trims) so two shooters in different matches can't
+        collide on the same ``video_id``. ``None`` disables derived
+        caching even when ``storage`` is bound; the raw-video
+        resolver still works because it keys off the
+        user-prefix-relative ``StageVideo.path`` directly.
+
+        Idempotent; ``None``/``None`` clears the binding.
         """
         self._storage = storage
+        self._storage_scope = scope
 
     @computed_field  # type: ignore[prop-decorator]
     @property
