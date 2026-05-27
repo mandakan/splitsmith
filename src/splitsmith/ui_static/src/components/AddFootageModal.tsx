@@ -34,6 +34,7 @@ import {
   api,
   type ScanResponse,
 } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 export type StorageMode = "symlink" | "copy";
@@ -80,6 +81,15 @@ export function AddFootageModal({
   onImported,
   onStorageChange,
 }: AddFootageModalProps) {
+  // Hosted mode: the SPA upload UX hasn't shipped yet (deferred to the
+  // tus migration in doc 05). Render a placeholder explaining the
+  // curl-only path so the operator isn't dead-ended into a filesystem
+  // picker against the container's ephemeral disk (#425). Hooks below
+  // still run so the Rules of Hooks are satisfied; the branch is in
+  // the returned JSX.
+  const deploymentMode = useDeploymentMode();
+  const hostedMode = deploymentMode === "hosted";
+
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [storage, setStorageState] = useState<StorageMode>(initialStorage);
   const setStorage = useCallback(
@@ -195,6 +205,10 @@ export function AddFootageModal({
 
     setPhase("result");
     onImported(totalImported);
+  }
+
+  if (hostedMode) {
+    return <HostedModePlaceholder onClose={onClose} />;
   }
 
   return (
@@ -707,5 +721,73 @@ function StatusIcon({ state }: { state: ScanState }) {
       aria-label="pending"
       className="inline-block size-2 rounded-full bg-subtle"
     />
+  );
+}
+
+/** Stand-in for the queue + scan flow when the server runs in hosted
+ *  mode. The SPA upload UX is deferred to the tus migration (doc 05);
+ *  meanwhile we surface the curl-only ``POST /api/me/raw/upload`` path
+ *  so the operator has a working route rather than a dead-ended
+ *  filesystem picker (#425). */
+function HostedModePlaceholder({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add footage (hosted mode)"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between gap-4 border-b border-rule px-5 py-3.5">
+          <div>
+            <h2 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+              Upload from browser (preview)
+            </h2>
+            <p className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+              Hosted-mode browser uploads ship with the tus migration.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="space-y-4 px-5 py-4 text-[0.8125rem] text-ink-2">
+          <p>
+            The host filesystem picker is disabled because there's no
+            useful path inside the hosted container. While the
+            drag-and-drop upload UX is in flight, you can stream a clip
+            in via curl:
+          </p>
+          <pre className="overflow-x-auto rounded-md border border-rule bg-surface-2 p-3 font-mono text-[0.75rem] text-ink">
+            {"curl -F \"file=@/path/to/clip.mp4\" \\\n  http://<host>:5174/api/me/raw/upload"}
+          </pre>
+          <p className="text-muted">
+            The endpoint stores the upload under
+            <code className="mx-1 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[0.75rem] text-ink-2">
+              users/&lt;user_id&gt;/raw/
+            </code>
+            in object storage and returns the resulting path + sha256.
+          </p>
+        </div>
+        <footer className="flex items-center justify-end gap-2 border-t border-rule bg-surface-2 px-5 py-3.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md bg-led-fill px-3.5 py-1.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink shadow-[0_0_0_1px_var(--color-led-fill),0_0_18px_var(--color-led-glow)] hover:bg-led"
+          >
+            Got it
+          </button>
+        </footer>
+      </div>
+    </div>
   );
 }

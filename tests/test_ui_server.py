@@ -5542,7 +5542,50 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     assert by_kind["match"]["name"] == "Fancy Match"
     assert by_kind["match"]["shooter_count"] == 1
     assert by_kind["match"]["stage_count"] == 2
+    # No footage attached -> "awaiting_footage". The picker uses this
+    # to flip from the default red "needs your attention" treatment to
+    # a softer "ready for footage" empty state (#425).
+    assert by_kind["match"]["status"] == "awaiting_footage"
+    assert by_kind["match"]["video_count"] == 0
+
+
+def test_recent_projects_detail_in_progress_once_footage_attached(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """Once any video lands on the project the status flips from
+    ``awaiting_footage`` to ``in_progress`` (the existing in-flight
+    state). Drives the MatchShell menu treatment per #425."""
+    from splitsmith import match_model, user_config
+    from splitsmith.ui.project import StageEntry, StageVideo
+
+    match_root = tmp_path / "with-footage"
+    match = match_model.Match.init(match_root, name="With Footage")
+    match.stages = [match_model.MatchStageDefinition(stage_number=1, stage_name="One")]
+    match.save(match_root)
+    shooter = match_model.Shooter(slug="ma", name="Mathias")
+    match.add_shooter(match_root, shooter)
+    shooter_root = match_model.Match.shooter_root(match_root, "ma")
+    legacy = MatchProject.init(shooter_root, name="With Footage")
+    # Drop a placeholder video into the registry. ``StageEntry`` accepts
+    # a videos list; a single entry is enough to flip the status.
+    legacy.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=0.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary")],
+        )
+    ]
+    legacy.save(shooter_root)
+    user_config.record_project_open(match_root, match.name, kind="match")
+
+    app = create_app()
+    client = _MatchClient(app)
+    resp = client.get("/api/me/recent-projects?detail=true")
+    assert resp.status_code == 200
+    by_kind = {p["kind"]: p for p in resp.json()["projects"]}
     assert by_kind["match"]["status"] == "in_progress"
+    assert by_kind["match"]["video_count"] == 1
 
 
 def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_home: Path) -> None:
@@ -5610,6 +5653,78 @@ def test_create_match_manual_scaffolds_match_and_binds_shooter(
     detail = client.get("/api/me/recent-projects?detail=true").json()
     kinds = sorted(p["kind"] for p in detail["projects"])
     assert kinds == ["match"]
+
+
+def test_create_match_manual_local_mode_requires_project_folder(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """Local mode must reject an omitted project_folder -- the SPA's
+    folder picker drives this in local mode and we don't want a missing
+    field to silently write somewhere arbitrary (issue #425)."""
+    app = create_app()
+    client = _MatchClient(app)
+
+    body = {
+        "name": "Bromma",
+        # project_folder omitted on purpose.
+        "stages": [{"stage_number": 1, "stage_name": "One"}],
+        "primary_shooter": {"name": "MA"},
+    }
+    resp = client.post("/api/match/create-manual", json=body)
+    assert resp.status_code == 400
+    assert "project_folder" in resp.text
+
+
+def test_create_match_manual_hosted_mode_synthesizes_path(
+    tmp_path: Path, monkeypatch, _user_config_home: Path
+) -> None:
+    """Hosted mode lets the SPA omit ``project_folder``; the server
+    synthesizes ``<SPLITSMITH_PROJECTS_DIR>/users/<id>/projects/<slug>/``
+    so the create-match flow works without a host filesystem picker
+    (issue #425). The SPA discriminates via ``/api/server/features``
+    (see ``test_server_features_reports_hosted_mode_when_env_set``)."""
+    from splitsmith import match_model
+    from splitsmith.ui import server as server_mod
+
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
+    monkeypatch.setenv("SPLITSMITH_PROJECTS_DIR", str(tmp_path / "hosted-root"))
+
+    # Stub the hosted wiring so the test doesn't need a Postgres URL.
+    # We still need ``state.auth.user_id`` to be set -- that's the
+    # multi-tenant prefix the synthesized path embeds. Use a sentinel
+    # value and verify it appears in the resolved match folder.
+    from splitsmith.auth import User
+
+    class _StubAuth:
+        user_id = "01TESTUSER0000000000000001"
+        _user = User(id=user_id, email="stub@test", display_name="Stub")
+
+        async def authenticate_request(self, request):
+            return self._user
+
+    def _stub_wiring(state):
+        state.auth = _StubAuth()
+
+    monkeypatch.setattr(server_mod, "_apply_hosted_mode_wiring", _stub_wiring)
+
+    app = create_app()
+    client = _MatchClient(app)
+
+    body = {
+        "name": "Bromma Practice",
+        # project_folder omitted on purpose -- server picks the path.
+        "stages": [{"stage_number": 1, "stage_name": "One"}],
+        "primary_shooter": {"name": "MA"},
+    }
+    resp = client.post("/api/match/create-manual", json=body)
+    assert resp.status_code == 200, resp.text
+
+    expected_root = (
+        tmp_path / "hosted-root" / "users" / "01TESTUSER0000000000000001" / "projects" / "bromma-practice"
+    )
+    assert (expected_root / "match.json").exists()
+    match = match_model.Match.load(expected_root)
+    assert match.name == "Bromma Practice"
 
 
 def test_create_match_manual_refuses_existing_match_folder(tmp_path: Path, _user_config_home: Path) -> None:
@@ -5792,6 +5907,41 @@ def test_load_env_files_picks_up_user_config_env(tmp_path: Path, monkeypatch: py
     import os
 
     assert os.environ.get("SPLITSMITH_TEST_TOKEN") == "from-user-config"
+
+
+def test_server_features_reports_local_mode_by_default(tmp_path: Path) -> None:
+    """Without ``SPLITSMITH_MODE=hosted`` the SPA should see local mode
+    so it keeps showing the host filesystem pickers + project-folder
+    input (issue #425)."""
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
+    resp = client.get("/api/server/features")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "local"
+    assert body["lab"] is False
+
+
+def test_server_features_reports_hosted_mode_when_env_set(tmp_path: Path, monkeypatch) -> None:
+    """``SPLITSMITH_MODE=hosted`` flips the discriminator; SPA reads
+    this on boot to suppress filesystem-picker UX that's meaningless
+    against an ephemeral hosted container (issue #425)."""
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
+    # We test *only* the feature flag projection; the full hosted
+    # wiring (Postgres-backed stores) is exercised in the hosted
+    # integration smoke (``pytest -m docker``). create_app already
+    # checks SPLITSMITH_MODE up front, so we have to monkeypatch the
+    # wiring helper to a no-op for this isolated test.
+    from splitsmith.ui import server as server_mod
+
+    monkeypatch.setattr(server_mod, "_apply_hosted_mode_wiring", lambda _state: None)
+
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
+    resp = client.get("/api/server/features")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "hosted"
 
 
 def test_promote_against_fixture_endpoint_lab_gated(tmp_path: Path) -> None:

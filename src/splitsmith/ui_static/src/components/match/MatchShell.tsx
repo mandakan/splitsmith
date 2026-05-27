@@ -405,6 +405,10 @@ export function MatchShell() {
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
+          // ``hasFootage`` is the cross-shooter rollup; any shooter with at
+          // least one attached video unlocks the footage-dependent nav rows
+          // (Audit / Coach / Export). See #425 for the rationale.
+          hasFootage={shooters.some((s) => s.video_count > 0)}
           onStageClick={(n) => {
             const target = slug ?? health?.default_shooter_slug;
             const mid = urlMatchId ?? health?.match_id ?? null;

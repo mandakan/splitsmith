@@ -45,6 +45,7 @@ import {
   type ScoreboardMatchData,
   type ScoreboardMatchRef,
 } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import { slugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
 
@@ -236,6 +237,11 @@ function ScoreboardVariant({
   const [parentDir, setParentDir] = useState<string>(DEFAULT_PARENT_DIR);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  // In hosted mode the server picks the project folder
+  // (``users/<user_id>/projects/<slug>/``); the picker UI is suppressed
+  // because there's no useful host filesystem inside the container.
+  const deploymentMode = useDeploymentMode();
+  const hostedMode = deploymentMode === "hosted";
   // Division facet -- ``null`` means "any". Selected division narrows the
   // accordion list to a single group. Squad isn't on the wire today, so
   // division does double duty as both the facet chip row and the
@@ -465,7 +471,7 @@ function ScoreboardVariant({
     !!selected &&
     !!matchData &&
     checked.size > 0 &&
-    parentDir.trim().length > 0 &&
+    (hostedMode || parentDir.trim().length > 0) &&
     slug.trim().length > 0 &&
     slugError == null &&
     !creating;
@@ -490,7 +496,9 @@ function ScoreboardVariant({
     onError(null);
     try {
       const health = await api.createMatchFromScoreboard({
-        project_folder: projectFolder,
+        // Hosted mode: server picks the path; the SPA doesn't have a
+        // useful host filesystem to point at. See #425.
+        project_folder: hostedMode ? null : projectFolder,
         name: selected.name,
         match_id: selected.id,
         content_type: selected.content_type,
@@ -771,31 +779,33 @@ function ScoreboardVariant({
 
           <Section eyebrow="03 Project folder" title="Where to save this match">
             <p className="-mt-1 mb-4 max-w-2xl text-[0.8125rem] text-muted">
-              The match folder will be created as a new directory inside
-              the parent you pick. The leaf defaults to the match name in
-              kebab-case; edit it if you'd like a different folder name.
+              {hostedMode
+                ? "The hosted server picks the storage location for you. The match name still drives the folder slug below; edit it if you'd like a different one."
+                : "The match folder will be created as a new directory inside the parent you pick. The leaf defaults to the match name in kebab-case; edit it if you'd like a different folder name."}
             </p>
 
             <div className="flex flex-col gap-3 rounded-lg border border-rule bg-surface-3 px-4 py-3.5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
-                    Parent folder
+              {!hostedMode && (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
+                      Parent folder
+                    </div>
+                    <div className="mt-0.5 truncate font-mono text-[0.8125rem] tabular-nums text-ink-2">
+                      {parentDir}
+                    </div>
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[0.8125rem] tabular-nums text-ink-2">
-                    {parentDir}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-3 py-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led"
+                  >
+                    <FolderOpen className="size-3.5" />
+                    Change...
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen(true)}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-3 py-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led"
-                >
-                  <FolderOpen className="size-3.5" />
-                  Change...
-                </button>
-              </div>
-              <div className="border-t border-rule pt-3">
+              )}
+              <div className={cn(hostedMode ? "" : "border-t border-rule pt-3")}>
                 <label className="block font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
                   Folder name
                 </label>
@@ -839,14 +849,16 @@ function ScoreboardVariant({
                   </p>
                 )}
               </div>
-              <div className="border-t border-rule pt-3">
-                <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
-                  Will create
+              {!hostedMode && (
+                <div className="border-t border-rule pt-3">
+                  <div className="font-mono text-[0.625rem] uppercase tracking-[0.1em] text-subtle">
+                    Will create
+                  </div>
+                  <div className="mt-0.5 truncate font-mono text-[0.8125rem] tabular-nums text-ink">
+                    {projectFolder}/
+                  </div>
                 </div>
-                <div className="mt-0.5 truncate font-mono text-[0.8125rem] tabular-nums text-ink">
-                  {projectFolder}/
-                </div>
-              </div>
+              )}
             </div>
           </Section>
 
@@ -891,7 +903,7 @@ function ScoreboardVariant({
         </div>
       )}
 
-      {pickerOpen && (
+      {pickerOpen && !hostedMode && (
         <DirectoryPickerModal
           initialPath={parentDir.startsWith("~") ? null : parentDir}
           onSelect={(picked) => {
@@ -1148,6 +1160,8 @@ function ManualVariant({
   onError: (e: string | null) => void;
 }) {
   const navigate = useNavigate();
+  const deploymentMode = useDeploymentMode();
+  const hostedMode = deploymentMode === "hosted";
   const today = new Date().toISOString().slice(0, 10);
   const [name, setName] = useState("");
   const [matchDate, setMatchDate] = useState(today);
@@ -1168,7 +1182,10 @@ function ManualVariant({
   const [creating, setCreating] = useState(false);
 
   // Auto-suggest a folder path from the match name once typed.
+  // Hosted mode skips the suggestion -- the server picks the path and
+  // the input isn't rendered.
   useEffect(() => {
+    if (hostedMode) return;
     if (!folder && name.trim()) {
       const slug = name
         .toLowerCase()
@@ -1176,7 +1193,7 @@ function ManualVariant({
         .replace(/^-+|-+$/g, "");
       if (slug) setFolder(`~/Splitsmith/${slug}/`);
     }
-  }, [name, folder]);
+  }, [name, folder, hostedMode]);
 
   const totalExpected = useMemo(
     () =>
@@ -1211,8 +1228,12 @@ function ManualVariant({
   }
 
   async function submit() {
-    if (!name.trim() || !folder.trim() || !shooterName.trim()) {
-      onError("Match name, project folder, and shooter name are required.");
+    if (!name.trim() || !shooterName.trim()) {
+      onError("Match name and shooter name are required.");
+      return;
+    }
+    if (!hostedMode && !folder.trim()) {
+      onError("Project folder is required in local mode.");
       return;
     }
     if (stages.length === 0) {
@@ -1224,7 +1245,8 @@ function ManualVariant({
     try {
       const health = await api.createMatchManual({
         name: name.trim(),
-        project_folder: folder.trim(),
+        // Hosted mode: server picks the path; see #425.
+        project_folder: hostedMode ? null : folder.trim(),
         match_date: matchDate || null,
         club: club.trim() || null,
         match_type: matchType,
@@ -1287,14 +1309,16 @@ function ManualVariant({
               options={DIVISIONS}
             />
           </FormField>
-          <FormField label="Project folder">
-            <TextInput
-              value={folder}
-              onChange={setFolder}
-              placeholder="~/Splitsmith/<slug>/"
-              mono
-            />
-          </FormField>
+          {!hostedMode && (
+            <FormField label="Project folder">
+              <TextInput
+                value={folder}
+                onChange={setFolder}
+                placeholder="~/Splitsmith/<slug>/"
+                mono
+              />
+            </FormField>
+          )}
         </div>
       </Section>
 
@@ -1418,7 +1442,7 @@ function ManualVariant({
             disabled={
               creating ||
               !name.trim() ||
-              !folder.trim() ||
+              (!hostedMode && !folder.trim()) ||
               !shooterName.trim() ||
               stages.length === 0
             }

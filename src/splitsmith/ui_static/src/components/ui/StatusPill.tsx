@@ -7,6 +7,9 @@
  *    visible without animation)
  *  - exported: green, solid
  *  - archived: cold grey, hollow
+ *  - awaiting: muted cool, hollow dot -- "not started yet, ready for input"
+ *    (e.g. a freshly-created match with no footage attached, #425). Visually
+ *    distinct from "archived" (stale) and the destructive LED red.
  *  - beep: cyan, used in Developer surfaces
  *
  * A11y: always carries a non-color cue (label text + a shape variation for
@@ -27,6 +30,7 @@ const pillVariants = cva(
           "border-live/40 bg-[color:var(--color-live-glow)] text-live",
         exported: "border-done/40 bg-[color:var(--color-done-glow)] text-done",
         archived: "border-rule bg-transparent text-cold",
+        awaiting: "border-rule-strong bg-surface-2 text-muted",
         beep: "border-beep/40 bg-[color:var(--color-beep-tint)] text-beep",
         led: "border-led/40 bg-[color:var(--color-led-tint)] text-led",
       },
@@ -58,6 +62,7 @@ export function StatusPill({
           tone === "in-progress" && "bg-live",
           tone === "exported" && "bg-done",
           tone === "archived" && "border border-cold bg-transparent",
+          tone === "awaiting" && "border border-muted bg-transparent",
           tone === "beep" && "bg-beep",
           tone === "led" && "bg-led",
           pulse && "animate-pulse",
