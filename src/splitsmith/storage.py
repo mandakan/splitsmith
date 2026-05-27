@@ -69,6 +69,20 @@ class Storage(Protocol):
         reads to EOF.
         """
 
+    def open_stream(self, path: str) -> BinaryIO:
+        """Open the object for chunked reads. Symmetric to ``upload_stream``.
+
+        Raises ``FileNotFoundError`` if the object is absent. Returned
+        file-like supports ``read(size)``, ``close()``, and the
+        context-manager protocol -- callers should use ``with`` so the
+        underlying network handle (S3) or file descriptor (local) is
+        released even on partial reads.
+
+        For multi-GB raw footage this is the seam the worker uses to
+        copy the object to a local cache without buffering the full
+        payload into memory the way ``read_bytes`` would.
+        """
+
     def exists(self, path: str) -> bool:
         """Return True iff an object exists at the path."""
 
@@ -168,6 +182,13 @@ class FilesystemStorage:
             raise
         return total
 
+    def open_stream(self, path: str) -> BinaryIO:
+        # ``open`` raises FileNotFoundError natively when the path is
+        # absent, matching the Protocol contract. The returned
+        # ``BufferedReader`` is a real BinaryIO -- already a context
+        # manager -- so no wrapping is needed.
+        return self._resolve(path).open("rb")
+
     def exists(self, path: str) -> bool:
         return self._resolve(path).exists()
 
@@ -216,6 +237,35 @@ class FilesystemStorage:
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+
+class _S3StreamWrapper:
+    """Adapt a botocore ``StreamingBody`` to the ``BinaryIO`` Protocol.
+
+    ``StreamingBody`` exposes ``read()`` and ``close()`` but lacks
+    ``__enter__`` / ``__exit__``, so a ``with storage.open_stream(...)``
+    block against S3 would TypeError without this shim. The wrapper
+    just forwards reads and ties the context-manager exit to
+    ``close()`` so callers can use one idiom across both backends.
+    """
+
+    def __init__(self, body: object) -> None:
+        self._body = body
+
+    def read(self, size: int = -1) -> bytes:
+        # boto3's StreamingBody.read uses ``None`` to mean "read all";
+        # BinaryIO's ``-1`` means the same. Translate so the caller can
+        # pass either convention.
+        return self._body.read(None if size == -1 else size)  # type: ignore[attr-defined]
+
+    def close(self) -> None:
+        self._body.close()  # type: ignore[attr-defined]
+
+    def __enter__(self) -> _S3StreamWrapper:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.close()
 
 
 class _CountingReader:
@@ -332,6 +382,21 @@ class S3Storage:
         counter = _CountingReader(fileobj)
         self._client.upload_fileobj(counter, self._bucket, self._key(path))
         return counter.bytes_read
+
+    def open_stream(self, path: str) -> BinaryIO:
+        from botocore.exceptions import ClientError
+
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=self._key(path))
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "404"):
+                raise FileNotFoundError(f"no object at {path!r}") from exc
+            raise
+        # ``response["Body"]`` is a botocore StreamingBody backed by the
+        # underlying HTTPS connection; wrap so callers can use it as a
+        # context manager without leaking the socket on a partial read.
+        return _S3StreamWrapper(response["Body"])
 
     def exists(self, path: str) -> bool:
         from botocore.exceptions import ClientError
