@@ -34,11 +34,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from .. import video_match
 from ..automation import AutomationOverride
 from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
+from ..storage import Storage
 from ..video_match import match_videos_to_stages
 
 logger = logging.getLogger(__name__)
@@ -788,6 +789,22 @@ class MatchProject(BaseModel):
     # projects until first upload/attach; backfilled from existing
     # StageVideos on v2->v3 schema migration.
     raw_videos: list[RawVideo] = Field(default_factory=list)
+
+    # Worker-side ``Storage`` handle, set by ``state.shooter_project``
+    # after load in hosted mode. Not persisted: it's request-scope state,
+    # not project-on-disk state, and a ``MatchProject`` round-tripped
+    # through ``model_dump`` / ``model_validate`` must stay identical.
+    # Local mode leaves this ``None`` and :meth:`resolve_video_path`
+    # falls back to the legacy path-only resolution -- desktop behavior
+    # is unchanged.
+    _storage: Storage | None = PrivateAttr(default=None)
+
+    def bind_storage(self, storage: Storage | None) -> None:
+        """Attach a per-request ``Storage`` so :meth:`resolve_video_path`
+        can mirror hosted-mode raw videos into the project's local
+        cache on first access. Idempotent; ``None`` clears the binding.
+        """
+        self._storage = storage
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -1551,9 +1568,65 @@ class MatchProject(BaseModel):
         return video
 
     def resolve_video_path(self, root: Path, video_path: Path) -> Path:
-        """Resolve a ``StageVideo.path`` (which may be project-relative or
-        absolute) to an absolute filesystem path."""
-        return video_path if video_path.is_absolute() else root / video_path
+        """Resolve a ``StageVideo.path`` to an absolute filesystem path,
+        mirroring from hosted storage on first access when needed.
+
+        Behaviour matrix:
+
+        - **Absolute path** -- returned as-is (legacy local-mode flow:
+          external drive, FCP scratch).
+        - **Relative path, no storage bound** -- returned as
+          ``root / video_path``. Identical to pre-PR-4 behavior; the
+          desktop UI lands here.
+        - **Relative path, storage bound, local mirror exists** -- the
+          cached mirror at ``root / video_path`` wins. Subsequent
+          detection jobs on the same project re-use the same local
+          copy without a second download.
+        - **Relative path, storage bound, no local mirror** -- streams
+          the object from storage into ``root / video_path`` via a
+          temp + atomic-rename, then returns the local path. A
+          missing key is left to surface as a downstream
+          ``FileNotFoundError`` -- callers already handle that for
+          offline-source cases.
+
+        ``storage`` is set by :meth:`bind_storage`, which the hosted
+        boot calls inside ``state.shooter_project`` so every project
+        load that goes through that accessor is automatically wired up.
+        """
+        if video_path.is_absolute():
+            return video_path
+        local = root / video_path
+        if self._storage is not None and not local.exists():
+            self._mirror_from_storage(self._storage, str(video_path), local)
+        return local
+
+    @staticmethod
+    def _mirror_from_storage(storage: Storage, key: str, dest: Path) -> None:
+        """Stream ``key`` from ``storage`` into ``dest`` via temp+rename.
+
+        Best-effort: a missing key is a no-op (the caller's existing
+        ``not source.exists()`` checks already handle that). Network
+        / IO errors propagate so the worker fails the job loudly --
+        a half-downloaded mirror would be worse than a failed detect.
+        """
+        if not storage.exists(key):
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=dest.name + ".",
+            suffix=".tmp",
+            dir=dest.parent,
+        )
+        try:
+            with storage.open_stream(key) as src, os.fdopen(fd, "wb") as out:
+                shutil.copyfileobj(src, out)
+            Path(tmp_name).replace(dest)
+        except Exception:
+            try:
+                Path(tmp_name).unlink()
+            except FileNotFoundError:
+                pass
+            raise
 
     def find_raw_video(self, storage_path: str) -> RawVideo | None:
         """Return the ``RawVideo`` with this ``storage_path``, or ``None``.

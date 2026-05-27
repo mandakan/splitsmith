@@ -687,8 +687,17 @@ class AppState:
 
     def shooter_project(self, slug: str) -> MatchProject:
         """Load the per-shooter ``MatchProject`` (each shooter slot
-        inside a Match folder owns its own ``project.json``)."""
-        return MatchProject.load(self.shooter_root(slug))
+        inside a Match folder owns its own ``project.json``).
+
+        Binds :attr:`storage` onto the project so
+        :meth:`MatchProject.resolve_video_path` can mirror hosted-mode
+        raw videos into the local cache on first access. Local mode
+        leaves ``storage`` at ``None``; the bind is a no-op and the
+        legacy disk-only resolver wins.
+        """
+        project = MatchProject.load(self.shooter_root(slug))
+        project.bind_storage(self.storage)
+        return project
 
     def register_match(self, root: Path) -> str | None:
         """Load the match at ``root`` and pin its ``match_id`` into
