@@ -2758,6 +2758,96 @@ def create_app(
             }
         )
 
+    @app.get("/api/me/raw/list")
+    def list_raw_uploads(user: User = Depends(get_current_user)) -> JSONResponse:
+        """List every object the operator has uploaded under their
+        ``raw/`` prefix.
+
+        Hosted-only -- 503 in local mode (no storage backend wired;
+        local users put videos on disk via the desktop ingest flow).
+
+        Returned shape mirrors what ``POST /api/me/raw/upload`` echoes
+        back so the SPA can render an "uploaded files" surface without
+        a second lookup:
+
+        - ``filename`` -- the bare leaf name, what the operator picked
+          on disk (``_sanitize_raw_filename`` already stripped any
+          directory parts at upload time).
+        - ``path`` -- the storage key relative to the user's prefix
+          (e.g. ``raw/clip.mp4``). The SPA echoes this back to any
+          register-into-project endpoint we add later.
+        - ``size`` -- bytes.
+        - ``last_modified`` -- ISO-8601 UTC, what S3 / MinIO reports
+          as the object's mtime. ``null`` when the backend doesn't
+          surface one (some test doubles).
+        - ``etag`` -- S3 etag when present (useful for the SPA to
+          detect a re-upload of the same filename).
+
+        Sorted newest-first so the picker surfaces the most recent
+        upload at the top without the SPA having to re-sort.
+        """
+        storage = state.storage
+        if storage is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "raw video list is hosted-mode only; "
+                    "local mode keeps videos on disk under the project root"
+                ),
+            )
+        entries: list[dict[str, Any]] = []
+        for obj in storage.list("raw/"):
+            entries.append(
+                {
+                    "filename": obj.path.split("/", 1)[1] if "/" in obj.path else obj.path,
+                    "path": obj.path,
+                    "size": obj.size,
+                    "last_modified": (
+                        obj.last_modified.isoformat() if obj.last_modified is not None else None
+                    ),
+                    "etag": obj.etag,
+                }
+            )
+        # Newest first. ``last_modified`` is None on backends that don't
+        # report one; those entries sort last (stable secondary key by
+        # filename so the SPA gets a deterministic order).
+        entries.sort(
+            key=lambda e: (
+                e["last_modified"] is not None,
+                e["last_modified"] or "",
+                e["filename"],
+            ),
+            reverse=True,
+        )
+        return JSONResponse({"uploads": entries})
+
+    @app.delete("/api/me/raw/{filename:path}")
+    def delete_raw_upload(filename: str, user: User = Depends(get_current_user)) -> JSONResponse:
+        """Remove one uploaded file from object storage.
+
+        Hosted-only (503 in local mode). Idempotent -- deleting an
+        already-gone object returns 200 with ``{"ok": true}`` so the
+        SPA can retry without special-casing.
+
+        The ``filename`` segment is run through ``_sanitize_raw_filename``
+        so a malicious caller can't traverse out of their ``raw/`` prefix
+        (the underlying ``S3Storage._key`` also rejects ``..`` but we
+        belt-and-braces it at the route layer too).
+        """
+        storage = state.storage
+        if storage is None:
+            raise HTTPException(
+                status_code=503,
+                detail="raw video delete is hosted-mode only",
+            )
+        name = _sanitize_raw_filename(filename)
+        key = f"raw/{name}"
+        try:
+            storage.delete(key)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"delete failed: {exc}") from exc
+        return JSONResponse({"ok": True, "path": key})
+
     @app.get("/api/shooters/{slug}/automation")
     def get_automation(slug: str) -> JSONResponse:
         """Resolved automation settings + per-field provenance (#215 / #216).

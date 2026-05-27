@@ -119,8 +119,12 @@ def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
     try:
         banner_line = _read_banner(proc, deadline_s=15.0)
         proc.terminate()
-        # SIGTERM must produce exit 0 within a short grace window.
-        rc = proc.wait(timeout=10.0)
+        # Allow the same grace window the runtime does
+        # (``DEFAULT_SHUTDOWN_TIMEOUT_S = 30s`` in ``embedded.py``) plus
+        # a small buffer for the test runner's process-teardown
+        # bookkeeping. The previous 10s was tighter than the runtime's
+        # own drain allowance and tripped intermittently on slow CI.
+        rc = proc.wait(timeout=35.0)
     finally:
         if proc.poll() is None:
             proc.kill()
