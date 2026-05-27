@@ -146,6 +146,7 @@ from .jobs import Job, JobBackend, JobCancelled, JobHandle, JobRegistry, Shutdow
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
+    RawVideo,
     ScoreboardImportConflictError,
     StageEntry,
     StageVideo,
@@ -1318,6 +1319,23 @@ class ForgetRecentProjectRequest(BaseModel):
     """Body for POST /api/user/recent-projects/forget (#75)."""
 
     path: str
+
+
+class AttachRawVideoRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/raw-videos/attach (doc 05).
+
+    The SPA passes back the shape ``POST /api/me/raw/upload`` returned
+    plus an optional ``covers_stages``. ``filename`` round-trips through
+    ``_sanitize_raw_filename`` so a malicious request body can't escape
+    the user's ``raw/`` prefix. ``covers_stages`` is optional -- callers
+    can leave it null and run auto-match later, or pre-declare it when
+    they already know which stages the recording spans.
+    """
+
+    filename: str
+    sha256: str | None = None
+    size_bytes: int | None = None
+    covers_stages: list[int] | None = None
 
 
 class ScoreboardIdentityRequest(BaseModel):
@@ -2847,6 +2865,109 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"delete failed: {exc}") from exc
         return JSONResponse({"ok": True, "path": key})
+
+    @app.post("/api/shooters/{slug}/raw-videos/attach")
+    def attach_raw_video(
+        slug: str,
+        body: AttachRawVideoRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Register an uploaded raw video against a shooter's project (doc 05).
+
+        Hosted-only -- 503 when ``state.storage`` is unwired. The
+        upload itself must already be in object storage (the SPA calls
+        ``POST /api/me/raw/upload`` first); this endpoint validates that
+        and records the manifest entry on ``match.json``.
+
+        Body shape: ``{filename, sha256?, size_bytes?, covers_stages?}``.
+        The trailing fields default to whatever the upload endpoint
+        echoed back; size + sha256 fill in the legacy backfill
+        placeholders if the project's migration left them empty. When
+        ``covers_stages`` is provided, the endpoint also creates
+        ``StageVideo`` entries on those stages (path =
+        ``raw/<filename>``, role auto-promoted to primary when the
+        stage has no primary yet -- same rule as
+        :meth:`MatchProject.assign_video`).
+
+        Returns the canonical ``RawVideo`` (either the freshly attached
+        entry or the merged-into existing one).
+
+        Error contract:
+
+        - 503 -- no hosted storage wired (local mode).
+        - 400 -- filename failed ``_sanitize_raw_filename`` (path
+          separators, ``..``, empty).
+        - 404 -- no object at ``raw/<filename>`` in storage.
+        - 422 -- ``covers_stages`` references a stage_number the
+          project doesn't have.
+        """
+        storage = state.storage
+        if storage is None:
+            raise HTTPException(
+                status_code=503,
+                detail="raw video attach is hosted-mode only",
+            )
+
+        name = _sanitize_raw_filename(body.filename)
+        storage_path = f"raw/{name}"
+        stat = storage.stat(storage_path)
+        if stat is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no upload at {storage_path!r}; upload first via POST /api/me/raw/upload",
+            )
+
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+
+        covers = sorted(set(body.covers_stages or []))
+        if covers:
+            # Verify every claimed stage exists before mutating anything;
+            # an unknown stage_number is a 422 (client bug) rather than a
+            # silent skip that leaves the manifest in a half-populated state.
+            known = {s.stage_number for s in project.stages}
+            unknown = [n for n in covers if n not in known]
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "unknown_stage_numbers",
+                        "stage_numbers": unknown,
+                    },
+                )
+
+        # Trust the upload endpoint's sha256 verification: it already
+        # rolled the object back on mismatch (see the X-Content-SHA256
+        # path in upload_raw_video). The size on the body is informational;
+        # we always defer to S3's reported ContentLength when available
+        # so the manifest matches the object the worker will download.
+        rv = RawVideo(
+            original_filename=name,
+            size_bytes=int(stat.size if stat.size else (body.size_bytes or 0)),
+            sha256=body.sha256,
+            storage_path=storage_path,
+            covers_stages=covers,
+        )
+        canonical = project.attach_raw_video(rv)
+
+        # When the caller pre-declared coverage, also wire up the
+        # per-stage StageVideo entries so the worker has something to
+        # detect against. Each stage gets its own StageVideo with the
+        # same ``path`` (one raw -> N stage rows is the doc-05 model);
+        # if the stage already references this path we skip rather than
+        # double-register. Role auto-promotes to primary when the stage
+        # has no primary yet -- same convention as ``assign_video``.
+        video_path = Path(storage_path)
+        for stage_number in covers:
+            stage = project.stage(stage_number)
+            if any(str(v.path) == storage_path for v in stage.videos):
+                continue
+            role: VideoRole = "secondary" if stage.primary() is not None else "primary"
+            stage.videos.append(StageVideo(path=video_path, role=role))
+
+        project.save(root)
+
+        return JSONResponse(canonical.model_dump(mode="json"))
 
     @app.get("/api/shooters/{slug}/automation")
     def get_automation(slug: str) -> JSONResponse:

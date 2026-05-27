@@ -33,6 +33,7 @@ from moto import mock_aws  # noqa: E402
 
 from splitsmith.db import Base, create_engine  # noqa: E402
 from splitsmith.storage import S3Storage  # noqa: E402
+from splitsmith.ui.project import MatchProject  # noqa: E402
 
 BUCKET = "splitsmith-uploads-test"
 
@@ -358,3 +359,244 @@ def test_delete_rejects_path_traversal(hosted_client) -> None:
     # _sanitize_raw_filename raises a 400; both that and the storage
     # guard fail closed.
     assert resp.status_code in (400, 404)
+
+
+# --- POST /api/shooters/{slug}/raw-videos/attach -----------------------
+#
+# The attach endpoint is the bridge from "file lives in S3" to
+# "project knows the file exists". It populates ``raw_videos[]`` on
+# match.json per doc 05 and optionally creates StageVideo entries on
+# the stages the recording covers, so the next step (PR 4) can run
+# detection against an S3-backed source.
+
+
+@pytest.fixture
+def hosted_client_with_match(hosted_client, tmp_path: Path) -> Iterator[tuple[TestClient, S3Storage, str]]:
+    """Extend ``hosted_client`` with a scaffolded Match + one shooter
+    so attach-endpoint tests have something to attach raw videos to.
+
+    Yields ``(client, storage, match_id)``. The match has two stages
+    so tests can exercise the multi-stage ``covers_stages`` path.
+    """
+    from splitsmith import match_model
+    from splitsmith.ui.project import StageEntry
+
+    client, storage = hosted_client
+
+    match_root = tmp_path / "matches" / "attach-test"
+    match = match_model.Match.init(match_root, name="Attach Test")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(match_root)
+    match.add_shooter(match_root, match_model.Shooter(slug="me", name="Me"))
+    sroot = match_model.Match.shooter_root(match_root, "me")
+    project = MatchProject.init(sroot, name="Attach Test")
+    project.stages = [
+        StageEntry(stage_number=1, stage_name="One", time_seconds=10.0),
+        StageEntry(stage_number=2, stage_name="Two", time_seconds=15.0),
+    ]
+    project.save(sroot)
+
+    resp = client.post(
+        "/api/me/recent-projects/bind",
+        json={"path": str(match_root.resolve())},
+    )
+    assert resp.status_code == 200, resp.text
+
+    ids = client.app.state.splitsmith_state.matches.known_ids()
+    assert len(ids) == 1
+    yield client, storage, ids[0]
+
+
+def _attach_url(match_id: str, slug: str = "me") -> str:
+    # The alias middleware rewrites ``/api/matches/{id}/<rest>`` to
+    # ``/api/<rest>`` -- so the prefix here is ``shooters/...``, not
+    # ``api/shooters/...``. Matches the _MatchClient rewrite pattern.
+    return f"/api/matches/{match_id}/shooters/{slug}/raw-videos/attach"
+
+
+def _seed_upload(client: TestClient, filename: str, payload: bytes) -> dict:
+    """Push a file through the upload endpoint so the attach test
+    can reference a real key. Returns the JSON the SPA would echo
+    back into the attach request body."""
+    resp = client.post(
+        "/api/me/raw/upload",
+        files={"file": (filename, io.BytesIO(payload), "video/mp4")},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_attach_registers_raw_video_on_project(hosted_client_with_match) -> None:
+    """An upload + attach round-trip lands a RawVideo entry on the
+    project's ``raw_videos[]`` with the storage_path the SPA can
+    reference back to."""
+    from splitsmith import match_model
+
+    client, _, match_id = hosted_client_with_match
+    upload = _seed_upload(client, "GH010023.mp4", b"video bytes " * 1024)
+
+    resp = client.post(
+        _attach_url(match_id),
+        json={
+            "filename": upload["filename"],
+            "sha256": upload["sha256"],
+            "size_bytes": upload["size"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["original_filename"] == "GH010023.mp4"
+    assert body["storage_path"] == "raw/GH010023.mp4"
+    assert body["sha256"] == upload["sha256"]
+    assert body["size_bytes"] == upload["size"]
+    assert body["covers_stages"] == []
+
+    # Persisted to the project on disk.
+    match_root = Path(client.app.state.splitsmith_state.matches.resolve(match_id))
+    sroot = match_model.Match.shooter_root(match_root, "me")
+    project = MatchProject.load(sroot)
+    assert len(project.raw_videos) == 1
+    assert project.raw_videos[0].storage_path == "raw/GH010023.mp4"
+
+
+def test_attach_with_covers_stages_creates_stagevideos(hosted_client_with_match) -> None:
+    """``covers_stages`` pre-declares the per-stage references so the
+    worker has something to detect against without a separate
+    auto-match call. The first stage gets primary; subsequent get
+    secondary (since they already have a primary on the shared raw)."""
+    from splitsmith import match_model
+
+    client, _, match_id = hosted_client_with_match
+    upload = _seed_upload(client, "headcam.mp4", b"shared " * 4096)
+
+    resp = client.post(
+        _attach_url(match_id),
+        json={
+            "filename": upload["filename"],
+            "sha256": upload["sha256"],
+            "size_bytes": upload["size"],
+            "covers_stages": [1, 2],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["covers_stages"] == [1, 2]
+
+    match_root = Path(client.app.state.splitsmith_state.matches.resolve(match_id))
+    sroot = match_model.Match.shooter_root(match_root, "me")
+    project = MatchProject.load(sroot)
+    stage_one = project.stage(1)
+    stage_two = project.stage(2)
+    assert len(stage_one.videos) == 1
+    assert len(stage_two.videos) == 1
+    assert str(stage_one.videos[0].path) == "raw/headcam.mp4"
+    assert str(stage_two.videos[0].path) == "raw/headcam.mp4"
+    assert stage_one.videos[0].role == "primary"
+    assert stage_two.videos[0].role == "primary"
+
+
+def test_attach_is_idempotent_merges_covers_stages(hosted_client_with_match) -> None:
+    """Repeat attaches with the same storage_path merge covers_stages
+    rather than appending duplicate raw_videos entries (the same
+    contract ``MatchProject.attach_raw_video`` enforces in unit
+    tests)."""
+    from splitsmith import match_model
+
+    client, _, match_id = hosted_client_with_match
+    upload = _seed_upload(client, "shared.mp4", b"x" * 1024)
+
+    client.post(
+        _attach_url(match_id),
+        json={
+            "filename": upload["filename"],
+            "sha256": upload["sha256"],
+            "covers_stages": [1],
+        },
+    )
+    resp = client.post(
+        _attach_url(match_id),
+        json={
+            "filename": upload["filename"],
+            "sha256": upload["sha256"],
+            "covers_stages": [2],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["covers_stages"] == [1, 2]
+
+    match_root = Path(client.app.state.splitsmith_state.matches.resolve(match_id))
+    sroot = match_model.Match.shooter_root(match_root, "me")
+    project = MatchProject.load(sroot)
+    assert len(project.raw_videos) == 1
+    # Stage 2 was added by the second attach without disturbing
+    # stage 1's existing StageVideo.
+    assert len(project.stage(1).videos) == 1
+    assert len(project.stage(2).videos) == 1
+
+
+def test_attach_404_when_upload_missing(hosted_client_with_match) -> None:
+    """Attach must refuse to register a key the storage backend
+    doesn't actually have -- otherwise the manifest would point at
+    a non-existent object and the worker would 500 on first
+    detection."""
+    client, _, match_id = hosted_client_with_match
+    resp = client.post(
+        _attach_url(match_id),
+        json={"filename": "never-uploaded.mp4"},
+    )
+    assert resp.status_code == 404
+    assert "no upload" in resp.json()["detail"]
+
+
+def test_attach_422_when_covers_stages_unknown(hosted_client_with_match) -> None:
+    """An unknown stage_number in ``covers_stages`` is a client bug --
+    fail loudly rather than silently dropping the bogus number and
+    leaving the manifest claiming coverage that doesn't exist."""
+    client, _, match_id = hosted_client_with_match
+    upload = _seed_upload(client, "clip.mp4", b"x" * 8)
+
+    resp = client.post(
+        _attach_url(match_id),
+        json={
+            "filename": upload["filename"],
+            "covers_stages": [1, 99],
+        },
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert detail["error"] == "unknown_stage_numbers"
+    assert detail["stage_numbers"] == [99]
+
+
+def test_attach_400_on_unsafe_filename(hosted_client_with_match) -> None:
+    """``_sanitize_raw_filename`` runs at the route layer so a
+    traversal attempt 400s before the storage backend's own guard
+    sees it."""
+    client, _, match_id = hosted_client_with_match
+    resp = client.post(
+        _attach_url(match_id),
+        json={"filename": "../escape.mp4"},
+    )
+    assert resp.status_code == 400
+
+
+def test_attach_503_when_storage_unwired(
+    hosted_db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same hosted-only contract as the upload endpoint -- a desktop
+    install with no storage backend refuses cleanly."""
+    monkeypatch.delenv("SPLITSMITH_S3_BUCKET", raising=False)
+
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/matches/anything/shooters/me/raw-videos/attach",
+            json={"filename": "clip.mp4"},
+        )
+    assert resp.status_code in (503, 404)
+    # 503 is the storage-off contract; 404 is the alias middleware
+    # rejecting an unknown match_id. Either is "fails closed".
