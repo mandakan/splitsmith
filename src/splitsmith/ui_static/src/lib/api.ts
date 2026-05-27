@@ -1267,6 +1267,21 @@ export interface RawUploadEntry {
   etag: string | null;
 }
 
+/** One ``raw_videos[]`` manifest entry on ``match.json`` (doc 05).
+ *  Returned by ``POST /api/shooters/{slug}/raw-videos/attach`` after
+ *  the server merges into any existing entry with the same
+ *  ``storage_path``. The SPA reads this back to confirm the canonical
+ *  ``covers_stages`` post-merge (which may differ from what the
+ *  caller posted when an earlier attach already declared coverage). */
+export interface RawVideoManifestEntry {
+  original_filename: string;
+  size_bytes: number;
+  sha256: string | null;
+  uploaded_at: string;
+  storage_path: string;
+  covers_stages: number[];
+}
+
 /** One shot point on a shooter's timeline in /compare (#328). */
 export interface CompareShotPoint {
   shot_number: number;
@@ -2146,6 +2161,32 @@ export const api = {
         }
         xhr.send(form);
       },
+    ),
+
+  /** Hosted-mode only -- register an uploaded raw video on the
+   *  shooter's project (``POST /api/shooters/{slug}/raw-videos/attach``).
+   *
+   *  Body shape mirrors what ``uploadRawFile`` echoed back:
+   *  ``filename`` is required; ``sha256`` / ``size_bytes`` are
+   *  optional (the server defers to S3's ContentLength either way).
+   *  ``covers_stages`` is optional -- omit it for the
+   *  attach-into-unassigned-tray flow, pass an explicit array when
+   *  the caller already knows which stages the recording spans.
+   *
+   *  Returns the canonical ``RawVideo`` after dedup-merge: a re-attach
+   *  with a different covers_stages set unions them server-side. */
+  attachRawVideo: (
+    slug: string,
+    body: {
+      filename: string;
+      sha256?: string | null;
+      size_bytes?: number | null;
+      covers_stages?: number[] | null;
+    },
+  ) =>
+    request<RawVideoManifestEntry>(
+      `/api/shooters/${encodeURIComponent(slug)}/raw-videos/attach`,
+      { method: "POST", json: body },
     ),
 
   /** Server health + bind state. The picker route polls this on mount

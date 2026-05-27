@@ -460,6 +460,10 @@ def test_attach_registers_raw_video_on_project(hosted_client_with_match) -> None
     project = MatchProject.load(sroot)
     assert len(project.raw_videos) == 1
     assert project.raw_videos[0].storage_path == "raw/GH010023.mp4"
+    # Without covers_stages, the file lands in unassigned_videos so the
+    # ingest tray UI surfaces it -- same shape as local-mode scan.
+    assert len(project.unassigned_videos) == 1
+    assert str(project.unassigned_videos[0].path) == "raw/GH010023.mp4"
 
 
 def test_attach_with_covers_stages_creates_stagevideos(hosted_client_with_match) -> None:
