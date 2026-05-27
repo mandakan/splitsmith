@@ -242,3 +242,119 @@ def test_local_mode_endpoint_still_503(monkeypatch: pytest.MonkeyPatch, tmp_path
         )
 
     assert resp.status_code == 503
+
+
+# --- GET /api/me/raw/list / DELETE /api/me/raw/{filename} ---------------
+#
+# The list + delete endpoints round out the v1 upload surface so the
+# SPA can drive an "uploaded files" panel against object storage
+# without inventing its own state (an upload that never lands is
+# invisible; a successful upload is observable; a mistake is
+# prunable). The actual project-attach is a follow-up; today the SPA
+# uses the list endpoint as the "what have I uploaded?" view.
+
+
+def test_list_returns_uploaded_files_newest_first(hosted_client) -> None:
+    """The list endpoint surfaces every object under the user's
+    ``raw/`` prefix with the metadata the SPA needs to render an
+    uploaded-files row."""
+    client, _ = hosted_client
+
+    # Upload two files; the second is the newer one so it should
+    # sort first.
+    client.post(
+        "/api/me/raw/upload",
+        files={"file": ("first.mp4", io.BytesIO(b"first " * 100), "video/mp4")},
+    )
+    client.post(
+        "/api/me/raw/upload",
+        files={"file": ("second.mp4", io.BytesIO(b"second " * 200), "video/mp4")},
+    )
+
+    resp = client.get("/api/me/raw/list")
+    assert resp.status_code == 200, resp.text
+    uploads = resp.json()["uploads"]
+    assert [u["filename"] for u in uploads] == ["second.mp4", "first.mp4"]
+    # Each row carries the fields the SPA needs.
+    assert uploads[0]["path"] == "raw/second.mp4"
+    assert uploads[0]["size"] == len(b"second " * 200)
+    assert uploads[0]["last_modified"] is not None
+    assert uploads[0]["etag"] is not None
+
+
+def test_list_empty_when_no_uploads(hosted_client) -> None:
+    """Fresh tenant -- empty list, not 404. The SPA's empty state
+    keys off ``uploads.length === 0`` so this needs to round-trip
+    cleanly."""
+    client, _ = hosted_client
+    resp = client.get("/api/me/raw/list")
+    assert resp.status_code == 200
+    assert resp.json() == {"uploads": []}
+
+
+def test_list_503_when_storage_unwired(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same hosted-mode-only contract as the upload endpoint -- no
+    storage backend, no list. Local users keep videos on disk and
+    don't call this route."""
+    monkeypatch.delenv("SPLITSMITH_S3_BUCKET", raising=False)
+
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.get("/api/me/raw/list")
+    assert resp.status_code == 503
+
+
+def test_delete_removes_object(hosted_client) -> None:
+    """Round-trip: upload, list, delete, list again -- the object
+    disappears from list and the underlying storage."""
+    client, storage = hosted_client
+
+    client.post(
+        "/api/me/raw/upload",
+        files={"file": ("doomed.mp4", io.BytesIO(b"bytes"), "video/mp4")},
+    )
+    assert storage.exists("raw/doomed.mp4")
+
+    resp = client.delete("/api/me/raw/doomed.mp4")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True, "path": "raw/doomed.mp4"}
+    assert not storage.exists("raw/doomed.mp4")
+
+    listing = client.get("/api/me/raw/list").json()
+    assert listing == {"uploads": []}
+
+
+def test_delete_idempotent(hosted_client) -> None:
+    """Deleting an already-gone object is a 200 no-op, so the SPA
+    can retry without special-casing 404. (R2's lifecycle rule is the
+    backstop; we don't want the SPA falsely reporting an error when
+    the actual end state -- "object is gone" -- matches the intent.)"""
+    client, _ = hosted_client
+    resp = client.delete("/api/me/raw/never-existed.mp4")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_delete_503_when_storage_unwired(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SPLITSMITH_S3_BUCKET", raising=False)
+
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.delete("/api/me/raw/clip.mp4")
+    assert resp.status_code == 503
+
+
+def test_delete_rejects_path_traversal(hosted_client) -> None:
+    """The route applies the same ``_sanitize_raw_filename`` guard the
+    upload route uses, so a malicious caller can't escape the
+    ``raw/`` prefix via ``..``. The storage backend's own
+    ``_validate_relative_key`` is a second line of defence."""
+    client, _ = hosted_client
+    resp = client.delete("/api/me/raw/..%2Fevil.mp4")
+    # _sanitize_raw_filename raises a 400; both that and the storage
+    # guard fail closed.
+    assert resp.status_code in (400, 404)

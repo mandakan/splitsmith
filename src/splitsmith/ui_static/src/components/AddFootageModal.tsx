@@ -26,12 +26,13 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FolderPicker } from "@/components/FolderPicker";
 import {
   ApiError,
   api,
+  type RawUploadEntry,
   type ScanResponse,
 } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
@@ -208,7 +209,7 @@ export function AddFootageModal({
   }
 
   if (hostedMode) {
-    return <HostedModePlaceholder onClose={onClose} />;
+    return <HostedUploadSurface onClose={onClose} />;
   }
 
   return (
@@ -724,70 +725,434 @@ function StatusIcon({ state }: { state: ScanState }) {
   );
 }
 
-/** Stand-in for the queue + scan flow when the server runs in hosted
- *  mode. The SPA upload UX is deferred to the tus migration (doc 05);
- *  meanwhile we surface the curl-only ``POST /api/me/raw/upload`` path
- *  so the operator has a working route rather than a dead-ended
- *  filesystem picker (#425). */
-function HostedModePlaceholder({ onClose }: { onClose: () => void }) {
+/** Hosted-mode browser upload surface: drag-and-drop / file-pick,
+ *  per-file progress, list of what's already uploaded, prune via
+ *  delete. Files land in S3 under ``users/<id>/raw/`` via
+ *  ``POST /api/me/raw/upload``; the SPA never sees a host filesystem
+ *  path. Today the upload terminates at object storage -- attaching
+ *  to a project happens once the worker pipeline can read from S3
+ *  (separate chunk per the saas-readiness roadmap). */
+function HostedUploadSurface({ onClose }: { onClose: () => void }) {
+  return <HostedUploadBody onClose={onClose} />;
+}
+
+interface PendingUpload {
+  /** Stable per-upload id so re-renders keep progress bars aligned
+   *  with the right file. ``crypto.randomUUID`` is fine -- we don't
+   *  persist this. */
+  id: string;
+  file: File;
+  status: "queued" | "hashing" | "uploading" | "done" | "error" | "cancelled";
+  bytesSent: number;
+  /** Computed client-side before the upload starts so the server can
+   *  roll back transit corruption via ``X-Content-SHA256``. Optional
+   *  -- a very large file on a slow CPU may skip the hash to start
+   *  uploading sooner, at the cost of weaker end-to-end checking. */
+  sha256?: string;
+  errorMessage?: string;
+  controller?: AbortController;
+}
+
+function HostedUploadBody({ onClose }: { onClose: () => void }) {
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Initial list -- so the surface opens with a real "you've already
+  // uploaded X" view instead of looking empty until the operator
+  // touches something.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listRawUploads()
+      .then((r) => {
+        if (alive) setExisting(r.uploads);
+      })
+      .catch(() => {
+        if (alive) setExisting([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Refresh the existing list whenever any upload finishes so the
+  // user sees their freshly-uploaded entry land in the bottom panel.
+  const refreshExisting = useCallback(async () => {
+    try {
+      const r = await api.listRawUploads();
+      setExisting(r.uploads);
+    } catch {
+      // Non-fatal -- the just-completed upload is still in the
+      // pending list, the user knows it succeeded.
+    }
+  }, []);
+
+  const updateOne = useCallback(
+    (id: string, patch: Partial<PendingUpload>) => {
+      setUploads((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, ...patch } : u)),
+      );
+    },
+    [],
+  );
+
+  const enqueue = useCallback(
+    (files: FileList | File[]) => {
+      const next: PendingUpload[] = [];
+      for (const f of Array.from(files)) {
+        next.push({
+          id: crypto.randomUUID(),
+          file: f,
+          status: "queued",
+          bytesSent: 0,
+        });
+      }
+      setUploads((prev) => [...prev, ...next]);
+    },
+    [],
+  );
+
+  // Pump the queue: for every upload still in ``queued``, kick off
+  // the hash + upload pipeline. Runs serially per file (one XHR at
+  // a time) so a slow uplink doesn't get starved by concurrent
+  // 500 MB transfers. The browser opens one TCP connection per
+  // upload anyway and S3 backpressures the rest.
+  useEffect(() => {
+    const next = uploads.find((u) => u.status === "queued");
+    if (!next) return;
+    let cancelled = false;
+
+    void (async () => {
+      const controller = new AbortController();
+      updateOne(next.id, { status: "hashing", controller });
+      let sha256: string | undefined;
+      try {
+        sha256 = await hashFile(next.file);
+        if (cancelled) return;
+      } catch {
+        // Hashing failures are rare (browser crypto SubtleCrypto is
+        // universal) but we still proceed with an unhashed upload --
+        // the server computes its own digest, the client just loses
+        // the round-trip integrity check.
+      }
+      updateOne(next.id, {
+        status: "uploading",
+        sha256,
+        bytesSent: 0,
+      });
+      try {
+        await api.uploadRawFile(next.file, {
+          sha256,
+          signal: controller.signal,
+          onProgress: (loaded) => {
+            if (cancelled) return;
+            updateOne(next.id, { bytesSent: loaded });
+          },
+        });
+        if (cancelled) return;
+        updateOne(next.id, {
+          status: "done",
+          bytesSent: next.file.size,
+        });
+        await refreshExisting();
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.detail === "upload cancelled") {
+          updateOne(next.id, { status: "cancelled" });
+          return;
+        }
+        const msg = err instanceof ApiError ? err.detail : String(err);
+        updateOne(next.id, { status: "error", errorMessage: msg });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploads.length, uploads.find((u) => u.status === "queued")?.id]);
+
+  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) enqueue(e.target.files);
+    // Reset so picking the same file twice in a row still fires.
+    e.target.value = "";
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      enqueue(e.dataTransfer.files);
+    }
+  };
+
+  const cancel = (id: string) => {
+    const u = uploads.find((x) => x.id === id);
+    if (u?.controller) u.controller.abort();
+  };
+
+  const removeUploaded = async (filename: string) => {
+    try {
+      await api.deleteRawUpload(filename);
+      await refreshExisting();
+    } catch {
+      // Surface inline -- a delete failure is non-fatal; the operator
+      // can retry. We don't blow away the row.
+    }
+  };
+
+  const inFlight = uploads.some(
+    (u) => u.status === "queued" || u.status === "hashing" || u.status === "uploading",
+  );
+
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Add footage (hosted mode)"
+      aria-label="Upload raw footage"
       className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={!inFlight ? onClose : undefined}
     >
       <div
-        className="relative flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
+        className="relative flex h-[min(720px,90vh)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between gap-4 border-b border-rule px-5 py-3.5">
           <div>
             <h2 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-              Upload from browser (preview)
+              Upload raw footage
             </h2>
             <p className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-              Hosted-mode browser uploads ship with the tus migration.
+              Files land in your hosted object storage. Attaching to a
+              project is a separate step.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
-          >
-            <X className="size-4" />
-          </button>
+          {!inFlight && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </header>
-        <div className="space-y-4 px-5 py-4 text-[0.8125rem] text-ink-2">
-          <p>
-            The host filesystem picker is disabled because there's no
-            useful path inside the hosted container. While the
-            drag-and-drop upload UX is in flight, you can stream a clip
-            in via curl:
-          </p>
-          <pre className="overflow-x-auto rounded-md border border-rule bg-surface-2 p-3 font-mono text-[0.75rem] text-ink">
-            {"curl -F \"file=@/path/to/clip.mp4\" \\\n  http://<host>:5174/api/me/raw/upload"}
-          </pre>
-          <p className="text-muted">
-            The endpoint stores the upload under
-            <code className="mx-1 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[0.75rem] text-ink-2">
-              users/&lt;user_id&gt;/raw/
-            </code>
-            in object storage and returns the resulting path + sha256.
-          </p>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+          {/* Dropzone */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={onDrop}
+            className={cn(
+              "flex flex-col items-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 text-center transition-colors",
+              isDragging
+                ? "border-led bg-led-tint"
+                : "border-rule bg-surface-2 hover:border-rule-strong",
+            )}
+          >
+            <FolderOpen className="size-6 text-muted" />
+            <div className="font-display text-[0.8125rem] font-bold uppercase tracking-[0.08em] text-ink">
+              Drop video files here
+            </div>
+            <div className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+              or
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-md border border-rule-strong bg-surface px-3 py-1.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led"
+            >
+              Choose files...
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="video/*"
+              onChange={onPick}
+              className="hidden"
+            />
+          </div>
+
+          {/* Pending queue */}
+          {uploads.length > 0 && (
+            <section className="flex flex-col gap-2">
+              <h3 className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+                This session ({uploads.length})
+              </h3>
+              <ul className="flex flex-col gap-1.5">
+                {uploads.map((u) => (
+                  <UploadRow key={u.id} upload={u} onCancel={() => cancel(u.id)} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Existing uploads */}
+          <section className="flex flex-col gap-2">
+            <h3 className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+              Already in storage{existing ? ` (${existing.length})` : ""}
+            </h3>
+            {existing === null ? (
+              <p className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+                Loading...
+              </p>
+            ) : existing.length === 0 ? (
+              <p className="rounded-md border border-rule bg-surface-2 px-3 py-2 font-mono text-[0.75rem] text-muted">
+                Nothing uploaded yet. Files added here persist across
+                browser sessions.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {existing.map((e) => (
+                  <ExistingRow
+                    key={e.path}
+                    entry={e}
+                    onDelete={() => removeUploaded(e.filename)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
+
         <footer className="flex items-center justify-end gap-2 border-t border-rule bg-surface-2 px-5 py-3.5">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md bg-led-fill px-3.5 py-1.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink shadow-[0_0_0_1px_var(--color-led-fill),0_0_18px_var(--color-led-glow)] hover:bg-led"
+            disabled={inFlight}
+            className="rounded-md bg-led-fill px-3.5 py-1.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink shadow-[0_0_0_1px_var(--color-led-fill),0_0_18px_var(--color-led-glow)] hover:bg-led disabled:opacity-50 disabled:shadow-none"
           >
-            Got it
+            {inFlight ? "Uploading..." : "Done"}
           </button>
         </footer>
       </div>
     </div>
   );
+}
+
+function UploadRow({
+  upload,
+  onCancel,
+}: {
+  upload: PendingUpload;
+  onCancel: () => void;
+}) {
+  const pct =
+    upload.file.size > 0
+      ? Math.min(100, Math.round((upload.bytesSent / upload.file.size) * 100))
+      : 0;
+  return (
+    <li className="rounded-md border border-rule bg-surface-2 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-mono text-[0.75rem] text-ink">
+            {upload.file.name}
+          </div>
+          <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+            {formatBytes(upload.file.size)}
+            {upload.status === "hashing" && " . hashing"}
+            {upload.status === "uploading" && ` . ${pct}%`}
+            {upload.status === "done" && " . done"}
+            {upload.status === "cancelled" && " . cancelled"}
+            {upload.status === "error" && (
+              <span className="text-led-text"> . {upload.errorMessage}</span>
+            )}
+          </div>
+        </div>
+        {(upload.status === "queued" ||
+          upload.status === "hashing" ||
+          upload.status === "uploading") && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md p-1 text-subtle hover:bg-surface-3 hover:text-ink"
+            aria-label="Cancel upload"
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+        {upload.status === "done" && (
+          <span
+            aria-hidden
+            className="inline-flex size-5 items-center justify-center rounded-full bg-done text-bg"
+          >
+            <Check className="size-3" strokeWidth={3} />
+          </span>
+        )}
+      </div>
+      {(upload.status === "uploading" || upload.status === "hashing") && (
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface">
+          <div
+            className="h-full bg-led transition-all"
+            style={{
+              width: `${upload.status === "hashing" ? 0 : pct}%`,
+            }}
+          />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function ExistingRow({
+  entry,
+  onDelete,
+}: {
+  entry: RawUploadEntry;
+  onDelete: () => void;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-md border border-rule bg-surface-2 px-3 py-2">
+      <div className="min-w-0">
+        <div className="truncate font-mono text-[0.75rem] text-ink">
+          {entry.filename}
+        </div>
+        <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          {formatBytes(entry.size)}
+          {entry.last_modified && ` . ${formatRelative(entry.last_modified)}`}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete ${entry.filename}`}
+        className="rounded-md p-1 text-subtle hover:bg-led-tint hover:text-led-text"
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+    </li>
+  );
+}
+
+async function hashFile(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const secs = Math.max(0, Math.round((now - then) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+  return `${Math.round(secs / 86400)}d ago`;
 }

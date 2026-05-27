@@ -1255,6 +1255,18 @@ export interface ShooterListResponse {
   shooters: ShooterListEntry[];
 }
 
+/** One uploaded raw video in the operator's hosted-mode object
+ *  storage, returned by ``GET /api/me/raw/list``. Mirrors the response
+ *  shape of ``POST /api/me/raw/upload`` so the SPA can hand-off
+ *  freshly-uploaded entries into the list view without a round-trip. */
+export interface RawUploadEntry {
+  filename: string;
+  path: string;
+  size: number;
+  last_modified: string | null;
+  etag: string | null;
+}
+
 /** One shot point on a shooter's timeline in /compare (#328). */
 export interface CompareShotPoint {
   shot_number: number;
@@ -2034,6 +2046,107 @@ export const api = {
    *    filesystem pickers / project-folder inputs in hosted mode. */
   getServerFeatures: () =>
     request<{ lab: boolean; mode: "local" | "hosted" }>("/api/server/features"),
+
+  /** Hosted-mode only -- list the operator's uploaded raw videos.
+   *  Empty array (not 404) when nothing has been uploaded yet. The
+   *  picker renders the empty state on length === 0. */
+  listRawUploads: () =>
+    request<{ uploads: RawUploadEntry[] }>("/api/me/raw/list"),
+
+  /** Hosted-mode only -- remove an uploaded raw video. Idempotent
+   *  (200 on already-gone); the SPA can retry without special-casing. */
+  deleteRawUpload: (filename: string) =>
+    request<{ ok: true; path: string }>(
+      `/api/me/raw/${encodeURIComponent(filename)}`,
+      { method: "DELETE" },
+    ),
+
+  /** Hosted-mode only -- upload one file via multipart/form-data to
+   *  ``POST /api/me/raw/upload``. Returns the server's response
+   *  (path/size/sha256/filename).
+   *
+   *  Uses ``XMLHttpRequest`` rather than ``fetch`` because ``fetch``
+   *  exposes no upload progress events in any current browser. The
+   *  ``onProgress`` callback fires whenever the browser flushes bytes
+   *  to the network so the SPA can render a real progress bar (200-
+   *  500 MB raw videos take long enough that no-progress feels
+   *  broken).
+   *
+   *  ``signal`` is an ``AbortSignal`` from the caller so cancel
+   *  buttons can yank an in-flight upload; the underlying
+   *  ``xhr.abort()`` rolls the request back. The server's
+   *  ``boto3.TransferManager`` aborts the multipart on its own when
+   *  the connection drops, so a cancelled upload doesn't leak. */
+  uploadRawFile: (
+    file: File,
+    opts: {
+      sha256?: string | null;
+      onProgress?: (bytesSent: number, totalBytes: number) => void;
+      signal?: AbortSignal;
+    } = {},
+  ) =>
+    new Promise<{ path: string; size: number; sha256: string; filename: string }>(
+      (resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const url = "/api/me/raw/upload";
+        xhr.open("POST", url, true);
+        // Server-side multipart parser keys off ``file`` -- mirror
+        // the ``files={"file": ...}`` shape the curl path uses.
+        const form = new FormData();
+        form.append("file", file, file.name);
+        if (opts.sha256) {
+          xhr.setRequestHeader("X-Content-SHA256", opts.sha256);
+        }
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && opts.onProgress) {
+            opts.onProgress(e.loaded, e.total);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+              reject(
+                new ApiError(
+                  xhr.status,
+                  `invalid upload response: ${e instanceof Error ? e.message : String(e)}`,
+                  null,
+                ),
+              );
+            }
+            return;
+          }
+          // Try to parse a structured FastAPI error body; fall back to
+          // status text otherwise.
+          let detail: unknown = xhr.statusText;
+          try {
+            const body = JSON.parse(xhr.responseText);
+            if (body && typeof body === "object" && "detail" in body) {
+              detail = body.detail;
+            }
+          } catch {
+            // ignore -- detail stays as the status text
+          }
+          const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+          reject(new ApiError(xhr.status, msg, detail));
+        };
+        xhr.onerror = () => {
+          reject(new ApiError(0, "network error during upload", null));
+        };
+        xhr.onabort = () => {
+          reject(new ApiError(0, "upload cancelled", null));
+        };
+        if (opts.signal) {
+          if (opts.signal.aborted) {
+            reject(new ApiError(0, "upload cancelled", null));
+            return;
+          }
+          opts.signal.addEventListener("abort", () => xhr.abort());
+        }
+        xhr.send(form);
+      },
+    ),
 
   /** Server health + bind state. The picker route polls this on mount
    *  to decide whether the user landed in unbound mode (boot with no
