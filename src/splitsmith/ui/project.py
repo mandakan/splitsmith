@@ -143,7 +143,14 @@ SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard", "probes"
 #        which could alias to a previous primary's audio after a reassignment.
 #        Migration deletes the legacy files so the next access re-extracts
 #        under the new naming.
-SCHEMA_VERSION = 2
+#   3 -- ``raw_videos[]`` added to MatchProject (doc 05). Migration
+#        backfills one RawVideo per unique StageVideo.path across stages
+#        + unassigned, aggregating covers_stages. Legacy entries get
+#        ``sha256=None`` and ``size_bytes`` from disk when accessible (0
+#        when the source is offline). The field is forward-compatible --
+#        a v2-on-disk project loads cleanly into the v3 model with an
+#        empty ``raw_videos``; the migration just populates it.
+SCHEMA_VERSION = 3
 
 
 def _migrate_v1_to_v2(root: Path, project: MatchProject) -> None:
@@ -193,6 +200,73 @@ def _migrate_v1_to_v2(root: Path, project: MatchProject) -> None:
         "schema migration v1->v2 on %s: removed %d legacy audio/trim cache file(s)",
         project.name,
         removed,
+    )
+
+
+def _migrate_v2_to_v3(root: Path, project: MatchProject) -> None:
+    """Backfill ``raw_videos[]`` from existing StageVideo entries.
+
+    Groups every StageVideo (assigned + unassigned) by ``str(path)`` so a
+    single source recording that's been added to multiple stages collapses
+    to one RawVideo entry with ``covers_stages`` aggregated. ``size_bytes``
+    is read from disk when the source is reachable; ``0`` otherwise so the
+    migration is lossless even when the user's external drive is unplugged.
+    ``sha256`` stays ``None`` (we never computed one); a future hosted-mode
+    attach can fill it in via :meth:`MatchProject.attach_raw_video`.
+
+    Idempotent: re-running against an already-populated ``raw_videos`` is a
+    merge (via ``attach_raw_video``) rather than a duplicate-append, so the
+    migration is safe to invoke on partial-v3 projects.
+    """
+    # storage_path -> {filename, covers_stages set, earliest_added_at}
+    aggregated: dict[str, dict[str, Any]] = {}
+
+    def _ingest(video: StageVideo, stage_number: int | None) -> None:
+        key = str(video.path)
+        entry = aggregated.setdefault(
+            key,
+            {
+                "filename": Path(video.path).name,
+                "covers_stages": set(),
+                "earliest_added_at": video.added_at,
+            },
+        )
+        if stage_number is not None:
+            entry["covers_stages"].add(stage_number)
+        if video.added_at < entry["earliest_added_at"]:
+            entry["earliest_added_at"] = video.added_at
+
+    for stage in project.stages:
+        for sv in stage.videos:
+            _ingest(sv, stage.stage_number)
+    for sv in project.unassigned_videos:
+        _ingest(sv, None)
+
+    backfilled = 0
+    for storage_path, info in aggregated.items():
+        size_bytes = 0
+        try:
+            resolved = project.resolve_video_path(root, Path(storage_path))
+            if resolved.exists():
+                size_bytes = resolved.stat().st_size
+        except OSError:
+            # Source offline -- record 0 and let a future re-scan fill it.
+            size_bytes = 0
+        rv = RawVideo(
+            original_filename=info["filename"],
+            size_bytes=size_bytes,
+            sha256=None,
+            uploaded_at=info["earliest_added_at"],
+            storage_path=storage_path,
+            covers_stages=sorted(info["covers_stages"]),
+        )
+        project.attach_raw_video(rv)
+        backfilled += 1
+
+    logger.info(
+        "schema migration v2->v3 on %s: backfilled %d raw_videos entry/entries",
+        project.name,
+        backfilled,
     )
 
 
@@ -579,6 +653,36 @@ class VideoMatchAnalysisEntry(BaseModel):
     stage_numbers: list[int]
 
 
+class RawVideo(BaseModel):
+    """One uploaded raw video file attached to a match (doc 05).
+
+    A raw video is the original camera recording the user uploaded once;
+    a single 30-minute head-cam clip typically ``covers_stages = [1, 2, 3, 4]``.
+    ``StageVideo`` entries are the per-stage references that point at this
+    raw via ``storage_path`` -- the relationship is N:1 (many StageVideos
+    can resolve to the same RawVideo when one source covers multiple
+    stages).
+
+    ``storage_path`` is the canonical key. In hosted mode it is a
+    storage-relative path under the user's tenant prefix (e.g.
+    ``raw/GH010023.mp4``); in local mode it is the project-relative or
+    absolute path on disk -- either way it round-trips through the active
+    ``Storage`` backend.
+
+    ``sha256`` is optional on legacy backfilled entries (we never computed
+    one) and populated on hosted uploads via ``X-Content-SHA256``. Future
+    content-addressable dedup keys off this field; for now ``storage_path``
+    is the primary identity.
+    """
+
+    original_filename: str
+    size_bytes: int = 0
+    sha256: str | None = None
+    uploaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    storage_path: str
+    covers_stages: list[int] = Field(default_factory=list)
+
+
 class MatchAnalysis(BaseModel):
     """Project-level match analysis exposed at GET /api/project/match-analysis.
 
@@ -677,6 +781,13 @@ class MatchProject(BaseModel):
     # decides re-emission, the project just remembers what was
     # dismissed.
     nudges_dismissed_stages: list[int] = Field(default_factory=list)
+    # Uploaded raw videos for this match (doc 05). One entry per source
+    # recording -- a single head-cam clip that covers stages 1-4 is one
+    # entry with ``covers_stages = [1, 2, 3, 4]``. StageVideo entries
+    # reference these by ``storage_path``. Empty on legacy and local-mode
+    # projects until first upload/attach; backfilled from existing
+    # StageVideos on v2->v3 schema migration.
+    raw_videos: list[RawVideo] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -728,7 +839,10 @@ class MatchProject(BaseModel):
         project = cls.model_validate(data)
         if on_disk_version < 2:
             _migrate_v1_to_v2(root, project)
-            project.schema_version = 2
+        if on_disk_version < 3:
+            _migrate_v2_to_v3(root, project)
+        if on_disk_version < SCHEMA_VERSION:
+            project.schema_version = SCHEMA_VERSION
             project.save(root)
         return project
 
@@ -1440,6 +1554,47 @@ class MatchProject(BaseModel):
         """Resolve a ``StageVideo.path`` (which may be project-relative or
         absolute) to an absolute filesystem path."""
         return video_path if video_path.is_absolute() else root / video_path
+
+    def find_raw_video(self, storage_path: str) -> RawVideo | None:
+        """Return the ``RawVideo`` with this ``storage_path``, or ``None``.
+
+        ``storage_path`` is the canonical identity key -- see RawVideo's
+        docstring for the local-vs-hosted semantics.
+        """
+        for rv in self.raw_videos:
+            if rv.storage_path == storage_path:
+                return rv
+        return None
+
+    def attach_raw_video(self, rv: RawVideo) -> RawVideo:
+        """Register a raw video on this project, merging into an existing
+        entry when one shares the same ``storage_path``.
+
+        Merge rules when an entry already exists:
+
+        - ``covers_stages`` -- union of existing + new (stable insertion
+          order; sorted ascending so the SPA renders deterministically).
+        - ``size_bytes`` -- adopt the new value when the existing one is 0
+          (legacy backfill placeholder).
+        - ``sha256`` -- adopt the new value when the existing one is
+          ``None`` (legacy backfill).
+        - ``original_filename`` / ``uploaded_at`` -- existing wins (we don't
+          rewrite the historical record once it's set).
+
+        Returns the canonical entry on the project (either the merged
+        existing one or the newly appended ``rv``).
+        """
+        existing = self.find_raw_video(rv.storage_path)
+        if existing is None:
+            self.raw_videos.append(rv)
+            return rv
+        merged = sorted(set(existing.covers_stages) | set(rv.covers_stages))
+        existing.covers_stages = merged
+        if existing.size_bytes == 0 and rv.size_bytes:
+            existing.size_bytes = rv.size_bytes
+        if existing.sha256 is None and rv.sha256:
+            existing.sha256 = rv.sha256
+        return existing
 
     def assign_video(
         self,
