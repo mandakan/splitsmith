@@ -691,12 +691,18 @@ class AppState:
 
         Binds :attr:`storage` onto the project so
         :meth:`MatchProject.resolve_video_path` can mirror hosted-mode
-        raw videos into the local cache on first access. Local mode
-        leaves ``storage`` at ``None``; the bind is a no-op and the
-        legacy disk-only resolver wins.
+        raw videos into the local cache on first access. The bound
+        ``scope`` is ``matches/<match_id>/shooters/<slug>`` -- used as
+        the prefix for derived-artifact caches (audio WAVs today,
+        trim outputs later) so two shooters in different matches
+        can't collide on the same ``video_id``. Local mode leaves
+        ``storage`` at ``None``; the bind is a no-op and the legacy
+        disk-only resolvers win.
         """
         project = MatchProject.load(self.shooter_root(slug))
-        project.bind_storage(self.storage)
+        match_id = current_match_id.get()
+        scope = f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
+        project.bind_storage(self.storage, scope=scope)
         return project
 
     def register_match(self, root: Path) -> str | None:

@@ -23,6 +23,7 @@ open so the next access re-extracts under the new naming.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -31,6 +32,8 @@ from pathlib import Path
 from .. import beep_detect
 from ..config import BeepDetectConfig, BeepDetection
 from .project import MatchProject, StageVideo
+
+logger = logging.getLogger(__name__)
 
 # Standard trim buffer (config.OutputConfig.trim_buffer_seconds default).
 # Used to derive the beep's position inside a trimmed clip when no trim
@@ -149,6 +152,14 @@ def ensure_video_audio(
     if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
         return audio_path
 
+    # Storage cache (hosted mode): another worker may have already
+    # extracted this WAV. Pulling 5 MB from S3 beats running ffmpeg
+    # against a 500 MB raw video. Local mode skips this -- ``project``
+    # has no storage bound, so the key resolves to ``None`` and the
+    # helper returns False without touching the network.
+    if _try_pull_audio_from_storage(project, audio_path):
+        return audio_path
+
     if not shutil.which(ffmpeg_binary):
         raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
 
@@ -173,6 +184,10 @@ def ensure_video_audio(
         raise AudioExtractionError(
             f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
         ) from exc
+    # Push the freshly-extracted WAV up to the storage cache so the
+    # next worker that touches this project can skip ffmpeg. Best-
+    # effort: a network blip during push doesn't fail the job.
+    _try_push_audio_to_storage(project, audio_path)
     return audio_path
 
 
@@ -251,7 +266,13 @@ def ensure_audit_audio(
         audio_path = audit_audio_path(project_root, stage_number, project=project)
         audio_path.parent.mkdir(parents=True, exist_ok=True)
         if not audio_path.exists() or audio_path.stat().st_mtime < trimmed_video.stat().st_mtime:
-            _extract_audio(trimmed_video, audio_path, sample_rate, ffmpeg_binary)
+            # Try the storage cache before invoking ffmpeg. The audit
+            # WAV is derived from the trimmed MP4, but its content is
+            # determined by the trim params; a worker that already
+            # produced this exact WAV pushed it under the same key.
+            if not _try_pull_audio_from_storage(project, audio_path):
+                _extract_audio(trimmed_video, audio_path, sample_rate, ffmpeg_binary)
+                _try_push_audio_to_storage(project, audio_path)
         # Beep position inside the trimmed clip = beep_in_source minus
         # trim_start. trim_start = max(0, beep - pre_buffer); so:
         #   beep_in_clip = min(beep_in_source, pre_buffer)
@@ -305,6 +326,75 @@ def _extract_audio(
         raise AudioExtractionError(
             f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
         ) from exc
+
+
+def _storage_audio_key(project: MatchProject | None, local_wav: Path) -> str | None:
+    """Compute the storage key for an extracted audio WAV.
+
+    Returns ``None`` in local mode (no storage bound) or when no
+    per-project scope is set -- both cases skip the storage cache.
+    The key mirrors the local layout under the project's scope:
+    ``<scope>/audio/<basename>``. The basename already includes the
+    ``video_id``, so collisions across shooters in different matches
+    are prevented by ``<scope>``.
+    """
+    if project is None or project._storage is None or project._storage_scope is None:
+        return None
+    return f"{project._storage_scope}/audio/{local_wav.name}"
+
+
+def _try_pull_audio_from_storage(project: MatchProject | None, local_wav: Path) -> bool:
+    """If the WAV exists in the project's storage cache, download it
+    into ``local_wav`` and return True. Returns False when no
+    storage is bound, the key is absent, or the download fails.
+
+    Best-effort by design: a storage hiccup falls through to ffmpeg
+    rather than failing the detection job. Logs at INFO so the
+    operator can spot a misbehaving backend without it being noisy.
+    """
+    key = _storage_audio_key(project, local_wav)
+    if key is None:
+        return False
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        if not storage.exists(key):
+            return False
+    except Exception as exc:
+        logger.info("audio cache: storage.exists(%s) raised %s", key, exc)
+        return False
+    try:
+        local_wav.parent.mkdir(parents=True, exist_ok=True)
+        with storage.open_stream(key) as src, local_wav.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        return True
+    except Exception as exc:
+        logger.info("audio cache: pull from %s failed: %s", key, exc)
+        # Leave nothing half-written behind so the ffmpeg fallback
+        # doesn't trip over a torn file.
+        try:
+            local_wav.unlink()
+        except FileNotFoundError:
+            pass
+        return False
+
+
+def _try_push_audio_to_storage(project: MatchProject | None, local_wav: Path) -> None:
+    """Push a freshly-extracted WAV to the project's storage cache.
+
+    Best-effort: a push failure logs and returns; the worker still
+    has the local WAV and can serve the current job. The next
+    worker on this project will re-extract -- annoying but not
+    incorrect.
+    """
+    key = _storage_audio_key(project, local_wav)
+    if key is None:
+        return
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        with local_wav.open("rb") as f:
+            storage.upload_stream(key, f)
+    except Exception as exc:
+        logger.info("audio cache: push to %s failed: %s", key, exc)
 
 
 def trim_params_path(output: Path) -> Path:
