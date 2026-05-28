@@ -55,6 +55,32 @@ COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
 ENV UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy
 
+# Static ffmpeg + ffprobe (John Van Sickle release builds -- fully
+# statically linked, no runtime shared libs). Replaces the Debian
+# ``ffmpeg`` package, which drags ~300 MB of codec/dev libraries into
+# the runtime image; the static binaries are ~80 MB and self-contained.
+# ``TARGETARCH`` is provided automatically by buildx (amd64 / arm64).
+# The release URL tracks the latest stable ffmpeg; it isn't strictly
+# version-pinned, which is acceptable for a CLI we only shell out to.
+ARG TARGETARCH
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
+    rm -rf /var/lib/apt/lists/*; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) ff_arch=amd64 ;; \
+        arm64) ff_arch=arm64 ;; \
+        *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${ff_arch}-static.tar.xz" \
+        -o /tmp/ffmpeg.tar.xz; \
+    mkdir -p /tmp/ffmpeg; \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
+    install -m0755 /tmp/ffmpeg/ffmpeg /tmp/ffmpeg/ffprobe /usr/local/bin/; \
+    rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
+    /usr/local/bin/ffmpeg -version | head -1; \
+    /usr/local/bin/ffprobe -version | head -1
+
 WORKDIR /app
 
 # Dependency layer first so it caches across source-only edits. Metadata
@@ -71,6 +97,15 @@ COPY src ./src
 RUN test -f src/splitsmith/ui_static/dist/index.html \
     || (echo "ERROR: src/splitsmith/ui_static/dist/index.html missing -- build the SPA before docker build" && exit 1)
 RUN uv sync --frozen --no-dev --extra hosted
+
+# Slim the venv before it's copied to the runtime stage: drop bundled
+# test suites + __pycache__. NOTE: do NOT ``strip`` the native .so files
+# -- the prebuilt scientific wheels (numpy/scipy OpenBLAS) carry an ELF
+# layout that strip corrupts ("load command not page-aligned"), breaking
+# numpy import. The big libs (llvmlite, openblas) stay as shipped.
+RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
+    find /app/.venv -type d -name 'tests' -prune -exec rm -rf {} + ; \
+    find /app/.venv -type d -name 'test' -prune -exec rm -rf {} +
 
 # Bake the slim ONNX model artifacts into a staging dir we copy into the
 # runtime stage. ``SPLITSMITH_CONFIG_DIR`` drives the cache location
@@ -90,14 +125,17 @@ RUN if [ "$BAKE_MODELS" = "1" ]; then \
 # --------------------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime
 
-# Runtime system deps only: ffmpeg for trim / probe, curl for the
-# healthcheck. No build tools.
+# Runtime system deps only: ca-certificates for outbound TLS, curl for
+# the compose healthcheck. ffmpeg/ffprobe come as static binaries from
+# the builder (below) -- no apt ffmpeg package, no codec libs.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        ffmpeg \
  && rm -rf /var/lib/apt/lists/*
+
+# Static ffmpeg + ffprobe from the builder (self-contained, no lib deps).
+COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
 
 # Non-root user; --create-home so the baked model cache + any runtime
 # writes (logs) land in a writable home.
