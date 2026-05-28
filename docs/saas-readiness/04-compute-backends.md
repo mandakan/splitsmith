@@ -175,9 +175,14 @@ spinner.
 
 ## The cloud worker
 
-A FastAPI app + an `arq` worker, deployed together (Fly machines or
-Railway services). The HTTP app receives detection requests, the
-worker processes them.
+A FastAPI app + a Procrastinate worker, deployed together (Fly
+machines or Railway services). The HTTP app receives detection
+requests; the `splitsmith worker` process drains the queue.
+Procrastinate's tables live in the same Postgres the API server
+already uses, so the worker fleet doesn't need a separate broker.
+Per-tenant queues (`user-<id>`) let us pin worker pools to specific
+tenants later -- see [HOSTED-LOCAL.md](HOSTED-LOCAL.md) "Workers"
+for the operational shape.
 
 ### Job shape
 
@@ -234,9 +239,10 @@ known storage paths.
 
 ### Failure handling
 
-- Worker crashes mid-job => `arq` retries up to 3 times with
-  exponential backoff. After 3 fails, the job moves to `failed`
-  with `error_message` set.
+- Worker crashes mid-job => Procrastinate retries up to 3 times
+  with exponential backoff (configured via the task's
+  ``retry`` policy). After 3 fails, the ``compute_jobs`` row
+  moves to ``failed`` with ``error_message`` set.
 - The user sees a "Retry" button. Retry creates a new job ID
   (different ULID) -- the failed job stays in the table for
   debugging.

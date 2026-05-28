@@ -240,21 +240,34 @@ On container restart, any `pending` / `running` row is swept to
 `failed` with `error="server restarted before this job finished"`
 -- no other process will resume them.
 
-**What's missing for a real worker fleet** (deferred to a follow-up PR):
+**What PR-alpha (2026-05-27) landed:**
+
+- [Procrastinate](https://procrastinate.readthedocs.io/) is on the
+  dependency list (hosted extra only -- local-mode wheels stay
+  queue-free). Its schema applies via alembic migration
+  `ba72882f8c1c` alongside our own tables.
+- `splitsmith.queue` exposes `build_app(database_url)` and a
+  per-tenant queue-name helper (`user-<id>` -- see "Per-tenant
+  queues" in 04). No tasks registered yet; the App is plumbing
+  only at this stage.
+
+**What's still missing for a real worker fleet** (PR-beta onwards):
 
 - A `splitsmith worker` CLI that boots a long-lived process which
-  pops jobs from a real queue and registers task handlers by name.
-- A Postgres-native queue layer ([Procrastinate](https://procrastinate.readthedocs.io/)
-  is the planned pick -- reuses our existing DB; no Redis
-  dependency). It would land a sibling `procrastinate_jobs` table
-  alongside `compute_jobs`.
+  pops jobs from a Procrastinate queue and registers task
+  handlers by name.
 - A `submit()` shape change from `fn=callable` (closure-passing)
   to `task_name + args` (worker-side registered tasks) -- this
-  cascades through ~30 callsites in `server.py`.
+  cascades through ~18 callsites in `server.py`. The plan is to
+  extract each closure body into a pure `*_body(handle, ...)`
+  function so local mode's `JobRegistry` keeps the closure path
+  (no Postgres / queue dependency on the desktop) while the
+  hosted Procrastinate task rebuilds per-user state from args and
+  calls the same body.
 
-Until then, two splitsmith containers pointed at the same Postgres
-would each only see / dispatch their own submissions; cross-container
-work-stealing doesn't exist.
+Until those land, two splitsmith containers pointed at the same
+Postgres would each only see / dispatch their own submissions;
+cross-container work-stealing doesn't exist.
 
 ### Workflows that touch the local filesystem
 

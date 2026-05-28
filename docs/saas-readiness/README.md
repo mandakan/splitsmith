@@ -46,8 +46,8 @@ touching.
    The `ComputeBackend` abstraction, the three-tier model
    (Tier 1 local / Tier 2 audio + cloud ML / Tier 3 full cloud), the
    browser-capability bench that drives auto-selection, the cloud
-   worker shape (`arq` + the `compute_jobs` table), and rough cost
-   sizing per tier.
+   worker shape (Procrastinate + the `compute_jobs` table), and rough
+   cost sizing per tier.
 
 6. **[05 -- Uploads and streaming](./05-uploads-and-streaming.md)**
    The tus.io upload protocol, the audio-default flow, opt-in raw

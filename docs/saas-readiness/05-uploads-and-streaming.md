@@ -63,7 +63,7 @@ Browser                          API server                   R2
   |-- POST /api/v1/jobs ------------>|                          |
   |   { project_id, stage_n,         |                          |
   |     upload_id }                  |                          |
-  |                                  |-- enqueue arq job        |
+  |                                  |-- enqueue queue job      |
   |<-- { job_id } ------------------|                          |
 ```
 

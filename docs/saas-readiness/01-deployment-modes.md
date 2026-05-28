@@ -84,8 +84,10 @@ upload by default, premium pricing tier gates access.
   Holds users, projects, project members, billing entitlements,
   upload sessions. **Does NOT hold detection results -- those stay
   in the JSON files in R2** (principle 6 in doc 00).
-- Background jobs run on `arq` workers (or hosted Inngest / Trigger
-  if ops cost flips against us -- see doc 00).
+- Background jobs run on Procrastinate workers (Postgres-native
+  queue; no Redis required), spawned by the `splitsmith worker`
+  CLI. Hosted Inngest / Trigger remains the escape hatch if
+  in-deploy ops cost flips against us -- see doc 00.
 - Stripe Checkout is the paywall. Webhooks update entitlements in
   Postgres. See 08-billing-and-quotas.md.
 - Sentry is on, with PII scrubbing. PostHog optional in v2.
