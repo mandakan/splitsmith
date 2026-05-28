@@ -165,3 +165,59 @@ def test_hosted_user_row_persists_in_postgres(hosted_stack: None) -> None:
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "1"
+
+
+def _psql(query: str) -> str:
+    """Run ``query`` in the compose Postgres and return trimmed stdout."""
+    out = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(COMPOSE_FILE),
+            "exec",
+            "-T",
+            "postgres",
+            "psql",
+            "-U",
+            "splitsmith",
+            "-d",
+            "splitsmith",
+            "-At",
+            "-c",
+            query,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+def test_migrations_applied_against_postgres(hosted_stack: None) -> None:
+    """Regression guard for the asyncpg multi-statement migration bug.
+
+    The stack only reaches ``healthy`` if ``alembic upgrade head``
+    succeeded, so reaching this assertion already proves the chain ran.
+    We additionally assert the procrastinate schema (the migration that
+    broke on asyncpg) actually landed its objects -- a green health
+    check alone wouldn't notice a migration that silently created
+    nothing."""
+    # Every shipped migration's objects must exist. The procrastinate
+    # schema is the one that broke: 4 tables + a pile of PL/pgSQL funcs.
+    proc_tables = _psql(
+        "SELECT count(*) FROM information_schema.tables "
+        "WHERE table_schema='public' AND table_name LIKE 'procrastinate_%'"
+    )
+    assert int(proc_tables) >= 4, f"expected >=4 procrastinate_* tables, got {proc_tables}"
+
+    proc_funcs = _psql("SELECT count(*) FROM pg_proc WHERE proname LIKE 'procrastinate_%'")
+    assert int(proc_funcs) > 0, "procrastinate PL/pgSQL functions missing"
+
+    # Our own tenant tables from the earlier migrations.
+    for table in ("users", "recent_projects", "compute_jobs"):
+        exists = _psql(
+            "SELECT count(*) FROM information_schema.tables "
+            f"WHERE table_schema='public' AND table_name='{table}'"
+        )
+        assert exists == "1", f"table {table!r} missing after migrations"
