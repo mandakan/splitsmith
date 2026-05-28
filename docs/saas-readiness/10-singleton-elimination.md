@@ -133,10 +133,13 @@ backend swaps in without touching handlers.
 1. **(done)** Define `JobBackend` Protocol; `JobRegistry`
    satisfies it; `AppState.jobs` widened to the Protocol.
 2. Pick the backing store per doc 04 -- Postgres `compute_jobs`
-   table is the spec. `arq` Redis queue is the runtime.
+   table is the spec. Procrastinate (Postgres-native) is the
+   queue runtime; its schema lives alongside `compute_jobs` in
+   the same DB.
 3. Ship a hosted-mode backend: `submit` inserts into
-   `compute_jobs`, the worker picks up via `arq`, status writes
-   land in Postgres, `list` / `get` / `cancel` read from Postgres.
+   `compute_jobs`, the worker picks up via Procrastinate, status
+   writes land in Postgres, `list` / `get` / `cancel` read from
+   Postgres.
 4. The local-mode backend stays in-memory (no Postgres dep on the
    desktop). A SQLite-backed `PersistentLocalJobBackend` is the
    obvious bridge if the desktop ever needs job persistence too

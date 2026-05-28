@@ -50,7 +50,7 @@ The bias order is:
    email, Neon for Postgres).
 2. **Library** -- open-source, well-maintained, fits the use case.
    Use it inside our own deploy (fsspec for storage abstraction,
-   SQLAlchemy for ORM, arq for job queue).
+   SQLAlchemy for ORM, Procrastinate for job queue).
 3. **Custom code** -- only when no library or service exists, and
    even then prefer a thin shim around an existing primitive.
 
@@ -69,7 +69,7 @@ is measured, not preemptively.
 | Auth (magic link) | [Clerk](https://clerk.com/) or [WorkOS](https://workos.com/) | Free tier covers <100s of users; pick after a v1 prototype with each |
 | Object storage | [Cloudflare R2](https://www.cloudflare.com/products/r2/) | S3-compatible API, **$0 egress**, ~$0.015/GB stored. Massive cost advantage over S3 for media workloads. |
 | Database hosting | [Neon](https://neon.tech/) (Postgres) or [Turso](https://turso.tech/) (SQLite-as-a-service) | Free tiers for v1; both scale up with usage |
-| Background workers (hosted) | [Inngest](https://www.inngest.com/) or [Trigger.dev](https://trigger.dev/) | Use only if `arq` + small Redis instance turns into too much ops |
+| Background workers (hosted) | [Inngest](https://www.inngest.com/) or [Trigger.dev](https://trigger.dev/) | Use only if in-deploy Procrastinate turns into too much ops |
 | Email (magic links + transactional) | [Resend](https://resend.com/) or [Postmark](https://postmarkapp.com/) | No SMTP self-hosting; generous free tiers |
 | Billing | [Stripe Checkout](https://stripe.com/docs/payments/checkout) + [Stripe webhooks](https://stripe.com/docs/webhooks) | Stripe-hosted checkout page; we never touch card data |
 | Errors / monitoring | [Sentry](https://sentry.io/) | Hosted; free tier covers our scale |
@@ -84,7 +84,7 @@ is measured, not preemptively.
 | Storage abstraction | [`fsspec`](https://filesystem-spec.readthedocs.io/) | One API across filesystem / S3 / R2 / GCS / Azure |
 | Database / migrations | [SQLAlchemy](https://www.sqlalchemy.org/) + [Alembic](https://alembic.sqlalchemy.org/) | Already idiomatic for FastAPI |
 | Auth (self-host fallback) | [Auth.js](https://authjs.dev/) backed by SQLite | If Clerk/WorkOS pricing flips at scale |
-| Job queue (in-deploy) | [arq](https://arq-docs.helpmanual.io/) (Redis-backed) or [Procrastinate](https://procrastinate.readthedocs.io/) (Postgres-backed, no Redis) | Both well-maintained, ~asyncio-native |
+| Job queue (in-deploy) | [Procrastinate](https://procrastinate.readthedocs.io/) (Postgres-backed) | Reuses our Postgres; no Redis dependency. Picked over arq because we already pay the Postgres cost. |
 | ML inference | [ONNX Runtime](https://onnxruntime.ai/) + [Web variant](https://onnxruntime.ai/docs/tutorials/web/) | Same model artifact runs server-side and in-browser |
 | ML export | [`sklearn-onnx`](https://onnx.ai/sklearn-onnx/) for GBDT | CLAP/PANN already PyTorch -> ONNX exportable |
 | Resumable upload | [tus.io](https://tus.io/) protocol; [tus-py-server](https://github.com/tus-project) + [tus-js-client](https://github.com/tus/tus-js-client) | Proven; resumes mid-upload after network drops |
@@ -285,10 +285,15 @@ questions live in the relevant doc.
   region pinning is nice for EU users (the user is in Sweden) and its
   pricing is predictable. Railway's developer experience is the
   smoothest. Decide when implementing 06-api-surface.md.
-- **Job queue: arq vs Procrastinate.** arq needs Redis. Procrastinate
-  needs Postgres (which we have anyway in v2+ but not v1). v1 might
-  ship with arq + a tiny Redis instance because v1 doesn't have
-  Postgres yet.
+- **Job queue: Procrastinate (resolved 2026-05-27).** Picked
+  Procrastinate over arq. The "v1 has no Postgres yet" caveat that
+  made arq + Redis attractive went away once hosted mode landed on
+  Postgres for the rest of the persistence layer (users,
+  recent_projects, compute_jobs). Procrastinate's
+  ``procrastinate_*`` schema lives alongside ours and is applied
+  via the same alembic stream (migration ``ba72882f8c1c``); the
+  worker entrypoint is ``splitsmith worker`` (lands in PR-beta of
+  this chunk).
 - **WASM ML bundle size budget.** GBDT-only stays under 5 MB. If we
   want to add envelope onset (currently pure DSP) as a WASM module
   too, the bundle grows but we lose a server round-trip per detection

@@ -72,6 +72,15 @@ hosted = [
     # ``S3Storage.__init__`` (and ``__init__`` only runs in hosted
     # mode -- see ``_apply_hosted_mode_wiring``).
     "boto3>=1.35.0",
+    # Postgres-native job queue for the worker fleet (doc 04). Pulled
+    # in only via the hosted extra so local-mode wheels stay queue-
+    # free. ``splitsmith.queue`` is lazy-imported behind
+    # ``_hosted_mode_active()``; local entrypoints never reach it.
+    # ``psycopg[binary]`` ships the libpq C bindings procrastinate's
+    # PsycopgConnector needs; procrastinate itself only requires the
+    # pure ``psycopg[pool]`` and leaves the backend choice to us.
+    "procrastinate>=2.0.0",
+    "psycopg[binary]>=3.2.0",
 ]
 
 [build-system]

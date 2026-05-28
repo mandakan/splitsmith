@@ -137,8 +137,9 @@ later steps are blocked on earlier ones.
 - [ ] Provision R2 bucket + lifecycle rule for incomplete multipart
   uploads.
 - [ ] Provision Postgres (Neon free tier likely).
-- [ ] Provision Redis if going with `arq` (or skip if going with
-  Procrastinate).
+- [x] ~~Provision Redis if going with `arq`~~ -- not needed:
+  Procrastinate (Postgres-native) is the picked job queue
+  (resolved 2026-05-27, doc 00).
 - [ ] Wire Sentry on the API + worker.
 - [ ] Wire Resend (or Postmark) for magic-link email delivery.
 - [ ] Set up the `splitsmith.app` domain + Cloudflare in front.
@@ -215,8 +216,9 @@ later steps are blocked on earlier ones.
 - [ ] ONNX-Web GBDT artifact built + served from `/static/models/`.
 - [ ] `compute_jobs` table.
 - [ ] `RemoteComputeBackend` (server-side wrapper that creates jobs).
-- [ ] `arq` worker that processes Tier 2 jobs (CLAP + PANN
-  inference + features back).
+- [ ] Procrastinate worker (`splitsmith worker` CLI) that processes
+  Tier 2 jobs (CLAP + PANN inference + features back). PR-alpha
+  landed the schema + queue module; PR-beta lands the CLI.
 - [ ] `POST /api/v1/projects/<id>/jobs` (enqueue).
 - [ ] `GET /api/v1/jobs/<id>` (poll status).
 - [ ] SSE stream `GET /api/v1/jobs/stream` for the jobs drawer (per
