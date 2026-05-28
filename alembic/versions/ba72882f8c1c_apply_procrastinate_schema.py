@@ -25,6 +25,7 @@ the new schema automatically; for existing deploys, follow
 procrastinate's release notes for any breaking migration steps.
 """
 
+import re
 from collections.abc import Sequence
 
 from alembic import op
@@ -34,6 +35,70 @@ down_revision: str | Sequence[str] | None = "5f824d1e237f"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Matches an opening/closing dollar-quote tag: ``$$`` or ``$name$``.
+_DOLLAR_TAG_RE = re.compile(r"\$[A-Za-z0-9_]*\$")
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a multi-statement SQL script into individual statements.
+
+    asyncpg (our production driver) rejects multiple commands in a
+    single ``execute`` -- "cannot insert multiple commands into a
+    prepared statement". Procrastinate ships its schema as one ~40-
+    statement script, so we split on top-level ``;`` and run each
+    statement on its own.
+
+    The split is dollar-quote aware: Procrastinate's PL/pgSQL function
+    bodies are wrapped in ``$$ ... $$`` (or ``$tag$ ... $tag$``) and
+    contain their own semicolons that must NOT split the statement.
+    ``--`` line comments are skipped so a semicolon inside a comment
+    can't break a statement boundary.
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(sql)
+    dollar_tag: str | None = None
+    while i < n:
+        if dollar_tag is None:
+            # Line comment: skip to end of line.
+            if sql.startswith("--", i):
+                eol = sql.find("\n", i)
+                if eol == -1:
+                    break
+                buf.append(sql[i:eol])
+                i = eol
+                continue
+            # Opening dollar quote ($tag$).
+            m = _DOLLAR_TAG_RE.match(sql, i)
+            if m:
+                dollar_tag = m.group(0)
+                buf.append(dollar_tag)
+                i = m.end()
+                continue
+            if sql[i] == ";":
+                stmt = "".join(buf).strip()
+                if stmt:
+                    statements.append(stmt)
+                buf = []
+                i += 1
+                continue
+            buf.append(sql[i])
+            i += 1
+        else:
+            # Inside a dollar-quoted body: only the matching tag closes it.
+            if sql.startswith(dollar_tag, i):
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                dollar_tag = None
+                continue
+            buf.append(sql[i])
+            i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
 
 def upgrade() -> None:
     bind = op.get_bind()
@@ -41,7 +106,8 @@ def upgrade() -> None:
         return
     from procrastinate.schema import SchemaManager
 
-    op.execute(SchemaManager.get_schema())
+    for statement in _split_sql_statements(SchemaManager.get_schema()):
+        op.execute(statement)
 
 
 def downgrade() -> None:
