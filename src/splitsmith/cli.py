@@ -594,6 +594,52 @@ def serve(
         console.print("\n[yellow]Stopped.[/]")
 
 
+@app.command()
+def worker(
+    concurrency: int = typer.Option(1, "--concurrency", "-c", help="Max jobs this worker runs in parallel."),
+) -> None:
+    """Run a long-lived hosted-mode worker that drains the job queue.
+
+    The other half of the worker fleet (doc 04): ``splitsmith serve``
+    enqueues jobs onto per-tenant ``user-<id>`` queues; this process
+    pops and runs them. Loads the ensemble models once and stays warm
+    across many jobs -- the reason the fleet isn't serverless.
+
+    Subscribes to **all** queues (Procrastinate has no queue-glob), so
+    a single worker covers every tenant. Run several for more
+    throughput; pin specific queues later for premium tiers.
+
+    Required env vars:
+
+    - ``SPLITSMITH_DATABASE_URL`` -- the same Postgres URL ``serve``
+      uses. The Procrastinate schema must already be migrated
+      (``serve`` runs ``alembic upgrade head`` on boot); start the
+      worker after the API, not before.
+    """
+    import asyncio as _asyncio
+    import os as _os
+
+    from .queue import run_worker as _run_worker
+
+    _os.environ.setdefault("SPLITSMITH_MODE", "hosted")
+    db_url = _os.environ.get("SPLITSMITH_DATABASE_URL")
+    if not db_url:
+        console.print(
+            "[red]SPLITSMITH_DATABASE_URL is not set.[/] "
+            "The worker needs the same Postgres URL as `splitsmith serve` "
+            "(e.g. postgresql+asyncpg://user:pass@host/db)."
+        )
+        raise typer.Exit(2)
+
+    console.print(
+        f"[green]splitsmith worker[/]: draining all queues (concurrency={concurrency})   (Ctrl+C to stop)"
+    )
+    try:
+        _asyncio.run(_run_worker(db_url, concurrency=concurrency))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
+
+
 @app.command("audit-prep")
 def audit_prep(
     video: Path = typer.Option(..., "--video", help="Source video file (mp4/mov)."),

@@ -8,12 +8,15 @@ inside ``splitsmith serve``; this module is the queue layer that
 lets the dispatch step move out-of-process so a separate
 ``splitsmith worker`` fleet can pop jobs.
 
-PR-alpha (this PR) lands the schema + the configured
-:class:`procrastinate.App` only. No tasks are registered yet -- task
-registration is the PR-gamma migration step where each job kind
-(``shot_detect``, ``beep_detect``, ``trim``, ...) gets split into a
-pure ``*_body`` function and a thin task wrapper that rebuilds per-
-user state from ``user_id`` + project_id alone.
+PR-alpha landed the schema + the configured :class:`procrastinate.App`.
+PR-beta (this change) adds the long-lived worker entrypoint
+(:func:`run_worker`, exposed as ``splitsmith worker``) plus a single
+state-free ``ping`` task whose only job is to prove the round-trip:
+enqueue from the API process, dispatch + execute in a separate worker
+process. The real job-kind tasks (``shot_detect``, ``beep_detect``,
+``trim``, ...) land in PR-gamma, where each job kind gets split into a
+pure ``*_body`` function and a thin task wrapper that rebuilds per-user
+state from ``user_id`` + project_id alone.
 
 ## Local-mode safety
 
@@ -72,16 +75,64 @@ def build_app(database_url: str) -> procrastinate.App:
     consumed by SQLAlchemy elsewhere. The async/asyncpg dialect
     suffix is stripped here so psycopg3 can parse it.
 
-    The returned App has **no tasks registered**. Task registration
-    happens in PR-gamma when each job kind gets its task wrapper.
-    Until then, callers can still use this App for the dispatch
-    plumbing (open/close connector, run the worker loop with a no-op
-    handler) so PR-beta's ``splitsmith worker`` smoke test is wirable
-    against a real queue.
+    The returned App has the ``ping`` smoke task registered (see
+    :func:`_register_smoke_tasks`). The real job-kind tasks
+    (``shot_detect`` / ``beep_detect`` / ``trim``) are still PR-gamma:
+    each gets a thin task wrapper around a pure ``*_body`` function.
     """
     dsn = _to_psycopg_dsn(database_url)
     connector = procrastinate.PsycopgConnector(kwargs={"conninfo": dsn})
-    return procrastinate.App(connector=connector)
+    app = procrastinate.App(connector=connector)
+    _register_smoke_tasks(app)
+    return app
+
+
+def _register_smoke_tasks(app: procrastinate.App) -> None:
+    """Register the worker-fleet smoke task(s) on ``app``.
+
+    ``ping`` carries no per-user state and touches no project files.
+    Its sole purpose is the PR-beta round-trip proof: the API process
+    defers ``ping`` onto a queue, and a separate ``splitsmith worker``
+    process pops + runs it. Real job kinds arrive in PR-gamma.
+
+    Tasks must be registered on the App instance before
+    :meth:`procrastinate.App.run_worker_async`, so this runs inside
+    :func:`build_app` rather than at import time (the module must stay
+    lazy-importable behind ``_hosted_mode_active()``).
+    """
+
+    @app.task(name="ping", queue="default")
+    async def _ping(*, payload: str = "ping") -> str:
+        return payload
+
+
+async def run_worker(
+    database_url: str,
+    *,
+    concurrency: int = 1,
+    queues: list[str] | None = None,
+) -> None:
+    """Run a long-lived worker that drains the job queue until killed.
+
+    ``queues=None`` (the default) subscribes to **every** queue --
+    Procrastinate has no queue-glob, so one worker covers all
+    ``user-*`` queues this way. Per-tenant pinning means passing an
+    explicit ``queues=[...]`` list; that's a future concern, not
+    wired here.
+
+    A persistent worker is the whole point of the fleet: it loads the
+    ensemble models once (the process-wide ``_ENSEMBLE_RUNTIME``
+    singleton, on the first detection task in PR-gamma) and drains
+    many jobs. For PR-beta the only registered task is ``ping``, so
+    the worker stays light.
+
+    Installs SIGINT/SIGTERM handlers (Procrastinate default) for
+    graceful drain; must therefore run on the main thread, which it
+    does via ``asyncio.run`` from the ``splitsmith worker`` command.
+    """
+    app = build_app(database_url)
+    async with app.open_async():
+        await app.run_worker_async(queues=queues, concurrency=concurrency)
 
 
 def queue_name_for_user(user_id: str) -> str:
