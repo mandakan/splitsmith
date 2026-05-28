@@ -171,7 +171,9 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 EXPOSE 5174
 
-# ``serve`` sets SPLITSMITH_MODE=hosted itself; the compose file layers in
-# SPLITSMITH_DATABASE_URL + S3 credentials.
-ENTRYPOINT ["splitsmith", "serve"]
-CMD ["--host", "0.0.0.0", "--port", "5174"]
+# ENTRYPOINT is just the CLI so the same image runs both roles: the API
+# (default CMD = ``serve ...``) and the worker fleet (compose overrides
+# ``command: ["worker"]``). Both subcommands set SPLITSMITH_MODE=hosted
+# themselves; the compose file layers in SPLITSMITH_DATABASE_URL + S3 creds.
+ENTRYPOINT ["splitsmith"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "5174"]

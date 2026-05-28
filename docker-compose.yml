@@ -89,6 +89,35 @@ services:
       retries: 20
       start_period: 30s
 
+  worker:
+    # Same image as the API; ENTRYPOINT is the bare ``splitsmith`` CLI so
+    # ``command: worker`` runs the long-lived queue drainer instead of
+    # ``serve``. The worker pops jobs the API enqueues onto ``user-*``
+    # queues (PR-beta: only the ``ping`` smoke task is registered).
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      # Wait for the API to be healthy, not just Postgres: ``serve`` runs
+      # ``alembic upgrade head`` on boot, which creates the Procrastinate
+      # schema the worker connects to. Starting the worker first would
+      # race the migration.
+      splitsmith:
+        condition: service_healthy
+    environment:
+      SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@postgres:5432/splitsmith
+      SPLITSMITH_MODE: hosted
+      SPLITSMITH_S3_ENDPOINT_URL: http://minio:9000
+      SPLITSMITH_S3_ACCESS_KEY_ID: splitsmith
+      SPLITSMITH_S3_SECRET_ACCESS_KEY: splitsmithsplitsmith
+      SPLITSMITH_S3_BUCKET: splitsmith-uploads
+      SPLITSMITH_S3_REGION: us-east-1
+
 volumes:
   postgres-data:
   minio-data:
