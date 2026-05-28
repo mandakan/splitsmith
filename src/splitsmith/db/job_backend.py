@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..ui.jobs import (
     Job,
+    JobBodyRegistry,
     JobCancelled,
     JobHandle,
     JobStatus,
@@ -101,6 +102,10 @@ class PostgresJobBackend:
             )
         self._session_factory = session_factory
         self._user_id = user_id
+        # Populated by ``register_job_bodies(state)`` in ``create_app``,
+        # same as the local :class:`JobRegistry`. The hosted worker
+        # process holds its own identically-populated registry.
+        self.bodies = JobBodyRegistry()
 
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrent,
@@ -162,12 +167,14 @@ class PostgresJobBackend:
         self,
         *,
         kind: str,
-        fn: Callable[[JobHandle], None],
+        args: dict[str, Any] | None = None,
         stage_number: int | None = None,
         video_id: str | None = None,
     ) -> Job:
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
+        body = self.bodies.get(kind)
+        call_args = args or {}
         now = datetime.now(UTC)
         job_id = uuid.uuid4().hex
         row = ComputeJobRow(
@@ -194,7 +201,7 @@ class PostgresJobBackend:
         captured_ctx = contextvars.copy_context()
 
         def _ctx_fn(handle: JobHandle) -> None:
-            captured_ctx.run(fn, handle)
+            captured_ctx.run(lambda: body(handle, **call_args))
 
         with self._lock:
             self._inflight += 1

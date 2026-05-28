@@ -39,6 +39,7 @@ def _enable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 from tests.conftest import scaffold_match as _scaffold_match  # noqa: E402
+from tests.conftest import submit_fn  # noqa: E402
 
 _SCOPED_PREFIXES = (
     "/api/shooters/",
@@ -6247,7 +6248,7 @@ def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
         started.set()
         release.wait(timeout=5.0)
 
-    asyncio.run(state.jobs.submit(kind="test_block", fn=worker))
+    asyncio.run(submit_fn(state.jobs, kind="test_block", fn=worker))
     assert started.wait(timeout=2.0)
 
     try:

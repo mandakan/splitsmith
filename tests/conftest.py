@@ -12,6 +12,20 @@ def fixtures_dir() -> Path:
     return FIXTURES_DIR
 
 
+def submit_fn(backend, *, kind: str, fn, **kwargs):
+    """Test shim bridging the pre-gamma ``submit(fn=callable)`` API to the
+    ``kind`` + body-registry dispatch.
+
+    Registers ``fn`` as the body for ``kind`` on ``backend.bodies`` then
+    returns the ``backend.submit(kind=...)`` coroutine, so existing tests
+    can keep writing ``asyncio.run(submit_fn(backend, kind=..., fn=...))``.
+    The body adapter swallows any ``args`` the dispatch would pass, since
+    these test callables take only the handle.
+    """
+    backend.bodies.register(kind, lambda handle, **_args: fn(handle))
+    return backend.submit(kind=kind, **kwargs)
+
+
 def scaffold_match(
     tmp_path: Path,
     *,

@@ -32,7 +32,7 @@ def test_begin_shutdown_blocks_new_submissions() -> None:
     reg = JobRegistry(max_concurrent=1)
     reg.begin_shutdown()
     with pytest.raises(ShutdownInProgressError):
-        asyncio.run(reg.submit(kind="test", fn=lambda _h: None))
+        asyncio.run(submit_fn(reg, kind="test", fn=lambda _h: None))
 
 
 def test_begin_shutdown_is_idempotent() -> None:
@@ -54,7 +54,7 @@ def test_wait_for_drain_waits_for_in_flight_then_returns() -> None:
     def slow(_handle):
         proceed.wait(timeout=2.0)
 
-    job = asyncio.run(reg.submit(kind="test", fn=slow))
+    job = asyncio.run(submit_fn(reg, kind="test", fn=slow))
     assert _wait_until(lambda: asyncio.run(reg.get(job.id)).status == JobStatus.RUNNING)
 
     reg.begin_shutdown()
@@ -74,7 +74,7 @@ def test_wait_for_drain_returns_false_on_timeout() -> None:
     def slow(_handle):
         proceed.wait(timeout=5.0)
 
-    asyncio.run(reg.submit(kind="test", fn=slow))
+    asyncio.run(submit_fn(reg, kind="test", fn=slow))
     assert _wait_until(lambda: reg.active_count() == 1)
 
     reg.begin_shutdown()
@@ -90,7 +90,7 @@ def test_active_count_excludes_terminal_states() -> None:
     def quick(_handle):
         pass
 
-    job = asyncio.run(reg.submit(kind="test", fn=quick))
+    job = asyncio.run(submit_fn(reg, kind="test", fn=quick))
     assert _wait_until(lambda: asyncio.run(reg.get(job.id)).status == JobStatus.SUCCEEDED)
     assert reg.active_count() == 0
 
@@ -100,7 +100,7 @@ def test_active_count_excludes_terminal_states() -> None:
 # ----------------------------------------------------------------------
 
 
-from tests.conftest import scaffold_match  # noqa: E402
+from tests.conftest import scaffold_match, submit_fn  # noqa: E402
 
 
 def _make_client(tmp_path: Path) -> TestClient:
@@ -187,7 +187,7 @@ def test_submit_during_shutdown_raises_at_registry(tmp_path: Path) -> None:
     state = client.app.state.splitsmith_state
     assert state.jobs.is_shutting_down
     with pytest.raises(ShutdownInProgressError):
-        asyncio.run(state.jobs.submit(kind="probe", fn=lambda _h: None))
+        asyncio.run(submit_fn(state.jobs, kind="probe", fn=lambda _h: None))
 
 
 def test_shutdown_calls_handler_after_drain(tmp_path: Path) -> None:
@@ -216,7 +216,7 @@ def test_shutdown_drains_in_flight_job_before_calling_handler(tmp_path: Path) ->
     def slow(_handle):
         proceed.wait(timeout=5.0)
 
-    asyncio.run(state.jobs.submit(kind="test", fn=slow))
+    asyncio.run(submit_fn(state.jobs, kind="test", fn=slow))
     assert _wait_until(lambda: state.jobs.active_count() == 1)
 
     resp = client.post("/api/shutdown")

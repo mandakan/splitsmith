@@ -30,6 +30,7 @@ from splitsmith.db import (
     sessionmaker,
 )
 from splitsmith.ui.jobs import JobBackend, JobStatus
+from tests.conftest import submit_fn
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0, poll: float = 0.01) -> bool:
@@ -91,7 +92,7 @@ def test_submit_persists_row_and_runs_to_succeeded(tmp_path) -> None:
     def work(_handle):
         seen.set()
 
-    job = asyncio.run(backend.submit(kind="test", fn=work))
+    job = asyncio.run(submit_fn(backend, kind="test", fn=work))
     assert job.status == JobStatus.PENDING
     assert seen.wait(timeout=2.0)
 
@@ -108,7 +109,7 @@ def test_failed_job_records_error_string(tmp_path) -> None:
     def boom(_handle):
         raise ValueError("oh no")
 
-    job = asyncio.run(backend.submit(kind="test", fn=boom))
+    job = asyncio.run(submit_fn(backend, kind="test", fn=boom))
     assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
     final = asyncio.run(backend.get(job.id))
     assert final.error == "oh no"
@@ -137,8 +138,8 @@ def test_list_returns_only_this_users_jobs(tmp_path) -> None:
     alice = PostgresJobBackend(session_factory, user_id=alice_id, max_concurrent=2)
     bob = PostgresJobBackend(session_factory, user_id=bob_id, max_concurrent=2)
 
-    a_job = asyncio.run(alice.submit(kind="probe", fn=lambda _h: None))
-    b_job = asyncio.run(bob.submit(kind="probe", fn=lambda _h: None))
+    a_job = asyncio.run(submit_fn(alice, kind="probe", fn=lambda _h: None))
+    b_job = asyncio.run(submit_fn(bob, kind="probe", fn=lambda _h: None))
     assert a_job.id != b_job.id
 
     # Each backend sees only its user's row, even though both rows
@@ -167,7 +168,7 @@ def test_cancel_pending_short_circuits_to_cancelled(tmp_path) -> None:
 
     # Block the executor with one slow job so a second submission
     # stays PENDING long enough for cancel() to race in.
-    asyncio.run(backend.submit(kind="hold", fn=hold))
+    asyncio.run(submit_fn(backend, kind="hold", fn=hold))
     assert started.wait(timeout=2.0)
 
     ran = threading.Event()
@@ -175,7 +176,7 @@ def test_cancel_pending_short_circuits_to_cancelled(tmp_path) -> None:
     def victim(_h):
         ran.set()
 
-    queued = asyncio.run(backend.submit(kind="victim", fn=victim))
+    queued = asyncio.run(submit_fn(backend, kind="victim", fn=victim))
     assert asyncio.run(backend.get(queued.id)).status == JobStatus.PENDING
     snapshot = asyncio.run(backend.cancel(queued.id))
     assert snapshot is not None
@@ -191,8 +192,8 @@ def test_acknowledge_and_acknowledge_all_failures(tmp_path) -> None:
     def boom(_h):
         raise ValueError("kaboom")
 
-    a = asyncio.run(backend.submit(kind="a", fn=boom))
-    b = asyncio.run(backend.submit(kind="b", fn=boom))
+    a = asyncio.run(submit_fn(backend, kind="a", fn=boom))
+    b = asyncio.run(submit_fn(backend, kind="b", fn=boom))
     assert _wait_until(
         lambda: all(asyncio.run(backend.get(jid)).status == JobStatus.FAILED for jid in (a.id, b.id))
     )
@@ -204,7 +205,7 @@ def test_acknowledge_and_acknowledge_all_failures(tmp_path) -> None:
     assert again == []
 
     # acknowledge on a non-failed job is a no-op snapshot return.
-    succeeded = asyncio.run(backend.submit(kind="ok", fn=lambda _h: None))
+    succeeded = asyncio.run(submit_fn(backend, kind="ok", fn=lambda _h: None))
     assert _wait_until(lambda: asyncio.run(backend.get(succeeded.id)).status == JobStatus.SUCCEEDED)
     snap = asyncio.run(backend.acknowledge(succeeded.id))
     assert snap is not None
@@ -218,7 +219,7 @@ def test_find_active_dedupe_by_kind_and_stage(tmp_path) -> None:
     def slow(_h):
         proceed.wait(timeout=2.0)
 
-    job = asyncio.run(backend.submit(kind="trim", stage_number=4, fn=slow))
+    job = asyncio.run(submit_fn(backend, kind="trim", stage_number=4, fn=slow))
     # While running, find_active matches on (kind, stage).
     assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.RUNNING)
     found = asyncio.run(backend.find_active(kind="trim", stage_number=4))
@@ -369,7 +370,7 @@ def test_progress_message_round_trip_via_handle(tmp_path) -> None:
         handle.update(progress=0.25, message="phase 1")
         proceed.wait(timeout=2.0)
 
-    job = asyncio.run(backend.submit(kind="test", fn=slow))
+    job = asyncio.run(submit_fn(backend, kind="test", fn=slow))
     assert _wait_until(lambda: asyncio.run(backend.get(job.id)).message == "phase 1")
     snap = asyncio.run(backend.get(job.id))
     assert snap.progress == 0.25
@@ -382,4 +383,4 @@ def test_shutdown_blocks_new_submissions(tmp_path) -> None:
     from splitsmith.ui.jobs import ShutdownInProgressError
 
     with pytest.raises(ShutdownInProgressError):
-        asyncio.run(backend.submit(kind="probe", fn=lambda _h: None))
+        asyncio.run(submit_fn(backend, kind="probe", fn=lambda _h: None))

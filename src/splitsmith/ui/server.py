@@ -893,7 +893,7 @@ async def _maybe_submit_model_download(state: AppState) -> None:
     if await state.jobs.find_active(kind="model_download") is not None:
         return
     try:
-        await state.jobs.submit(kind="model_download", fn=_run_model_download_job)
+        await state.jobs.submit(kind="model_download")
     except ShutdownInProgressError:
         # Server is already winding down; nothing to do.
         return
@@ -2332,6 +2332,14 @@ def create_app(
     # shot-detect after the user picks a match finds the cache primed.
     # ``create_app`` runs at boot outside any event loop, so the async
     # JobBackend submission is wrapped in ``asyncio.run`` here.
+    #
+    # ``model_download`` is the one kind submitted during create_app
+    # itself (the others fire only from HTTP handlers, after this
+    # function returns), so its body must be registered before the
+    # prefetch submit -- the rest register just before ``return app``.
+    # ``_run_model_download_job`` is module-level; tests monkeypatch it,
+    # and the name resolves to the patched function here.
+    state.jobs.bodies.register("model_download", _run_model_download_job)
     asyncio.run(_maybe_submit_model_download(state))
 
     async def get_current_user(request: Request) -> User:
@@ -4195,7 +4203,7 @@ def create_app(
                     state.jobs.submit(
                         kind="shot_detect",
                         stage_number=stage_number,
-                        fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                        args={"slug": slug, "stage_number": stage_number},
                     )
                 )
         handle.update(progress=1.0, message="Done")
@@ -4216,9 +4224,7 @@ def create_app(
             kind="detect_beep",
             stage_number=stage_number,
             video_id=video.video_id,
-            fn=lambda h, sl=slug, n=stage_number, vid=video.video_id: (
-                _run_detect_beep_for_video(h, sl, n, vid)
-            ),
+            args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -4389,7 +4395,7 @@ def create_app(
             kind="trim",
             stage_number=stage_number,
             video_id=video.video_id,
-            fn=lambda h, sl=slug, n=stage_number, vid=video.video_id: (_run_trim_for_video(h, sl, n, vid)),
+            args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -4399,25 +4405,40 @@ def create_app(
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         return await _submit_trim(slug, stage_number, stage, video, project)
 
-    def _run_trim_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
+    def _run_trim(
+        handle: JobHandle,
+        *,
+        slug: str,
+        stage_number: int,
+        video_id: str,
+        chain_shot_detect: bool = True,
+    ) -> None:
         """Worker for the audit-mode trim of a specific video.
 
+        Resolves the shooter via ``slug`` (so the body is portable to a
+        hosted worker process -- the bulk path used to pass an explicit
+        ``shooter_root`` Path, which can't cross a process boundary).
+
         Auto-chains shot detection only when the trimmed video is the
-        primary; secondaries align to the primary's audit timeline by
-        their own beep, so they do not need their own shot-detection run.
+        reviewed primary AND ``chain_shot_detect`` is set; secondaries
+        align to the primary's audit timeline by their own beep, so they
+        do not need their own shot-detection run. The bulk maintenance
+        pass passes ``chain_shot_detect=False`` -- it regenerates derived
+        trim caches without re-running detection over the whole match.
         """
         handle.update(progress=0.1, message="Preparing trim...")
         proj = state.shooter_project(slug)
+        root = state.shooter_root(slug)
         stg = proj.stage(stage_number)
         video = stg.find_video_by_id(video_id)
         if video is None or video.beep_time is None:
             raise RuntimeError("video or beep disappeared mid-flight")
-        source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+        source = proj.resolve_video_path(root, video.path)
         handle.check_cancel()
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
         audio_helpers.ensure_video_audit_trim(
-            state.shooter_root(slug),
+            root,
             stage_number,
             video,
             source,
@@ -4435,11 +4456,12 @@ def create_app(
         v_fresh = stg_fresh.find_video_by_id(video_id)
         if v_fresh is not None:
             v_fresh.processed["trim"] = True
-            fresh.save(state.shooter_root(slug))
+            fresh.save(root)
         # Worker callback runs in a ThreadPoolExecutor thread with no
         # event loop; bridge to the async JobBackend via ``asyncio.run``.
         if (
-            video.role == "primary"
+            chain_shot_detect
+            and video.role == "primary"
             and video.beep_reviewed
             and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
         ):
@@ -4460,74 +4482,10 @@ def create_app(
                     state.jobs.submit(
                         kind="shot_detect",
                         stage_number=stage_number,
-                        fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                        args={"slug": slug, "stage_number": stage_number},
                     )
                 )
         handle.update(progress=1.0, message="Done")
-
-    def _run_trim_at_root(
-        handle: JobHandle,
-        shooter_root: Path,
-        stage_number: int,
-        video_id: str,
-    ) -> None:
-        """Like :func:`_run_trim_for_video` but scoped to an explicit
-        ``shooter_root`` instead of the server's bound ``state``. Used by
-        the bulk-rebuild endpoint so the operator can regenerate trim
-        caches for a non-active shooter without rebinding (which would
-        force-reload their current Audit / Compare context).
-
-        Unlike the bound variant this never auto-chains shot detection --
-        the operator is doing a maintenance pass on derived data; the
-        original audit + shot results are kept as-is.
-        """
-        handle.update(progress=0.1, message="Preparing trim...")
-        proj = MatchProject.load(shooter_root)
-        stg = proj.stage(stage_number)
-        video = stg.find_video_by_id(video_id)
-        if video is None or video.beep_time is None:
-            raise RuntimeError("video or beep disappeared mid-flight")
-        source = proj.resolve_video_path(shooter_root, video.path)
-        handle.check_cancel()
-        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
-        handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
-        audio_helpers.ensure_video_audit_trim(
-            shooter_root,
-            stage_number,
-            video,
-            source,
-            video.beep_time,
-            stg.time_seconds,
-            project=proj,
-            runner=_cancellable_runner(handle),
-            ffmpeg_binary=process_runtime().ffmpeg_binary,
-        )
-        handle.update(progress=0.85, message="Saving project...")
-        fresh = MatchProject.load(shooter_root)
-        stg_fresh = fresh.stage(stage_number)
-        v_fresh = stg_fresh.find_video_by_id(video_id)
-        if v_fresh is not None:
-            v_fresh.processed["trim"] = True
-            fresh.save(shooter_root)
-        handle.update(progress=1.0, message="Done")
-
-    def _run_trim_for_stage(handle: JobHandle, slug: str, stage_number: int) -> None:
-        """Backward-compat shim for legacy callers (e.g. beep-override
-        endpoints) that submit a trim by stage_number alone.
-
-        Resolves the stage's primary and forwards to the per-video
-        worker. New callers should pass a ``video_id`` and submit via
-        :func:`_run_trim_for_video` directly.
-        """
-        proj = state.shooter_project(slug)
-        try:
-            stg = proj.stage(stage_number)
-        except KeyError as exc:
-            raise RuntimeError(f"stage {stage_number} disappeared mid-flight: {exc}") from exc
-        primary = stg.primary()
-        if primary is None:
-            raise RuntimeError(f"stage {stage_number} has no primary mid-flight")
-        _run_trim_for_video(handle, slug, stage_number, primary.video_id)
 
     def _run_shot_detect(handle: JobHandle, slug: str, stage_number: int, reset: bool = False) -> None:
         """Worker that runs the 4-voter ensemble on the stage's audit clip.
@@ -4803,7 +4761,7 @@ def create_app(
             job = await state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
-                fn=lambda h, sl=slug, n=stage_number, r=reset: _run_shot_detect(h, sl, n, reset=r),
+                args={"slug": slug, "stage_number": stage_number, "reset": reset},
             )
             jobs.append(job.model_dump(mode="json"))
         return JSONResponse({"jobs": jobs, "skipped": skipped})
@@ -4850,7 +4808,7 @@ def create_app(
         job = await state.jobs.submit(
             kind="shot_detect",
             stage_number=stage_number,
-            fn=lambda h, sl=slug, r=reset: _run_shot_detect(h, sl, stage_number, reset=r),
+            args={"slug": slug, "stage_number": stage_number, "reset": reset},
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -4993,9 +4951,11 @@ def create_app(
             kind="trim",
             stage_number=stage.stage_number,
             video_id=video.video_id,
-            fn=lambda h, sl=slug, n=stage.stage_number, vid=video.video_id: (
-                _run_trim_for_video(h, sl, n, vid)
-            ),
+            args={
+                "slug": slug,
+                "stage_number": stage.stage_number,
+                "video_id": video.video_id,
+            },
         )
 
     def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
@@ -5268,7 +5228,7 @@ def create_app(
             await state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
-                fn=lambda h, sl=slug, n=stage_number: _run_shot_detect(h, sl, n),
+                args={"slug": slug, "stage_number": stage_number},
             )
 
         return JSONResponse(project.model_dump(mode="json"))
@@ -6670,7 +6630,7 @@ def create_app(
         job = await state.jobs.submit(
             kind="export",
             stage_number=stage_number,
-            fn=lambda h, sl=slug, n=stage_number, r=req: _run_export_for_stage(h, sl, n, r),
+            args={"slug": slug, "stage_number": stage_number, "req": req},
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -6892,7 +6852,7 @@ def create_app(
             return JSONResponse(existing.model_dump(mode="json"))
         job = await state.jobs.submit(
             kind="match_export",
-            fn=lambda h, sl=slug, r=req: _run_match_export(h, sl, r),
+            args={"slug": slug, "req": req},
         )
         return JSONResponse(job.model_dump(mode="json"))
 
@@ -7832,9 +7792,12 @@ def create_app(
                 kind="trim",
                 stage_number=stage.stage_number,
                 video_id=primary.video_id,
-                fn=lambda h, sr=shooter_root, n=stage.stage_number, vid=primary.video_id: (
-                    _run_trim_at_root(h, sr, n, vid)
-                ),
+                args={
+                    "slug": slug,
+                    "stage_number": stage.stage_number,
+                    "video_id": primary.video_id,
+                    "chain_shot_detect": False,
+                },
             )
             jobs_submitted.append(job.model_dump(mode="json"))
 
@@ -8318,7 +8281,13 @@ def create_app(
                 _lab_universe_cache["last_run"] = run
                 handle.update(progress=1.0, message=f"done ({len(run.universe.fixtures)} fixtures)")
 
-            job = await state.jobs.submit(kind="lab_eval", fn=_run)
+            # Lab kinds are dev-only and never deferred to a hosted worker,
+            # so the body closes over this request's params and is
+            # registered just-in-time. submit() resolves the body
+            # synchronously before any await, so a concurrent lab request
+            # re-registering the same kind can't steal this submission.
+            state.jobs.bodies.register("lab_eval", _run)
+            job = await state.jobs.submit(kind="lab_eval")
             return JSONResponse(job.model_dump(mode="json"))
 
         @app.post("/api/lab/rescore")
@@ -8621,7 +8590,8 @@ def create_app(
                 _lab_runtime_cache.pop("runtime", None)
                 handle.update(progress=1.0, message="calibration rebuilt")
 
-            job = await state.jobs.submit(kind="rebuild_calibration", fn=_run)
+            state.jobs.bodies.register("rebuild_calibration", _run)
+            job = await state.jobs.submit(kind="rebuild_calibration")
             return JSONResponse(job.model_dump(mode="json"))
 
         # ------------------------------------------------------------------
@@ -8746,7 +8716,8 @@ def create_app(
                     ),
                 )
 
-            job = await state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            state.jobs.bodies.register("promote_from_anchor", _run)
+            job = await state.jobs.submit(kind="promote_from_anchor")
             # Return the resolved fixture + anchor paths alongside the job so the
             # SPA can navigate to the review page once the job succeeds without
             # needing a separate result-fetch endpoint.
@@ -9047,7 +9018,8 @@ def create_app(
                     ),
                 )
 
-            job = await state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            state.jobs.bodies.register("promote_from_anchor", _run)
+            job = await state.jobs.submit(kind="promote_from_anchor")
             return JSONResponse(
                 {
                     "job": job.model_dump(mode="json"),
@@ -9253,7 +9225,8 @@ def create_app(
                     ),
                 )
 
-            job = await state.jobs.submit(kind="promote_from_anchor", fn=_run)
+            state.jobs.bodies.register("promote_from_anchor", _run)
+            job = await state.jobs.submit(kind="promote_from_anchor")
             return JSONResponse(
                 {
                     "job": job.model_dump(mode="json"),
@@ -9462,6 +9435,20 @@ def create_app(
                     ),
                 )
             return FileResponse(index, headers={"Cache-Control": "no-cache"})
+
+    # Register the job bodies the dispatch resolves by ``kind``. Done after
+    # any hosted-mode backend swap (``_apply_hosted_mode_wiring``) so
+    # ``submit(kind=...)`` on whichever backend is bound finds the callable.
+    # The bodies close over this process's ``state``; a hosted worker
+    # registers its own identical set against its own state. See
+    # ``JobBodyRegistry``. ``model_download`` is registered earlier (it's
+    # submitted during create_app); lab-only kinds register inside
+    # ``_setup_lab`` (they're never deferred to a hosted worker).
+    state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
+    state.jobs.bodies.register("trim", _run_trim)
+    state.jobs.bodies.register("shot_detect", _run_shot_detect)
+    state.jobs.bodies.register("export", _run_export_for_stage)
+    state.jobs.bodies.register("match_export", _run_match_export)
 
     return app
 
