@@ -204,6 +204,14 @@ def run_embedded(
         # /api/shutdown or SIGTERM already kicked the drain, this is a
         # no-op past the first transition.
         splitsmith_state.jobs.begin_shutdown()
+        # The boot-time model prefetch is a best-effort, resumable
+        # background download (~150 MB on a cold cache). Draining it
+        # would block shutdown for up to the full timeout while the
+        # download finishes; cancel it so the drain only waits on
+        # user-initiated work (shot-detect / trim / export), whose loss
+        # mid-flight would actually matter. The prefetch resumes on the
+        # next boot.
+        _cancel_resumable_jobs(splitsmith_state.jobs)
         splitsmith_state.jobs.wait_for_drain(shutdown_timeout)
         server.should_exit = True
         thread.join(timeout=shutdown_timeout)
@@ -214,6 +222,33 @@ def run_embedded(
             )
             server.force_exit = True
             thread.join(timeout=5.0)
+
+
+# Job kinds that are safe to abandon on shutdown -- background work
+# that re-runs cleanly on the next boot, so we cancel rather than
+# drain them. Keep this narrow: user-initiated jobs (shot-detect,
+# trim, export) must NOT be listed; their loss mid-flight matters.
+_RESUMABLE_JOB_KINDS = ("model_download",)
+
+
+def _cancel_resumable_jobs(jobs: Any) -> None:
+    """Cancel best-effort background jobs so the drain doesn't wait on them.
+
+    The :class:`JobBackend` API is async; ``run_embedded``'s teardown
+    runs on a plain (non-async) thread, so each call is bridged through
+    ``asyncio.run``. Best-effort: any failure here is logged and
+    swallowed -- a stuck cancel must not block the shutdown path it's
+    meant to speed up.
+    """
+    import asyncio
+
+    for kind in _RESUMABLE_JOB_KINDS:
+        try:
+            job = asyncio.run(jobs.find_active(kind=kind))
+            if job is not None:
+                asyncio.run(jobs.cancel(job.id))
+        except Exception:  # noqa: BLE001 -- shutdown path must never raise
+            logger.warning("failed to cancel resumable job kind %r on shutdown", kind, exc_info=True)
 
 
 def _env_int(name: str, default: int) -> int:
