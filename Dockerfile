@@ -105,7 +105,10 @@ RUN uv sync --frozen --no-dev --extra hosted
 # numpy import. The big libs (llvmlite, openblas) stay as shipped.
 RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
     find /app/.venv -type d -name 'tests' -prune -exec rm -rf {} + ; \
-    find /app/.venv -type d -name 'test' -prune -exec rm -rf {} +
+    find /app/.venv -type d -name 'test' -prune -exec rm -rf {} + ; \
+    SP="$(/app/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"; \
+    rm -rf "${SP}/sklearn/datasets/data" "${SP}/sklearn/datasets/descr" \
+           "${SP}/sklearn/datasets/images"
 
 # Bake the slim ONNX model artifacts into a staging dir we copy into the
 # runtime stage. ``SPLITSMITH_CONFIG_DIR`` drives the cache location
