@@ -71,9 +71,32 @@ RUN uv sync --frozen --no-dev --extra hosted
 RUN chown -R splitsmith:splitsmith /app
 USER splitsmith
 
+# Pin the config dir so the model cache (``<config_dir>/models``) lands
+# at a fixed, baked-in path that the build step below and the runtime
+# both agree on -- independent of the platform default, which differs
+# between the build user and any future runtime user/home.
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    SPLITSMITH_CONFIG_DIR=/home/splitsmith/.splitsmith
+
+# Bake the slim ONNX model artifacts (~450 MB: CLAP + PANN + text
+# embeddings) into the image. This is the whole point of running a
+# persistent worker fleet: a cold worker loads models from local disk
+# instead of paying a ~450 MB download on first detection (doc 04 --
+# "model artifacts live in a baked-in Docker layer"). With models
+# present, ``_maybe_submit_model_download`` no-ops at boot, so neither
+# the API nor a worker ever fetches at runtime.
+#
+# Gated behind ``BAKE_MODELS`` so offline / network-restricted builds
+# (e.g. some CI) can opt out with ``--build-arg BAKE_MODELS=0`` and
+# fall back to the runtime-download path. Default on.
+ARG BAKE_MODELS=1
+RUN if [ "$BAKE_MODELS" = "1" ]; then \
+        splitsmith fetch-models; \
+    else \
+        echo "BAKE_MODELS=0 -- skipping model bake; runtime will download on first detection"; \
+    fi
 
 EXPOSE 5174
 
