@@ -221,3 +221,44 @@ def test_migrations_applied_against_postgres(hosted_stack: None) -> None:
             f"WHERE table_schema='public' AND table_name='{table}'"
         )
         assert exists == "1", f"table {table!r} missing after migrations"
+
+
+def test_worker_drains_ping_task(hosted_stack: None) -> None:
+    """PR-beta round-trip proof: defer a ``ping`` from the host onto the
+    queue and assert the separate ``worker`` container pops + runs it to
+    ``succeeded``.
+
+    This is the one test that exercises the actual cross-process
+    dispatch -- the unit tests only inspect the App. The host defers
+    through the same ``build_app`` path the API uses (Postgres exposed
+    on localhost:5432 by compose); the worker container, draining all
+    queues, executes it and writes ``succeeded`` to ``procrastinate_jobs``.
+    """
+    import asyncio
+
+    from splitsmith.queue import build_app
+
+    host_url = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+
+    async def _defer() -> None:
+        app = build_app(host_url)
+        async with app.open_async():
+            await app.tasks["ping"].defer_async(payload="pong")
+
+    asyncio.run(_defer())
+
+    # Poll the queue table until the worker marks the job done. The
+    # worker's fetch_job_polling_interval defaults to 5s, so allow a
+    # comfortable margin over a couple of poll cycles.
+    deadline = time.time() + 30.0
+    status = ""
+    while time.time() < deadline:
+        status = _psql(
+            "SELECT status FROM procrastinate_jobs " "WHERE task_name = 'ping' ORDER BY id DESC LIMIT 1"
+        )
+        if status == "succeeded":
+            return
+        if status == "failed":
+            pytest.fail("ping job reached 'failed' -- the worker errored running it")
+        time.sleep(1.0)
+    pytest.fail(f"worker did not drain ping within 30s (last status: {status!r})")

@@ -81,7 +81,13 @@ def build_app(database_url: str) -> procrastinate.App:
     each gets a thin task wrapper around a pure ``*_body`` function.
     """
     dsn = _to_psycopg_dsn(database_url)
-    connector = procrastinate.PsycopgConnector(kwargs={"conninfo": dsn})
+    # PsycopgConnector forwards every extra kwarg to its pool factory
+    # (psycopg_pool.AsyncConnectionPool), whose first arg is ``conninfo``.
+    # Passing it directly is correct; wrapping it as ``kwargs={"conninfo":
+    # dsn}`` instead lands in the pool's *per-connection* ``kwargs`` and
+    # collides with the pool's own ``conninfo`` ("got multiple values for
+    # argument 'conninfo'") -- a runtime-only failure the unit tests miss.
+    connector = procrastinate.PsycopgConnector(conninfo=dsn)
     app = procrastinate.App(connector=connector)
     _register_smoke_tasks(app)
     return app
