@@ -156,3 +156,89 @@ def _read_banner(proc: subprocess.Popen[str], *, deadline_s: float) -> str:
         if line.startswith(READY_PREFIX + " "):
             return line.rstrip("\n")
     raise TimeoutError("never saw SPLITSMITH_READY banner")
+
+
+def _await(coro):
+    """Run an async JobBackend coroutine from a sync test body."""
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def _submit_blocking_job(registry, kind: str, started, release):
+    """Submit a job that blocks until cancelled or ``release`` is set.
+
+    ``started`` is set once the worker is actually running so the test
+    can cancel a RUNNING (not just PENDING) job. The worker raises
+    ``JobCancelled`` when cancel is requested -- the cooperative
+    contract real workers follow.
+    """
+    from splitsmith.ui.jobs import JobCancelled
+
+    def _block(handle) -> None:
+        started.set()
+        while True:
+            if handle.is_cancel_requested():
+                raise JobCancelled()
+            if release.wait(0.02):
+                return
+
+    return _await(registry.submit(kind=kind, fn=_block))
+
+
+def _wait_status(registry, job_id: str, *, deadline_s: float = 3.0):
+    """Poll the registry until ``job_id`` reaches a terminal status."""
+    from splitsmith.ui.jobs import JobStatus
+
+    terminal = {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}
+    deadline = time.monotonic() + deadline_s
+    while time.monotonic() < deadline:
+        job = _await(registry.get(job_id))
+        if job is not None and job.status in terminal:
+            return job
+        time.sleep(0.02)
+    return _await(registry.get(job_id))
+
+
+def test_cancel_resumable_jobs_cancels_model_download_only() -> None:
+    """Shutdown abandons the resumable model prefetch but lets
+    user-initiated work keep draining.
+
+    Regression guard for the SIGTERM-hang fix: the boot-time
+    ``model_download`` prefetch used to block graceful shutdown for the
+    full drain timeout while a ~150 MB download finished.
+    ``_cancel_resumable_jobs`` must cancel it (and nothing else)."""
+    import threading
+
+    from splitsmith.ui.embedded import _cancel_resumable_jobs
+    from splitsmith.ui.jobs import JobRegistry, JobStatus
+
+    registry = JobRegistry(max_concurrent=2)
+    try:
+        dl_started = threading.Event()
+        dl_release = threading.Event()
+        user_started = threading.Event()
+        user_release = threading.Event()
+
+        dl_job = _submit_blocking_job(registry, "model_download", dl_started, dl_release)
+        user_job = _submit_blocking_job(registry, "shot_detect", user_started, user_release)
+
+        assert dl_started.wait(3.0), "model_download worker never started"
+        assert user_started.wait(3.0), "shot_detect worker never started"
+
+        _cancel_resumable_jobs(registry)
+
+        cancelled = _wait_status(registry, dl_job.id)
+        assert cancelled is not None and cancelled.status == JobStatus.CANCELLED
+
+        # The user-initiated job must be untouched -- still running.
+        user_now = _await(registry.get(user_job.id))
+        assert user_now is not None and user_now.status == JobStatus.RUNNING
+
+        # Let the user job finish so the registry drains cleanly.
+        user_release.set()
+        done = _wait_status(registry, user_job.id)
+        assert done is not None and done.status == JobStatus.SUCCEEDED
+    finally:
+        registry.begin_shutdown()
+        registry.wait_for_drain(2.0)
