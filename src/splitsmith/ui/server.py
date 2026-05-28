@@ -840,6 +840,13 @@ def _run_model_download_job(handle: JobHandle) -> None:
             base: int = completed_bytes,
             cap: int = slug_bytes,
         ) -> None:
+            # Fires once per ~1 MB chunk (see models.download). Checking
+            # cancel here lets an in-flight artifact abort within a chunk
+            # instead of only at artifact boundaries -- the difference
+            # between a sub-second shutdown and waiting out a ~150 MB
+            # download. The prefetch is resumable on next boot, so
+            # abandoning it mid-stream loses nothing.
+            handle.check_cancel()
             if total_bytes:
                 handle.update(progress=(base + min(seen, cap)) / total_bytes)
 
