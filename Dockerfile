@@ -1,32 +1,97 @@
 # syntax=docker/dockerfile:1.7
 #
-# Docker image for `splitsmith serve` (hosted mode).
+# Multi-stage image for `splitsmith serve` (hosted mode).
 #
-# Single-stage on purpose: the slim runtime (everything outside
-# ``[dev]``) is already small enough that a multi-stage split mostly
-# adds complexity. If the image grows past a few hundred MB it's
-# worth revisiting with a uv build cache + a slim distroless final
-# stage; for now the priority is a single-file ``docker compose up``
-# experience for contributors.
+# Why multi-stage: the single-stage build shipped uv + a 951 MB
+# `chown -R /app` dup layer + ~280 MB of ui_static/node_modules, all of
+# which the runtime never touches. Splitting builder from runtime keeps
+# the final image to {venv + ffmpeg + baked models + base} only.
 #
-# What ships:
+# Layout:
+# - builder: installs the venv (deps + the splitsmith package, editable)
+#   and bakes the slim ONNX models.
+# - runtime: a clean base + ffmpeg, with the venv, the (slim) source tree,
+#   alembic migrations, and baked models copied in. No uv, no SPA build
+#   inputs, no chown dup layer.
+#
+# Why editable (not a built wheel): ``splitsmith serve`` resolves the
+# alembic config dir as ``Path(cli.__file__).parent.parent.parent`` -- the
+# repo root in the ``src/splitsmith/...`` layout. A non-editable install
+# moves the package into site-packages and breaks that path math (alembic
+# then runs with no script_location). Editable keeps cli.py at
+# /app/src/splitsmith/cli.py so the repo-root assumption holds. The
+# ``.dockerignore`` strips ui_static/node_modules + the TS source so the
+# copied tree stays small; only ui_static/dist (the built SPA) ships.
+#
+# CRITICAL invariant: both stages use the SAME base image so the venv's
+# interpreter path (pyvenv.cfg -> /usr/local/bin/python3.11) stays valid
+# after the copy. ``UV_PYTHON_DOWNLOADS=never`` forces uv to build the venv
+# against that base-image Python rather than a uv-managed one that would
+# not exist in the runtime stage.
+#
+# What ships at runtime:
 # - Python 3.11 (matches the wheel's ``requires-python``).
-# - uv for dependency install (faster + lockfile-aware).
-# - ``[project]`` deps + ``[project.optional-dependencies].hosted``:
-#   the core local-mode set plus the runtime hosted-mode deps
-#   (SQLAlchemy + alembic + asyncpg + aiosqlite + python-ulid +
-#   boto3). The dev group (torch / transformers / panns / mypy / ruff
-#   / moto / etc.) stays out -- the slim ONNX runtime + scikit-learn
-#   cover voter B + C inference paths.
-# - ffmpeg + ffprobe via the OS package manager so trim / shot-detect
-#   workers can still execute when a real shooter / match is uploaded.
+# - ``[project]`` deps + ``[project.optional-dependencies].hosted`` (the
+#   slim ONNX runtime + scikit-learn + SQLAlchemy/alembic/asyncpg/boto3/
+#   procrastinate). The dev group (torch / transformers / panns / mypy /
+#   ruff / moto) stays out.
+# - ffmpeg + ffprobe for trim / probe.
+# - Baked CLAP + PANN + text-embedding artifacts (~450 MB) so neither the
+#   API nor a worker downloads models at runtime (doc 04).
 
-FROM python:3.11-slim-bookworm
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 
-# System deps: ffmpeg for trim / probe (workers still need it once
-# real jobs run); curl for healthchecks. ``--no-install-recommends``
-# keeps the image tight. Build tools intentionally omitted -- every
-# wheel in the slim runtime ships a manylinux artifact.
+# --------------------------------------------------------------------------
+# Builder
+# --------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
+
+# Use the base-image Python; never let uv fetch a managed interpreter (it
+# would bake an interpreter path the runtime stage can't satisfy). Copy
+# link mode so the venv holds real files, not hardlinks into uv's cache
+# (hardlinks don't survive the cross-stage COPY).
+ENV UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+# Dependency layer first so it caches across source-only edits. Metadata
+# only -- ``--no-install-project`` skips the splitsmith package itself.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --extra hosted --no-install-project
+
+# Now the source + the editable project install.
+COPY src ./src
+# Fail fast if the SPA wasn't built before docker build: dist/ is not
+# committed, so a build from a clean checkout would otherwise ship an
+# image that serves no UI. Run ``npm --prefix src/splitsmith/ui_static run
+# build`` first (or copy a prebuilt dist into the context).
+RUN test -f src/splitsmith/ui_static/dist/index.html \
+    || (echo "ERROR: src/splitsmith/ui_static/dist/index.html missing -- build the SPA before docker build" && exit 1)
+RUN uv sync --frozen --no-dev --extra hosted
+
+# Bake the slim ONNX model artifacts into a staging dir we copy into the
+# runtime stage. ``SPLITSMITH_CONFIG_DIR`` drives the cache location
+# (<config_dir>/models). Gated behind BAKE_MODELS so offline / network-
+# restricted builds opt out with ``--build-arg BAKE_MODELS=0``.
+ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
+ARG BAKE_MODELS=1
+RUN if [ "$BAKE_MODELS" = "1" ]; then \
+        /app/.venv/bin/splitsmith fetch-models; \
+    else \
+        echo "BAKE_MODELS=0 -- skipping model bake; runtime will download on first detection"; \
+        mkdir -p /opt/splitsmith/models; \
+    fi
+
+# --------------------------------------------------------------------------
+# Runtime
+# --------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS runtime
+
+# Runtime system deps only: ffmpeg for trim / probe, curl for the
+# healthcheck. No build tools.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -34,73 +99,38 @@ RUN apt-get update \
         ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
-# Install uv -- pinned to the same version range the dev environment uses.
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
-
-# Non-root user. Avoids container processes running as root, and
-# keeps any future volume mounts owned correctly without a chown.
+# Non-root user; --create-home so the baked model cache + any runtime
+# writes (logs) land in a writable home.
 RUN groupadd --system splitsmith \
  && useradd --system --gid splitsmith --home-dir /home/splitsmith --create-home splitsmith
 
 WORKDIR /app
 
-# Copy lock + project metadata first so the dependency install
-# layer caches across source-only changes.
-COPY pyproject.toml uv.lock README.md ./
-COPY alembic.ini ./
-COPY alembic ./alembic
+# The venv carries all deps + the editable link to /app/src. Copy both to
+# the SAME paths they were built at: the venv so interpreter shebangs +
+# the editable .pth resolve, and the source tree the .pth points at.
+COPY --from=builder --chown=splitsmith:splitsmith /app/.venv /app/.venv
+COPY --from=builder --chown=splitsmith:splitsmith /app/src /app/src
 
-# Install dependencies only. ``--no-install-project`` skips the
-# splitsmith package itself, so this layer is invalidated only when
-# ``pyproject.toml`` / ``uv.lock`` change -- a source-only edit reuses
-# the wheel install on the next build. ``--extra hosted`` pulls the
-# hosted-mode runtime deps (alembic + sqlalchemy + asyncpg + boto3 +
-# ...). Without it the container would boot with the local-mode wheel
-# only and ``splitsmith serve`` would crash on the first alembic call.
-RUN uv sync --frozen --no-dev --extra hosted --no-install-project
+# Alembic migrations: ``splitsmith serve`` runs ``alembic upgrade head`` on
+# boot (unless --skip-migrations) with cwd=/app (the repo root in the
+# editable layout), so alembic.ini + the versions tree must live at /app.
+COPY --chown=splitsmith:splitsmith alembic.ini ./
+COPY --chown=splitsmith:splitsmith alembic ./alembic
 
-# Now bring in the source and install the package itself into the
-# already-warm venv. ``--frozen`` ensures the build still fails if
-# the lockfile and pyproject have drifted.
-COPY src ./src
-RUN uv sync --frozen --no-dev --extra hosted
+# Baked models -> the runtime config dir's models/ cache.
+COPY --from=builder --chown=splitsmith:splitsmith /opt/splitsmith /home/splitsmith/.splitsmith
 
-# Hand the working directory to the non-root user so anything the
-# server writes (logs, the optional ``~/.splitsmith`` config) lands
-# in a writable home.
-RUN chown -R splitsmith:splitsmith /app
 USER splitsmith
 
-# Pin the config dir so the model cache (``<config_dir>/models``) lands
-# at a fixed, baked-in path that the build step below and the runtime
-# both agree on -- independent of the platform default, which differs
-# between the build user and any future runtime user/home.
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     SPLITSMITH_CONFIG_DIR=/home/splitsmith/.splitsmith
 
-# Bake the slim ONNX model artifacts (~450 MB: CLAP + PANN + text
-# embeddings) into the image. This is the whole point of running a
-# persistent worker fleet: a cold worker loads models from local disk
-# instead of paying a ~450 MB download on first detection (doc 04 --
-# "model artifacts live in a baked-in Docker layer"). With models
-# present, ``_maybe_submit_model_download`` no-ops at boot, so neither
-# the API nor a worker ever fetches at runtime.
-#
-# Gated behind ``BAKE_MODELS`` so offline / network-restricted builds
-# (e.g. some CI) can opt out with ``--build-arg BAKE_MODELS=0`` and
-# fall back to the runtime-download path. Default on.
-ARG BAKE_MODELS=1
-RUN if [ "$BAKE_MODELS" = "1" ]; then \
-        splitsmith fetch-models; \
-    else \
-        echo "BAKE_MODELS=0 -- skipping model bake; runtime will download on first detection"; \
-    fi
-
 EXPOSE 5174
 
-# ``serve`` sets SPLITSMITH_MODE=hosted itself; the compose file
-# layers in SPLITSMITH_DATABASE_URL + S3 credentials.
+# ``serve`` sets SPLITSMITH_MODE=hosted itself; the compose file layers in
+# SPLITSMITH_DATABASE_URL + S3 credentials.
 ENTRYPOINT ["splitsmith", "serve"]
 CMD ["--host", "0.0.0.0", "--port", "5174"]
