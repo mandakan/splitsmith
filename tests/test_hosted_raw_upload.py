@@ -77,10 +77,14 @@ def hosted_db(tmp_path: Path) -> Iterator[str]:
 def hosted_client(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, S3Storage]]:
     """Boot the FastAPI app in hosted mode against a moto bucket.
 
-    Replaces ``_build_hosted_storage`` so the S3Storage instance is
-    constructed with a client bound to the mock S3 backend that's
-    already created the bucket. This avoids the chicken-and-egg of
-    "the wiring needs a bucket to exist before boto3 will GET it".
+    Replaces ``_tenant_s3_storage`` (the per-request wrapper) so each
+    tenant ``S3Storage`` is built with a client bound to the mock S3
+    backend that already created the bucket -- avoiding the chicken-and-
+    egg of "the wiring needs a bucket to exist before boto3 will GET it".
+    Storage is now resolved per request via ``current_tenant`` rather than
+    held on ``AppState``, so the stub captures the constructed instance for
+    the test to assert against (every request rebuilds an equivalent one
+    against the same bucket/prefix/client).
     """
     monkeypatch.setenv("SPLITSMITH_S3_BUCKET", BUCKET)
     monkeypatch.setenv("SPLITSMITH_S3_ENDPOINT_URL", "http://moto")
@@ -94,14 +98,22 @@ def hosted_client(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[t
 
         from splitsmith.ui import server as server_mod
 
-        def _stub_build_storage(user_id: str) -> S3Storage:
-            return S3Storage(bucket=BUCKET, prefix=f"users/{user_id}/", client=s3)
+        captured: dict[str, S3Storage] = {}
 
-        monkeypatch.setattr(server_mod, "_build_hosted_storage", _stub_build_storage)
+        def _stub_tenant_storage(client: object, bucket: object, user_id: str) -> S3Storage:
+            storage = S3Storage(bucket=BUCKET, prefix=f"users/{user_id}/", client=s3)
+            captured["storage"] = storage
+            return storage
+
+        monkeypatch.setattr(server_mod, "_tenant_s3_storage", _stub_tenant_storage)
 
         app = server_mod.create_app()
         with TestClient(app) as client:
-            yield client, app.state.splitsmith_state.storage
+            # Drive one request so the per-request tenant builds a storage
+            # the test can read back; ``/api/me/raw`` resolves the tenant
+            # without needing a project. Any captured instance is equivalent.
+            client.get("/api/me/recent-projects")
+            yield client, captured["storage"]
 
 
 def test_upload_returns_path_size_sha256(hosted_client) -> None:

@@ -148,7 +148,15 @@ from . import audio as audio_helpers
 from . import export_storage
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
-from .jobs import Job, JobBackend, JobCancelled, JobHandle, JobRegistry, ShutdownInProgressError
+from .jobs import (
+    Job,
+    JobBackend,
+    JobBodyRegistry,
+    JobCancelled,
+    JobHandle,
+    JobRegistry,
+    ShutdownInProgressError,
+)
 from .project import (
     PROJECT_FILE,
     VIDEO_EXTENSIONS,
@@ -578,6 +586,38 @@ current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_
 
 
 @dataclass
+class TenantContext:
+    """The per-user stores resolved for the lifetime of one request / job.
+
+    In hosted mode every ``/api/*`` request and every worker job runs as a
+    distinct user, so the per-user stores cannot be process singletons --
+    a singleton bound to user A would serve user B's request with A's
+    Row-Level-Security GUC. The hosted wiring builds one of these per
+    request (in the auth-gate middleware, from the resolved ``User``) and
+    per job (in the queue task, from the queued ``user_id``); the matching
+    :class:`AppState` properties read it via the :data:`current_tenant`
+    ContextVar. In local mode there is exactly one operator, so this is
+    never populated and the properties fall back to the process singletons.
+    """
+
+    recent_projects: user_config.RecentProjectsStore
+    scoreboard_identity: user_config.ScoreboardIdentityStore
+    jobs: JobBackend
+    matches_store: PostgresMatchStore | None
+    storage: Storage | None
+
+
+# Per-request / per-job tenant resolved by the hosted-mode auth gate
+# (API) and the ``run_compute_job`` queue task (worker). When set, the
+# per-user ``AppState`` properties (``jobs``, ``recent_projects``,
+# ``scoreboard_identity``, ``matches_store``, ``storage``) read from it
+# instead of the local-mode singleton -- the same pattern
+# ``current_match_root`` uses for match scoping. ``None`` in local mode
+# and on boot/non-request code paths.
+current_tenant: ContextVar[TenantContext | None] = ContextVar("splitsmith_current_tenant", default=None)
+
+
+@dataclass
 class AppState:
     """Process state. One bound Match folder at a time.
 
@@ -607,26 +647,30 @@ class AppState:
 
     # The ``JobBackend`` Protocol (see ``splitsmith.ui.jobs``) is
     # what handlers depend on; ``JobRegistry`` is the local in-memory
-    # implementation. A hosted-mode backend swaps in here per
-    # Tier 2 of doc 10.
-    jobs: JobBackend = field(default_factory=JobRegistry)
+    # implementation. In hosted mode the per-request / per-job tenant
+    # backend resolves through the ``jobs`` property below; this backing
+    # slot then holds the boot-time backend (bodies registry + restart
+    # sweep). See ``_apply_hosted_mode_wiring``.
+    _jobs: JobBackend = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
     # Per-user ``matches`` table store (PR-delta). ``None`` in local mode;
-    # set by ``_apply_hosted_mode_wiring`` so the API can upsert a row when
-    # a match is opened and the worker can resolve a ``match_id`` it never
-    # opened locally. See ``splitsmith.db.matches.PostgresMatchStore``.
-    matches_store: PostgresMatchStore | None = None
+    # in hosted mode resolved per request / per job via the property below.
+    # See ``splitsmith.db.matches.PostgresMatchStore``.
+    _matches_store: PostgresMatchStore | None = None
     # Per-user preference stores (Tier 3 of doc 10). Local mode
     # delegates to the ``~/.splitsmith/*.json`` module functions;
-    # the hosted-mode backend will be per-user Postgres rows
-    # constructed per-request after the auth check. See
-    # ``splitsmith.user_config``.
-    recent_projects: user_config.RecentProjectsStore = field(
+    # in hosted mode resolved per request from the authenticated user
+    # via the properties below. See ``splitsmith.user_config``.
+    _recent_projects: user_config.RecentProjectsStore = field(
         default_factory=user_config.JsonRecentProjectsStore
     )
-    scoreboard_identity: user_config.ScoreboardIdentityStore = field(
+    _scoreboard_identity: user_config.ScoreboardIdentityStore = field(
         default_factory=user_config.JsonScoreboardIdentityStore
     )
+    # Hosted-mode factory: build a :class:`TenantContext` for a ``user_id``.
+    # ``None`` in local mode. Set by ``_apply_hosted_mode_wiring``; called
+    # per request (auth gate) and per job (queue task).
+    _build_tenant: Callable[[str], TenantContext] | None = None
     # Auth backend. ``LoopbackAuth`` in local mode (every request
     # resolves to the same sentinel user); a hosted-mode backend will
     # be injected here when SaaS lands. See ``splitsmith.auth``.
@@ -646,8 +690,9 @@ class AppState:
     # constructs a per-user :class:`S3Storage` scoped to
     # ``users/<user_id>/`` so the upload endpoints can stream raw
     # footage into R2 / MinIO without ever touching the API
-    # container's filesystem. See ``docs/saas-readiness/03-storage-layer.md``.
-    storage: Storage | None = None
+    # container's filesystem. Resolved per request / per job via the
+    # property below. See ``docs/saas-readiness/03-storage-layer.md``.
+    _storage: Storage | None = None
     # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
     # so the /api/shutdown route can ask uvicorn to exit. None under the
     # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
@@ -656,6 +701,78 @@ class AppState:
     # Idempotency latch for /api/shutdown: first call kicks the drain
     # thread, subsequent calls return 202 without rescheduling.
     shutdown_initiated: bool = False
+
+    # ------------------------------------------------------------------
+    # Per-user stores -- tenant-resolving in hosted mode, singletons local
+    # ------------------------------------------------------------------
+    #
+    # Each getter returns the request/job's :class:`TenantContext` store
+    # when ``current_tenant`` is set (hosted mode), else the process
+    # singleton in the backing field (local mode + boot/non-request code).
+    # The setters write the backing field so tests + the local path can
+    # inject fakes; hosted requests never assign these (they set
+    # ``current_tenant`` instead). This mirrors ``shooter_root`` reading
+    # ``current_match_root``.
+
+    @property
+    def jobs(self) -> JobBackend:
+        tenant = current_tenant.get()
+        return tenant.jobs if tenant is not None else self._jobs
+
+    @jobs.setter
+    def jobs(self, value: JobBackend) -> None:
+        self._jobs = value
+
+    @property
+    def recent_projects(self) -> user_config.RecentProjectsStore:
+        tenant = current_tenant.get()
+        return tenant.recent_projects if tenant is not None else self._recent_projects
+
+    @recent_projects.setter
+    def recent_projects(self, value: user_config.RecentProjectsStore) -> None:
+        self._recent_projects = value
+
+    @property
+    def scoreboard_identity(self) -> user_config.ScoreboardIdentityStore:
+        tenant = current_tenant.get()
+        return tenant.scoreboard_identity if tenant is not None else self._scoreboard_identity
+
+    @scoreboard_identity.setter
+    def scoreboard_identity(self, value: user_config.ScoreboardIdentityStore) -> None:
+        self._scoreboard_identity = value
+
+    @property
+    def matches_store(self) -> PostgresMatchStore | None:
+        tenant = current_tenant.get()
+        return tenant.matches_store if tenant is not None else self._matches_store
+
+    @matches_store.setter
+    def matches_store(self, value: PostgresMatchStore | None) -> None:
+        self._matches_store = value
+
+    @property
+    def storage(self) -> Storage | None:
+        tenant = current_tenant.get()
+        return tenant.storage if tenant is not None else self._storage
+
+    @storage.setter
+    def storage(self, value: Storage | None) -> None:
+        self._storage = value
+
+    def build_tenant(self, user_id: str) -> TenantContext:
+        """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
+
+        Raises if called in local mode -- there is no per-user tenancy
+        there, and a caller reaching this in local mode is a bug. The
+        hosted wiring sets :attr:`_build_tenant`.
+        """
+        if self._build_tenant is None:
+            raise RuntimeError(
+                "AppState.build_tenant called without a hosted-mode tenant "
+                "factory; this is only valid when SPLITSMITH_MODE=hosted "
+                "wiring has run."
+            )
+        return self._build_tenant(user_id)
 
     @property
     def match_root(self) -> Path:
@@ -3245,24 +3362,27 @@ def _hosted_mode_active() -> bool:
 
 
 def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
-    """Swap AppState's local-mode defaults for Postgres-backed impls.
+    """Wire AppState for hosted mode: a per-tenant store factory + the
+    process-level resources it needs.
 
     Runs only when :func:`_hosted_mode_active` is True. Requires
     ``SPLITSMITH_DATABASE_URL`` to point at a Postgres (or SQLite)
-    engine the migrations have already applied. Constructs:
+    engine the migrations have already applied.
 
-    - :class:`HostedLoopbackAuth` (upserts the loopback hosted user
-      row + remembers its id).
-    - :class:`PostgresRecentProjectsStore` bound to that user.
-    - :class:`PostgresScoreboardIdentityStore` bound to that user.
-    - :class:`PostgresJobBackend` bound to that user.
+    Unlike the original single-user wiring, this does **not** bind the
+    per-user stores to one user at boot. It installs
+    :meth:`AppState.build_tenant`, which constructs a fresh
+    :class:`TenantContext` for a given ``user_id`` -- the auth gate calls
+    it per request, the queue task per job. Each context's stores open
+    sessions through :func:`tenant_session_factory`, so the ``app.user_id``
+    GUC the RLS policies key on is set per transaction for the right user.
 
-    Single-user binding is deliberate: while :class:`LoopbackAuth`
-    is the only auth backend, every request resolves to the same
-    user, so the stores can be process-singletons. Once
-    :class:`MagicLinkAuth` lands and requests resolve different
-    users, this wiring is replaced with FastAPI ``Depends``-based
-    per-request construction.
+    Process-level resources are built once and shared across tenants: the
+    engine + session factory, the queue deferrer, the S3 client, and the
+    job-body registry (the ``kind`` -> body mapping is a process constant).
+    The ``HostedLoopbackAuth`` boot user is still resolved here -- in this
+    chunk it remains the only user, and the backing job backend uses its id
+    for restart-sweep hygiene. :class:`MagicLinkAuth` replaces it next.
     """
     from ..db import (
         HostedLoopbackAuth,
@@ -3274,6 +3394,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..queue import make_deferrer
 
     url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV)
     if not url:
@@ -3295,38 +3416,59 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # upsert the user row; that's safe here because ``create_app``
     # itself runs outside any event loop.
     auth = HostedLoopbackAuth(session_factory)
-    user_id = auth.user_id
-
-    # Every per-user store opens its sessions through a tenant-scoped
-    # factory that sets the ``app.user_id`` GUC the RLS policies key on
-    # (no-op on SQLite). The auth backend keeps the raw ``session_factory``
-    # because it resolves identity from ``users`` -- which has no RLS --
-    # before any GUC exists. ``build_worker_state`` reaches this same seam,
-    # so the worker's stores get the GUC too.
-    tenant_factory = tenant_session_factory(session_factory, user_id)
-
     state.auth = auth
-    state.recent_projects = PostgresRecentProjectsStore(tenant_factory, user_id=user_id)
-    state.scoreboard_identity = PostgresScoreboardIdentityStore(tenant_factory, user_id=user_id)
-    # The API process enqueues via the deferrer; the worker executes and
-    # must not sweep jobs queued for it to run. The worker also enqueues
-    # (job chaining defers a follow-up onto the queue), so it gets a
-    # deferrer too.
-    from ..queue import make_deferrer
 
-    state.jobs = PostgresJobBackend(
-        tenant_factory,
-        user_id=user_id,
-        deferrer=make_deferrer(url),
+    # Process-level, tenant-agnostic resources shared by every
+    # ``TenantContext``. The deferrer routes per-user inside ``_defer``
+    # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
+    # tenant (only the key prefix is per-user, see ``_build_hosted_storage``);
+    # the body registry is the fixed ``kind`` -> body mapping.
+    deferrer = make_deferrer(url)
+    s3_client, s3_bucket = _build_hosted_s3_client()
+    job_bodies = JobBodyRegistry()
+
+    def _build_tenant(user_id: str) -> TenantContext:
+        # Every per-user store opens its sessions through a tenant-scoped
+        # factory that sets the ``app.user_id`` GUC the RLS policies key on
+        # (no-op on SQLite). ``sweep_on_boot=False``: a per-request /
+        # per-job backend must never fail the in-flight jobs of the user it
+        # was just built for. The shared ``job_bodies`` registry is injected
+        # so a fresh backend resolves the same kinds without re-registration.
+        tenant_factory = tenant_session_factory(session_factory, user_id)
+        return TenantContext(
+            recent_projects=PostgresRecentProjectsStore(tenant_factory, user_id=user_id),
+            scoreboard_identity=PostgresScoreboardIdentityStore(tenant_factory, user_id=user_id),
+            jobs=PostgresJobBackend(
+                tenant_factory,
+                user_id=user_id,
+                deferrer=deferrer,
+                sweep_on_boot=False,
+                bodies=job_bodies,
+            ),
+            matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
+            storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
+        )
+
+    state._build_tenant = _build_tenant
+
+    # Backing job backend (read via ``state.jobs`` only when no tenant is
+    # pinned, i.e. boot + non-request code). It holds the shared body
+    # registry so ``register_job_bodies(state)`` -- which runs at boot with
+    # no ``current_tenant`` -- populates the registry every per-request
+    # backend shares. The API also uses it for one-shot restart hygiene:
+    # ``sweep_on_boot`` fails the boot user's stranded PENDING/RUNNING rows.
+    # The worker disables the sweep (it must not fail jobs queued for it to
+    # run). Multi-tenant restart hygiene -- sweeping *every* user's stranded
+    # rows, which can't be enumerated per-request -- is a follow-up for when
+    # MagicLinkAuth makes a second user real.
+    state._jobs = PostgresJobBackend(
+        tenant_session_factory(session_factory, auth.user_id),
+        user_id=auth.user_id,
+        deferrer=deferrer,
         sweep_on_boot=not worker,
+        bodies=job_bodies,
     )
-    state.storage = _build_hosted_storage(user_id)
 
-    # Per-user ``matches`` table. The API upserts a row when a match is
-    # opened (see the open path); the worker resolves a queued ``match_id``
-    # through it (it never opened the match locally).
-    match_store = PostgresMatchStore(tenant_factory, user_id=user_id)
-    state.matches_store = match_store
     if worker:
         worker_root = Path(
             os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
@@ -3335,14 +3477,20 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         def _resolve_match_for_worker(match_id: str) -> Path | None:
             """Map a queued ``match_id`` to a worker-local working root.
 
-            Returns ``None`` (-> ``MatchNotRegisteredError``, surfaced as a
-            clean job failure) when the match isn't in this user's table --
-            no fallback to the local recent-projects scan, which a separate
-            worker process can't satisfy anyway. The match's metadata +
-            inputs are mirrored down from S3 lazily by the ``state``
-            accessors once ``current_match_root`` points here.
+            Reads the job's tenant ``matches_store`` (``current_tenant`` is
+            pinned by the queue task before ``run_job``), so resolution is
+            scoped to the job's owner. Returns ``None`` (->
+            ``MatchNotRegisteredError``, surfaced as a clean job failure)
+            when the match isn't in that user's table -- no fallback to the
+            local recent-projects scan, which a separate worker process
+            can't satisfy anyway. The match's metadata + inputs are mirrored
+            down from S3 lazily by the ``state`` accessors once
+            ``current_match_root`` points here.
             """
-            row = asyncio.run(match_store.get(match_id))
+            store = state.matches_store
+            if store is None:
+                return None
+            row = asyncio.run(store.get(match_id))
             if row is None:
                 return None
             root = worker_root / match_id
@@ -3371,26 +3519,30 @@ def build_worker_state() -> AppState:
     return state
 
 
-def _build_hosted_storage(user_id: str) -> Storage | None:
-    """Construct the per-user :class:`S3Storage` from ``SPLITSMITH_S3_*``
-    env vars, or return ``None`` if the bucket is unset.
+def _build_hosted_s3_client() -> tuple[Any, str | None]:
+    """Build the process-level S3 client + bucket from ``SPLITSMITH_S3_*``,
+    or ``(None, None)`` if the bucket is unset.
 
-    Hosted mode without S3 wiring is a valid configuration -- a
-    developer iterating on the Postgres-backed stores doesn't need
-    MinIO running just to hit ``/api/me/recent-projects``. The
-    upload endpoint guards on ``state.storage is None`` and returns
-    a 503 in that case, so the contract is "set the bucket to get
-    upload support, leave it unset to disable that surface".
+    Built once at hosted-mode wiring and shared across tenants -- a boto3
+    client is thread-safe for calls and stateless w.r.t. the tenant (the
+    per-user isolation is purely the key prefix, applied per request by
+    :func:`_tenant_s3_storage`). Constructing a client per request would
+    add tens of milliseconds (boto3 parses service models on creation) to
+    every ``/api/*`` call.
 
-    When the bucket *is* set, the rest of the credentials must be
-    present too -- a half-configured S3 wiring would crash on the
-    first request, which is worse than failing loud at boot.
+    Hosted mode without S3 wiring is a valid configuration -- a developer
+    iterating on the Postgres-backed stores doesn't need MinIO running
+    just to hit ``/api/me/recent-projects``. The upload endpoint guards on
+    ``state.storage is None`` and returns a 503, so the contract is "set
+    the bucket to get upload support, leave it unset to disable it".
+
+    When the bucket *is* set, the rest of the credentials must be present
+    too -- a half-configured S3 wiring would crash on the first request,
+    which is worse than failing loud at boot.
     """
-    from ..storage import S3Storage
-
     bucket = os.environ.get(SPLITSMITH_S3_BUCKET_ENV, "").strip()
     if not bucket:
-        return None
+        return None, None
     endpoint = os.environ.get(SPLITSMITH_S3_ENDPOINT_URL_ENV, "").strip() or None
     region = os.environ.get(SPLITSMITH_S3_REGION_ENV, "").strip() or "auto"
     access_key = os.environ.get(SPLITSMITH_S3_ACCESS_KEY_ID_ENV, "").strip()
@@ -3411,10 +3563,22 @@ def _build_hosted_storage(user_id: str) -> Storage | None:
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
     )
-    # Per-user prefix is the multi-tenant isolation boundary: every
-    # caller gets their own ``users/<id>/`` namespace and can't
-    # construct a key that escapes it (the path-traversal guard
-    # inside ``S3Storage._key`` enforces this).
+    return client, bucket
+
+
+def _tenant_s3_storage(client: Any, bucket: str | None, user_id: str) -> Storage | None:
+    """Wrap the shared S3 client in a per-user :class:`S3Storage`, or
+    ``None`` when S3 is unconfigured.
+
+    The per-user prefix is the multi-tenant isolation boundary: every
+    caller gets their own ``users/<id>/`` namespace and can't construct a
+    key that escapes it (the path-traversal guard inside ``S3Storage._key``
+    enforces this). Cheap -- it only wraps an already-built client.
+    """
+    if client is None or bucket is None:
+        return None
+    from ..storage import S3Storage
+
     return S3Storage(bucket=bucket, prefix=f"users/{user_id}/", client=client)
 
 
@@ -3503,11 +3667,20 @@ def create_app(
     #
     # All job bodies register here, after any hosted-mode backend swap
     # above, so ``submit(kind=...)`` resolves against whichever backend is
-    # bound. Must precede the prefetch submit below, which fires
-    # ``model_download`` during create_app itself. ``register_job_bodies``
-    # is shared with the Procrastinate worker bootstrap.
+    # bound. In hosted mode ``state.jobs`` (no ``current_tenant`` at boot)
+    # falls back to the backing backend that holds the shared body
+    # registry, so every per-request backend resolves these kinds. Must
+    # precede the prefetch submit below. ``register_job_bodies`` is shared
+    # with the Procrastinate worker bootstrap.
     register_job_bodies(state)
-    asyncio.run(_maybe_submit_model_download(state))
+    # The slim-ONNX prefetch is a local-mode convenience: it submits a
+    # ``model_download`` job when artifacts are missing. Hosted mode bakes
+    # the slim models into the image (nothing to fetch) and has no boot
+    # tenant to own the job -- model prefetch is a process concern, not a
+    # per-user one -- so skip it there entirely rather than route an
+    # ownerless job through the per-tenant ``state.jobs`` property.
+    if not _hosted_mode_active():
+        asyncio.run(_maybe_submit_model_download(state))
 
     async def get_current_user(request: Request) -> User:
         """FastAPI dependency: resolve the operator behind a request.
@@ -3607,6 +3780,16 @@ def create_app(
     # the feature flag the SPA reads on mount (both are needed before a
     # user is established) plus ``/api/shutdown`` (which has its own
     # loopback gate that's stricter than auth).
+    #
+    # In hosted mode this gate also pins ``current_tenant`` for the
+    # resolved user before the handler runs, so the per-user ``AppState``
+    # store properties resolve to that user's Postgres/S3 stores. The set
+    # happens *before* ``call_next`` (same forward-propagation contract the
+    # ``_match_id_alias`` middleware relies on) and is reset in ``finally``.
+    # Local mode leaves it unset -- there is one operator and the
+    # properties fall back to the process singletons.
+    hosted = _hosted_mode_active()
+
     @app.middleware("http")
     async def _auth_gate(request, call_next):
         path = request.url.path
@@ -3620,7 +3803,13 @@ def create_app(
                 status_code=401,
                 content={"detail": "not authenticated"},
             )
-        return await call_next(request)
+        if not hosted:
+            return await call_next(request)
+        tenant_token = current_tenant.set(state.build_tenant(user.id))
+        try:
+            return await call_next(request)
+        finally:
+            current_tenant.reset(tenant_token)
 
     # ----------------------------------------------------------------------
     # API

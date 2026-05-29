@@ -119,6 +119,7 @@ class PostgresJobBackend:
         user_id: str,
         deferrer: JobDeferrer | None = None,
         sweep_on_boot: bool = True,
+        bodies: JobBodyRegistry | None = None,
     ) -> None:
         # Defence-in-depth: see :class:`PostgresRecentProjectsStore`
         # for the same fail-loud-on-empty-user_id rationale.
@@ -136,8 +137,12 @@ class PostgresJobBackend:
         self._deferrer = deferrer
         # Populated by ``register_job_bodies(state)`` in ``create_app``
         # (API) and the worker bootstrap, same as the local
-        # :class:`JobRegistry`. Each process holds its own copy.
-        self.bodies = JobBodyRegistry()
+        # :class:`JobRegistry`. The kind -> body mapping is a process-level
+        # constant, so when the hosted wiring builds a fresh backend per
+        # request / per job it injects one shared registry rather than
+        # re-registering bodies on every instance. ``None`` (the default,
+        # used by tests + the boot-time backend) creates a private one.
+        self.bodies = bodies if bodies is not None else JobBodyRegistry()
 
         self._lock = threading.RLock()
         self._subprocs: dict[str, subprocess.Popen] = {}

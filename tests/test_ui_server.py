@@ -5704,7 +5704,26 @@ def test_create_match_manual_hosted_mode_synthesizes_path(
             return self._user
 
     def _stub_wiring(state):
+        # Stand in for the Postgres wiring: set the stub auth and a tenant
+        # factory backed by local in-memory stores, so the per-request auth
+        # gate can pin a ``current_tenant`` without a real database. The
+        # create-manual flow only needs ``recent_projects`` here (no S3, no
+        # matches table), so the rest are minimal.
         state.auth = _StubAuth()
+        from splitsmith.ui.jobs import JobRegistry
+        from splitsmith.ui.server import TenantContext
+        from splitsmith.user_config import (
+            JsonRecentProjectsStore,
+            JsonScoreboardIdentityStore,
+        )
+
+        state._build_tenant = lambda uid: TenantContext(
+            recent_projects=JsonRecentProjectsStore(),
+            scoreboard_identity=JsonScoreboardIdentityStore(),
+            jobs=JobRegistry(),
+            matches_store=None,
+            storage=None,
+        )
 
     monkeypatch.setattr(server_mod, "_apply_hosted_mode_wiring", _stub_wiring)
 

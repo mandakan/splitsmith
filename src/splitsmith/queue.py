@@ -151,6 +151,7 @@ def make_deferrer(database_url: str) -> Callable[..., Awaitable[None]]:
         async with app.open_async():
             await app.configure_task(name=RUN_COMPUTE_JOB_TASK, queue=queue).defer_async(
                 job_id=job_id,
+                user_id=user_id,
                 kind=kind,
                 args=args,
                 match_id=match_id,
@@ -171,17 +172,32 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
     :meth:`procrastinate.App.run_worker_async`.
     """
     from .match_registry import MatchNotRegisteredError
-    from .ui.server import current_match_id, current_match_root
+    from .ui.server import current_match_id, current_match_root, current_tenant
 
     @app.task(name=RUN_COMPUTE_JOB_TASK, queue="default")
     async def _run_compute_job(
         *,
         job_id: str,
+        user_id: str,
         kind: str,
         args: dict[str, Any] | None = None,
         match_id: str | None = None,
     ) -> None:
         call_args = _rehydrate_args(kind, args or {})
+
+        # Build this job's tenant context from the queued ``user_id`` and
+        # pin it for the lifetime of the run. ``state.jobs`` / ``state.storage``
+        # / ``state.matches_store`` are tenant-resolving properties, so they
+        # must see ``current_tenant`` before any of them is touched -- the
+        # very next line reads ``state.jobs``. ``run_job`` offloads the body
+        # via ``asyncio.to_thread``, which copies this context, so the GUC the
+        # tenant session factory sets (and the per-user S3 prefix) follow the
+        # body onto the worker thread. ``user_id`` is required: there is no
+        # fallback to the ``user-<id>`` queue name (a queued job always
+        # carries its owner; a missing one is a wire-format bug, not a
+        # recoverable state).
+        tenant = state.build_tenant(user_id)
+        tenant_token = current_tenant.set(tenant)
 
         def _bind_match() -> None:
             """Re-set the match ContextVars from the queued ``match_id``.
@@ -201,14 +217,17 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
                 root = state.matches.resolve(match_id)
             except MatchNotRegisteredError as exc:
                 raise RuntimeError(
-                    f"hosted worker cannot resolve match {match_id!r}: its match "
-                    "metadata is not reachable cross-process yet (a later chunk). "
-                    "Only match-less kinds (e.g. model_download) run on the worker today."
+                    f"hosted worker cannot resolve match {match_id!r}: it is not in "
+                    f"this user's matches table (or its metadata is unreachable). "
+                    "Match-less kinds (e.g. model_download) need no resolution."
                 ) from exc
             current_match_root.set(root)
             current_match_id.set(match_id)
 
-        await state.jobs.run_job(job_id=job_id, kind=kind, args=call_args, before_body=_bind_match)
+        try:
+            await state.jobs.run_job(job_id=job_id, kind=kind, args=call_args, before_body=_bind_match)
+        finally:
+            current_tenant.reset(tenant_token)
 
 
 def _rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
