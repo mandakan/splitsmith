@@ -30,6 +30,10 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Creates the non-superuser ``splitsmith_app`` role the API/worker
+      # connect as, so RLS policies actually apply (a superuser bypasses
+      # RLS). Runs once on first init; recreate the volume to re-run.
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U splitsmith -d splitsmith"]
       interval: 2s
@@ -84,7 +88,10 @@ services:
     environment:
       # asyncpg dialect so SQLAlchemy's async engine + Alembic align
       # with the production engine choice.
-      SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@postgres:5432/splitsmith
+      # Connect as the NON-superuser app role so RLS is enforced (the
+      # ``splitsmith`` superuser bypasses RLS). Alembic-on-boot runs as
+      # this role too, so it owns every table it creates.
+      SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith_app:splitsmith_app@postgres:5432/splitsmith
       SPLITSMITH_MODE: hosted
       # S3Storage credentials -- wired once a hosted-mode codepath
       # actually constructs an S3Storage instance. Left in the compose
@@ -127,7 +134,10 @@ services:
       splitsmith:
         condition: service_healthy
     environment:
-      SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@postgres:5432/splitsmith
+      # Connect as the NON-superuser app role so RLS is enforced (the
+      # ``splitsmith`` superuser bypasses RLS). Alembic-on-boot runs as
+      # this role too, so it owns every table it creates.
+      SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith_app:splitsmith_app@postgres:5432/splitsmith
       SPLITSMITH_MODE: hosted
       SPLITSMITH_S3_ENDPOINT_URL: http://minio:9000
       SPLITSMITH_S3_ACCESS_KEY_ID: splitsmith

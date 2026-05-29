@@ -3272,6 +3272,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         PostgresScoreboardIdentityStore,
         create_engine,
         sessionmaker,
+        tenant_session_factory,
     )
 
     url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV)
@@ -3296,9 +3297,17 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     auth = HostedLoopbackAuth(session_factory)
     user_id = auth.user_id
 
+    # Every per-user store opens its sessions through a tenant-scoped
+    # factory that sets the ``app.user_id`` GUC the RLS policies key on
+    # (no-op on SQLite). The auth backend keeps the raw ``session_factory``
+    # because it resolves identity from ``users`` -- which has no RLS --
+    # before any GUC exists. ``build_worker_state`` reaches this same seam,
+    # so the worker's stores get the GUC too.
+    tenant_factory = tenant_session_factory(session_factory, user_id)
+
     state.auth = auth
-    state.recent_projects = PostgresRecentProjectsStore(session_factory, user_id=user_id)
-    state.scoreboard_identity = PostgresScoreboardIdentityStore(session_factory, user_id=user_id)
+    state.recent_projects = PostgresRecentProjectsStore(tenant_factory, user_id=user_id)
+    state.scoreboard_identity = PostgresScoreboardIdentityStore(tenant_factory, user_id=user_id)
     # The API process enqueues via the deferrer; the worker executes and
     # must not sweep jobs queued for it to run. The worker also enqueues
     # (job chaining defers a follow-up onto the queue), so it gets a
@@ -3306,7 +3315,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     from ..queue import make_deferrer
 
     state.jobs = PostgresJobBackend(
-        session_factory,
+        tenant_factory,
         user_id=user_id,
         deferrer=make_deferrer(url),
         sweep_on_boot=not worker,
@@ -3316,7 +3325,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # Per-user ``matches`` table. The API upserts a row when a match is
     # opened (see the open path); the worker resolves a queued ``match_id``
     # through it (it never opened the match locally).
-    match_store = PostgresMatchStore(session_factory, user_id=user_id)
+    match_store = PostgresMatchStore(tenant_factory, user_id=user_id)
     state.matches_store = match_store
     if worker:
         worker_root = Path(

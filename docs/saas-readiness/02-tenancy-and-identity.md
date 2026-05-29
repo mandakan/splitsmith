@@ -205,6 +205,54 @@ asserts membership before doing anything else. There is **no
 "current project" implicit context** in the request -- always
 explicit, always checked.
 
+## Database-enforced isolation (Row-Level Security)
+
+App-layer `WHERE user_id = ...` filters in every store class are the
+first line of defence, but they only protect code that goes through
+those stores. Postgres Row-Level Security is the backstop that survives
+a future raw-SQL helper forgetting the clause. As of the RLS-hardening
+PR it is **enabled and FORCED** on the three per-user tenant tables
+(`recent_projects`, `matches`, `compute_jobs`) with one policy each:
+
+```sql
+ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <t> FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON <t>
+  FOR ALL
+  USING      (user_id = current_setting('app.user_id', true))
+  WITH CHECK (user_id = current_setting('app.user_id', true));
+```
+
+Two hard requirements make this real rather than decorative:
+
+- **The app's DB role must be a non-superuser without `BYPASSRLS`.**
+  Postgres superusers bypass RLS unconditionally, and the table owner
+  bypasses it unless `FORCE` is set. The API, worker, and Alembic all
+  connect as a least-privilege role (`splitsmith_app` locally; on Neon
+  the project's default role, which is already a non-superuser owner) so
+  the policies apply -- `FORCE` then covers the owner-applies case. The
+  `postgres`/`splitsmith` superuser stays for bootstrap and seeding only.
+- **Every session sets `app.user_id`.** The per-user store sessions run
+  through `tenant_session_factory`, which pins the GUC per transaction
+  (`set_config(..., true)`, the `SET LOCAL` form) via an `after_begin`
+  listener -- re-set on each transaction because the `NullPool` engine
+  hands each transaction a fresh connection. With the GUC unset the
+  policy is fail-closed (zero rows / rejected writes).
+
+`users` is deliberately **not** under RLS: auth must resolve a user by
+email before any `app.user_id` exists, so an RLS'd `users` would break
+login. Its `scoreboard_identity` JSON column stays guarded by the
+app-layer `User.id == user_id` filter; moving it to its own RLS'd table
+is a possible follow-up. The `procrastinate_*` queue tables are infra,
+not tenant data, and are excluded.
+
+Sharing does not change any of this: the per-user tables stay strictly
+owner-scoped. When the `project_members` ACL above lands, the shareable
+tables gain a *second* policy clause that ORs in
+`EXISTS (SELECT 1 FROM project_members WHERE user_id = current_setting('app.user_id', true) ...)`.
+The GUC substrate is already in place. Tracked in the sharing data-model
+issue.
+
 ## Project ID -- what it represents
 
 A `project_id` corresponds to one **single-shooter MatchProject** --

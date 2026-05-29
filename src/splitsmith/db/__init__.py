@@ -22,7 +22,7 @@ this DB layer internally without leaking SQL into handler code.
 """
 
 from .auth import HOSTED_LOOPBACK_EMAIL, HostedLoopbackAuth
-from .engine import create_engine, sessionmaker
+from .engine import create_engine, sessionmaker, tenant_session_factory
 from .job_backend import PostgresJobBackend
 from .matches import PostgresMatchStore
 from .models import Base, ComputeJobRow, MatchRow, RecentProjectRow, User, new_ulid
@@ -44,4 +44,5 @@ __all__ = [
     "create_engine",
     "new_ulid",
     "sessionmaker",
+    "tenant_session_factory",
 ]
