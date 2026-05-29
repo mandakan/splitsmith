@@ -166,6 +166,57 @@ class RecentProjectRow(Base):
         return f"<RecentProjectRow user_id={self.user_id!r} path={self.path!r}>"
 
 
+class MatchRow(Base):
+    """One row per (user, match) so a worker process can resolve a
+    ``match_id`` it never opened locally.
+
+    The local desktop flow resolves ``match_id`` -> on-disk path by
+    scanning ``projects.json`` (see :class:`splitsmith.match_registry.MatchRegistry`).
+    A separate hosted worker has no such file, so PR-delta gives
+    ``match_id`` a first-class, queryable identity here: given just the
+    ``(user_id, match_id)`` carried on the Procrastinate queue, the
+    worker looks up the match's ``storage_prefix`` and mirrors its
+    metadata + inputs down from S3 into a local working root.
+
+    ``storage_prefix`` is the per-user-storage-root-relative prefix for
+    the match's objects (``matches/<match_id>``); the per-user S3 root
+    (``users/<user_id>/``) is supplied by the bound :class:`Storage`, so
+    the prefix here stays tenant-agnostic.
+
+    **Multi-tenant:** ``user_id`` is non-nullable and CASCADEs on user
+    delete. The unique ``(user_id, match_id)`` pair scopes matches
+    per-user. Every query in :class:`splitsmith.db.matches.PostgresMatchStore`
+    filters by ``user_id``; isolation tests guard the invariant.
+    """
+
+    __tablename__ = "matches"
+    __table_args__ = (UniqueConstraint("user_id", "match_id", name="uq_matches_user_match"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    match_id: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    storage_prefix: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<MatchRow user_id={self.user_id!r} match_id={self.match_id!r}>"
+
+
 class ComputeJobRow(Base):
     """One row per submitted job (doc 04).
 

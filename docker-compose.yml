@@ -55,6 +55,21 @@ services:
       timeout: 5s
       retries: 30
 
+  # One-shot: create the uploads bucket before the API/worker write to
+  # it. Production (R2) buckets are pre-provisioned, so the app never
+  # creates buckets itself; this just stands the dev/smoke bucket up.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mc alias set local http://minio:9000 splitsmith splitsmithsplitsmith &&
+        mc mb --ignore-existing local/splitsmith-uploads
+
   splitsmith:
     build:
       context: .
@@ -64,6 +79,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       # asyncpg dialect so SQLAlchemy's async engine + Alembic align
       # with the production engine choice.

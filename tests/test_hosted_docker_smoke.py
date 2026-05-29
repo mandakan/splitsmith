@@ -322,3 +322,107 @@ def test_worker_runs_compute_job_end_to_end(hosted_stack: None) -> None:
             pytest.fail(f"compute job reached 'failed': {err!r}")
         time.sleep(1.0)
     pytest.fail(f"worker did not finish compute job within 60s (last status: {status!r})")
+
+
+def _s3_object_exists(key: str) -> bool:
+    """True iff ``key`` exists in the compose MinIO uploads bucket."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    client = boto3.client(
+        "s3",
+        endpoint_url="http://localhost:9000",
+        region_name="us-east-1",
+        aws_access_key_id="splitsmith",
+        aws_secret_access_key="splitsmithsplitsmith",
+    )
+    try:
+        client.head_object(Bucket="splitsmith-uploads", Key=key)
+        return True
+    except ClientError:
+        return False
+
+
+def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
+    """PR-delta proof: a match created through the API is resolvable by the
+    *separate* worker container, with its metadata round-tripping via MinIO.
+
+    Covers the chunk's new machinery against real containers:
+    1. ``create-manual`` upserts a ``matches`` row on real Postgres, and
+    2. pushes ``match.json`` + the shooter's ``project.json`` to real MinIO,
+    3. so a ``detect_beep`` job the worker pops gets *past* match resolution
+       (no ``MatchNotRegisteredError`` -- the gamma stopgap's failure mode).
+
+    The job then fails because no video is assigned -- proving resolution +
+    cross-container metadata pull worked without needing an uploaded video
+    (full detect-to-succeeded is exercised by the in-process seam tests).
+    """
+    import asyncio
+    import uuid
+
+    from splitsmith.queue import make_deferrer
+
+    # 1. Create a match (no video) through the hosted API.
+    resp = httpx.post(
+        f"{API_BASE}/api/match/create-manual",
+        json={
+            "name": "Worker Delta Match",
+            "stages": [{"stage_number": 1, "stage_name": "Stage 1"}],
+            "primary_shooter": {"name": "Test Shooter"},
+        },
+        timeout=30.0,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    match_id = body["match_id"]
+    slug = body["default_shooter_slug"]
+    assert match_id and slug, body
+
+    user_id = _psql("SELECT id FROM users WHERE email = 'loopback@hosted.local'")
+    assert user_id
+
+    # 2. The API upserted a matches row on real Postgres.
+    assert _psql(f"SELECT count(*) FROM matches WHERE match_id = '{match_id}'") == "1"
+
+    # 3. The API pushed match.json + project.json to real MinIO (S3).
+    prefix = f"users/{user_id}/matches/{match_id}"
+    assert _s3_object_exists(f"{prefix}/match.json"), "match.json missing in MinIO"
+    assert _s3_object_exists(f"{prefix}/shooters/{slug}/project.json"), "project.json missing in MinIO"
+
+    # 4. The worker container resolves the match cross-process. Mirror the
+    #    backend's submit (PENDING row + defer) for a detect_beep job with no
+    #    real video; assert it gets past resolution (no "cannot resolve
+    #    match" failure).
+    host_url = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+    job_id = uuid.uuid4().hex
+    _psql(
+        "INSERT INTO compute_jobs (id, user_id, kind, status, stage_number, video_id, "
+        "cancel_requested, acknowledged) "
+        f"VALUES ('{job_id}', '{user_id}', 'detect_beep', 'pending', 1, 'no-such-video', false, false)"
+    )
+
+    async def _enqueue() -> None:
+        defer = make_deferrer(host_url)
+        await defer(
+            job_id=job_id,
+            user_id=user_id,
+            kind="detect_beep",
+            args={"slug": slug, "stage_number": 1, "video_id": "no-such-video"},
+            match_id=match_id,
+        )
+
+    asyncio.run(_enqueue())
+
+    deadline = time.time() + 60.0
+    status = ""
+    while time.time() < deadline:
+        status = _psql(f"SELECT status FROM compute_jobs WHERE id = '{job_id}'")
+        if status in ("failed", "succeeded"):
+            break
+        time.sleep(1.0)
+    assert status in ("failed", "succeeded"), f"worker never ran detect_beep (last: {status!r})"
+
+    err = _psql(f"SELECT coalesce(error, '') FROM compute_jobs WHERE id = '{job_id}'").lower()
+    assert (
+        "resolve match" not in err and "matchnotregistered" not in err
+    ), f"worker failed to resolve the match cross-process: {err!r}"

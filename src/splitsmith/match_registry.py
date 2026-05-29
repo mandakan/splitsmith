@@ -26,6 +26,7 @@ calls :meth:`resolve` for routing yet.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 
@@ -46,9 +47,17 @@ class MatchRegistry:
     cache mutations need to be serialised).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, miss_resolver: Callable[[str], Path | None] | None = None) -> None:
         self._by_id: dict[str, Path] = {}
         self._lock = RLock()
+        # Strategy used on a cache miss. ``None`` (local desktop / API
+        # process) -> rescan the local recent-projects file. The hosted
+        # worker injects a resolver that looks the match up in Postgres
+        # and mirrors its metadata down from S3 into a local working
+        # root, returning that root (or ``None`` if the match is unknown
+        # to this user). Injected from ``server.build_worker_state`` so
+        # this module stays free of db/storage imports.
+        self._miss_resolver = miss_resolver
 
     # ------------------------------------------------------------------
     # Mutation
@@ -109,16 +118,23 @@ class MatchRegistry:
     def resolve(self, match_id: str) -> Path:
         """Return the on-disk match root for ``match_id``.
 
-        Falls back to a one-shot rescan of recent projects on a miss so
-        a freshly-created match doesn't require a server restart.
-        Raises :class:`MatchNotRegisteredError` if the id still doesn't
-        resolve afterwards.
+        On a cache miss, falls back to the injected ``miss_resolver`` if
+        one was provided (the hosted worker's Postgres+S3 lookup), else
+        to a one-shot rescan of the local recent projects so a
+        freshly-created match doesn't require a server restart. Raises
+        :class:`MatchNotRegisteredError` if the id still doesn't resolve.
         """
         with self._lock:
             hit = self._by_id.get(match_id)
         if hit is not None:
             return hit
-        self.refresh_from_recent_projects()
+        if self._miss_resolver is not None:
+            root = self._miss_resolver(match_id)
+            if root is None:
+                raise MatchNotRegisteredError(match_id)
+            self.register(match_id, root)
+        else:
+            self.refresh_from_recent_projects()
         with self._lock:
             hit = self._by_id.get(match_id)
         if hit is None:

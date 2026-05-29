@@ -87,7 +87,12 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Literal
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal
+
+if TYPE_CHECKING:
+    # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
+    # so local mode stays free of the db (procrastinate/psycopg) dependency.
+    from ..db import PostgresMatchStore
 
 from fastapi import (
     Body,
@@ -144,6 +149,7 @@ from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from .jobs import Job, JobBackend, JobCancelled, JobHandle, JobRegistry, ShutdownInProgressError
 from .project import (
+    PROJECT_FILE,
     VIDEO_EXTENSIONS,
     MatchProject,
     RawVideo,
@@ -604,6 +610,11 @@ class AppState:
     # Tier 2 of doc 10.
     jobs: JobBackend = field(default_factory=JobRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
+    # Per-user ``matches`` table store (PR-delta). ``None`` in local mode;
+    # set by ``_apply_hosted_mode_wiring`` so the API can upsert a row when
+    # a match is opened and the worker can resolve a ``match_id`` it never
+    # opened locally. See ``splitsmith.db.matches.PostgresMatchStore``.
+    matches_store: PostgresMatchStore | None = None
     # Per-user preference stores (Tier 3 of doc 10). Local mode
     # delegates to the ``~/.splitsmith/*.json`` module functions;
     # the hosted-mode backend will be per-user Postgres rows
@@ -677,6 +688,13 @@ class AppState:
         scoped_root = current_match_root.get()
         if scoped_root is None:
             raise _no_project_error()
+        # Hosted: a separate worker process has none of the match's files
+        # on disk. Pull match.json down (S3 authoritative) before reading
+        # it so a worker can see the shooter roster the API wrote. No-op
+        # in local mode (storage is None). See _pull_json.
+        mid = current_match_id.get()
+        if mid is not None:
+            self._pull_json(f"matches/{mid}/{match_model.MATCH_FILE}", scoped_root / match_model.MATCH_FILE)
         match = match_model.Match.load(scoped_root)
         if slug not in match.shooters:
             raise HTTPException(
@@ -684,6 +702,52 @@ class AppState:
                 detail=f"shooter {slug!r} is not registered on this match",
             )
         return match_model.Match.shooter_root(scoped_root, slug)
+
+    # ------------------------------------------------------------------
+    # Hosted-mode JSON storage seam (PR-delta)
+    # ------------------------------------------------------------------
+    #
+    # match.json / project.json / audit stage<N>.json are the small,
+    # mutable JSON files that carry match + shooter state. In hosted mode
+    # they round-trip through S3 so a worker process can read the inputs
+    # the API wrote and the API can read the results the worker wrote.
+    # S3 is the source of truth: load pulls fresh (overwrite local),
+    # save/write pushes. JSON is tiny, so always-pull is cheap. Whole-file
+    # last-writer-wins -- a compute job and a manual SPA edit don't touch
+    # the same stage concurrently (the SPA shows the job in progress).
+    # All four helpers no-op in local mode (storage is None).
+
+    def _pull_json(self, key: str | None, dest: Path) -> None:
+        """Mirror a JSON object down from storage, overwriting ``dest``."""
+        if self.storage is None or key is None:
+            return
+        MatchProject._mirror_from_storage(self.storage, key, dest)
+
+    def _push_json(self, key: str | None, src: Path) -> None:
+        """Push a locally-written JSON file up to storage."""
+        if self.storage is None or key is None or not src.exists():
+            return
+        self.storage.write_bytes(key, src.read_bytes())
+
+    def _audit_key(self, slug: str, stage_number: int) -> str | None:
+        mid = current_match_id.get()
+        if mid is None:
+            return None
+        return f"matches/{mid}/shooters/{slug}/audit/stage{stage_number}.json"
+
+    def _audit_file(self, slug: str, stage_number: int) -> Path:
+        scoped_root = current_match_root.get()
+        if scoped_root is None:
+            raise _no_project_error()
+        return match_model.Match.shooter_root(scoped_root, slug) / "audit" / f"stage{stage_number}.json"
+
+    def pull_audit(self, slug: str, stage_number: int) -> None:
+        """Pull a stage's audit JSON down before reading it (hosted)."""
+        self._pull_json(self._audit_key(slug, stage_number), self._audit_file(slug, stage_number))
+
+    def push_audit(self, slug: str, stage_number: int) -> None:
+        """Push a stage's audit JSON up after writing it (hosted)."""
+        self._push_json(self._audit_key(slug, stage_number), self._audit_file(slug, stage_number))
 
     def shooter_project(self, slug: str) -> MatchProject:
         """Load the per-shooter ``MatchProject`` (each shooter slot
@@ -699,9 +763,14 @@ class AppState:
         ``storage`` at ``None``; the bind is a no-op and the legacy
         disk-only resolvers win.
         """
-        project = MatchProject.load(self.shooter_root(slug))
+        shooter_root = self.shooter_root(slug)
         match_id = current_match_id.get()
         scope = f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
+        # Hosted: pull project.json fresh (S3 authoritative) before load so
+        # the API sees a worker's saved beep_time/processed and vice versa.
+        if scope is not None:
+            self._pull_json(f"{scope}/{PROJECT_FILE}", shooter_root / PROJECT_FILE)
+        project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
         return project
 
@@ -1371,6 +1440,9 @@ def register_job_bodies(state: AppState) -> None:
         # Read existing audit JSON up-front: we need ``stage_rounds.expected``
         # before running detection (it changes voter C's mode and the
         # apriori boost) and we'll merge results back into the same dict.
+        # Hosted: pull the existing audit fresh first so a prior API/worker
+        # write isn't lost when we merge + push back.
+        state.pull_audit(slug, stage_number)
         audit_dir = proj.audit_path(state.shooter_root(slug))
         audit_dir.mkdir(parents=True, exist_ok=True)
         audit_file = audit_dir / f"stage{stage_number}.json"
@@ -1508,6 +1580,9 @@ def register_job_bodies(state: AppState) -> None:
                 backup.unlink()
             audit_file.replace(backup)
         tmp.replace(audit_file)
+        # Hosted: push the detected shots up so the API's audit page sees
+        # them (this is shot_detect's primary result).
+        state.push_audit(slug, stage_number)
 
         # Read-modify-write the project file: a long-running shot_detect
         # job must not save the snapshot it loaded at start, because the
@@ -2887,7 +2962,40 @@ async def _register_match_at(
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
     if match.match_id:
         state.matches.register(match.match_id, resolved)
+        # Hosted: record the match in Postgres so a separate worker can
+        # resolve this ``match_id``, and seed its JSON in S3 so the worker
+        # can read what the API wrote. A job is only submittable from an
+        # open match, so this runs before any worker touches it.
+        if state.matches_store is not None:
+            await state.matches_store.upsert(match.match_id, name, f"matches/{match.match_id}")
+            # Blocking boto3 PUT/HEAD round-trips -- offload so they don't
+            # stall the event loop (this runs inside an async handler).
+            await asyncio.to_thread(_sync_match_json_to_storage, state, resolved, match)
     return name, match.match_id
+
+
+def _sync_match_json_to_storage(state: AppState, root: Path, match: match_model.Match) -> None:
+    """Seed S3 with a match's JSON so a worker process can read it.
+
+    ``match.json`` is pushed unconditionally -- the API is its sole
+    writer, so there is no worker result to clobber. Each shooter's
+    ``project.json`` is seeded only when absent in storage: a worker job
+    may already have written newer results (beep_time/processed), and S3
+    is authoritative for that file, so the API must not overwrite it with
+    its possibly-stale local copy. Subsequent project.json writes (API or
+    worker) push via :meth:`MatchProject.save`. No-op without storage.
+    """
+    if state.storage is None or not match.match_id:
+        return
+    state.storage.write_bytes(
+        f"matches/{match.match_id}/{match_model.MATCH_FILE}",
+        (root / match_model.MATCH_FILE).read_bytes(),
+    )
+    for slug in match.shooters:
+        key = f"matches/{match.match_id}/shooters/{slug}/{PROJECT_FILE}"
+        local = match_model.Match.shooter_root(root, slug) / PROJECT_FILE
+        if local.exists() and not state.storage.exists(key):
+            state.storage.write_bytes(key, local.read_bytes())
 
 
 def _resolve_create_target(
@@ -3124,6 +3232,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     from ..db import (
         HostedLoopbackAuth,
         PostgresJobBackend,
+        PostgresMatchStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
         create_engine,
@@ -3168,6 +3277,35 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sweep_on_boot=not worker,
     )
     state.storage = _build_hosted_storage(user_id)
+
+    # Per-user ``matches`` table. The API upserts a row when a match is
+    # opened (see the open path); the worker resolves a queued ``match_id``
+    # through it (it never opened the match locally).
+    match_store = PostgresMatchStore(session_factory, user_id=user_id)
+    state.matches_store = match_store
+    if worker:
+        worker_root = Path(
+            os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
+        )
+
+        def _resolve_match_for_worker(match_id: str) -> Path | None:
+            """Map a queued ``match_id`` to a worker-local working root.
+
+            Returns ``None`` (-> ``MatchNotRegisteredError``, surfaced as a
+            clean job failure) when the match isn't in this user's table --
+            no fallback to the local recent-projects scan, which a separate
+            worker process can't satisfy anyway. The match's metadata +
+            inputs are mirrored down from S3 lazily by the ``state``
+            accessors once ``current_match_root`` points here.
+            """
+            row = asyncio.run(match_store.get(match_id))
+            if row is None:
+                return None
+            root = worker_root / match_id
+            root.mkdir(parents=True, exist_ok=True)
+            return root
+
+        state.matches = MatchRegistry(miss_resolver=_resolve_match_for_worker)
 
 
 def build_worker_state() -> AppState:
@@ -5948,6 +6086,8 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # Hosted: pull fresh so a worker's shot_detect result is visible.
+        state.pull_audit(slug, stage_number)
         audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
         if not audit_file.exists():
             return JSONResponse(None)
@@ -5994,6 +6134,9 @@ def create_app(
             if tmp.exists():
                 tmp.unlink()
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
+        # Hosted: push the manual audit edit up so the worker (and other
+        # browsers) see it.
+        state.push_audit(slug, stage_number)
         return JSONResponse(payload)
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
@@ -7757,6 +7900,12 @@ def create_app(
                     )
                 )
         legacy.save(shooter_root)
+        # Hosted: match.json now carries the new slug and S3 is authoritative
+        # (shooter_root always pulls it). Push the updated roster + seed the
+        # new shooter's project.json so the next request -- and the worker --
+        # see the addition instead of the stale opened-at roster. Sync call
+        # is fine: this is a sync endpoint (FastAPI runs it off the loop).
+        _sync_match_json_to_storage(state, match_root, match)
         return list_match_shooters()
 
     @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
@@ -7774,6 +7923,9 @@ def create_app(
             shutil.rmtree(shooter_root, ignore_errors=True)
         match.shooters = [s for s in match.shooters if s != slug]
         match.save(match_root)
+        # Hosted: push the updated roster so the always-pull in shooter_root
+        # doesn't resurrect the removed shooter from the stale S3 copy.
+        _sync_match_json_to_storage(state, match_root, match)
         return list_match_shooters()
 
     @app.post("/api/match/shooters/{slug}/build-trim-caches")
