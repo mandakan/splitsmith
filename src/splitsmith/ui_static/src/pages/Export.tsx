@@ -25,6 +25,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Download,
   ExternalLink,
   FileBarChart,
   FileText,
@@ -52,6 +53,7 @@ import {
   type OverlayCodec,
   type StageExportStatus,
 } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 type OutputMode = "single" | "compare";
@@ -125,6 +127,7 @@ export function Export() {
 }
 
 function ExportInner({ slug }: { slug: string }) {
+  const deploymentMode = useDeploymentMode();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -239,6 +242,45 @@ function ExportInner({ slug }: { slug: string }) {
     () => stages.map((s) => s.stage_number).filter((n) => selection.has(n)),
     [stages, selection],
   );
+
+  // Hosted mode has no "Reveal in Finder": the worker that produced the
+  // bundle ran in a separate container. Surface the finished match FCPXML
+  // plus the per-stage media it references (trims + overlays + per-cam
+  // trims) as individual download links. Filenames are basenames under the
+  // project's exports/ dir; the download endpoint pulls them from object
+  // storage. Empty until a match export finishes (``result`` set).
+  const hostedDownloads = useMemo(() => {
+    if (deploymentMode !== "hosted" || result === null) return [];
+    const basename = (p: string) => p.split("/").pop() ?? p;
+    const sel = new Set(orderedSelection);
+    const out: { label: string; filename: string }[] = [
+      { label: "Match FCPXML", filename: basename(result.fcpxml_path) },
+    ];
+    for (const s of stages) {
+      if (!sel.has(s.stage_number)) continue;
+      if (s.lossless_trim_present && s.trimmed_video_path) {
+        out.push({
+          label: `Stage ${s.stage_number} trim`,
+          filename: basename(s.trimmed_video_path),
+        });
+      }
+      if (s.overlay_path) {
+        out.push({
+          label: `Stage ${s.stage_number} overlay`,
+          filename: basename(s.overlay_path),
+        });
+      }
+      for (const sec of s.secondaries) {
+        if (sec.trim_present && sec.trim_path) {
+          out.push({
+            label: `Stage ${s.stage_number} ${sec.label}`,
+            filename: basename(sec.trim_path),
+          });
+        }
+      }
+    }
+    return out;
+  }, [deploymentMode, result, stages, orderedSelection]);
 
   // Custom preset auto-sync.
   function selectPreset(next: PaddingPreset) {
@@ -603,7 +645,7 @@ function ExportInner({ slug }: { slug: string }) {
                 <code className="flex-1 truncate rounded-md border border-rule bg-surface-3 px-3 py-2 font-mono text-xs text-ink-2">
                   {project?.exports_dir ?? `${project?.name ?? ""}/exports/`}
                 </code>
-                {project?.exports_dir && (
+                {project?.exports_dir && deploymentMode !== "hosted" && (
                   <button
                     type="button"
                     onClick={() => void reveal(project.exports_dir!)}
@@ -703,7 +745,15 @@ function ExportInner({ slug }: { slug: string }) {
                 </div>
               )}
               {result && (
-                <ResultPanel result={result} onReveal={reveal} />
+                <ResultPanel
+                  result={result}
+                  onReveal={reveal}
+                  hosted={deploymentMode === "hosted"}
+                  downloads={hostedDownloads}
+                  exportFileUrl={(filename) =>
+                    slug ? api.exportFileUrl(slug, filename) : "#"
+                  }
+                />
               )}
             </div>
           </div>
@@ -720,9 +770,15 @@ function ExportInner({ slug }: { slug: string }) {
 function ResultPanel({
   result,
   onReveal,
+  hosted,
+  downloads,
+  exportFileUrl,
 }: {
   result: MatchExportResult;
   onReveal: (path: string) => void;
+  hosted: boolean;
+  downloads: { label: string; filename: string }[];
+  exportFileUrl: (filename: string) => string;
 }) {
   return (
     <div className="mt-3 rounded-lg border border-done/40 bg-done/10 px-3 py-2.5 text-[0.8125rem] text-ink-2">
@@ -736,13 +792,31 @@ function ResultPanel({
           <> &middot; {result.anomalies.length} warnings</>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => onReveal(result.fcpxml_path)}
-        className="mt-2 inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
-      >
-        Reveal bundle <ExternalLink className="size-3" />
-      </button>
+      {hosted ? (
+        // Hosted: the bundle lives in object storage, not on a local disk to
+        // reveal. Download each file (FCPXML + the media it references) so
+        // the operator can pull them down and open the timeline in FCP.
+        <div className="mt-2 flex flex-col gap-1">
+          {downloads.map((d) => (
+            <a
+              key={d.filename}
+              href={exportFileUrl(d.filename)}
+              download={d.filename}
+              className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
+            >
+              <Download className="size-3" /> {d.label}
+            </a>
+          ))}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onReveal(result.fcpxml_path)}
+          className="mt-2 inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
+        >
+          Reveal bundle <ExternalLink className="size-3" />
+        </button>
+      )}
     </div>
   );
 }

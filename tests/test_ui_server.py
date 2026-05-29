@@ -6956,3 +6956,28 @@ def test_match_id_alias_missing_segment_returns_400(tmp_path: Path, _user_config
     resp = client.get("/api/matches/")
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "match_id_required"
+
+
+def test_download_export_file_serves_local_and_guards_traversal(tmp_path: Path) -> None:
+    """The export download endpoint serves a deliverable off the local
+    exports dir, 404s an absent file, and refuses a path that escapes the
+    exports folder (encoded ``../``)."""
+    from splitsmith import match_model
+
+    root = tmp_path / "match"
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
+
+    exports = match_model.Match.shooter_root(root, "me") / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    (exports / "stage1_one.fcpxml").write_bytes(b"<fcpxml/>")
+
+    resp = client.get("/api/shooters/me/exports/file/stage1_one.fcpxml")
+    assert resp.status_code == 200
+    assert resp.content == b"<fcpxml/>"
+    assert resp.headers["content-type"].startswith("application/xml")
+
+    assert client.get("/api/shooters/me/exports/file/missing.csv").status_code == 404
+
+    resp = client.get("/api/shooters/me/exports/file/%2e%2e%2f%2e%2e%2fmatch.json")
+    assert resp.status_code == 400

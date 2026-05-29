@@ -2429,6 +2429,16 @@ export const api = {
   ) =>
     `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
 
+  /** Build a download URL for one finished export deliverable (#447 part 2).
+   *  ``filename`` is the basename under the project's ``exports/`` dir.
+   *  Hosted mode pulls the file from object storage before serving; local
+   *  mode reads it off disk. Used in place of "Reveal in Finder" in hosted
+   *  mode, where the worker that produced the file ran in a separate
+   *  container. Mirrors ``videoStreamUrl``: a bare path consumed as an
+   *  ``<a href download>``, not a fetch. */
+  exportFileUrl: (slug: string, filename: string) =>
+    `/api/shooters/${encodeURIComponent(slug)}/exports/file/${encodeURIComponent(filename)}`,
+
   getStagePeaks: (slug: string, stageNumber: number, bins = 1200) =>
     request<PeaksResult>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/peaks?bins=${bins}`,
