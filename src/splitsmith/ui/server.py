@@ -6196,15 +6196,17 @@ def create_app(
         ``min(beep_time, trim_pre_buffer_seconds)`` inside it (the trim
         starts at ``max(0, beep_time - pre_buffer)``). When there's no
         trim we fall through to the source clip and the beep is at
-        ``beep_time`` directly. Pure check: no ffmpeg, no audio
-        extraction -- the file existence + project config is enough.
+        ``beep_time`` directly. No ffmpeg / no audio extraction; in hosted
+        mode this pays only a cheap ``storage.exists`` HEAD so the reported
+        position agrees with the clip ``stream_video`` will actually serve
+        (which pulls the worker-cut trim on demand).
         """
         if video.beep_time is None:
             return None
         trimmed = audio_helpers.trimmed_video_path(
             state.shooter_root(slug), stage_number, video, project=project
         )
-        if trimmed.exists() and trimmed.stat().st_size > 0:
+        if audio_helpers.trim_available(project, trimmed):
             return min(video.beep_time, project.trim_pre_buffer_seconds)
         return video.beep_time
 
@@ -6644,7 +6646,11 @@ def create_app(
             # Per-video short-GOP trim is keyed per role: each angle has
             # its own scrub clip cut around its own beep, so dragging
             # the audit playhead doesn't stall on a 4K MOV from a phone.
-            trimmed = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
+            # Hosted: a worker cut this trim into its own filesystem and
+            # pushed it to storage; pull it down before serving the bytes.
+            # Never invokes ffmpeg -- a missing trim falls through to the
+            # source clip (kind=auto) or 404s (kind=trim), as before.
+            trimmed = audio_helpers.pull_trimmed_video(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
         if served_path is None:
@@ -7680,7 +7686,7 @@ def create_app(
             except Exception:  # noqa: BLE001 -- defensive
                 continue
             cache = audio_helpers.trimmed_video_path(shooter_root, s.stage_number, prim, project=legacy)
-            if not cache.exists():
+            if not audio_helpers.trim_available(legacy, cache):
                 stages_missing_trim += 1
         # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
         groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
@@ -7973,7 +7979,7 @@ def create_app(
                 skipped.append({"stage": stage.stage_number, "reason": "source_missing"})
                 continue
             cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, primary, project=proj)
-            if cache.exists():
+            if audio_helpers.trim_available(proj, cache):
                 skipped.append({"stage": stage.stage_number, "reason": "already_cached"})
                 continue
             # video_id is a hash of the source path so it's unique across

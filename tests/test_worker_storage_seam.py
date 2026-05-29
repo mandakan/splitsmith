@@ -16,10 +16,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from splitsmith.match_model import Match
 from splitsmith.storage import FilesystemStorage
+from splitsmith.ui import audio as audio_helpers
 from splitsmith.ui import server as srv
-from splitsmith.ui.project import PROJECT_FILE, MatchProject
+from splitsmith.ui.project import PROJECT_FILE, MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import AppState, current_match_id, current_match_root
 
 
@@ -133,6 +136,57 @@ def test_audit_json_round_trips(tmp_path: Path) -> None:
         state.pull_audit("alpha", 1)
         api_audit = Match.shooter_root(api_root, "alpha") / "audit" / "stage1.json"
         assert json.loads(api_audit.read_text())["shots"] == [0.21, 0.55]
+
+
+def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The heavy binary seam: a worker cuts the audit-trim MP4 and pushes
+    it to storage; the API mirrors it down to serve the scrub clip. Proves
+    the scope wiring (``state.shooter_project`` bind) produces matching
+    push/pull keys across two working roots."""
+    # Fake the ffmpeg-backed trim so the test has no binary dependency.
+    monkeypatch.setattr("splitsmith.trim.select_audit_encoder", lambda *a, **k: "libx264")
+
+    def fake_trim_video(**kwargs: object) -> None:
+        dest = Path(kwargs["output_path"])  # type: ignore[arg-type]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"MP4DATA")
+
+    monkeypatch.setattr("splitsmith.trim.trim_video", fake_trim_video)
+
+    storage = FilesystemStorage(tmp_path / "s3")
+    state = AppState()
+    state.storage = storage
+
+    api_root = tmp_path / "api"
+    match_id = _scaffold_match(api_root)
+    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
+
+    # Worker: fresh root pointed at the same storage. Add a stage with a
+    # primary video (round-trips via project.json), then cut the trim ->
+    # pushes the MP4 to storage.
+    worker_root = tmp_path / "worker"
+    worker_root.mkdir()
+    with _BoundMatch(worker_root, match_id):
+        wproj = state.shooter_project("alpha")
+        video = StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=3.5)
+        wproj.stages = [StageEntry(stage_number=1, stage_name="One", time_seconds=10.0, videos=[video])]
+        wshooter = state.shooter_root("alpha")
+        wproj.save(wshooter)
+        source = wshooter / "raw" / "v.mp4"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"video bytes")
+        audio_helpers.ensure_video_audit_trim(wshooter, 1, video, source, 3.5, 10.0, project=wproj)
+
+    # API: pulls project.json (sees the stage), then mirrors the trim down.
+    with _BoundMatch(api_root, match_id):
+        aproj = state.shooter_project("alpha")
+        prim = aproj.stage(1).primary()
+        assert prim is not None
+        ashooter = state.shooter_root("alpha")
+        assert not audio_helpers.trimmed_video_path(ashooter, 1, prim, project=aproj).exists()
+        pulled = audio_helpers.pull_trimmed_video(ashooter, 1, prim, project=aproj)
+        assert pulled.exists()
+        assert pulled.read_bytes() == b"MP4DATA"
 
 
 def test_seam_is_noop_without_storage(tmp_path: Path) -> None:

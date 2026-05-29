@@ -258,6 +258,12 @@ def ensure_audit_audio(
     the result is mtime-cached.
     """
     trimmed_video = trimmed_primary_path(project_root, stage_number, project=project)
+    # Hosted: the trim was cut on a worker, not here. Pull it down so the
+    # audit screen serves the trimmed-window waveform instead of falling
+    # back to the full source WAV (wrong extent + wrong beep position).
+    # No-op in local mode (no storage bound).
+    if not trimmed_video.exists():
+        _try_pull_trim_from_storage(project, trimmed_video)
     # If a prior trim was interrupted, ensure_audit_trim leaves no .partial
     # behind, but be defensive: ignore an obviously-broken trim by checking
     # for a non-empty file. Anything more sophisticated (full ffprobe round
@@ -443,6 +449,138 @@ def invalidate_video_audit_trim(
             pass
 
 
+def _storage_trim_key(project: MatchProject | None, local_mp4: Path) -> str | None:
+    """Compute the storage key for an audit-trim MP4.
+
+    Returns ``None`` in local mode (no storage bound) or when no
+    per-project scope is set -- both cases skip the storage cache.
+    Mirrors :func:`_storage_audio_key`: the key is
+    ``<scope>/trimmed/<basename>`` and the basename already carries the
+    ``video_id``, so two shooters in different matches can't collide.
+    """
+    if project is None or project._storage is None or project._storage_scope is None:
+        return None
+    return f"{project._storage_scope}/trimmed/{local_mp4.name}"
+
+
+def _try_pull_trim_from_storage(project: MatchProject | None, local_mp4: Path) -> bool:
+    """If the audit trim exists in the project's storage cache, download
+    it (and its params sidecar) into place and return True.
+
+    Unlike the WAV cache, the trim's validity is checked against the
+    ``*.params.json`` sidecar in :func:`ensure_video_audit_trim`, so we
+    pull the sidecar alongside the MP4 -- the caller's existing cache_hit
+    check then decides whether the pulled trim is trustworthy or must be
+    re-cut. The sidecar is optional: a torn/legacy cache without one is
+    treated as a miss by the validation and re-cut.
+
+    Best-effort: a storage hiccup falls through to ffmpeg rather than
+    failing the job. On any failure the half-written MP4 is removed so the
+    re-cut path doesn't trip over a torn file.
+    """
+    key = _storage_trim_key(project, local_mp4)
+    if key is None:
+        return False
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        if not storage.exists(key):
+            return False
+    except Exception as exc:
+        logger.info("trim cache: storage.exists(%s) raised %s", key, exc)
+        return False
+    params_local = trim_params_path(local_mp4)
+    params_key = f"{key.rsplit('/', 1)[0]}/{params_local.name}"
+    try:
+        local_mp4.parent.mkdir(parents=True, exist_ok=True)
+        with storage.open_stream(key) as src, local_mp4.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        # Pull the sidecar when present; its absence just forces a re-cut.
+        try:
+            if storage.exists(params_key):
+                with storage.open_stream(params_key) as src, params_local.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        except Exception as exc:
+            logger.info("trim cache: params pull from %s failed: %s", params_key, exc)
+        return True
+    except Exception as exc:
+        logger.info("trim cache: pull from %s failed: %s", key, exc)
+        for torn in (local_mp4, params_local):
+            try:
+                torn.unlink()
+            except FileNotFoundError:
+                pass
+        return False
+
+
+def _try_push_trim_to_storage(project: MatchProject | None, local_mp4: Path) -> None:
+    """Push a freshly-cut audit trim (+ its params sidecar) to the
+    project's storage cache so the API process can serve the scrub clip
+    and the next worker can skip the ffmpeg re-cut.
+
+    Best-effort: a push failure logs and returns; the local trim is the
+    source of truth for the current job.
+    """
+    key = _storage_trim_key(project, local_mp4)
+    if key is None:
+        return
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        with local_mp4.open("rb") as f:
+            storage.upload_stream(key, f)
+        params_local = trim_params_path(local_mp4)
+        if params_local.exists():
+            params_key = f"{key.rsplit('/', 1)[0]}/{params_local.name}"
+            storage.write_bytes(params_key, params_local.read_bytes())
+    except Exception as exc:
+        logger.info("trim cache: push to %s failed: %s", key, exc)
+
+
+def trim_available(project: MatchProject | None, local_mp4: Path) -> bool:
+    """Whether a usable audit trim exists for ``local_mp4`` -- locally or
+    in the storage cache -- without downloading it.
+
+    Lets metadata callers (the beep-in-clip position) agree with what the
+    byte-serving path (``stream_video?kind=trim``) will produce, paying
+    only a cheap ``storage.exists`` HEAD in hosted mode. In local mode
+    (no storage) this collapses to the plain local non-empty check.
+    """
+    if local_mp4.exists() and local_mp4.stat().st_size > 0:
+        return True
+    key = _storage_trim_key(project, local_mp4)
+    if key is None:
+        return False
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        return storage.exists(key)
+    except Exception as exc:
+        logger.info("trim cache: storage.exists(%s) raised %s", key, exc)
+        return False
+
+
+def pull_trimmed_video(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+) -> Path:
+    """Resolve ``video``'s audit-trim path, pulling it from the storage
+    cache first when it isn't already local (hosted mode).
+
+    The API process uses this before serving the scrub clip: a worker
+    cut the trim into its own ephemeral filesystem and pushed it up, so
+    the API has to mirror it down to serve the bytes. Never invokes
+    ffmpeg -- when neither the local copy nor the storage cache has the
+    trim, the returned path simply doesn't exist and the caller falls
+    back to the source clip (or 404s for an explicit ``kind=trim``),
+    exactly as before this seam. No-op in local mode.
+    """
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    if not (output.exists() and output.stat().st_size > 0):
+        _try_pull_trim_from_storage(project, output)
+    return output
+
+
 def ensure_video_audit_trim(
     project_root: Path,
     stage_number: int,
@@ -478,6 +616,14 @@ def ensure_video_audit_trim(
     src_resolved = source.resolve()
     if not src_resolved.exists():
         raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+
+    # Storage cache (hosted mode): another worker may have already cut
+    # this trim. Pull the MP4 + params sidecar into place so the cache_hit
+    # check below can validate + reuse it instead of re-running ffmpeg
+    # against the (large) source. Local mode skips this -- the key
+    # resolves to None and the helper returns without touching the network.
+    if not output.exists():
+        _try_pull_trim_from_storage(project, output)
 
     cache_hit = (
         output.exists() and output.stat().st_mtime >= src_resolved.stat().st_mtime and params_file.exists()
@@ -524,6 +670,9 @@ def ensure_video_audit_trim(
 
     partial.replace(output)
     params_file.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8")
+    # Push the freshly-cut trim up so the API can serve the scrub clip and
+    # the next worker can skip the re-cut. Best-effort; local mode no-ops.
+    _try_push_trim_to_storage(project, output)
     return output
 
 
