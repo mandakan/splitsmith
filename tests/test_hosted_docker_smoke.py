@@ -167,9 +167,16 @@ def test_hosted_user_row_persists_in_postgres(hosted_stack: None) -> None:
     assert out.stdout.strip() == "1"
 
 
-def _psql(query: str) -> str:
-    """Run ``query`` in the compose Postgres and return trimmed stdout."""
-    out = subprocess.run(
+def _psql_run(query: str, *, user: str = "splitsmith") -> subprocess.CompletedProcess[str]:
+    """Run ``query`` in the compose Postgres as ``user`` and return the
+    completed process (no return-code assertion).
+
+    ``user`` defaults to the ``splitsmith`` superuser, which **bypasses
+    RLS** -- correct for seeding cross-tenant rows and for inspecting the
+    raw table state. Pass ``user="splitsmith_app"`` (the non-superuser app
+    role) to exercise the RLS policies the app actually runs under.
+    """
+    return subprocess.run(
         [
             "docker",
             "compose",
@@ -180,16 +187,24 @@ def _psql(query: str) -> str:
             "postgres",
             "psql",
             "-U",
-            "splitsmith",
+            user,
             "-d",
             "splitsmith",
-            "-At",
+            # ``-q`` suppresses command tags ("SET", "INSERT 0 1") so a
+            # multi-statement ``SET ...; SELECT ...`` returns only the row
+            # data; SELECT output and errors are unaffected.
+            "-qAt",
             "-c",
             query,
         ],
         capture_output=True,
         text=True,
     )
+
+
+def _psql(query: str, *, user: str = "splitsmith") -> str:
+    """Run ``query`` (asserting success) and return trimmed stdout."""
+    out = _psql_run(query, user=user)
     assert out.returncode == 0, out.stderr
     return out.stdout.strip()
 
@@ -426,3 +441,108 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     assert (
         "resolve match" not in err and "matchnotregistered" not in err
     ), f"worker failed to resolve the match cross-process: {err!r}"
+
+
+# The three per-user tenant tables RLS protects. Keep in sync with the
+# migration's TENANT_TABLES and the multi-tenant store classes.
+_RLS_TABLES = ("recent_projects", "matches", "compute_jobs")
+
+
+def _seed_two_tenants() -> tuple[str, str]:
+    """Seed users A and B with one row each in every tenant table.
+
+    Runs as the ``splitsmith`` superuser, which bypasses RLS -- that is
+    the only way to write rows owned by two different tenants in one
+    pass. Returns the two user ids."""
+    uid_a, uid_b = "user-a-rls", "user-b-rls"
+    _psql(
+        "INSERT INTO users (id, email, entitlement) VALUES "
+        f"('{uid_a}', 'a-rls@hosted.local', 'free'), "
+        f"('{uid_b}', 'b-rls@hosted.local', 'free') "
+        "ON CONFLICT (id) DO NOTHING"
+    )
+    _psql(
+        "INSERT INTO recent_projects (id, user_id, path, name) VALUES "
+        f"('rp-a', '{uid_a}', '/a', 'A proj'), ('rp-b', '{uid_b}', '/b', 'B proj') "
+        "ON CONFLICT (id) DO NOTHING"
+    )
+    _psql(
+        "INSERT INTO matches (id, user_id, match_id, name, storage_prefix) VALUES "
+        f"('m-a', '{uid_a}', 'mid-a', 'A match', 'matches/mid-a'), "
+        f"('m-b', '{uid_b}', 'mid-b', 'B match', 'matches/mid-b') "
+        "ON CONFLICT (id) DO NOTHING"
+    )
+    _psql(
+        "INSERT INTO compute_jobs (id, user_id, kind, status, cancel_requested, acknowledged) "
+        f"VALUES ('j-a', '{uid_a}', 'model_download', 'pending', false, false), "
+        f"('j-b', '{uid_b}', 'model_download', 'pending', false, false) "
+        "ON CONFLICT (id) DO NOTHING"
+    )
+    return uid_a, uid_b
+
+
+def test_rls_blocks_cross_tenant_reads_and_writes(hosted_stack: None) -> None:
+    """The real RLS proof: as the non-superuser app role, a query with no
+    ``user_id`` filter at all returns only the current tenant's rows.
+
+    This is the failure mode the per-query app-layer filters can't catch
+    -- a future raw-SQL helper that forgets the ``WHERE user_id = ...``
+    clause. With RLS it sees only the tenant whose id is in the
+    ``app.user_id`` GUC; without the GUC it sees nothing (fail-closed).
+    """
+    uid_a, uid_b = _seed_two_tenants()
+    seeded = f"('{uid_a}', '{uid_b}')"
+
+    # Guard: the whole test is meaningless if the app role can bypass RLS.
+    assert _psql("SELECT rolsuper FROM pg_roles WHERE rolname='splitsmith_app'") == "f"
+    assert _psql("SELECT rolbypassrls FROM pg_roles WHERE rolname='splitsmith_app'") == "f"
+
+    # The migration enabled + FORCED RLS and created the policy on all three.
+    assert (
+        _psql(
+            "SELECT count(*) FROM pg_policies WHERE policyname='tenant_isolation' "
+            "AND tablename IN ('recent_projects','matches','compute_jobs')"
+        )
+        == "3"
+    )
+    assert (
+        _psql(
+            "SELECT count(*) FROM pg_class WHERE relforcerowsecurity "
+            "AND relname IN ('recent_projects','matches','compute_jobs')"
+        )
+        == "3"
+    )
+
+    for table in _RLS_TABLES:
+        # GUC = A: the deliberately-unfiltered SELECT returns only A's row.
+        visible_a = _psql(
+            f"SET app.user_id = '{uid_a}'; "
+            f"SELECT user_id FROM {table} WHERE user_id IN {seeded} ORDER BY user_id",
+            user="splitsmith_app",
+        )
+        assert visible_a == uid_a, f"{table}: tenant A saw {visible_a!r}, expected only {uid_a!r}"
+
+        # GUC = B: only B's row.
+        visible_b = _psql(
+            f"SET app.user_id = '{uid_b}'; "
+            f"SELECT user_id FROM {table} WHERE user_id IN {seeded} ORDER BY user_id",
+            user="splitsmith_app",
+        )
+        assert visible_b == uid_b, f"{table}: tenant B saw {visible_b!r}, expected only {uid_b!r}"
+
+        # No GUC set: fail-closed, zero rows (current_setting -> NULL).
+        unset = _psql(
+            f"SELECT count(*) FROM {table} WHERE user_id IN {seeded}",
+            user="splitsmith_app",
+        )
+        assert unset == "0", f"{table}: GUC-unset query leaked {unset} rows (should be 0)"
+
+    # WITH CHECK: as tenant A, inserting a row owned by B must be rejected.
+    bad_insert = _psql_run(
+        f"SET app.user_id = '{uid_a}'; "
+        "INSERT INTO matches (id, user_id, match_id, name, storage_prefix) "
+        f"VALUES ('m-x', '{uid_b}', 'mid-x', 'x', 'matches/mid-x')",
+        user="splitsmith_app",
+    )
+    assert bad_insert.returncode != 0, "RLS WITH CHECK let tenant A insert a row owned by tenant B"
+    assert "row-level security" in bad_insert.stderr.lower()
