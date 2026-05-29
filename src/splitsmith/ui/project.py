@@ -881,9 +881,23 @@ class MatchProject(BaseModel):
         return project
 
     def save(self, root: Path) -> None:
-        """Atomically persist the project to ``root/project.json``."""
+        """Atomically persist the project to ``root/project.json``.
+
+        In hosted mode (storage + a match scope bound via
+        :meth:`bind_storage`) the saved ``project.json`` is also pushed to
+        S3. It is the worker<->API channel for a shooter's state
+        (``beep_time``, ``processed`` flags): the worker writes it during a
+        job, the API reads it back. S3 is authoritative, so every save
+        pushes and the load path (``state.shooter_project``) pulls fresh.
+        Local desktop leaves ``_storage`` ``None`` and this is a no-op.
+        """
         self.updated_at = datetime.now(UTC)
         atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
+        if self._storage is not None and self._storage_scope is not None:
+            self._storage.write_bytes(
+                f"{self._storage_scope}/{PROJECT_FILE}",
+                (root / PROJECT_FILE).read_bytes(),
+            )
 
     def stage(self, stage_number: int) -> StageEntry:
         """Return the stage with this number; raises ``KeyError`` if absent."""

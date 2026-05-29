@@ -125,3 +125,31 @@ def test_two_matches_same_name_get_distinct_ids(tmp_path: Path, isolated_user_co
     reg.register(b.match_id, tmp_path / "b")
     assert reg.resolve(a.match_id) == (tmp_path / "a").resolve()
     assert reg.resolve(b.match_id) == (tmp_path / "b").resolve()
+
+
+def test_injected_miss_resolver_used_on_miss(tmp_path: Path) -> None:
+    """The worker injects a resolver used on a cache miss instead of the
+    local recent-projects scan; a hit is cached and not re-resolved."""
+    calls: list[str] = []
+
+    def resolver(match_id: str) -> Path | None:
+        calls.append(match_id)
+        return (tmp_path / match_id) if match_id == "known" else None
+
+    reg = MatchRegistry(miss_resolver=resolver)
+    assert reg.resolve("known") == (tmp_path / "known").resolve()
+    # Second resolve is a cache hit -> resolver not called again.
+    assert reg.resolve("known") == (tmp_path / "known").resolve()
+    assert calls == ["known"]
+
+
+def test_injected_miss_resolver_none_raises(tmp_path: Path) -> None:
+    """An unknown match -> MatchNotRegisteredError (clean fail), with no
+    fallback to the local recent-projects scan a worker can't satisfy."""
+
+    def resolver(match_id: str) -> Path | None:
+        return None
+
+    reg = MatchRegistry(miss_resolver=resolver)
+    with pytest.raises(MatchNotRegisteredError):
+        reg.resolve("nope")
