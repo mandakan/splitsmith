@@ -543,7 +543,9 @@ def test_run_model_download_job_aggregates_progress(monkeypatch: pytest.MonkeyPa
     from splitsmith.ui.jobs import JobRegistry
 
     jobs = JobRegistry()
-    submitted = asyncio.run(jobs.submit(kind="model_download", fn=_run_model_download_job))
+    from tests.conftest import submit_fn
+
+    submitted = asyncio.run(submit_fn(jobs, kind="model_download", fn=_run_model_download_job))
     jobs.wait_for_drain(timeout_s=2.0)
     final = asyncio.run(jobs.get(submitted.id))
     assert final is not None

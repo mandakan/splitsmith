@@ -8,7 +8,14 @@ import time
 
 import pytest
 
-from splitsmith.ui.jobs import JobCancelled, JobRegistry, JobStatus, _priority_for_kind
+from splitsmith.ui.jobs import (
+    JobBodyRegistry,
+    JobCancelled,
+    JobRegistry,
+    JobStatus,
+    UnknownJobKindError,
+    _priority_for_kind,
+)
 
 
 class _Sync:
@@ -42,6 +49,16 @@ class _Sync:
         return self._inner.wait_for_drain(timeout_s)
 
     def submit(self, **kwargs):
+        # The dispatch reshape (worker-fleet gamma) replaced ``fn=callable``
+        # with ``kind`` + a kind->body registry. These tests predate that
+        # and still pass ``fn=`` for terseness; translate by registering the
+        # callable as the body for ``kind`` then submitting by kind. submit()
+        # resolves the body synchronously before any await, so back-to-back
+        # same-kind submits each capture their own callable.
+        fn = kwargs.pop("fn", None)
+        if fn is not None:
+            self._inner.bodies.register(kwargs["kind"], lambda handle, **_a: fn(handle))
+            kwargs.setdefault("args", {})
         return asyncio.run(self._inner.submit(**kwargs))
 
     def get(self, job_id):
@@ -648,3 +665,52 @@ def test_dispatcher_respects_max_concurrent() -> None:
     for j in jobs:
         assert _wait_until(lambda jid=j.id: reg.get(jid).status == JobStatus.SUCCEEDED)
     assert peak == 2
+
+
+# ---------------------------------------------------------------------------
+# Dispatch reshape: kind -> body registry (worker-fleet gamma)
+# ---------------------------------------------------------------------------
+
+
+def test_body_registry_register_and_get() -> None:
+    reg = JobBodyRegistry()
+
+    def body(_handle, **_a):
+        return None
+
+    assert "k" not in reg
+    reg.register("k", body)
+    assert "k" in reg
+    assert reg.get("k") is body
+
+
+def test_body_registry_unknown_kind_raises() -> None:
+    reg = JobBodyRegistry()
+    with pytest.raises(UnknownJobKindError):
+        reg.get("nope")
+
+
+def test_submit_dispatches_registered_body_with_args() -> None:
+    """submit(kind, args) resolves the registered body and calls it as
+    ``body(handle, **args)``."""
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    seen: dict = {}
+    done = threading.Event()
+
+    def body(handle, *, slug, stage_number):
+        seen["slug"] = slug
+        seen["stage_number"] = stage_number
+        seen["handle_id"] = handle.id
+        done.set()
+
+    reg._inner.bodies.register("shot_detect", body)
+    job = reg.submit(kind="shot_detect", args={"slug": "alice", "stage_number": 3})
+    assert done.wait(timeout=2.0)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+    assert seen == {"slug": "alice", "stage_number": 3, "handle_id": job.id}
+
+
+def test_submit_unregistered_kind_raises_unknown_job_kind() -> None:
+    reg = _Sync(JobRegistry())
+    with pytest.raises(UnknownJobKindError):
+        reg.submit(kind="never_registered", args={})

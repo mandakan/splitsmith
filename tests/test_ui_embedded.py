@@ -16,6 +16,7 @@ from splitsmith.ui.embedded import (
     READY_PREFIX,
     run_embedded,
 )
+from tests.conftest import submit_fn
 
 
 def test_context_manager_binds_serves_health_and_shuts_down() -> None:
@@ -183,7 +184,7 @@ def _submit_blocking_job(registry, kind: str, started, release):
             if release.wait(0.02):
                 return
 
-    return _await(registry.submit(kind=kind, fn=_block))
+    return _await(submit_fn(registry, kind=kind, fn=_block))
 
 
 def _wait_status(registry, job_id: str, *, deadline_s: float = 3.0):

@@ -91,6 +91,56 @@ class _Unset:
 _UNSET = _Unset()
 
 
+# A job body performs one job kind. Signature: ``body(handle, **args)``.
+# ``args`` is whatever the submit callsite passed and MUST be JSON-
+# serialisable so the hosted transport can ship it to a worker process.
+JobBody = Callable[..., None]
+
+
+class UnknownJobKindError(KeyError):
+    """Raised by :meth:`JobBodyRegistry.get` for an unregistered kind.
+
+    This is a programming error (a ``submit(kind=...)`` whose body was
+    never registered in ``register_job_bodies``), not a user-facing
+    condition -- it should surface loudly in development, never in prod.
+    """
+
+
+class JobBodyRegistry:
+    """Maps a job ``kind`` to the callable that performs it.
+
+    The unification point of the worker-fleet dispatch (doc 04): both the
+    local in-process :class:`JobRegistry` and the hosted
+    ``PostgresJobBackend`` resolve the body to run from this same map, so
+    there is one dispatch shape (``kind`` + serialisable ``args``) and no
+    closure-vs-task_name divergence between desktop and hosted.
+
+    ``register_job_bodies(state)`` in ``server.py`` populates one of these
+    against a process's :class:`AppState`; the hosted worker bootstrap
+    populates an identical one against its own hosted state. The bodies
+    close over that ``state`` -- which is why each process registers its
+    own -- but every callsite and the wire format stay state-agnostic.
+    """
+
+    def __init__(self) -> None:
+        self._bodies: dict[str, JobBody] = {}
+
+    def register(self, kind: str, body: JobBody) -> None:
+        self._bodies[kind] = body
+
+    def get(self, kind: str) -> JobBody:
+        try:
+            return self._bodies[kind]
+        except KeyError:
+            raise UnknownJobKindError(
+                f"no body registered for job kind {kind!r}; "
+                "register it in splitsmith.ui.server.register_job_bodies"
+            ) from None
+
+    def __contains__(self, kind: str) -> bool:
+        return kind in self._bodies
+
+
 class JobStatus(StrEnum):
     """Job lifecycle states.
 
@@ -278,6 +328,10 @@ class JobBackend(Protocol):
     in ``server.py`` and ``embedded.py`` untouched.
     """
 
+    # The kind->body map this backend dispatches through. Populated by
+    # ``register_job_bodies(state)`` against this process's AppState.
+    bodies: JobBodyRegistry
+
     @property
     def is_shutting_down(self) -> bool: ...
 
@@ -291,7 +345,7 @@ class JobBackend(Protocol):
         self,
         *,
         kind: str,
-        fn: Callable[[JobHandle], None],
+        args: dict[str, Any] | None = None,
         stage_number: int | None = None,
         video_id: str | None = None,
     ) -> Job: ...
@@ -330,6 +384,7 @@ class JobRegistry:
     """
 
     def __init__(self, *, max_concurrent: int = 2, retain_recent: int = 50) -> None:
+        self.bodies = JobBodyRegistry()
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
         self._lock = threading.RLock()
@@ -402,17 +457,19 @@ class JobRegistry:
         self,
         *,
         kind: str,
-        fn: Callable[[JobHandle], None],
+        args: dict[str, Any] | None = None,
         stage_number: int | None = None,
         video_id: str | None = None,
     ) -> Job:
-        """Schedule ``fn`` to run on the thread pool.
+        """Schedule the body registered for ``kind`` to run on the thread
+        pool, called as ``body(handle, **args)``.
 
         Returns the job snapshot (status=PENDING) immediately so the HTTP
         handler can hand the id back to the caller without blocking.
 
         Raises :class:`ShutdownInProgressError` if :meth:`begin_shutdown`
-        has been called -- the HTTP layer maps this to a 503.
+        has been called -- the HTTP layer maps this to a 503. Raises
+        :class:`UnknownJobKindError` if no body is registered for ``kind``.
 
         The submitting HTTP request's ``contextvars`` (notably
         ``current_match_root`` / ``current_match_id`` set by the
@@ -420,10 +477,14 @@ class JobRegistry:
         here and replayed inside the worker thread. Without this the
         ContextVars are unset on the executor thread and any
         ``state.shooter_root(...)`` call inside the worker 409s
-        ``no_project``. See Tier 1 step 3 of doc 10.
+        ``no_project``. See Tier 1 step 3 of doc 10. (The hosted backend
+        instead reconstructs the match context from the ``args`` it ships
+        to the worker process, which has no inherited contextvars.)
         """
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
+        body = self.bodies.get(kind)
+        call_args = args or {}
         now = datetime.now(UTC)
         job = Job(
             id=uuid.uuid4().hex,
@@ -437,7 +498,7 @@ class JobRegistry:
         captured_ctx = contextvars.copy_context()
 
         def _ctx_fn(handle: JobHandle) -> None:
-            captured_ctx.run(fn, handle)
+            captured_ctx.run(lambda: body(handle, **call_args))
 
         with self._lock:
             self._jobs[job.id] = job
