@@ -899,6 +899,962 @@ async def _maybe_submit_model_download(state: AppState) -> None:
         return
 
 
+def register_job_bodies(state: AppState) -> None:
+    """Register the production job-body closures on ``state.jobs.bodies``.
+
+    Shared by ``create_app`` (local + embedded hosts) and the
+    Procrastinate worker bootstrap so the same ``kind`` -> body mapping
+    backs every transport. The bodies close over ``state``; a hosted
+    worker builds its own ``state`` and calls this against it. Dev-only
+    lab kinds register at their callsites in ``create_app`` since they're
+    never deferred to a hosted worker.
+    """
+    # Cross-cam alignment is accepted as a *suggestion* (beep_source="aligned",
+    # beep_reviewed=False so the SPA forces the user to verify on the waveform
+    # picker) when the peak-to-runner-up ratio of the cross-correlation clears
+    # this threshold. 1.0 means the landmark wasn't distinctive at all.
+    # Empirically calibrated on tallmilan-2026 secondaries: same-stage pairs
+    # where in-stream detection independently succeeded land at 1.23-1.34, and
+    # plausible alignments on the in-stream-failed pairs land at 1.15-1.31.
+    # Same-mic non-overlapping clips sit at ~1.00. 1.10 leaves a slim margin
+    # over the floor while still surfacing real alignments. False positives
+    # are caught by the user in the picker before "Mark reviewed"; false
+    # negatives mean the user starts from the auto-detect-failed state and
+    # places the marker by hand, which is the same UX as before this change.
+    _align_confidence_floor = 1.10
+
+    def _try_align_secondary_to_primary(
+        root: Path,
+        proj: MatchProject,
+        stage: StageEntry,
+        video: StageVideo,
+        handle: JobHandle,
+    ) -> cross_align.CrossAlignResult | None:
+        """Attempt cross-correlation alignment of ``video`` against the stage's
+        primary. Returns the raw result whenever cross-correlation could be
+        computed (so the caller can save ``confidence`` as a diagnostic even
+        below the auto-accept floor); returns ``None`` only when alignment
+        isn't possible at all (no primary, no primary beep_time, audio not
+        cached, landmark window too narrow). Threshold comparison happens at
+        the call site so a low-confidence result can still inform the UI.
+
+        Run only on the secondary soft-fail path -- when in-stream beep
+        detection has already raised ``BeepNotFoundError``. Cheap (envelope
+        cross-correlation at 200 Hz; sub-second on a 60 s clip), but not free,
+        so we skip it on the primary path entirely.
+        """
+        primary = stage.primary()
+        if primary is None or primary.beep_time is None:
+            return None
+        primary_audio_path = audio_helpers.primary_audio_path(root, stage.stage_number, project=proj)
+        secondary_audio_path = audio_helpers.video_audio_path(root, stage.stage_number, video, project=proj)
+        if not primary_audio_path.exists() or not secondary_audio_path.exists():
+            # Either side missing means the user hasn't run beep-detect on
+            # the primary yet, or the secondary's own audio extract failed
+            # before we even got here. Both are dealt with by the existing
+            # soft-fail UX -- alignment can be retried later.
+            return None
+        try:
+            primary_audio, primary_sr = beep_detect.load_audio(primary_audio_path)
+            secondary_audio, secondary_sr = beep_detect.load_audio(secondary_audio_path)
+            handle.update(progress=0.45, message="Aligning to primary...")
+            result = cross_align.align_secondary_to_primary(
+                primary_audio,
+                primary_sr,
+                primary.beep_time,
+                secondary_audio,
+                secondary_sr,
+            )
+        except cross_align.CrossAlignError as exc:
+            logger.info(
+                "cross-align skipped for stage %d video %s: %s",
+                stage.stage_number,
+                video.video_id,
+                exc,
+            )
+            return None
+        return result
+
+    def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
+        """Worker: detect ``video``'s beep, then auto-chain trim.
+
+        Generic over role:
+          - primary: detect -> trim -> shot_detect (existing pipeline).
+          - secondary: detect -> trim (no shot_detect; the audit timeline
+            is anchored to the primary's beep).
+
+        Trim is treated as a soft failure: the beep is valuable on its
+        own and the SPA can re-trim later.
+        """
+        handle.update(progress=0.05, message="Loading project...")
+        proj = state.shooter_project(slug)
+        stg = proj.stage(stage_number)
+        video = stg.find_video_by_id(video_id)
+        if video is None:
+            raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
+        source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
+        handle.update(
+            progress=0.15,
+            message=f"Extracting audio + detecting beep ({role_label})...",
+        )
+        try:
+            beep = audio_helpers.detect_video_beep(
+                state.shooter_root(slug),
+                stage_number,
+                video,
+                source,
+                project=proj,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
+            )
+        except beep_detect.BeepNotFoundError as exc:
+            # Primary failure is fatal -- the entire downstream pipeline
+            # (trim window, shot timeline) hangs off the primary beep.
+            # Surfacing as a job error gets the user looking at the audio
+            # right away rather than silently falling through to a wrong
+            # alignment. Secondary failure is soft-handled below: many
+            # non-headcam cameras (iPhone tripod, RO position, AGC'd) just
+            # don't capture a sustained 2-5 kHz tone, and aborting the
+            # import on every one of them is the worse UX.
+            if video.role == "primary":
+                raise
+            logger.info(
+                "no beep on secondary stage %d video %s: %s",
+                stage_number,
+                video.video_id,
+                exc,
+            )
+            # Cross-correlation fallback: when the primary already has a
+            # beep, try aligning the secondary's audio against the
+            # primary's landmark window. Same buzzer + first shots in the
+            # same room means the loudness envelopes line up modulo a
+            # constant time offset, even when the secondary's mic missed
+            # the sustained 2-5 kHz tone the in-stream detector wants.
+            aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
+            video.beep_peak_amplitude = None
+            video.beep_duration_ms = None
+            video.beep_candidates = []
+            video.beep_reviewed = False
+            video.processed["beep"] = True
+            # Surface the cross-correlation confidence whenever we got one,
+            # even if we don't promote the suggestion. Lets the UI tell the
+            # difference between "never tried" and "tried, sub-floor result".
+            video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
+            # Delta is only meaningful when both in-stream AND cross-align
+            # produced timestamps. In-stream failed here, so wipe it.
+            video.beep_alignment_delta_ms = None
+            if aligned is not None and aligned.confidence >= _align_confidence_floor:
+                handle.update(
+                    progress=0.55,
+                    message=(f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"),
+                )
+                video.beep_time = aligned.secondary_beep_time
+                video.beep_source = "aligned"
+                video.beep_auto_detect_failed = False
+                # Treat as "we have a usable beep_time": fall through to
+                # the trim block below.
+                beep = aligned
+            else:
+                if aligned is not None:
+                    logger.info(
+                        "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
+                        stage_number,
+                        video.video_id,
+                        aligned.confidence,
+                        _align_confidence_floor,
+                    )
+                handle.update(progress=0.55, message="No beep detected; pick on waveform")
+                video.beep_time = None
+                video.beep_source = "auto"
+                video.beep_auto_detect_failed = True
+                video.processed["trim"] = False
+                beep = None
+        else:
+            handle.update(progress=0.55, message="Saving beep...")
+            video.beep_time = beep.time
+            video.beep_source = "auto"
+            video.beep_peak_amplitude = beep.peak_amplitude
+            video.beep_duration_ms = beep.duration_ms
+            video.beep_confidence = beep.confidence
+            video.beep_candidates = list(beep.candidates)
+            video.beep_auto_detect_failed = False
+            video.beep_alignment_confidence = None
+            video.beep_alignment_delta_ms = None
+            video.processed["beep"] = True
+            # Auto-detected beeps need explicit user review (#71) UNLESS
+            # the calibrated confidence (#220 layer 3a) clears the
+            # ``beep_low_confidence_threshold`` automation gate (#219).
+            # Above the threshold we auto-trust: the detector is right
+            # ~95 % of the time in that band, so making the user click
+            # to confirm every high-confidence beep adds friction
+            # without catching real problems. Below it the user has to
+            # review -- the HITL queue (``GET /api/hitl-queue``) lists
+            # exactly these. Resets to False on re-detection so the
+            # prior approval doesn't carry over to a fresh run.
+            resolved_auto = automation_settings.resolve_automation(
+                project_override=proj.automation,
+            )
+            threshold = resolved_auto.settings.beep_low_confidence_threshold
+            video.beep_reviewed = beep.confidence >= threshold
+            # Sanity check: when in-stream succeeded on a secondary, ALSO
+            # run cross-correlation against the primary. If the two
+            # methods disagree by more than ~250 ms it usually means the
+            # in-stream detector locked onto something that wasn't the
+            # buzzer (a steel-strike that resembles a tone, an early
+            # range-officer command, etc.). The delta is surfaced in the
+            # SPA so the user can compare both candidates on the
+            # waveform before marking reviewed. Never overrides the
+            # in-stream result -- in-stream has frequency-domain
+            # information cross-align doesn't, so when they agree we
+            # trust the in-stream answer; when they disagree we let the
+            # user decide.
+            if video.role != "primary":
+                check = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
+                if check is not None and check.confidence >= _align_confidence_floor:
+                    video.beep_alignment_confidence = check.confidence
+                    video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
+
+        trimmed_ok = False
+        if beep is not None and stg.time_seconds > 0:
+            handle.check_cancel()
+            handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
+            try:
+                audio_helpers.ensure_video_audit_trim(
+                    state.shooter_root(slug),
+                    stage_number,
+                    video,
+                    source,
+                    video.beep_time,
+                    stg.time_seconds,
+                    project=proj,
+                    runner=_cancellable_runner(handle),
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                )
+                video.processed["trim"] = True
+                trimmed_ok = True
+            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                # Soft failure: beep alone is still useful, especially for
+                # secondaries (audit alignment works without a trim cache).
+                logger.warning(
+                    "auto-trim failed for stage %d video %s: %s",
+                    stage_number,
+                    video.video_id,
+                    exc,
+                )
+                handle.update(message=f"beep saved; trim failed: {exc}")
+        handle.update(progress=0.85, message="Saving project...")
+        # Read-modify-write the project file: extract / detection /
+        # ffmpeg trim can take 30+ s during which the user may have
+        # toggled ``beep_reviewed`` on other stages. Reloading and
+        # copying our targeted fields onto the fresh project preserves
+        # those concurrent edits instead of stomping them with the
+        # snapshot we loaded at job start.
+        fresh = state.shooter_project(slug)
+        try:
+            stg_fresh = fresh.stage(stage_number)
+        except KeyError:
+            stg_fresh = None
+        v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
+        if v_fresh is not None:
+            v_fresh.beep_time = video.beep_time
+            v_fresh.beep_source = video.beep_source
+            v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
+            v_fresh.beep_duration_ms = video.beep_duration_ms
+            v_fresh.beep_confidence = video.beep_confidence
+            v_fresh.beep_candidates = list(video.beep_candidates)
+            v_fresh.beep_reviewed = video.beep_reviewed
+            v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
+            v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
+            v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
+            v_fresh.processed["beep"] = True
+            if trimmed_ok:
+                v_fresh.processed["trim"] = True
+            fresh.save(state.shooter_root(slug))
+        if trimmed_ok and video.role == "primary" and video.beep_reviewed:
+            # Shot detection is primary-only AND gated on
+            # ``beep_reviewed`` (#71). That flag is True either because
+            # the user explicitly clicked "Mark reviewed" (which
+            # re-triggers chaining via ``set_beep_reviewed``) or because
+            # the auto-trust gate cleared (#219 layer 3b: confidence at
+            # or above ``beep_low_confidence_threshold``). Saves the
+            # heavy CLAP / GBDT / PANN ensemble work when the beep
+            # timestamp is wrong, since everything downstream of it
+            # would be garbage anyway.
+            #
+            # Layered automation gate (#215): users can disable the
+            # auto-trigger globally or per project. ``cli_override`` is
+            # always None for the server -- the daemon doesn't take
+            # CLI flags at this entry point.
+            resolved = automation_settings.resolve_automation(
+                project_override=fresh.automation,
+            )
+            # Worker callback runs in a ThreadPoolExecutor thread with
+            # no event loop; bridge to the async JobBackend via
+            # ``asyncio.run``.
+            if (
+                resolved.settings.shot_detect_on_beep_verified
+                and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
+            ):
+                asyncio.run(
+                    state.jobs.submit(
+                        kind="shot_detect",
+                        stage_number=stage_number,
+                        args={"slug": slug, "stage_number": stage_number},
+                    )
+                )
+        handle.update(progress=1.0, message="Done")
+
+    def _run_trim(
+        handle: JobHandle,
+        *,
+        slug: str,
+        stage_number: int,
+        video_id: str,
+        chain_shot_detect: bool = True,
+    ) -> None:
+        """Worker for the audit-mode trim of a specific video.
+
+        Resolves the shooter via ``slug`` (so the body is portable to a
+        hosted worker process -- the bulk path used to pass an explicit
+        ``shooter_root`` Path, which can't cross a process boundary).
+
+        Auto-chains shot detection only when the trimmed video is the
+        reviewed primary AND ``chain_shot_detect`` is set; secondaries
+        align to the primary's audit timeline by their own beep, so they
+        do not need their own shot-detection run. The bulk maintenance
+        pass passes ``chain_shot_detect=False`` -- it regenerates derived
+        trim caches without re-running detection over the whole match.
+        """
+        handle.update(progress=0.1, message="Preparing trim...")
+        proj = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        stg = proj.stage(stage_number)
+        video = stg.find_video_by_id(video_id)
+        if video is None or video.beep_time is None:
+            raise RuntimeError("video or beep disappeared mid-flight")
+        source = proj.resolve_video_path(root, video.path)
+        handle.check_cancel()
+        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
+        handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
+        audio_helpers.ensure_video_audit_trim(
+            root,
+            stage_number,
+            video,
+            source,
+            video.beep_time,
+            stg.time_seconds,
+            project=proj,
+            runner=_cancellable_runner(handle),
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
+        )
+        handle.update(progress=0.85, message="Saving project...")
+        # Read-modify-write to avoid stomping concurrent edits made
+        # while ffmpeg was running (e.g. another stage's beep review).
+        fresh = state.shooter_project(slug)
+        stg_fresh = fresh.stage(stage_number)
+        v_fresh = stg_fresh.find_video_by_id(video_id)
+        if v_fresh is not None:
+            v_fresh.processed["trim"] = True
+            fresh.save(root)
+        # Worker callback runs in a ThreadPoolExecutor thread with no
+        # event loop; bridge to the async JobBackend via ``asyncio.run``.
+        if (
+            chain_shot_detect
+            and video.role == "primary"
+            and video.beep_reviewed
+            and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
+        ):
+            # Same gate as the detect-then-trim path (#71): don't burn
+            # CLAP / GBDT / PANN cycles on a beep the user hasn't
+            # confirmed. Manual entries pre-set ``beep_reviewed`` to True
+            # so this still runs; the auto-detect path waits for the
+            # user's explicit "Mark reviewed" click which re-fires
+            # shot_detect from there.
+            #
+            # Layered automation gate (#215): a global / project
+            # opt-out can suppress this auto-trigger.
+            resolved = automation_settings.resolve_automation(
+                project_override=fresh.automation,
+            )
+            if resolved.settings.shot_detect_on_beep_verified:
+                asyncio.run(
+                    state.jobs.submit(
+                        kind="shot_detect",
+                        stage_number=stage_number,
+                        args={"slug": slug, "stage_number": stage_number},
+                    )
+                )
+        handle.update(progress=1.0, message="Done")
+
+    def _run_shot_detect(handle: JobHandle, slug: str, stage_number: int, reset: bool = False) -> None:
+        """Worker that runs the 4-voter ensemble on the stage's audit clip.
+
+        Reads the trimmed clip's WAV (extracting it on demand if needed),
+        runs ``splitsmith.ensemble.detect_shots_ensemble`` over the
+        ``[beep .. beep+stage]`` window, and writes both the consensus
+        ``shots[]`` and the full voter-A universe into the audit JSON.
+
+        ``_candidates_pending_audit.candidates`` carries every candidate
+        annotated with per-voter signals (vote_a/b/c/d, ensemble_score,
+        score_c, clap_diff, gunshot_prob) so the audit UI can render the
+        decision trail. ``shots[]`` is seeded from the consensus subset
+        unless it is already populated -- the user retains authority. If
+        ``reset`` is True, ``shots[]`` is wiped first so the user can
+        start over after a bad beep / detector pass.
+
+        Adaptive prior: if the audit JSON already carries
+        ``stage_rounds.expected``, voter C switches to its adaptive
+        top-(K+slack) mode and the apriori boost lifts the top-K
+        confidence-ranked candidates over the consensus line.
+        """
+        proj = state.shooter_project(slug)
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError(f"stage {stage_number} has no primary or no beep yet")
+        if stg.time_seconds <= 0:
+            raise RuntimeError(
+                f"stage {stage_number} has time_seconds=0; import a "
+                "scoreboard before running shot detection"
+            )
+        source = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+
+        # Re-detect-all on an old project (and the v1->v2 cache migration in
+        # #298) leaves stages with no trimmed MP4 cached. Without that file,
+        # ensure_audit_audio falls back to the full source WAV -- shot
+        # detection still works, but the audit page then streams the raw
+        # source clip into <video>, where long-GOP 4K MOVs wedge in buffering
+        # on first play. Force the trim here so every shot-detect run leaves
+        # the audit cache in the same state the beep-detect path would have.
+        handle.update(progress=0.05, message="Ensuring audit trim...")
+        try:
+            audio_helpers.ensure_video_audit_trim(
+                state.shooter_root(slug),
+                stage_number,
+                prim,
+                source,
+                prim.beep_time,
+                stg.time_seconds,
+                project=proj,
+                runner=_cancellable_runner(handle),
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
+            )
+            trim_fresh = state.shooter_project(slug)
+            try:
+                v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
+            except KeyError:
+                v_fresh = None
+            if v_fresh is not None and not v_fresh.processed.get("trim"):
+                v_fresh.processed["trim"] = True
+                trim_fresh.save(state.shooter_root(slug))
+        except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+            # Soft failure: detection can still proceed against the source
+            # WAV. ensure_audit_audio's fallback handles the missing trim,
+            # so we log and continue rather than abort the whole job.
+            logger.warning(
+                "shot_detect could not (re)build trim for stage %d: %s",
+                stage_number,
+                exc,
+            )
+
+        handle.update(progress=0.1, message="Preparing audio...")
+        audit = audio_helpers.ensure_audit_audio(
+            state.shooter_root(slug),
+            stage_number,
+            source,
+            prim.beep_time,
+            project=proj,
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
+        )
+        beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
+
+        # Read existing audit JSON up-front: we need ``stage_rounds.expected``
+        # before running detection (it changes voter C's mode and the
+        # apriori boost) and we'll merge results back into the same dict.
+        audit_dir = proj.audit_path(state.shooter_root(slug))
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_file = audit_dir / f"stage{stage_number}.json"
+        if audit_file.exists():
+            try:
+                existing_json = json.loads(audit_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing_json = {}
+        else:
+            existing_json = {
+                "stage_number": stg.stage_number,
+                "stage_name": stg.stage_name,
+                "stage_time_seconds": stg.time_seconds,
+                "beep_time": round(beep_in_clip, 4),
+                "shots": [],
+            }
+        # Carry stage_rounds (min_rounds + target breakdown) from the
+        # project state into the audit JSON so the ensemble's adaptive
+        # voter C + apriori boost can consume ``stage_rounds.expected``.
+        # Project value wins over a stale audit-JSON copy: re-running
+        # detection after a scoreboard refresh should pick up the new
+        # round count without manual edits.
+        if stg.stage_rounds is not None:
+            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
+        expected_rounds: int | None = None
+        sr_block = existing_json.get("stage_rounds")
+        if isinstance(sr_block, dict):
+            raw = sr_block.get("expected")
+            if isinstance(raw, int) and raw > 0:
+                expected_rounds = raw
+
+        handle.update(progress=0.2, message="Loading ensemble models...")
+        handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
+        audio_array, sr = beep_detect.load_audio(audit.audio_path)
+        # Camera-class dispatch (issue #143). When the primary's mount
+        # is set, look up handheld vs. headcam thresholds; otherwise
+        # the ensemble falls back to the default class (headcam).
+        cam_class = ensemble_module.camera_class_from_mount(prim.camera_mount)
+        # Voter E opt-in (issue #183). Off by default for the first
+        # release; flip via env var until corpus growth justifies
+        # default-on. Requires the calibration to ship a probe head
+        # AND the source video to be reachable.
+        enable_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
+        ensemble_cfg = ensemble_module.EnsembleConfig(enable_voter_e=enable_e)
+        result = state.compute.detect_stage(
+            audio=audio_array,
+            sample_rate=sr,
+            beep_time_in_clip=beep_in_clip,
+            stage_time_seconds=stg.time_seconds,
+            expected_rounds=expected_rounds,
+            ensemble_config=ensemble_cfg,
+            camera_class=cam_class,
+            camera_make=prim.camera_make,
+            camera_model=prim.camera_model,
+            video_path=source if enable_e else None,
+            source_beep_time=prim.beep_time if enable_e else None,
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for cand in result.candidates:
+            candidates.append(
+                {
+                    "candidate_number": cand.candidate_number,
+                    "time": cand.time,
+                    "ms_after_beep": cand.ms_after_beep,
+                    "peak_amplitude": cand.peak_amplitude,
+                    "confidence": cand.confidence,
+                    "vote_a": cand.vote_a,
+                    "vote_b": cand.vote_b,
+                    "vote_c": cand.vote_c,
+                    "vote_e": cand.vote_e,
+                    "vote_total": cand.vote_total,
+                    "apriori_boost": cand.apriori_boost,
+                    "ensemble_score": cand.ensemble_score,
+                    "score_c": cand.score_c,
+                    "clap_diff": cand.clap_diff,
+                    "gunshot_prob": cand.gunshot_prob,
+                    "voter_e_signal": cand.voter_e_signal,
+                }
+            )
+
+        handle.update(progress=0.85, message="Saving audit JSON...")
+        existing_json["_candidates_pending_audit"] = {
+            "_note": (
+                "3-voter ensemble (PANN gunshot folded into voter C). "
+                "vote_a/b/c=1 means the voter kept the candidate; "
+                "ensemble_score = vote_total + apriori_boost. shots[] is "
+                "seeded from candidates with ensemble_score >= consensus."
+            ),
+            "consensus": result.consensus,
+            "expected_rounds": result.expected_rounds,
+            "candidates": candidates,
+        }
+        if reset:
+            existing_json["shots"] = []
+        seeded_shots = False
+        if not existing_json.get("shots"):
+            kept = [c for c in result.candidates if c.kept]
+            existing_json["shots"] = [
+                {
+                    "shot_number": i,
+                    "candidate_number": c.candidate_number,
+                    "time": c.time,
+                    "ms_after_beep": c.ms_after_beep,
+                    "source": "detected",
+                    "ensemble_votes": c.vote_total,
+                    "apriori_boost": c.apriori_boost,
+                    "ensemble_score": c.ensemble_score,
+                }
+                for i, c in enumerate(kept, start=1)
+            ]
+            seeded_shots = True
+        events = list(existing_json.get("audit_events") or [])
+        events.append(
+            {
+                "ts": _now_iso(),
+                "kind": "shot_detect_run",
+                "payload": {
+                    "candidate_count": len(candidates),
+                    "kept_count": sum(1 for c in result.candidates if c.kept),
+                    "consensus": result.consensus,
+                    "expected_rounds": result.expected_rounds,
+                    "seeded_shots": seeded_shots,
+                },
+            }
+        )
+        existing_json["audit_events"] = events
+
+        # Atomic write + .bak (mirrors put_stage_audit).
+        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        tmp.write_text(json.dumps(existing_json, indent=2) + "\n", encoding="utf-8")
+        if audit_file.exists():
+            if backup.exists():
+                backup.unlink()
+            audit_file.replace(backup)
+        tmp.replace(audit_file)
+
+        # Read-modify-write the project file: a long-running shot_detect
+        # job must not save the snapshot it loaded at start, because the
+        # user may have toggled ``beep_reviewed`` on other stages in the
+        # interim (the review action kicks shot_detect, so concurrent
+        # bursts are the common case). Reloading from disk and mutating
+        # only the targeted field preserves those concurrent edits.
+        fresh = state.shooter_project(slug)
+        stg_fresh = fresh.stage(stage_number)
+        prim_fresh = stg_fresh.primary()
+        if prim_fresh is not None:
+            prim_fresh.processed["shot_detect"] = True
+            fresh.save(state.shooter_root(slug))
+        handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
+
+    def _run_export_for_stage(
+        handle: JobHandle, slug: str, stage_number: int, req: ExportStageRequest
+    ) -> None:
+        """Worker for /api/stages/{n}/export. Phases mirror the user's
+        mental model so the JobsPanel message is meaningful."""
+        from ..config import StageData as EngineStageData
+
+        handle.update(progress=0.05, message="Loading project...")
+        proj = state.shooter_project(slug)
+        stg = proj.stage(stage_number)
+        prim = stg.primary()
+        if prim is None or prim.beep_time is None:
+            raise RuntimeError("primary or beep disappeared mid-flight")
+
+        audit_file = proj.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
+        exports_dir = proj.exports_path(state.shooter_root(slug))
+        source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+        engine_stage = EngineStageData(
+            stage_number=stg.stage_number,
+            stage_name=stg.stage_name,
+            time_seconds=stg.time_seconds,
+            scorecard_updated_at=stg.scorecard_updated_at,
+        )
+
+        # Phase progress is approximate; trim dominates wall time when the
+        # source is large, so we hold at 0.4 through the trim phase and
+        # then jump on the small writers.
+        if req.write_trim:
+            handle.update(progress=0.15, message="Trimming source (lossless stream copy)...")
+        elif req.write_fcpxml:
+            handle.update(progress=0.15, message="Reading audit + preparing FCPXML...")
+        else:
+            handle.update(progress=0.15, message="Reading audit JSON...")
+        handle.check_cancel()
+
+        # Multi-cam (issue #54). Each secondary with a known beep ships
+        # alongside the primary so a single Generate click produces the
+        # complete multi-cam timeline. Cams without a beep yet -- e.g.
+        # registered but ingest didn't finish -- are silently skipped; the
+        # SPA's ingest screen flags those rows separately. The Export page
+        # may also pass ``secondary_video_ids`` to restrict the roster to a
+        # subset (None = include every cam with a beep, the legacy default).
+        allowed_ids: set[str] | None = (
+            set(req.secondary_video_ids) if req.secondary_video_ids is not None else None
+        )
+        secondaries: list[export_helpers.SecondaryExport] = []
+        for sv in stg.videos:
+            if sv.role != "secondary":
+                continue
+            if sv.beep_time is None:
+                continue
+            if allowed_ids is not None and sv.video_id not in allowed_ids:
+                continue
+            sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
+            secondaries.append(
+                export_helpers.SecondaryExport(
+                    video_id=sv.video_id,
+                    source_path=sec_source,
+                    beep_time_in_source=sv.beep_time,
+                    label=f"Cam {sv.video_id}",
+                )
+            )
+
+        try:
+            result = export_helpers.export_stage(
+                request=export_helpers.StageExportRequest(
+                    stage_number=stage_number,
+                    write_trim=req.write_trim,
+                    write_csv=req.write_csv,
+                    write_fcpxml=req.write_fcpxml,
+                    write_report=req.write_report,
+                    write_overlay=req.write_overlay,
+                    overlay_codec=req.overlay_codec,
+                    overlay_max_height=req.overlay_max_height,
+                    overlay_max_fps=req.overlay_max_fps,
+                    overlay_theme=req.overlay_theme,
+                ),
+                audit_path=audit_file,
+                exports_dir=exports_dir,
+                source_video_path=source_video if source_video.exists() else None,
+                stage_data=engine_stage,
+                beep_time_in_source=prim.beep_time,
+                pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                post_buffer_seconds=proj.trim_post_buffer_seconds,
+                config=Config(),
+                secondaries=secondaries,
+            )
+        except export_helpers.StageExportError as exc:
+            # Surface as a job failure with the exporter's own message so
+            # the JobsPanel row reads "audit JSON has no shots in shots[]"
+            # rather than a stack trace.
+            raise RuntimeError(str(exc)) from exc
+
+        handle.update(progress=0.95, message="Saving project...")
+        proj.updated_at = datetime.now(UTC)
+        proj.save(state.shooter_root(slug))
+
+        # Final message summarises what shipped + flags any skipped
+        # artefacts (FCPXML without a trim, etc). The full list lives in
+        # the report.txt; the user can Reveal it for details.
+        bits: list[str] = []
+        if result.trimmed_video_path is not None:
+            bits.append("trim")
+        if result.secondary_trimmed_paths:
+            n = len(result.secondary_trimmed_paths)
+            bits.append(f"{n} secondary trim{'s' if n != 1 else ''}")
+        if result.csv_path is not None:
+            bits.append("csv")
+        if result.fcpxml_path is not None:
+            bits.append("fcpxml")
+        if result.report_path is not None:
+            bits.append("report")
+        if result.overlay_path is not None:
+            bits.append("overlay")
+        summary = ", ".join(bits) if bits else "nothing written"
+        if result.anomalies:
+            n = len(result.anomalies)
+            word = "anomaly" if n == 1 else "anomalies"
+            summary += f" ({n} {word} -- see report.txt)"
+        handle.update(progress=1.0, message=f"Done: {summary}")
+
+    def _run_match_export(handle: JobHandle, slug: str, req: MatchExportRequest) -> None:
+        """Worker for the shooter's match-export job. Re-runs the per-stage exporter for
+        any selected stage missing its lossless trim, then composes the
+        match FCPXML.
+        """
+        from ..config import StageData as EngineStageData
+        from . import exports as exports_mod
+
+        handle.update(progress=0.02, message="Loading project...")
+        proj = state.shooter_project(slug)
+        exports_dir = proj.exports_path(state.shooter_root(slug))
+        audit_dir = proj.audit_path(state.shooter_root(slug))
+
+        n = len(req.stage_numbers)
+        # Reserve the last 10% for the match compose step; the rest is
+        # split evenly across per-stage trims (the dominant wall time).
+        # Stages that already have a trim skip ahead within their slice
+        # instead of contributing to the wait.
+        per_stage_share = 0.85 / max(1, n)
+
+        for idx, stage_number in enumerate(req.stage_numbers):
+            handle.check_cancel()
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None or prim.beep_time is None:
+                raise RuntimeError(f"stage {stage_number}: primary or beep disappeared mid-flight")
+
+            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+            overlay_target = exports_dir / f"{base}_overlay.mov"
+
+            # Decide what's missing. The match composer needs the
+            # lossless trim + per-cam trims (when include_secondaries) +
+            # optional overlay. Re-run the per-stage exporter for any
+            # stage where any required artefact isn't on disk.
+            wanted_secondary_ids: set[str] = set()
+            if req.include_secondaries:
+                for sv in stg.videos:
+                    if sv.role == "secondary" and sv.beep_time is not None:
+                        wanted_secondary_ids.add(sv.video_id)
+            secondary_trims_present = all(
+                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
+            )
+            # Treat any non-default overlay format option as "force re-render"
+            # so the dialog's codec / max-height / max-fps choices actually
+            # apply when a stale overlay sits on disk. With all defaults we
+            # keep the legacy "skip if present" behaviour for fast re-stitching.
+            overlay_format_overridden = (
+                req.overlay_codec != "auto"
+                or req.overlay_max_height is not None
+                or req.overlay_max_fps is not None
+                or req.overlay_theme != "splitsmith"
+            )
+            overlay_missing = req.include_overlay and (
+                not overlay_target.exists() or overlay_format_overridden
+            )
+
+            needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
+            if needs_per_stage:
+                handle.update(
+                    progress=0.02 + idx * per_stage_share,
+                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
+                )
+                # Build the secondaries list for the per-stage exporter --
+                # mirrors the single-stage endpoint's logic.
+                secondaries_in: list[export_helpers.SecondaryExport] = []
+                if req.include_secondaries:
+                    for sv in stg.videos:
+                        if sv.role != "secondary" or sv.beep_time is None:
+                            continue
+                        sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
+                        secondaries_in.append(
+                            export_helpers.SecondaryExport(
+                                video_id=sv.video_id,
+                                source_path=sec_source,
+                                beep_time_in_source=sv.beep_time,
+                                label=f"Cam {sv.video_id}",
+                            )
+                        )
+                source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+                engine_stage = EngineStageData(
+                    stage_number=stg.stage_number,
+                    stage_name=stg.stage_name,
+                    time_seconds=stg.time_seconds,
+                    scorecard_updated_at=stg.scorecard_updated_at,
+                )
+                try:
+                    export_helpers.export_stage(
+                        request=export_helpers.StageExportRequest(
+                            stage_number=stage_number,
+                            write_trim=True,
+                            write_csv=True,
+                            write_fcpxml=True,
+                            write_report=True,
+                            write_overlay=req.include_overlay,
+                            overlay_codec=req.overlay_codec,
+                            overlay_max_height=req.overlay_max_height,
+                            overlay_max_fps=req.overlay_max_fps,
+                            overlay_theme=req.overlay_theme,
+                        ),
+                        audit_path=audit_dir / f"stage{stage_number}.json",
+                        exports_dir=exports_dir,
+                        source_video_path=source_video if source_video.exists() else None,
+                        stage_data=engine_stage,
+                        beep_time_in_source=prim.beep_time,
+                        pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                        post_buffer_seconds=proj.trim_post_buffer_seconds,
+                        config=Config(),
+                        secondaries=secondaries_in,
+                    )
+                except export_helpers.StageExportError as exc:
+                    raise RuntimeError(f"stage {stage_number}: {exc}") from exc
+            else:
+                handle.update(
+                    progress=0.02 + idx * per_stage_share,
+                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"),
+                )
+
+        handle.check_cancel()
+        handle.update(progress=0.92, message="Stitching match FCPXML...")
+
+        # Re-load the project: the per-stage worker writes processed flags
+        # via project.save() side-effects, so a fresh load picks those up.
+        proj = state.shooter_project(slug)
+        stages_input: list[match_export_helpers.MatchStageInput] = []
+        for stage_number in req.stage_numbers:
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            assert prim is not None and prim.beep_time is not None
+            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+            audit_path = audit_dir / f"stage{stage_number}.json"
+            overlay_path = exports_dir / f"{base}_overlay.mov"
+            secondaries: list[match_export_helpers.MatchSecondaryInput] = []
+            for sv in stg.videos:
+                if sv.role != "secondary" or sv.beep_time is None:
+                    continue
+                sec_clip_beep = min(proj.trim_pre_buffer_seconds, sv.beep_time)
+                secondaries.append(
+                    match_export_helpers.MatchSecondaryInput(
+                        video_id=sv.video_id,
+                        trimmed_path=exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4",
+                        beep_offset_seconds=sec_clip_beep,
+                        label=f"Cam {sv.video_id}",
+                    )
+                )
+            primary_clip_beep = min(proj.trim_pre_buffer_seconds, prim.beep_time)
+            stages_input.append(
+                match_export_helpers.MatchStageInput(
+                    stage_number=stage_number,
+                    stage_name=stg.stage_name,
+                    audit_path=audit_path,
+                    trimmed_path=trimmed_path,
+                    beep_offset_seconds=primary_clip_beep,
+                    secondaries=tuple(secondaries),
+                    overlay_path=overlay_path,
+                )
+            )
+
+        project_name = req.project_name or proj.name or "match"
+        request_data = match_export_helpers.MatchExportRequestData(
+            stage_numbers=tuple(req.stage_numbers),
+            head_pad_seconds=req.head_pad_seconds,
+            tail_pad_seconds=req.tail_pad_seconds,
+            include_secondaries=req.include_secondaries,
+            include_overlay=req.include_overlay,
+            project_name=project_name,
+            pip_layout=req.pip_layout,
+            output_format=req.output_format,
+            transition_kind=req.transition_kind,
+            transition_duration_seconds=req.transition_duration_seconds,
+            title_kind=req.title_kind,
+            title_duration_seconds=req.title_duration_seconds,
+            intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
+            outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
+            youtube_sidecar=req.youtube_sidecar,
+            youtube_preset=req.youtube_preset,
+        )
+        try:
+            result = match_export_helpers.export_match(
+                stages=stages_input,
+                request=request_data,
+                exports_dir=exports_dir,
+                config=Config().output,
+            )
+        except match_export_helpers.MatchExportError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        handle.set_result(
+            {
+                "fcpxml_path": str(result.fcpxml_path),
+                "stage_count": result.stage_count,
+                "duration_seconds": result.duration_seconds,
+                "anomalies": result.anomalies,
+            }
+        )
+        anom_word = "anomaly" if len(result.anomalies) == 1 else "anomalies"
+        anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
+        handle.update(
+            progress=1.0,
+            message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
+        )
+
+    state.jobs.bodies.register("model_download", _run_model_download_job)
+    state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
+    state.jobs.bodies.register("trim", _run_trim)
+    state.jobs.bodies.register("shot_detect", _run_shot_detect)
+    state.jobs.bodies.register("export", _run_export_for_stage)
+    state.jobs.bodies.register("match_export", _run_match_export)
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = splitsmith_version
@@ -2145,7 +3101,7 @@ def _hosted_mode_active() -> bool:
     return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
 
 
-def _apply_hosted_mode_wiring(state: AppState) -> None:
+def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     """Swap AppState's local-mode defaults for Postgres-backed impls.
 
     Runs only when :func:`_hosted_mode_active` is True. Requires
@@ -2199,8 +3155,38 @@ def _apply_hosted_mode_wiring(state: AppState) -> None:
     state.auth = auth
     state.recent_projects = PostgresRecentProjectsStore(session_factory, user_id=user_id)
     state.scoreboard_identity = PostgresScoreboardIdentityStore(session_factory, user_id=user_id)
-    state.jobs = PostgresJobBackend(session_factory, user_id=user_id)
+    # The API process enqueues via the deferrer; the worker executes and
+    # must not sweep jobs queued for it to run. The worker also enqueues
+    # (job chaining defers a follow-up onto the queue), so it gets a
+    # deferrer too.
+    from ..queue import make_deferrer
+
+    state.jobs = PostgresJobBackend(
+        session_factory,
+        user_id=user_id,
+        deferrer=make_deferrer(url),
+        sweep_on_boot=not worker,
+    )
     state.storage = _build_hosted_storage(user_id)
+
+
+def build_worker_state() -> AppState:
+    """Build the hosted ``AppState`` a ``splitsmith worker`` runs jobs against.
+
+    The headless counterpart to ``create_app``'s state wiring: no FastAPI
+    app and no routes -- just the compute backend (local ensemble, loaded
+    once per process via the ``_ENSEMBLE_RUNTIME`` singleton), the
+    hosted-mode Postgres/S3 wiring (execute-only job backend, no boot
+    sweep), and the shared job-body registry the Procrastinate
+    ``run_compute_job`` task dispatches against. Requires hosted-mode env
+    (``SPLITSMITH_DATABASE_URL``); ``_apply_hosted_mode_wiring`` raises
+    otherwise.
+    """
+    state = AppState()
+    state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
+    _apply_hosted_mode_wiring(state, worker=True)
+    register_job_bodies(state)
+    return state
 
 
 def _build_hosted_storage(user_id: str) -> Storage | None:
@@ -2333,13 +3319,12 @@ def create_app(
     # ``create_app`` runs at boot outside any event loop, so the async
     # JobBackend submission is wrapped in ``asyncio.run`` here.
     #
-    # ``model_download`` is the one kind submitted during create_app
-    # itself (the others fire only from HTTP handlers, after this
-    # function returns), so its body must be registered before the
-    # prefetch submit -- the rest register just before ``return app``.
-    # ``_run_model_download_job`` is module-level; tests monkeypatch it,
-    # and the name resolves to the patched function here.
-    state.jobs.bodies.register("model_download", _run_model_download_job)
+    # All job bodies register here, after any hosted-mode backend swap
+    # above, so ``submit(kind=...)`` resolves against whichever backend is
+    # bound. Must precede the prefetch submit below, which fires
+    # ``model_download`` during create_app itself. ``register_job_bodies``
+    # is shared with the Procrastinate worker bootstrap.
+    register_job_bodies(state)
     asyncio.run(_maybe_submit_model_download(state))
 
     async def get_current_user(request: Request) -> User:
@@ -3913,301 +4898,6 @@ def create_app(
             )
         return project, stage, video
 
-    # Cross-cam alignment is accepted as a *suggestion* (beep_source="aligned",
-    # beep_reviewed=False so the SPA forces the user to verify on the waveform
-    # picker) when the peak-to-runner-up ratio of the cross-correlation clears
-    # this threshold. 1.0 means the landmark wasn't distinctive at all.
-    # Empirically calibrated on tallmilan-2026 secondaries: same-stage pairs
-    # where in-stream detection independently succeeded land at 1.23-1.34, and
-    # plausible alignments on the in-stream-failed pairs land at 1.15-1.31.
-    # Same-mic non-overlapping clips sit at ~1.00. 1.10 leaves a slim margin
-    # over the floor while still surfacing real alignments. False positives
-    # are caught by the user in the picker before "Mark reviewed"; false
-    # negatives mean the user starts from the auto-detect-failed state and
-    # places the marker by hand, which is the same UX as before this change.
-    _align_confidence_floor = 1.10
-
-    def _try_align_secondary_to_primary(
-        root: Path,
-        proj: MatchProject,
-        stage: StageEntry,
-        video: StageVideo,
-        handle: JobHandle,
-    ) -> cross_align.CrossAlignResult | None:
-        """Attempt cross-correlation alignment of ``video`` against the stage's
-        primary. Returns the raw result whenever cross-correlation could be
-        computed (so the caller can save ``confidence`` as a diagnostic even
-        below the auto-accept floor); returns ``None`` only when alignment
-        isn't possible at all (no primary, no primary beep_time, audio not
-        cached, landmark window too narrow). Threshold comparison happens at
-        the call site so a low-confidence result can still inform the UI.
-
-        Run only on the secondary soft-fail path -- when in-stream beep
-        detection has already raised ``BeepNotFoundError``. Cheap (envelope
-        cross-correlation at 200 Hz; sub-second on a 60 s clip), but not free,
-        so we skip it on the primary path entirely.
-        """
-        primary = stage.primary()
-        if primary is None or primary.beep_time is None:
-            return None
-        primary_audio_path = audio_helpers.primary_audio_path(root, stage.stage_number, project=proj)
-        secondary_audio_path = audio_helpers.video_audio_path(root, stage.stage_number, video, project=proj)
-        if not primary_audio_path.exists() or not secondary_audio_path.exists():
-            # Either side missing means the user hasn't run beep-detect on
-            # the primary yet, or the secondary's own audio extract failed
-            # before we even got here. Both are dealt with by the existing
-            # soft-fail UX -- alignment can be retried later.
-            return None
-        try:
-            primary_audio, primary_sr = beep_detect.load_audio(primary_audio_path)
-            secondary_audio, secondary_sr = beep_detect.load_audio(secondary_audio_path)
-            handle.update(progress=0.45, message="Aligning to primary...")
-            result = cross_align.align_secondary_to_primary(
-                primary_audio,
-                primary_sr,
-                primary.beep_time,
-                secondary_audio,
-                secondary_sr,
-            )
-        except cross_align.CrossAlignError as exc:
-            logger.info(
-                "cross-align skipped for stage %d video %s: %s",
-                stage.stage_number,
-                video.video_id,
-                exc,
-            )
-            return None
-        return result
-
-    def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
-        """Worker: detect ``video``'s beep, then auto-chain trim.
-
-        Generic over role:
-          - primary: detect -> trim -> shot_detect (existing pipeline).
-          - secondary: detect -> trim (no shot_detect; the audit timeline
-            is anchored to the primary's beep).
-
-        Trim is treated as a soft failure: the beep is valuable on its
-        own and the SPA can re-trim later.
-        """
-        handle.update(progress=0.05, message="Loading project...")
-        proj = state.shooter_project(slug)
-        stg = proj.stage(stage_number)
-        video = stg.find_video_by_id(video_id)
-        if video is None:
-            raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
-        source = proj.resolve_video_path(state.shooter_root(slug), video.path)
-        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
-        handle.update(
-            progress=0.15,
-            message=f"Extracting audio + detecting beep ({role_label})...",
-        )
-        try:
-            beep = audio_helpers.detect_video_beep(
-                state.shooter_root(slug),
-                stage_number,
-                video,
-                source,
-                project=proj,
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
-        except beep_detect.BeepNotFoundError as exc:
-            # Primary failure is fatal -- the entire downstream pipeline
-            # (trim window, shot timeline) hangs off the primary beep.
-            # Surfacing as a job error gets the user looking at the audio
-            # right away rather than silently falling through to a wrong
-            # alignment. Secondary failure is soft-handled below: many
-            # non-headcam cameras (iPhone tripod, RO position, AGC'd) just
-            # don't capture a sustained 2-5 kHz tone, and aborting the
-            # import on every one of them is the worse UX.
-            if video.role == "primary":
-                raise
-            logger.info(
-                "no beep on secondary stage %d video %s: %s",
-                stage_number,
-                video.video_id,
-                exc,
-            )
-            # Cross-correlation fallback: when the primary already has a
-            # beep, try aligning the secondary's audio against the
-            # primary's landmark window. Same buzzer + first shots in the
-            # same room means the loudness envelopes line up modulo a
-            # constant time offset, even when the secondary's mic missed
-            # the sustained 2-5 kHz tone the in-stream detector wants.
-            aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
-            video.beep_peak_amplitude = None
-            video.beep_duration_ms = None
-            video.beep_candidates = []
-            video.beep_reviewed = False
-            video.processed["beep"] = True
-            # Surface the cross-correlation confidence whenever we got one,
-            # even if we don't promote the suggestion. Lets the UI tell the
-            # difference between "never tried" and "tried, sub-floor result".
-            video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
-            # Delta is only meaningful when both in-stream AND cross-align
-            # produced timestamps. In-stream failed here, so wipe it.
-            video.beep_alignment_delta_ms = None
-            if aligned is not None and aligned.confidence >= _align_confidence_floor:
-                handle.update(
-                    progress=0.55,
-                    message=(f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"),
-                )
-                video.beep_time = aligned.secondary_beep_time
-                video.beep_source = "aligned"
-                video.beep_auto_detect_failed = False
-                # Treat as "we have a usable beep_time": fall through to
-                # the trim block below.
-                beep = aligned
-            else:
-                if aligned is not None:
-                    logger.info(
-                        "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
-                        stage_number,
-                        video.video_id,
-                        aligned.confidence,
-                        _align_confidence_floor,
-                    )
-                handle.update(progress=0.55, message="No beep detected; pick on waveform")
-                video.beep_time = None
-                video.beep_source = "auto"
-                video.beep_auto_detect_failed = True
-                video.processed["trim"] = False
-                beep = None
-        else:
-            handle.update(progress=0.55, message="Saving beep...")
-            video.beep_time = beep.time
-            video.beep_source = "auto"
-            video.beep_peak_amplitude = beep.peak_amplitude
-            video.beep_duration_ms = beep.duration_ms
-            video.beep_confidence = beep.confidence
-            video.beep_candidates = list(beep.candidates)
-            video.beep_auto_detect_failed = False
-            video.beep_alignment_confidence = None
-            video.beep_alignment_delta_ms = None
-            video.processed["beep"] = True
-            # Auto-detected beeps need explicit user review (#71) UNLESS
-            # the calibrated confidence (#220 layer 3a) clears the
-            # ``beep_low_confidence_threshold`` automation gate (#219).
-            # Above the threshold we auto-trust: the detector is right
-            # ~95 % of the time in that band, so making the user click
-            # to confirm every high-confidence beep adds friction
-            # without catching real problems. Below it the user has to
-            # review -- the HITL queue (``GET /api/hitl-queue``) lists
-            # exactly these. Resets to False on re-detection so the
-            # prior approval doesn't carry over to a fresh run.
-            resolved_auto = automation_settings.resolve_automation(
-                project_override=proj.automation,
-            )
-            threshold = resolved_auto.settings.beep_low_confidence_threshold
-            video.beep_reviewed = beep.confidence >= threshold
-            # Sanity check: when in-stream succeeded on a secondary, ALSO
-            # run cross-correlation against the primary. If the two
-            # methods disagree by more than ~250 ms it usually means the
-            # in-stream detector locked onto something that wasn't the
-            # buzzer (a steel-strike that resembles a tone, an early
-            # range-officer command, etc.). The delta is surfaced in the
-            # SPA so the user can compare both candidates on the
-            # waveform before marking reviewed. Never overrides the
-            # in-stream result -- in-stream has frequency-domain
-            # information cross-align doesn't, so when they agree we
-            # trust the in-stream answer; when they disagree we let the
-            # user decide.
-            if video.role != "primary":
-                check = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
-                if check is not None and check.confidence >= _align_confidence_floor:
-                    video.beep_alignment_confidence = check.confidence
-                    video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
-
-        trimmed_ok = False
-        if beep is not None and stg.time_seconds > 0:
-            handle.check_cancel()
-            handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
-            try:
-                audio_helpers.ensure_video_audit_trim(
-                    state.shooter_root(slug),
-                    stage_number,
-                    video,
-                    source,
-                    video.beep_time,
-                    stg.time_seconds,
-                    project=proj,
-                    runner=_cancellable_runner(handle),
-                    ffmpeg_binary=process_runtime().ffmpeg_binary,
-                )
-                video.processed["trim"] = True
-                trimmed_ok = True
-            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
-                # Soft failure: beep alone is still useful, especially for
-                # secondaries (audit alignment works without a trim cache).
-                logger.warning(
-                    "auto-trim failed for stage %d video %s: %s",
-                    stage_number,
-                    video.video_id,
-                    exc,
-                )
-                handle.update(message=f"beep saved; trim failed: {exc}")
-        handle.update(progress=0.85, message="Saving project...")
-        # Read-modify-write the project file: extract / detection /
-        # ffmpeg trim can take 30+ s during which the user may have
-        # toggled ``beep_reviewed`` on other stages. Reloading and
-        # copying our targeted fields onto the fresh project preserves
-        # those concurrent edits instead of stomping them with the
-        # snapshot we loaded at job start.
-        fresh = state.shooter_project(slug)
-        try:
-            stg_fresh = fresh.stage(stage_number)
-        except KeyError:
-            stg_fresh = None
-        v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
-        if v_fresh is not None:
-            v_fresh.beep_time = video.beep_time
-            v_fresh.beep_source = video.beep_source
-            v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
-            v_fresh.beep_duration_ms = video.beep_duration_ms
-            v_fresh.beep_confidence = video.beep_confidence
-            v_fresh.beep_candidates = list(video.beep_candidates)
-            v_fresh.beep_reviewed = video.beep_reviewed
-            v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
-            v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
-            v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
-            v_fresh.processed["beep"] = True
-            if trimmed_ok:
-                v_fresh.processed["trim"] = True
-            fresh.save(state.shooter_root(slug))
-        if trimmed_ok and video.role == "primary" and video.beep_reviewed:
-            # Shot detection is primary-only AND gated on
-            # ``beep_reviewed`` (#71). That flag is True either because
-            # the user explicitly clicked "Mark reviewed" (which
-            # re-triggers chaining via ``set_beep_reviewed``) or because
-            # the auto-trust gate cleared (#219 layer 3b: confidence at
-            # or above ``beep_low_confidence_threshold``). Saves the
-            # heavy CLAP / GBDT / PANN ensemble work when the beep
-            # timestamp is wrong, since everything downstream of it
-            # would be garbage anyway.
-            #
-            # Layered automation gate (#215): users can disable the
-            # auto-trigger globally or per project. ``cli_override`` is
-            # always None for the server -- the daemon doesn't take
-            # CLI flags at this entry point.
-            resolved = automation_settings.resolve_automation(
-                project_override=fresh.automation,
-            )
-            # Worker callback runs in a ThreadPoolExecutor thread with
-            # no event loop; bridge to the async JobBackend via
-            # ``asyncio.run``.
-            if (
-                resolved.settings.shot_detect_on_beep_verified
-                and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
-            ):
-                asyncio.run(
-                    state.jobs.submit(
-                        kind="shot_detect",
-                        stage_number=stage_number,
-                        args={"slug": slug, "stage_number": stage_number},
-                    )
-                )
-        handle.update(progress=1.0, message="Done")
-
     async def _submit_detect_beep(slug: str, stage_number: int, video: StageVideo) -> JSONResponse:
         """Validate + dedupe + queue a detect-beep job for ``video``.
 
@@ -4404,325 +5094,6 @@ def create_app(
         """Submit an audit-mode trim job for ``video_id`` on ``stage_number``."""
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         return await _submit_trim(slug, stage_number, stage, video, project)
-
-    def _run_trim(
-        handle: JobHandle,
-        *,
-        slug: str,
-        stage_number: int,
-        video_id: str,
-        chain_shot_detect: bool = True,
-    ) -> None:
-        """Worker for the audit-mode trim of a specific video.
-
-        Resolves the shooter via ``slug`` (so the body is portable to a
-        hosted worker process -- the bulk path used to pass an explicit
-        ``shooter_root`` Path, which can't cross a process boundary).
-
-        Auto-chains shot detection only when the trimmed video is the
-        reviewed primary AND ``chain_shot_detect`` is set; secondaries
-        align to the primary's audit timeline by their own beep, so they
-        do not need their own shot-detection run. The bulk maintenance
-        pass passes ``chain_shot_detect=False`` -- it regenerates derived
-        trim caches without re-running detection over the whole match.
-        """
-        handle.update(progress=0.1, message="Preparing trim...")
-        proj = state.shooter_project(slug)
-        root = state.shooter_root(slug)
-        stg = proj.stage(stage_number)
-        video = stg.find_video_by_id(video_id)
-        if video is None or video.beep_time is None:
-            raise RuntimeError("video or beep disappeared mid-flight")
-        source = proj.resolve_video_path(root, video.path)
-        handle.check_cancel()
-        role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
-        handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
-        audio_helpers.ensure_video_audit_trim(
-            root,
-            stage_number,
-            video,
-            source,
-            video.beep_time,
-            stg.time_seconds,
-            project=proj,
-            runner=_cancellable_runner(handle),
-            ffmpeg_binary=process_runtime().ffmpeg_binary,
-        )
-        handle.update(progress=0.85, message="Saving project...")
-        # Read-modify-write to avoid stomping concurrent edits made
-        # while ffmpeg was running (e.g. another stage's beep review).
-        fresh = state.shooter_project(slug)
-        stg_fresh = fresh.stage(stage_number)
-        v_fresh = stg_fresh.find_video_by_id(video_id)
-        if v_fresh is not None:
-            v_fresh.processed["trim"] = True
-            fresh.save(root)
-        # Worker callback runs in a ThreadPoolExecutor thread with no
-        # event loop; bridge to the async JobBackend via ``asyncio.run``.
-        if (
-            chain_shot_detect
-            and video.role == "primary"
-            and video.beep_reviewed
-            and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
-        ):
-            # Same gate as the detect-then-trim path (#71): don't burn
-            # CLAP / GBDT / PANN cycles on a beep the user hasn't
-            # confirmed. Manual entries pre-set ``beep_reviewed`` to True
-            # so this still runs; the auto-detect path waits for the
-            # user's explicit "Mark reviewed" click which re-fires
-            # shot_detect from there.
-            #
-            # Layered automation gate (#215): a global / project
-            # opt-out can suppress this auto-trigger.
-            resolved = automation_settings.resolve_automation(
-                project_override=fresh.automation,
-            )
-            if resolved.settings.shot_detect_on_beep_verified:
-                asyncio.run(
-                    state.jobs.submit(
-                        kind="shot_detect",
-                        stage_number=stage_number,
-                        args={"slug": slug, "stage_number": stage_number},
-                    )
-                )
-        handle.update(progress=1.0, message="Done")
-
-    def _run_shot_detect(handle: JobHandle, slug: str, stage_number: int, reset: bool = False) -> None:
-        """Worker that runs the 4-voter ensemble on the stage's audit clip.
-
-        Reads the trimmed clip's WAV (extracting it on demand if needed),
-        runs ``splitsmith.ensemble.detect_shots_ensemble`` over the
-        ``[beep .. beep+stage]`` window, and writes both the consensus
-        ``shots[]`` and the full voter-A universe into the audit JSON.
-
-        ``_candidates_pending_audit.candidates`` carries every candidate
-        annotated with per-voter signals (vote_a/b/c/d, ensemble_score,
-        score_c, clap_diff, gunshot_prob) so the audit UI can render the
-        decision trail. ``shots[]`` is seeded from the consensus subset
-        unless it is already populated -- the user retains authority. If
-        ``reset`` is True, ``shots[]`` is wiped first so the user can
-        start over after a bad beep / detector pass.
-
-        Adaptive prior: if the audit JSON already carries
-        ``stage_rounds.expected``, voter C switches to its adaptive
-        top-(K+slack) mode and the apriori boost lifts the top-K
-        confidence-ranked candidates over the consensus line.
-        """
-        proj = state.shooter_project(slug)
-        stg = proj.stage(stage_number)
-        prim = stg.primary()
-        if prim is None or prim.beep_time is None:
-            raise RuntimeError(f"stage {stage_number} has no primary or no beep yet")
-        if stg.time_seconds <= 0:
-            raise RuntimeError(
-                f"stage {stage_number} has time_seconds=0; import a "
-                "scoreboard before running shot detection"
-            )
-        source = proj.resolve_video_path(state.shooter_root(slug), prim.path)
-
-        # Re-detect-all on an old project (and the v1->v2 cache migration in
-        # #298) leaves stages with no trimmed MP4 cached. Without that file,
-        # ensure_audit_audio falls back to the full source WAV -- shot
-        # detection still works, but the audit page then streams the raw
-        # source clip into <video>, where long-GOP 4K MOVs wedge in buffering
-        # on first play. Force the trim here so every shot-detect run leaves
-        # the audit cache in the same state the beep-detect path would have.
-        handle.update(progress=0.05, message="Ensuring audit trim...")
-        try:
-            audio_helpers.ensure_video_audit_trim(
-                state.shooter_root(slug),
-                stage_number,
-                prim,
-                source,
-                prim.beep_time,
-                stg.time_seconds,
-                project=proj,
-                runner=_cancellable_runner(handle),
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
-            trim_fresh = state.shooter_project(slug)
-            try:
-                v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
-            except KeyError:
-                v_fresh = None
-            if v_fresh is not None and not v_fresh.processed.get("trim"):
-                v_fresh.processed["trim"] = True
-                trim_fresh.save(state.shooter_root(slug))
-        except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
-            # Soft failure: detection can still proceed against the source
-            # WAV. ensure_audit_audio's fallback handles the missing trim,
-            # so we log and continue rather than abort the whole job.
-            logger.warning(
-                "shot_detect could not (re)build trim for stage %d: %s",
-                stage_number,
-                exc,
-            )
-
-        handle.update(progress=0.1, message="Preparing audio...")
-        audit = audio_helpers.ensure_audit_audio(
-            state.shooter_root(slug),
-            stage_number,
-            source,
-            prim.beep_time,
-            project=proj,
-            ffmpeg_binary=process_runtime().ffmpeg_binary,
-        )
-        beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
-
-        # Read existing audit JSON up-front: we need ``stage_rounds.expected``
-        # before running detection (it changes voter C's mode and the
-        # apriori boost) and we'll merge results back into the same dict.
-        audit_dir = proj.audit_path(state.shooter_root(slug))
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        audit_file = audit_dir / f"stage{stage_number}.json"
-        if audit_file.exists():
-            try:
-                existing_json = json.loads(audit_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                existing_json = {}
-        else:
-            existing_json = {
-                "stage_number": stg.stage_number,
-                "stage_name": stg.stage_name,
-                "stage_time_seconds": stg.time_seconds,
-                "beep_time": round(beep_in_clip, 4),
-                "shots": [],
-            }
-        # Carry stage_rounds (min_rounds + target breakdown) from the
-        # project state into the audit JSON so the ensemble's adaptive
-        # voter C + apriori boost can consume ``stage_rounds.expected``.
-        # Project value wins over a stale audit-JSON copy: re-running
-        # detection after a scoreboard refresh should pick up the new
-        # round count without manual edits.
-        if stg.stage_rounds is not None:
-            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
-        expected_rounds: int | None = None
-        sr_block = existing_json.get("stage_rounds")
-        if isinstance(sr_block, dict):
-            raw = sr_block.get("expected")
-            if isinstance(raw, int) and raw > 0:
-                expected_rounds = raw
-
-        handle.update(progress=0.2, message="Loading ensemble models...")
-        handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
-        audio_array, sr = beep_detect.load_audio(audit.audio_path)
-        # Camera-class dispatch (issue #143). When the primary's mount
-        # is set, look up handheld vs. headcam thresholds; otherwise
-        # the ensemble falls back to the default class (headcam).
-        cam_class = ensemble_module.camera_class_from_mount(prim.camera_mount)
-        # Voter E opt-in (issue #183). Off by default for the first
-        # release; flip via env var until corpus growth justifies
-        # default-on. Requires the calibration to ship a probe head
-        # AND the source video to be reachable.
-        enable_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
-        ensemble_cfg = ensemble_module.EnsembleConfig(enable_voter_e=enable_e)
-        result = state.compute.detect_stage(
-            audio=audio_array,
-            sample_rate=sr,
-            beep_time_in_clip=beep_in_clip,
-            stage_time_seconds=stg.time_seconds,
-            expected_rounds=expected_rounds,
-            ensemble_config=ensemble_cfg,
-            camera_class=cam_class,
-            camera_make=prim.camera_make,
-            camera_model=prim.camera_model,
-            video_path=source if enable_e else None,
-            source_beep_time=prim.beep_time if enable_e else None,
-        )
-
-        candidates: list[dict[str, Any]] = []
-        for cand in result.candidates:
-            candidates.append(
-                {
-                    "candidate_number": cand.candidate_number,
-                    "time": cand.time,
-                    "ms_after_beep": cand.ms_after_beep,
-                    "peak_amplitude": cand.peak_amplitude,
-                    "confidence": cand.confidence,
-                    "vote_a": cand.vote_a,
-                    "vote_b": cand.vote_b,
-                    "vote_c": cand.vote_c,
-                    "vote_e": cand.vote_e,
-                    "vote_total": cand.vote_total,
-                    "apriori_boost": cand.apriori_boost,
-                    "ensemble_score": cand.ensemble_score,
-                    "score_c": cand.score_c,
-                    "clap_diff": cand.clap_diff,
-                    "gunshot_prob": cand.gunshot_prob,
-                    "voter_e_signal": cand.voter_e_signal,
-                }
-            )
-
-        handle.update(progress=0.85, message="Saving audit JSON...")
-        existing_json["_candidates_pending_audit"] = {
-            "_note": (
-                "3-voter ensemble (PANN gunshot folded into voter C). "
-                "vote_a/b/c=1 means the voter kept the candidate; "
-                "ensemble_score = vote_total + apriori_boost. shots[] is "
-                "seeded from candidates with ensemble_score >= consensus."
-            ),
-            "consensus": result.consensus,
-            "expected_rounds": result.expected_rounds,
-            "candidates": candidates,
-        }
-        if reset:
-            existing_json["shots"] = []
-        seeded_shots = False
-        if not existing_json.get("shots"):
-            kept = [c for c in result.candidates if c.kept]
-            existing_json["shots"] = [
-                {
-                    "shot_number": i,
-                    "candidate_number": c.candidate_number,
-                    "time": c.time,
-                    "ms_after_beep": c.ms_after_beep,
-                    "source": "detected",
-                    "ensemble_votes": c.vote_total,
-                    "apriori_boost": c.apriori_boost,
-                    "ensemble_score": c.ensemble_score,
-                }
-                for i, c in enumerate(kept, start=1)
-            ]
-            seeded_shots = True
-        events = list(existing_json.get("audit_events") or [])
-        events.append(
-            {
-                "ts": _now_iso(),
-                "kind": "shot_detect_run",
-                "payload": {
-                    "candidate_count": len(candidates),
-                    "kept_count": sum(1 for c in result.candidates if c.kept),
-                    "consensus": result.consensus,
-                    "expected_rounds": result.expected_rounds,
-                    "seeded_shots": seeded_shots,
-                },
-            }
-        )
-        existing_json["audit_events"] = events
-
-        # Atomic write + .bak (mirrors put_stage_audit).
-        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        tmp.write_text(json.dumps(existing_json, indent=2) + "\n", encoding="utf-8")
-        if audit_file.exists():
-            if backup.exists():
-                backup.unlink()
-            audit_file.replace(backup)
-        tmp.replace(audit_file)
-
-        # Read-modify-write the project file: a long-running shot_detect
-        # job must not save the snapshot it loaded at start, because the
-        # user may have toggled ``beep_reviewed`` on other stages in the
-        # interim (the review action kicks shot_detect, so concurrent
-        # bursts are the common case). Reloading from disk and mutating
-        # only the targeted field preserves those concurrent edits.
-        fresh = state.shooter_project(slug)
-        stg_fresh = fresh.stage(stage_number)
-        prim_fresh = stg_fresh.primary()
-        if prim_fresh is not None:
-            prim_fresh.processed["shot_detect"] = True
-            fresh.save(state.shooter_root(slug))
-        handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
 
     @app.post("/api/shooters/{slug}/stages/shot-detect")
     async def shot_detect_all_endpoint(slug: str, reset: bool = False) -> JSONResponse:
@@ -6634,127 +7005,6 @@ def create_app(
         )
         return JSONResponse(job.model_dump(mode="json"))
 
-    def _run_export_for_stage(
-        handle: JobHandle, slug: str, stage_number: int, req: ExportStageRequest
-    ) -> None:
-        """Worker for /api/stages/{n}/export. Phases mirror the user's
-        mental model so the JobsPanel message is meaningful."""
-        from ..config import StageData as EngineStageData
-
-        handle.update(progress=0.05, message="Loading project...")
-        proj = state.shooter_project(slug)
-        stg = proj.stage(stage_number)
-        prim = stg.primary()
-        if prim is None or prim.beep_time is None:
-            raise RuntimeError("primary or beep disappeared mid-flight")
-
-        audit_file = proj.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
-        exports_dir = proj.exports_path(state.shooter_root(slug))
-        source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
-        engine_stage = EngineStageData(
-            stage_number=stg.stage_number,
-            stage_name=stg.stage_name,
-            time_seconds=stg.time_seconds,
-            scorecard_updated_at=stg.scorecard_updated_at,
-        )
-
-        # Phase progress is approximate; trim dominates wall time when the
-        # source is large, so we hold at 0.4 through the trim phase and
-        # then jump on the small writers.
-        if req.write_trim:
-            handle.update(progress=0.15, message="Trimming source (lossless stream copy)...")
-        elif req.write_fcpxml:
-            handle.update(progress=0.15, message="Reading audit + preparing FCPXML...")
-        else:
-            handle.update(progress=0.15, message="Reading audit JSON...")
-        handle.check_cancel()
-
-        # Multi-cam (issue #54). Each secondary with a known beep ships
-        # alongside the primary so a single Generate click produces the
-        # complete multi-cam timeline. Cams without a beep yet -- e.g.
-        # registered but ingest didn't finish -- are silently skipped; the
-        # SPA's ingest screen flags those rows separately. The Export page
-        # may also pass ``secondary_video_ids`` to restrict the roster to a
-        # subset (None = include every cam with a beep, the legacy default).
-        allowed_ids: set[str] | None = (
-            set(req.secondary_video_ids) if req.secondary_video_ids is not None else None
-        )
-        secondaries: list[export_helpers.SecondaryExport] = []
-        for sv in stg.videos:
-            if sv.role != "secondary":
-                continue
-            if sv.beep_time is None:
-                continue
-            if allowed_ids is not None and sv.video_id not in allowed_ids:
-                continue
-            sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
-            secondaries.append(
-                export_helpers.SecondaryExport(
-                    video_id=sv.video_id,
-                    source_path=sec_source,
-                    beep_time_in_source=sv.beep_time,
-                    label=f"Cam {sv.video_id}",
-                )
-            )
-
-        try:
-            result = export_helpers.export_stage(
-                request=export_helpers.StageExportRequest(
-                    stage_number=stage_number,
-                    write_trim=req.write_trim,
-                    write_csv=req.write_csv,
-                    write_fcpxml=req.write_fcpxml,
-                    write_report=req.write_report,
-                    write_overlay=req.write_overlay,
-                    overlay_codec=req.overlay_codec,
-                    overlay_max_height=req.overlay_max_height,
-                    overlay_max_fps=req.overlay_max_fps,
-                    overlay_theme=req.overlay_theme,
-                ),
-                audit_path=audit_file,
-                exports_dir=exports_dir,
-                source_video_path=source_video if source_video.exists() else None,
-                stage_data=engine_stage,
-                beep_time_in_source=prim.beep_time,
-                pre_buffer_seconds=proj.trim_pre_buffer_seconds,
-                post_buffer_seconds=proj.trim_post_buffer_seconds,
-                config=Config(),
-                secondaries=secondaries,
-            )
-        except export_helpers.StageExportError as exc:
-            # Surface as a job failure with the exporter's own message so
-            # the JobsPanel row reads "audit JSON has no shots in shots[]"
-            # rather than a stack trace.
-            raise RuntimeError(str(exc)) from exc
-
-        handle.update(progress=0.95, message="Saving project...")
-        proj.updated_at = datetime.now(UTC)
-        proj.save(state.shooter_root(slug))
-
-        # Final message summarises what shipped + flags any skipped
-        # artefacts (FCPXML without a trim, etc). The full list lives in
-        # the report.txt; the user can Reveal it for details.
-        bits: list[str] = []
-        if result.trimmed_video_path is not None:
-            bits.append("trim")
-        if result.secondary_trimmed_paths:
-            n = len(result.secondary_trimmed_paths)
-            bits.append(f"{n} secondary trim{'s' if n != 1 else ''}")
-        if result.csv_path is not None:
-            bits.append("csv")
-        if result.fcpxml_path is not None:
-            bits.append("fcpxml")
-        if result.report_path is not None:
-            bits.append("report")
-        if result.overlay_path is not None:
-            bits.append("overlay")
-        summary = ", ".join(bits) if bits else "nothing written"
-        if result.anomalies:
-            n = len(result.anomalies)
-            word = "anomaly" if n == 1 else "anomalies"
-            summary += f" ({n} {word} -- see report.txt)"
-        handle.update(progress=1.0, message=f"Done: {summary}")
-
     @app.get("/api/match/templates")
     def list_match_templates() -> JSONResponse:
         """List export templates from built-in + user dirs (issue #198).
@@ -6855,209 +7105,6 @@ def create_app(
             args={"slug": slug, "req": req},
         )
         return JSONResponse(job.model_dump(mode="json"))
-
-    def _run_match_export(handle: JobHandle, slug: str, req: MatchExportRequest) -> None:
-        """Worker for the shooter's match-export job. Re-runs the per-stage exporter for
-        any selected stage missing its lossless trim, then composes the
-        match FCPXML.
-        """
-        from ..config import StageData as EngineStageData
-        from . import exports as exports_mod
-
-        handle.update(progress=0.02, message="Loading project...")
-        proj = state.shooter_project(slug)
-        exports_dir = proj.exports_path(state.shooter_root(slug))
-        audit_dir = proj.audit_path(state.shooter_root(slug))
-
-        n = len(req.stage_numbers)
-        # Reserve the last 10% for the match compose step; the rest is
-        # split evenly across per-stage trims (the dominant wall time).
-        # Stages that already have a trim skip ahead within their slice
-        # instead of contributing to the wait.
-        per_stage_share = 0.85 / max(1, n)
-
-        for idx, stage_number in enumerate(req.stage_numbers):
-            handle.check_cancel()
-            stg = proj.stage(stage_number)
-            prim = stg.primary()
-            if prim is None or prim.beep_time is None:
-                raise RuntimeError(f"stage {stage_number}: primary or beep disappeared mid-flight")
-
-            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
-            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
-            overlay_target = exports_dir / f"{base}_overlay.mov"
-
-            # Decide what's missing. The match composer needs the
-            # lossless trim + per-cam trims (when include_secondaries) +
-            # optional overlay. Re-run the per-stage exporter for any
-            # stage where any required artefact isn't on disk.
-            wanted_secondary_ids: set[str] = set()
-            if req.include_secondaries:
-                for sv in stg.videos:
-                    if sv.role == "secondary" and sv.beep_time is not None:
-                        wanted_secondary_ids.add(sv.video_id)
-            secondary_trims_present = all(
-                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
-            )
-            # Treat any non-default overlay format option as "force re-render"
-            # so the dialog's codec / max-height / max-fps choices actually
-            # apply when a stale overlay sits on disk. With all defaults we
-            # keep the legacy "skip if present" behaviour for fast re-stitching.
-            overlay_format_overridden = (
-                req.overlay_codec != "auto"
-                or req.overlay_max_height is not None
-                or req.overlay_max_fps is not None
-                or req.overlay_theme != "splitsmith"
-            )
-            overlay_missing = req.include_overlay and (
-                not overlay_target.exists() or overlay_format_overridden
-            )
-
-            needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
-            if needs_per_stage:
-                handle.update(
-                    progress=0.02 + idx * per_stage_share,
-                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
-                )
-                # Build the secondaries list for the per-stage exporter --
-                # mirrors the single-stage endpoint's logic.
-                secondaries_in: list[export_helpers.SecondaryExport] = []
-                if req.include_secondaries:
-                    for sv in stg.videos:
-                        if sv.role != "secondary" or sv.beep_time is None:
-                            continue
-                        sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
-                        secondaries_in.append(
-                            export_helpers.SecondaryExport(
-                                video_id=sv.video_id,
-                                source_path=sec_source,
-                                beep_time_in_source=sv.beep_time,
-                                label=f"Cam {sv.video_id}",
-                            )
-                        )
-                source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
-                engine_stage = EngineStageData(
-                    stage_number=stg.stage_number,
-                    stage_name=stg.stage_name,
-                    time_seconds=stg.time_seconds,
-                    scorecard_updated_at=stg.scorecard_updated_at,
-                )
-                try:
-                    export_helpers.export_stage(
-                        request=export_helpers.StageExportRequest(
-                            stage_number=stage_number,
-                            write_trim=True,
-                            write_csv=True,
-                            write_fcpxml=True,
-                            write_report=True,
-                            write_overlay=req.include_overlay,
-                            overlay_codec=req.overlay_codec,
-                            overlay_max_height=req.overlay_max_height,
-                            overlay_max_fps=req.overlay_max_fps,
-                            overlay_theme=req.overlay_theme,
-                        ),
-                        audit_path=audit_dir / f"stage{stage_number}.json",
-                        exports_dir=exports_dir,
-                        source_video_path=source_video if source_video.exists() else None,
-                        stage_data=engine_stage,
-                        beep_time_in_source=prim.beep_time,
-                        pre_buffer_seconds=proj.trim_pre_buffer_seconds,
-                        post_buffer_seconds=proj.trim_post_buffer_seconds,
-                        config=Config(),
-                        secondaries=secondaries_in,
-                    )
-                except export_helpers.StageExportError as exc:
-                    raise RuntimeError(f"stage {stage_number}: {exc}") from exc
-            else:
-                handle.update(
-                    progress=0.02 + idx * per_stage_share,
-                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"),
-                )
-
-        handle.check_cancel()
-        handle.update(progress=0.92, message="Stitching match FCPXML...")
-
-        # Re-load the project: the per-stage worker writes processed flags
-        # via project.save() side-effects, so a fresh load picks those up.
-        proj = state.shooter_project(slug)
-        stages_input: list[match_export_helpers.MatchStageInput] = []
-        for stage_number in req.stage_numbers:
-            stg = proj.stage(stage_number)
-            prim = stg.primary()
-            assert prim is not None and prim.beep_time is not None
-            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
-            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
-            audit_path = audit_dir / f"stage{stage_number}.json"
-            overlay_path = exports_dir / f"{base}_overlay.mov"
-            secondaries: list[match_export_helpers.MatchSecondaryInput] = []
-            for sv in stg.videos:
-                if sv.role != "secondary" or sv.beep_time is None:
-                    continue
-                sec_clip_beep = min(proj.trim_pre_buffer_seconds, sv.beep_time)
-                secondaries.append(
-                    match_export_helpers.MatchSecondaryInput(
-                        video_id=sv.video_id,
-                        trimmed_path=exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4",
-                        beep_offset_seconds=sec_clip_beep,
-                        label=f"Cam {sv.video_id}",
-                    )
-                )
-            primary_clip_beep = min(proj.trim_pre_buffer_seconds, prim.beep_time)
-            stages_input.append(
-                match_export_helpers.MatchStageInput(
-                    stage_number=stage_number,
-                    stage_name=stg.stage_name,
-                    audit_path=audit_path,
-                    trimmed_path=trimmed_path,
-                    beep_offset_seconds=primary_clip_beep,
-                    secondaries=tuple(secondaries),
-                    overlay_path=overlay_path,
-                )
-            )
-
-        project_name = req.project_name or proj.name or "match"
-        request_data = match_export_helpers.MatchExportRequestData(
-            stage_numbers=tuple(req.stage_numbers),
-            head_pad_seconds=req.head_pad_seconds,
-            tail_pad_seconds=req.tail_pad_seconds,
-            include_secondaries=req.include_secondaries,
-            include_overlay=req.include_overlay,
-            project_name=project_name,
-            pip_layout=req.pip_layout,
-            output_format=req.output_format,
-            transition_kind=req.transition_kind,
-            transition_duration_seconds=req.transition_duration_seconds,
-            title_kind=req.title_kind,
-            title_duration_seconds=req.title_duration_seconds,
-            intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
-            outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
-            youtube_sidecar=req.youtube_sidecar,
-            youtube_preset=req.youtube_preset,
-        )
-        try:
-            result = match_export_helpers.export_match(
-                stages=stages_input,
-                request=request_data,
-                exports_dir=exports_dir,
-                config=Config().output,
-            )
-        except match_export_helpers.MatchExportError as exc:
-            raise RuntimeError(str(exc)) from exc
-
-        handle.set_result(
-            {
-                "fcpxml_path": str(result.fcpxml_path),
-                "stage_count": result.stage_count,
-                "duration_seconds": result.duration_seconds,
-                "anomalies": result.anomalies,
-            }
-        )
-        anom_word = "anomaly" if len(result.anomalies) == 1 else "anomalies"
-        anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
-        handle.update(
-            progress=1.0,
-            message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
-        )
 
     def _reveal_in_file_manager(resolved: Path) -> None:
         """Launch the OS file manager for ``resolved``, surfacing failures.
@@ -9435,20 +9482,6 @@ def create_app(
                     ),
                 )
             return FileResponse(index, headers={"Cache-Control": "no-cache"})
-
-    # Register the job bodies the dispatch resolves by ``kind``. Done after
-    # any hosted-mode backend swap (``_apply_hosted_mode_wiring``) so
-    # ``submit(kind=...)`` on whichever backend is bound finds the callable.
-    # The bodies close over this process's ``state``; a hosted worker
-    # registers its own identical set against its own state. See
-    # ``JobBodyRegistry``. ``model_download`` is registered earlier (it's
-    # submitted during create_app); lab-only kinds register inside
-    # ``_setup_lab`` (they're never deferred to a hosted worker).
-    state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
-    state.jobs.bodies.register("trim", _run_trim)
-    state.jobs.bodies.register("shot_detect", _run_shot_detect)
-    state.jobs.bodies.register("export", _run_export_for_stage)
-    state.jobs.bodies.register("match_export", _run_match_export)
 
     return app
 

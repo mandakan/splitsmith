@@ -262,3 +262,63 @@ def test_worker_drains_ping_task(hosted_stack: None) -> None:
             pytest.fail("ping job reached 'failed' -- the worker errored running it")
         time.sleep(1.0)
     pytest.fail(f"worker did not drain ping within 30s (last status: {status!r})")
+
+
+def test_worker_runs_compute_job_end_to_end(hosted_stack: None) -> None:
+    """PR-gamma full-transport proof for a real compute kind.
+
+    Mirror exactly what ``PostgresJobBackend.submit`` does -- write a
+    PENDING ``compute_jobs`` row, then defer a ``run_compute_job`` task
+    onto the user's queue -- and assert the separate worker container
+    pops it, runs the ``model_download`` body, and writes ``succeeded``
+    back to the *same* row the SPA polls. ``model_download`` is the one
+    production kind that carries no per-match state, so it proves the
+    cross-process round-trip end to end. Real detection kinds need match
+    metadata reachable from the worker (a later chunk), so they can't be
+    driven through the queue yet.
+
+    Splitting the row-write from the defer (rather than calling the
+    backend's ``submit``) lets the test own the ``job_id`` it polls; the
+    enqueue uses the same ``make_deferrer`` the API does.
+    """
+    import asyncio
+    import uuid
+
+    from splitsmith.queue import make_deferrer
+
+    host_url = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+    user_id = _psql("SELECT id FROM users WHERE email = 'loopback@hosted.local'")
+    assert user_id, "loopback user row missing -- auth bootstrap did not run"
+
+    job_id = uuid.uuid4().hex
+    _psql(
+        "INSERT INTO compute_jobs (id, user_id, kind, status, cancel_requested, acknowledged) "
+        f"VALUES ('{job_id}', '{user_id}', 'model_download', 'pending', false, false)"
+    )
+
+    async def _enqueue() -> None:
+        defer = make_deferrer(host_url)
+        await defer(
+            job_id=job_id,
+            user_id=user_id,
+            kind="model_download",
+            args={},
+            match_id=None,
+        )
+
+    asyncio.run(_enqueue())
+
+    # The worker pops from ``user-<id>`` (it drains all queues), runs the
+    # body, and finalises the row. Baked-in slim models make the body a
+    # near-instant no-op, but allow margin over the worker poll interval.
+    deadline = time.time() + 60.0
+    status = ""
+    while time.time() < deadline:
+        status = _psql(f"SELECT status FROM compute_jobs WHERE id = '{job_id}'")
+        if status == "succeeded":
+            return
+        if status == "failed":
+            err = _psql(f"SELECT error FROM compute_jobs WHERE id = '{job_id}'")
+            pytest.fail(f"compute job reached 'failed': {err!r}")
+        time.sleep(1.0)
+    pytest.fail(f"worker did not finish compute job within 60s (last status: {status!r})")

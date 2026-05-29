@@ -40,9 +40,18 @@ today is zero.
 
 from __future__ import annotations
 
+import asyncio
 import re
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import procrastinate
+
+# Procrastinate task name for the unified compute-job dispatcher. The
+# API enqueues it via :func:`make_deferrer` (``configure_task`` -- no
+# local registration needed); the worker registers the real
+# implementation via :func:`register_compute_task`.
+RUN_COMPUTE_JOB_TASK = "run_compute_job"
 
 
 def _to_psycopg_dsn(sqlalchemy_url: str) -> str:
@@ -112,6 +121,114 @@ def _register_smoke_tasks(app: procrastinate.App) -> None:
         return payload
 
 
+def make_deferrer(database_url: str) -> Callable[..., Awaitable[None]]:
+    """Build the enqueue coroutine injected into :class:`PostgresJobBackend`.
+
+    The returned ``deferrer(job_id, user_id, kind, args, match_id)``
+    enqueues a :data:`RUN_COMPUTE_JOB_TASK` job onto the user's queue.
+    ``configure_task`` defers a task by name without registering its
+    body locally -- the API process only enqueues; the worker owns the
+    implementation. The :class:`procrastinate.App` is built lazily and
+    cached on first defer so merely wiring hosted mode (e.g. against
+    SQLite, where the queue is unused) never touches Postgres; a SQLite
+    URL raises only if a job is actually submitted.
+    """
+    cache: dict[str, procrastinate.App] = {}
+
+    async def _defer(
+        *,
+        job_id: str,
+        user_id: str,
+        kind: str,
+        args: dict[str, Any],
+        match_id: str | None,
+    ) -> None:
+        app = cache.get("app")
+        if app is None:
+            app = build_app(database_url)
+            cache["app"] = app
+        queue = queue_name_for_user(user_id)
+        async with app.open_async():
+            await app.configure_task(name=RUN_COMPUTE_JOB_TASK, queue=queue).defer_async(
+                job_id=job_id,
+                kind=kind,
+                args=args,
+                match_id=match_id,
+            )
+
+    return _defer
+
+
+def register_compute_task(app: procrastinate.App, state: Any) -> None:
+    """Register the worker-side :data:`RUN_COMPUTE_JOB_TASK` on ``app``.
+
+    Bound to a worker ``state`` (built by
+    ``splitsmith.ui.server.build_worker_state``). The task re-sets the
+    ``current_match_*`` ContextVars from the queued ``match_id``,
+    rehydrates any Pydantic ``req`` in ``args``, then drives the shared
+    body via :meth:`PostgresJobBackend.run_job` -- the same ``kind`` ->
+    body mapping the local registry uses. Must be registered before
+    :meth:`procrastinate.App.run_worker_async`.
+    """
+    from .match_registry import MatchNotRegisteredError
+    from .ui.server import current_match_id, current_match_root
+
+    @app.task(name=RUN_COMPUTE_JOB_TASK, queue="default")
+    async def _run_compute_job(
+        *,
+        job_id: str,
+        kind: str,
+        args: dict[str, Any] | None = None,
+        match_id: str | None = None,
+    ) -> None:
+        call_args = _rehydrate_args(kind, args or {})
+
+        def _bind_match() -> None:
+            """Re-set the match ContextVars from the queued ``match_id``.
+
+            Runs on the worker thread inside ``run_job``'s failure
+            capture, so an unresolvable match fails the job cleanly
+            instead of stranding its row at PENDING. The worker resolves
+            a match through its *local* recent-projects list; a separate
+            worker process has none of the API user's matches, so every
+            match-carrying kind fails here today. Only ``model_download``
+            (no ``match_id``) is proven end-to-end on the worker -- making
+            cross-process match metadata reachable is a later chunk.
+            """
+            if match_id is None:
+                return
+            try:
+                root = state.matches.resolve(match_id)
+            except MatchNotRegisteredError as exc:
+                raise RuntimeError(
+                    f"hosted worker cannot resolve match {match_id!r}: its match "
+                    "metadata is not reachable cross-process yet (a later chunk). "
+                    "Only match-less kinds (e.g. model_download) run on the worker today."
+                ) from exc
+            current_match_root.set(root)
+            current_match_id.set(match_id)
+
+        await state.jobs.run_job(job_id=job_id, kind=kind, args=call_args, before_body=_bind_match)
+
+
+def _rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild the typed ``req`` Pydantic model dropped to a dict by
+    :func:`splitsmith.db.job_backend._to_wire_args` for the queue.
+
+    Only ``export`` / ``match_export`` carry a ``req``; every other kind
+    passes through. Importing the request models lazily keeps this module
+    free of a server import at load time (it stays lazy-importable behind
+    ``_hosted_mode_active()``)."""
+    if kind not in ("export", "match_export") or "req" not in args:
+        return args
+    from .ui.server import ExportStageRequest, MatchExportRequest
+
+    model = ExportStageRequest if kind == "export" else MatchExportRequest
+    out = dict(args)
+    out["req"] = model.model_validate(args["req"])
+    return out
+
+
 async def run_worker(
     database_url: str,
     *,
@@ -128,15 +245,24 @@ async def run_worker(
 
     A persistent worker is the whole point of the fleet: it loads the
     ensemble models once (the process-wide ``_ENSEMBLE_RUNTIME``
-    singleton, on the first detection task in PR-gamma) and drains
-    many jobs. For PR-beta the only registered task is ``ping``, so
-    the worker stays light.
+    singleton, on the first detection) and drains many jobs. Building
+    the worker ``state`` wires the per-user ``PostgresJobBackend``
+    (execute-only, no boot sweep) + storage + the shared job bodies.
 
     Installs SIGINT/SIGTERM handlers (Procrastinate default) for
     graceful drain; must therefore run on the main thread, which it
     does via ``asyncio.run`` from the ``splitsmith worker`` command.
+
+    ``build_worker_state`` runs its own ``asyncio.run`` calls (the auth
+    bootstrap upserts the user row synchronously), so it can't run inside
+    this coroutine's event loop -- it's offloaded to a worker thread,
+    which has no running loop of its own.
     """
+    from .ui.server import build_worker_state
+
+    state = await asyncio.to_thread(build_worker_state)
     app = build_app(database_url)
+    register_compute_task(app, state)
     async with app.open_async():
         await app.run_worker_async(queues=queues, concurrency=concurrency)
 

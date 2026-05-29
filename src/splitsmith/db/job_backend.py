@@ -1,18 +1,25 @@
 """Postgres-backed :class:`JobBackend` (doc 04, Tier 2 of doc 10).
 
 Hosted-mode counterpart to :class:`splitsmith.ui.jobs.JobRegistry`'s
-in-memory dict + thread pool. The persistence layer is Postgres; the
-dispatch layer is still an in-process :class:`ThreadPoolExecutor`
-inside the API server. Multi-machine workers via Procrastinate / arq
-+ a closure-free ``submit(task_name, args)`` shape land in a follow-up
-PR -- this one just makes job state survive a server restart, which is
-the gate for the docker-compose smoke test.
+in-memory dict + thread pool. Persistence is Postgres (``compute_jobs``);
+dispatch is out-of-process via Procrastinate (PR-gamma). :meth:`submit`
+writes a ``pending`` row and hands the job to the injected
+:data:`JobDeferrer`, which enqueues it on the per-tenant Procrastinate
+queue. A separate ``splitsmith worker`` process pops it and calls
+:meth:`run_job`, which drives the same ``kind`` -> body callable the
+local :class:`JobRegistry` uses (registered via
+``register_job_bodies(state)``) and writes the terminal status back to
+the row the API created. The SPA polls ``/api/jobs/{id}`` against that
+row throughout.
 
-**Restart hygiene:** at construction the backend sweeps any
-``compute_jobs`` rows for this user that were ``pending`` or
-``running`` and flips them to ``failed`` with an explanatory error
-message. The in-process executor that was supposed to drive them is
-gone; the SPA would otherwise see them stuck in ``pending`` forever.
+The body closures only carry JSON-serialisable ``args`` across the
+process boundary -- a closure can't be pickled onto a queue, which is
+why PR-gamma reshaped ``submit(fn=...)`` to ``submit(kind=, args=)``.
+
+**Restart hygiene:** at construction (when ``sweep_on_boot``) the
+backend sweeps this user's ``pending``/``running`` rows to ``failed``.
+This is correct for the API process on restart; the worker passes
+``sweep_on_boot=False`` so it never fails jobs it is about to run.
 
 **Multi-tenant:** every query filters by
 ``ComputeJobRow.user_id == self._user_id`` (see the
@@ -23,16 +30,15 @@ gone; the SPA would otherwise see them stuck in ``pending`` forever.
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import logging
 import subprocess
 import threading
 import uuid
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -47,6 +53,26 @@ from ..ui.jobs import (
 from .models import ComputeJobRow
 
 logger = logging.getLogger(__name__)
+
+# Enqueue side of the split: ``submit`` calls this with a fully
+# JSON-serialisable payload; the implementation (see
+# ``splitsmith.queue.make_deferrer``) defers a ``run_compute_job``
+# Procrastinate task onto ``queue_name_for_user(user_id)``. Injected so
+# the backend stays free of any ``procrastinate`` import and so tests can
+# pass a fake that records or inline-runs the payload.
+JobDeferrer = Callable[..., Awaitable[None]]
+
+
+def _to_wire_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Project ``args`` to a JSON-serialisable dict for the queue.
+
+    Pydantic models (the ``req`` carried by ``export`` / ``match_export``)
+    become ``model_dump(mode="json")`` dicts; the worker rehydrates them
+    to the typed request before calling the body. Everything else
+    (slug, stage_number, flags) is already JSON-native and passes
+    through untouched.
+    """
+    return {k: (v.model_dump(mode="json") if isinstance(v, BaseModel) else v) for k, v in args.items()}
 
 
 _ROW_TO_JOB_FIELDS = (
@@ -76,13 +102,14 @@ def _row_to_job(row: ComputeJobRow) -> Job:
 class PostgresJobBackend:
     """Per-user :class:`JobBackend` backed by ``compute_jobs``.
 
-    Persistence-only for now: ``submit`` writes a PENDING row and
-    schedules the callable on an in-process :class:`ThreadPoolExecutor`
-    the same way :class:`JobRegistry` does. The DB-touching methods on
-    the Protocol (``submit`` / ``get`` / ``list`` / ``cancel`` /
-    ``acknowledge`` / ``acknowledge_all_failures`` / ``find_active``)
-    are async; the lifecycle methods stay sync because they're
-    process-local concepts (a thread pool, a drain flag).
+    The API process constructs one with a ``deferrer`` and uses
+    :meth:`submit` to enqueue. The worker process constructs one with
+    ``sweep_on_boot=False`` and uses :meth:`run_job` to execute. Both
+    share the persistence + :class:`JobHandle` bridge methods; the
+    DB-touching Protocol methods (``submit`` / ``get`` / ``list`` /
+    ``cancel`` / ``acknowledge`` / ``acknowledge_all_failures`` /
+    ``find_active``) are async; the lifecycle methods stay sync because
+    they're process-local concepts (a drain flag, the subprocess map).
     """
 
     def __init__(
@@ -90,7 +117,8 @@ class PostgresJobBackend:
         session_factory: async_sessionmaker,
         *,
         user_id: str,
-        max_concurrent: int = 2,
+        deferrer: JobDeferrer | None = None,
+        sweep_on_boot: bool = True,
     ) -> None:
         # Defence-in-depth: see :class:`PostgresRecentProjectsStore`
         # for the same fail-loud-on-empty-user_id rationale.
@@ -102,29 +130,29 @@ class PostgresJobBackend:
             )
         self._session_factory = session_factory
         self._user_id = user_id
-        # Populated by ``register_job_bodies(state)`` in ``create_app``,
-        # same as the local :class:`JobRegistry`. The hosted worker
-        # process holds its own identically-populated registry.
+        # ``submit`` hands the enqueue to this; ``None`` means the backend
+        # can persist + execute (``run_job``) but not enqueue. Calling
+        # ``submit`` without one is a programming error (surfaced there).
+        self._deferrer = deferrer
+        # Populated by ``register_job_bodies(state)`` in ``create_app``
+        # (API) and the worker bootstrap, same as the local
+        # :class:`JobRegistry`. Each process holds its own copy.
         self.bodies = JobBodyRegistry()
 
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_concurrent,
-            thread_name_prefix="splitsmith-pgjob",
-        )
         self._lock = threading.RLock()
         self._subprocs: dict[str, subprocess.Popen] = {}
         self._shutting_down = False
         self._drained = threading.Event()
-        # In-process count of jobs we're currently driving on the
-        # executor. Does NOT include rows other API processes may be
-        # working on -- this is purely local-process bookkeeping for
-        # the drain primitive.
+        # In-process count of jobs this process is currently driving in
+        # ``run_job``. Zero in the API process (it only enqueues); the
+        # drain primitive is meaningful in the worker.
         self._inflight = 0
 
-        # Restart hygiene: any rows still marked PENDING or RUNNING
-        # for this user belong to a previous server process that's
-        # gone. Mark them FAILED so the SPA doesn't see ghosts.
-        asyncio.run(self._sweep_stuck_jobs_on_boot())
+        # Restart hygiene: any rows still PENDING/RUNNING for this user
+        # belong to a previous API process that's gone. The worker
+        # disables this -- it must not fail jobs queued for it to run.
+        if sweep_on_boot:
+            asyncio.run(self._sweep_stuck_jobs_on_boot())
 
     # ------------------------------------------------------------------
     # Lifecycle (sync) -- match JobRegistry semantics
@@ -173,8 +201,20 @@ class PostgresJobBackend:
     ) -> Job:
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
-        body = self.bodies.get(kind)
-        call_args = args or {}
+        if self._deferrer is None:
+            raise RuntimeError(
+                "PostgresJobBackend.submit needs a deferrer; this backend was "
+                "built execute-only (worker side). Enqueue from the API process."
+            )
+        # Resolve the body now so an unknown kind fails fast at the
+        # caller -- before a row is written or a job is enqueued.
+        self.bodies.get(kind)
+        # Match identity rides the queue so the worker can re-set the
+        # ``current_match_*`` ContextVars before running the body.
+        # ``model_download`` (submitted at startup) carries no match.
+        from ..ui.server import current_match_id
+
+        match_id = current_match_id.get()
         now = datetime.now(UTC)
         job_id = uuid.uuid4().hex
         row = ComputeJobRow(
@@ -195,18 +235,52 @@ class PostgresJobBackend:
             await session.refresh(row)
             snapshot = _row_to_job(row)
 
-        # Capture ContextVars + dispatch on the executor. Matches
-        # :class:`JobRegistry`'s behaviour so workers that depend on
-        # request-scoped state still see it (Tier 1 step 3 of doc 10).
-        captured_ctx = contextvars.copy_context()
+        await self._deferrer(
+            job_id=job_id,
+            user_id=self._user_id,
+            kind=kind,
+            args=_to_wire_args(args or {}),
+            match_id=match_id,
+        )
+        return snapshot
+
+    async def run_job(
+        self,
+        *,
+        job_id: str,
+        kind: str,
+        args: dict[str, Any] | None = None,
+        before_body: Callable[[], None] | None = None,
+    ) -> None:
+        """Execute a previously-:meth:`submit`-ted job. Worker entry point.
+
+        The worker's Procrastinate task calls this. Looks up the ``kind``
+        -> body callable and drives it through the same persistence path
+        the in-process executor used to. Offloaded to a thread because
+        :meth:`_run` and the :class:`JobHandle` bridge use ``asyncio.run``
+        for their DB writes, which can't run inside the worker's
+        already-running event loop; ``to_thread`` also copies the current
+        context so the ContextVars propagate.
+
+        ``before_body`` runs on the worker thread immediately before the
+        body, *inside* :meth:`_run`'s failure capture. The worker uses it
+        to re-set the ``current_match_*`` ContextVars from the queued
+        ``match_id``; routing it through here (rather than the calling
+        task) means a failure to resolve the match surfaces as a FAILED
+        job row with a legible message instead of an escaped exception
+        that strands the row at PENDING.
+        """
+        body = self.bodies.get(kind)
+        call_args = args or {}
 
         def _ctx_fn(handle: JobHandle) -> None:
-            captured_ctx.run(lambda: body(handle, **call_args))
+            if before_body is not None:
+                before_body()
+            body(handle, **call_args)
 
         with self._lock:
             self._inflight += 1
-        self._executor.submit(self._run, job_id, _ctx_fn)
-        return snapshot
+        await asyncio.to_thread(self._run, job_id, _ctx_fn)
 
     async def get(self, job_id: str) -> Job | None:
         async with self._session_factory() as session:
@@ -394,8 +468,13 @@ class PostgresJobBackend:
             row_snapshot = asyncio.run(self._begin_run(job_id, now))
             if row_snapshot is None:
                 return
-            if row_snapshot.status == JobStatus.CANCELLED.value:
-                # cancel() raced ahead of the worker; nothing to do.
+            if row_snapshot.status in (
+                JobStatus.CANCELLED.value,
+                JobStatus.FAILED.value,
+                JobStatus.SUCCEEDED.value,
+            ):
+                # cancel() (or a duplicate delivery) raced ahead of the
+                # worker; the row is already terminal. Nothing to run.
                 return
 
             handle = JobHandle(self, job_id)  # type: ignore[arg-type]
@@ -426,6 +505,15 @@ class PostgresJobBackend:
             ).scalar_one_or_none()
             if row is None:
                 return None
+            # Already terminal: a ``cancel()`` (or a duplicate delivery)
+            # beat the worker to this row. Don't resurrect it to RUNNING
+            # -- return the snapshot so ``_run`` can skip the body.
+            if row.status in (
+                JobStatus.CANCELLED.value,
+                JobStatus.FAILED.value,
+                JobStatus.SUCCEEDED.value,
+            ):
+                return _row_to_job(row)
             if row.cancel_requested and row.status == JobStatus.PENDING.value:
                 row.status = JobStatus.CANCELLED.value
                 row.finished_at = now

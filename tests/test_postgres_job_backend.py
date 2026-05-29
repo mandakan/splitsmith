@@ -4,11 +4,24 @@ Runs against file-backed SQLite + aiosqlite. The backend is
 engine-agnostic; SQLite suffices to prove the SQL shapes work, the
 per-user filter holds, and the restart-sweep behaviour fires.
 
-Why file-backed and not ``:memory:``: the in-process worker thread
-opens its own event loop via ``asyncio.run`` for each DB call, and
-``sqlite+aiosqlite:///:memory:`` is per-connection in aiosqlite --
-the worker thread would see a fresh empty DB and the row it's
-supposed to update would be invisible. A ``tmp_path``-backed file
+PR-gamma split enqueue from execution: :meth:`submit` writes a PENDING
+row and hands a JSON payload to the injected ``deferrer`` (in
+production, the Procrastinate enqueue); a separate worker process pops
+it and calls :meth:`run_job`. These tests stand in for that worker with
+two fake deferrers:
+
+* an *inline* deferrer that drives :meth:`run_job` immediately, so a
+  ``submit`` runs the body to its terminal state in one call (the common
+  case -- most tests only care about the end state);
+* a *no-op* deferrer that records nothing and runs nothing, leaving the
+  row PENDING so tests can exercise the queued window (cancel-before-pickup,
+  find_active dedupe) and then drive :meth:`run_job` themselves.
+
+Why file-backed and not ``:memory:``: :meth:`run_job` offloads the body
+to a worker thread that opens its own event loop via ``asyncio.run`` for
+each DB call, and ``sqlite+aiosqlite:///:memory:`` is per-connection in
+aiosqlite -- the worker thread would see a fresh empty DB and the row
+it's supposed to update would be invisible. A ``tmp_path``-backed file
 shares state across connections without any extra setup.
 """
 
@@ -30,7 +43,6 @@ from splitsmith.db import (
     sessionmaker,
 )
 from splitsmith.ui.jobs import JobBackend, JobStatus
-from tests.conftest import submit_fn
 
 
 def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0, poll: float = 0.01) -> bool:
@@ -42,12 +54,49 @@ def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0, poll: fl
     return predicate()
 
 
+def _noop_deferrer() -> Callable[..., object]:
+    """A deferrer that records nothing and runs nothing.
+
+    Leaves the submitted row PENDING so tests can exercise the queued
+    window before a worker pops the job.
+    """
+
+    async def _defer(**_payload: object) -> None:
+        return None
+
+    return _defer
+
+
+def _inline_deferrer(box: list[PostgresJobBackend]) -> Callable[..., object]:
+    """A deferrer that runs the job inline via :meth:`run_job`.
+
+    Stands in for the worker round-trip: ``submit`` enqueues, this runs
+    the body to its terminal state before ``submit`` returns. ``box`` is
+    a one-element list holding the backend, populated after construction
+    (the deferrer and the backend reference each other).
+    """
+
+    async def _defer(*, job_id: str, kind: str, args: dict | None = None, **_rest: object) -> None:
+        await box[0].run_job(job_id=job_id, kind=kind, args=args)
+
+    return _defer
+
+
+def _register(backend: PostgresJobBackend, kind: str, fn: Callable[[object], None]) -> None:
+    """Register ``fn`` as the body for ``kind``.
+
+    The adapter swallows any dispatch ``args``; these test callables take
+    only the :class:`JobHandle`.
+    """
+    backend.bodies.register(kind, lambda handle, **_args: fn(handle))
+
+
 def _build_backend_for_new_user(
     tmp_path,
     *,
     email: str = "jobs@thias.se",
-    max_concurrent: int = 2,
     db_name: str = "jobs.sqlite",
+    inline: bool = True,
 ) -> tuple[PostgresJobBackend, sessionmaker, str]:
     db_path = tmp_path / db_name
     engine = create_engine(f"sqlite+aiosqlite:///{db_path}")
@@ -64,7 +113,10 @@ def _build_backend_for_new_user(
             return user.id
 
     user_id = asyncio.run(_setup())
-    backend = PostgresJobBackend(session_factory, user_id=user_id, max_concurrent=max_concurrent)
+    box: list[PostgresJobBackend] = []
+    deferrer = _inline_deferrer(box) if inline else _noop_deferrer()
+    backend = PostgresJobBackend(session_factory, user_id=user_id, deferrer=deferrer)
+    box.append(backend)
     return backend, session_factory, user_id
 
 
@@ -85,6 +137,40 @@ def test_construction_rejects_empty_or_non_string_user_id(bad, tmp_path) -> None
         PostgresJobBackend(factory, user_id=bad)  # type: ignore[arg-type]
 
 
+def test_submit_without_deferrer_raises(tmp_path) -> None:
+    """An execute-only backend (worker side, no deferrer) must refuse to
+    enqueue -- enqueuing belongs to the API process."""
+    db_path = tmp_path / "no-deferrer.sqlite"
+    engine = create_engine(f"sqlite+aiosqlite:///{db_path}")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> str:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            user = User(email="worker@thias.se")
+            s.add(user)
+            await s.commit()
+            await s.refresh(user)
+            return user.id
+
+    user_id = asyncio.run(_setup())
+    backend = PostgresJobBackend(session_factory, user_id=user_id, sweep_on_boot=False)
+    _register(backend, "probe", lambda _h: None)
+    with pytest.raises(RuntimeError, match="needs a deferrer"):
+        asyncio.run(backend.submit(kind="probe"))
+
+
+def test_submit_unknown_kind_fails_fast(tmp_path) -> None:
+    """An unknown kind must fail before any row is written or enqueued."""
+    from splitsmith.ui.jobs import UnknownJobKindError
+
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+    with pytest.raises(UnknownJobKindError):
+        asyncio.run(backend.submit(kind="nope"))
+    assert asyncio.run(backend.list()) == []
+
+
 def test_submit_persists_row_and_runs_to_succeeded(tmp_path) -> None:
     backend, _, _ = _build_backend_for_new_user(tmp_path)
     seen = threading.Event()
@@ -92,7 +178,10 @@ def test_submit_persists_row_and_runs_to_succeeded(tmp_path) -> None:
     def work(_handle):
         seen.set()
 
-    job = asyncio.run(submit_fn(backend, kind="test", fn=work))
+    _register(backend, "test", work)
+    job = asyncio.run(backend.submit(kind="test"))
+    # The returned snapshot reflects the enqueue moment, before the
+    # (inline) worker picks it up.
     assert job.status == JobStatus.PENDING
     assert seen.wait(timeout=2.0)
 
@@ -104,12 +193,13 @@ def test_submit_persists_row_and_runs_to_succeeded(tmp_path) -> None:
 
 
 def test_failed_job_records_error_string(tmp_path) -> None:
-    backend, _, _ = _build_backend_for_new_user(tmp_path, max_concurrent=1)
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
 
     def boom(_handle):
         raise ValueError("oh no")
 
-    job = asyncio.run(submit_fn(backend, kind="test", fn=boom))
+    _register(backend, "test", boom)
+    job = asyncio.run(backend.submit(kind="test"))
     assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
     final = asyncio.run(backend.get(job.id))
     assert final.error == "oh no"
@@ -135,11 +225,14 @@ def test_list_returns_only_this_users_jobs(tmp_path) -> None:
             return alice.id, bob.id
 
     alice_id, bob_id = asyncio.run(_setup())
-    alice = PostgresJobBackend(session_factory, user_id=alice_id, max_concurrent=2)
-    bob = PostgresJobBackend(session_factory, user_id=bob_id, max_concurrent=2)
+    # No-op deferrers: this test only checks row ownership, not execution.
+    alice = PostgresJobBackend(session_factory, user_id=alice_id, deferrer=_noop_deferrer())
+    bob = PostgresJobBackend(session_factory, user_id=bob_id, deferrer=_noop_deferrer())
+    _register(alice, "probe", lambda _h: None)
+    _register(bob, "probe", lambda _h: None)
 
-    a_job = asyncio.run(submit_fn(alice, kind="probe", fn=lambda _h: None))
-    b_job = asyncio.run(submit_fn(bob, kind="probe", fn=lambda _h: None))
+    a_job = asyncio.run(alice.submit(kind="probe"))
+    b_job = asyncio.run(bob.submit(kind="probe"))
     assert a_job.id != b_job.id
 
     # Each backend sees only its user's row, even though both rows
@@ -156,44 +249,58 @@ def test_list_returns_only_this_users_jobs(tmp_path) -> None:
 
 
 def test_cancel_pending_short_circuits_to_cancelled(tmp_path) -> None:
-    """A cancel that arrives before the worker picks the row up should
-    flip status straight to CANCELLED so the SPA can stop polling."""
-    backend, _, _ = _build_backend_for_new_user(tmp_path, max_concurrent=1)
-    proceed = threading.Event()
-    started = threading.Event()
+    """A cancel that arrives before the worker pops the row should flip
+    status straight to CANCELLED so the SPA can stop polling.
 
-    def hold(_h):
-        started.set()
-        proceed.wait(timeout=2.0)
-
-    # Block the executor with one slow job so a second submission
-    # stays PENDING long enough for cancel() to race in.
-    asyncio.run(submit_fn(backend, kind="hold", fn=hold))
-    assert started.wait(timeout=2.0)
-
+    With out-of-process dispatch the PENDING window is real: the no-op
+    deferrer leaves the row queued, so cancel() races in cleanly without
+    needing to block any executor."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
     ran = threading.Event()
 
     def victim(_h):
         ran.set()
 
-    queued = asyncio.run(submit_fn(backend, kind="victim", fn=victim))
+    _register(backend, "victim", victim)
+    queued = asyncio.run(backend.submit(kind="victim"))
     assert asyncio.run(backend.get(queued.id)).status == JobStatus.PENDING
+
     snapshot = asyncio.run(backend.cancel(queued.id))
     assert snapshot is not None
     assert snapshot.status == JobStatus.CANCELLED
-    proceed.set()
-    # The worker should never have run the victim.
+    # The body never ran.
     assert not ran.is_set()
 
 
+def test_run_job_skips_a_cancelled_row(tmp_path) -> None:
+    """If a worker pops a job that was cancelled while PENDING, the body
+    must not run and the row stays CANCELLED."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    ran = threading.Event()
+
+    def victim(_h):
+        ran.set()
+
+    _register(backend, "victim", victim)
+    queued = asyncio.run(backend.submit(kind="victim"))
+    asyncio.run(backend.cancel(queued.id))
+
+    # Worker pops it after the cancel landed.
+    asyncio.run(backend.run_job(job_id=queued.id, kind="victim"))
+    assert not ran.is_set()
+    assert asyncio.run(backend.get(queued.id)).status == JobStatus.CANCELLED
+
+
 def test_acknowledge_and_acknowledge_all_failures(tmp_path) -> None:
-    backend, _, _ = _build_backend_for_new_user(tmp_path, max_concurrent=1)
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
 
     def boom(_h):
         raise ValueError("kaboom")
 
-    a = asyncio.run(submit_fn(backend, kind="a", fn=boom))
-    b = asyncio.run(submit_fn(backend, kind="b", fn=boom))
+    _register(backend, "a", boom)
+    _register(backend, "b", boom)
+    a = asyncio.run(backend.submit(kind="a"))
+    b = asyncio.run(backend.submit(kind="b"))
     assert _wait_until(
         lambda: all(asyncio.run(backend.get(jid)).status == JobStatus.FAILED for jid in (a.id, b.id))
     )
@@ -205,7 +312,8 @@ def test_acknowledge_and_acknowledge_all_failures(tmp_path) -> None:
     assert again == []
 
     # acknowledge on a non-failed job is a no-op snapshot return.
-    succeeded = asyncio.run(submit_fn(backend, kind="ok", fn=lambda _h: None))
+    _register(backend, "ok", lambda _h: None)
+    succeeded = asyncio.run(backend.submit(kind="ok"))
     assert _wait_until(lambda: asyncio.run(backend.get(succeeded.id)).status == JobStatus.SUCCEEDED)
     snap = asyncio.run(backend.acknowledge(succeeded.id))
     assert snap is not None
@@ -213,15 +321,15 @@ def test_acknowledge_and_acknowledge_all_failures(tmp_path) -> None:
 
 
 def test_find_active_dedupe_by_kind_and_stage(tmp_path) -> None:
-    backend, _, _ = _build_backend_for_new_user(tmp_path, max_concurrent=1)
-    proceed = threading.Event()
+    """find_active matches a queued (PENDING) or running job so the SPA
+    can dedupe a resubmission; terminal jobs stop matching."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    _register(backend, "trim", lambda _h: None)
 
-    def slow(_h):
-        proceed.wait(timeout=2.0)
+    job = asyncio.run(backend.submit(kind="trim", stage_number=4))
+    assert asyncio.run(backend.get(job.id)).status == JobStatus.PENDING
 
-    job = asyncio.run(submit_fn(backend, kind="trim", stage_number=4, fn=slow))
-    # While running, find_active matches on (kind, stage).
-    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.RUNNING)
+    # While queued, find_active matches on (kind, stage).
     found = asyncio.run(backend.find_active(kind="trim", stage_number=4))
     assert found is not None and found.id == job.id
 
@@ -230,9 +338,9 @@ def test_find_active_dedupe_by_kind_and_stage(tmp_path) -> None:
     # Different kind: no match.
     assert asyncio.run(backend.find_active(kind="detect_beep", stage_number=4)) is None
 
-    proceed.set()
-    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.SUCCEEDED)
-    # Terminal jobs don't match find_active anymore.
+    # Drive it to completion; terminal jobs don't match find_active.
+    asyncio.run(backend.run_job(job_id=job.id, kind="trim"))
+    assert asyncio.run(backend.get(job.id)).status == JobStatus.SUCCEEDED
     assert asyncio.run(backend.find_active(kind="trim", stage_number=4)) is None
 
 
@@ -286,7 +394,7 @@ def test_restart_sweep_marks_stuck_rows_failed(tmp_path) -> None:
             return uid
 
     user_id = asyncio.run(_setup())
-    backend = PostgresJobBackend(session_factory, user_id=user_id, max_concurrent=1)
+    backend = PostgresJobBackend(session_factory, user_id=user_id)
 
     pending_snap = asyncio.run(backend.get("stuck-pending"))
     running_snap = asyncio.run(backend.get("stuck-running"))
@@ -297,6 +405,40 @@ def test_restart_sweep_marks_stuck_rows_failed(tmp_path) -> None:
     assert running_snap.error == "server restarted before this job finished"
     # Already-terminal rows are untouched.
     assert done_snap.status == JobStatus.SUCCEEDED
+
+
+def test_worker_backend_does_not_sweep_on_boot(tmp_path) -> None:
+    """The worker passes ``sweep_on_boot=False`` so it never fails jobs
+    that were queued for it to run."""
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/worker-sweep.sqlite")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> str:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            user = User(email="worker-sweep@thias.se")
+            s.add(user)
+            await s.commit()
+            await s.refresh(user)
+            uid = user.id
+            s.add(
+                ComputeJobRow(
+                    id="queued-for-worker",
+                    user_id=uid,
+                    kind="trim",
+                    status=JobStatus.PENDING.value,
+                    cancel_requested=False,
+                    acknowledged=False,
+                )
+            )
+            await s.commit()
+            return uid
+
+    user_id = asyncio.run(_setup())
+    backend = PostgresJobBackend(session_factory, user_id=user_id, sweep_on_boot=False)
+    snap = asyncio.run(backend.get("queued-for-worker"))
+    assert snap.status == JobStatus.PENDING
 
 
 def test_restart_sweep_only_touches_this_users_rows(tmp_path) -> None:
@@ -341,7 +483,7 @@ def test_restart_sweep_only_touches_this_users_rows(tmp_path) -> None:
     alice_id, bob_id = asyncio.run(_setup())
     # Only Alice's backend is constructed; Bob's row should stay
     # untouched.
-    PostgresJobBackend(session_factory, user_id=alice_id, max_concurrent=1)
+    PostgresJobBackend(session_factory, user_id=alice_id)
 
     async def _statuses() -> tuple[str, str]:
         async with session_factory() as s:
@@ -362,25 +504,111 @@ def test_restart_sweep_only_touches_this_users_rows(tmp_path) -> None:
 
 def test_progress_message_round_trip_via_handle(tmp_path) -> None:
     """Worker writes via :class:`JobHandle.update`; the persisted row
-    reflects the latest progress + message."""
-    backend, _, _ = _build_backend_for_new_user(tmp_path, max_concurrent=1)
+    reflects the latest progress + message.
+
+    Drives :meth:`run_job` on a background thread with a body that blocks
+    after its first update, so the main thread can observe the mid-run
+    state before the job finalises."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
     proceed = threading.Event()
 
     def slow(handle):
         handle.update(progress=0.25, message="phase 1")
         proceed.wait(timeout=2.0)
 
-    job = asyncio.run(submit_fn(backend, kind="test", fn=slow))
-    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).message == "phase 1")
-    snap = asyncio.run(backend.get(job.id))
-    assert snap.progress == 0.25
-    proceed.set()
+    _register(backend, "test", slow)
+    job = asyncio.run(backend.submit(kind="test"))
+
+    worker = threading.Thread(target=lambda: asyncio.run(backend.run_job(job_id=job.id, kind="test")))
+    worker.start()
+    try:
+        assert _wait_until(lambda: asyncio.run(backend.get(job.id)).message == "phase 1")
+        snap = asyncio.run(backend.get(job.id))
+        assert snap.progress == 0.25
+    finally:
+        proceed.set()
+        worker.join(timeout=2.0)
 
 
 def test_shutdown_blocks_new_submissions(tmp_path) -> None:
-    backend, _, _ = _build_backend_for_new_user(tmp_path, max_concurrent=1)
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
     backend.begin_shutdown()
     from splitsmith.ui.jobs import ShutdownInProgressError
 
     with pytest.raises(ShutdownInProgressError):
-        asyncio.run(submit_fn(backend, kind="probe", fn=lambda _h: None))
+        asyncio.run(backend.submit(kind="probe"))
+
+
+def test_args_reach_the_body_through_submit(tmp_path) -> None:
+    """A non-empty ``args`` payload survives submit -> deferrer -> run_job
+    and arrives at the body as keyword arguments.
+
+    The other tests register through ``_register``, which swallows
+    dispatch args; this one keeps them so a regression that dropped or
+    mangled ``**call_args`` on the way to the body would fail here.
+    """
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+    seen: dict[str, object] = {}
+
+    def body(handle, **kwargs):
+        seen.update(kwargs)
+
+    backend.bodies.register("with_args", body)
+    asyncio.run(backend.submit(kind="with_args", args={"slug": "stage-3", "chain": False}))
+
+    assert seen == {"slug": "stage-3", "chain": False}
+
+
+def test_before_body_failure_fails_the_job_not_strands_it(tmp_path) -> None:
+    """A ``before_body`` that raises (e.g. the worker failing to resolve a
+    match cross-process) must mark the row FAILED with the error message,
+    not let the exception escape and strand the row at PENDING.
+
+    This is the worker's match-binding guard: ``register_compute_task``
+    resolves the match inside ``before_body`` precisely so this capture
+    path applies.
+    """
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    ran = {"body": False}
+
+    def body(handle, **_kwargs):
+        ran["body"] = True
+
+    backend.bodies.register("needs_match", body)
+    job = asyncio.run(backend.submit(kind="needs_match"))
+
+    def before_body():
+        raise RuntimeError("hosted worker cannot resolve match 'abc123'")
+
+    asyncio.run(backend.run_job(job_id=job.id, kind="needs_match", before_body=before_body))
+
+    snap = asyncio.run(backend.get(job.id))
+    assert snap.status == JobStatus.FAILED.value
+    assert "cannot resolve match 'abc123'" in (snap.error or "")
+    assert ran["body"] is False  # body never ran -- binding failed first
+
+
+def test_wire_and_rehydrate_round_trip_a_pydantic_req() -> None:
+    """``_to_wire_args`` projects the Pydantic ``req`` (carried by
+    ``export`` / ``match_export``) to a JSON-native dict so it can ride
+    the queue, and ``_rehydrate_args`` reconstructs the typed model on
+    the worker side. A closure can't be pickled onto a queue, so this
+    JSON round-trip is the whole reason PR-gamma reshaped dispatch.
+    """
+    from splitsmith.db.job_backend import _to_wire_args
+    from splitsmith.queue import _rehydrate_args
+    from splitsmith.ui.server import ExportStageRequest
+
+    req = ExportStageRequest(write_csv=False, overlay_theme="clean")
+    wire = _to_wire_args({"req": req, "video_id": "v1"})
+
+    # On the wire the model is a plain JSON dict, not a BaseModel.
+    assert isinstance(wire["req"], dict)
+    assert wire["req"]["write_csv"] is False
+    assert wire["video_id"] == "v1"
+
+    rehydrated = _rehydrate_args("export", wire)
+    assert isinstance(rehydrated["req"], ExportStageRequest)
+    assert rehydrated["req"] == req
+    # Pass-through kinds are returned untouched (no ``req`` to rebuild).
+    assert _rehydrate_args("trim", {"video_id": "v1"}) == {"video_id": "v1"}
