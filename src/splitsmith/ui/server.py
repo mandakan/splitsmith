@@ -2968,7 +2968,9 @@ async def _register_match_at(
         # open match, so this runs before any worker touches it.
         if state.matches_store is not None:
             await state.matches_store.upsert(match.match_id, name, f"matches/{match.match_id}")
-            _sync_match_json_to_storage(state, resolved, match)
+            # Blocking boto3 PUT/HEAD round-trips -- offload so they don't
+            # stall the event loop (this runs inside an async handler).
+            await asyncio.to_thread(_sync_match_json_to_storage, state, resolved, match)
     return name, match.match_id
 
 
@@ -7898,6 +7900,12 @@ def create_app(
                     )
                 )
         legacy.save(shooter_root)
+        # Hosted: match.json now carries the new slug and S3 is authoritative
+        # (shooter_root always pulls it). Push the updated roster + seed the
+        # new shooter's project.json so the next request -- and the worker --
+        # see the addition instead of the stale opened-at roster. Sync call
+        # is fine: this is a sync endpoint (FastAPI runs it off the loop).
+        _sync_match_json_to_storage(state, match_root, match)
         return list_match_shooters()
 
     @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
@@ -7915,6 +7923,9 @@ def create_app(
             shutil.rmtree(shooter_root, ignore_errors=True)
         match.shooters = [s for s in match.shooters if s != slug]
         match.save(match_root)
+        # Hosted: push the updated roster so the always-pull in shooter_root
+        # doesn't resurrect the removed shooter from the stale S3 copy.
+        _sync_match_json_to_storage(state, match_root, match)
         return list_match_shooters()
 
     @app.post("/api/match/shooters/{slug}/build-trim-caches")

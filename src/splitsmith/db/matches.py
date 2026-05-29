@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .models import MatchRow
@@ -66,7 +67,6 @@ class PostgresMatchStore:
         storage_prefix and bumps ``updated_at`` instead of inserting a
         duplicate (the unique constraint would reject one anyway).
         """
-        now = datetime.now(UTC)
         async with self._session_factory() as session:
             existing = (
                 await session.execute(
@@ -76,20 +76,42 @@ class PostgresMatchStore:
                     )
                 )
             ).scalar_one_or_none()
-            if existing is None:
-                session.add(
-                    MatchRow(
-                        user_id=self._user_id,
-                        match_id=match_id,
-                        name=name,
-                        storage_prefix=storage_prefix,
-                    )
+            if existing is not None:
+                await self._apply_update(session, existing, name, storage_prefix)
+                return
+            session.add(
+                MatchRow(
+                    user_id=self._user_id,
+                    match_id=match_id,
+                    name=name,
+                    storage_prefix=storage_prefix,
                 )
-            else:
-                existing.name = name
-                existing.storage_prefix = storage_prefix
-                existing.updated_at = now
-            await session.commit()
+            )
+            try:
+                await session.commit()
+            except IntegrityError:
+                # A concurrent first-open inserted the same (user_id,
+                # match_id) between our SELECT and INSERT (the SELECT-then-
+                # INSERT is not atomic; both coroutines saw None). The
+                # uq_matches_user_match constraint rejected our row. Roll
+                # back and apply as an update so the open path doesn't 500.
+                await session.rollback()
+                row = (
+                    await session.execute(
+                        select(MatchRow).where(
+                            MatchRow.user_id == self._user_id,
+                            MatchRow.match_id == match_id,
+                        )
+                    )
+                ).scalar_one()
+                await self._apply_update(session, row, name, storage_prefix)
+
+    @staticmethod
+    async def _apply_update(session, row: MatchRow, name: str, storage_prefix: str) -> None:
+        row.name = name
+        row.storage_prefix = storage_prefix
+        row.updated_at = datetime.now(UTC)
+        await session.commit()
 
     async def get(self, match_id: str) -> MatchRow | None:
         """Return the user's match row for ``match_id``, or ``None``."""

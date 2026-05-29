@@ -144,3 +144,36 @@ def test_seam_is_noop_without_storage(tmp_path: Path) -> None:
     with _BoundMatch(api_root, match_id):
         state.pull_audit("alpha", 1)  # no-op
         state.push_audit("alpha", 1)  # no-op
+
+
+def test_added_shooter_survives_shooter_root_always_pull(tmp_path: Path) -> None:
+    """Regression (bug_001): a shooter added after match open must push the
+    updated roster to S3. ``shooter_root`` always-pulls match.json and
+    overwrites local, so without the push it would revert to the opened-at
+    roster and the new shooter would 404 (and corrupt local match.json)."""
+    storage = FilesystemStorage(tmp_path / "s3")
+    state = AppState()
+    state.storage = storage
+
+    api_root = tmp_path / "api"
+    match_id = _scaffold_match(api_root, slug="alpha")
+    # Open: seed match.json ([alpha]) + alpha's project.json to S3.
+    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
+
+    # Add shooter "beta" the way add_match_shooter does: update match.json +
+    # create the shooter's project.json locally, then push (the fix).
+    match = Match.load(api_root)
+    beta_root = Match.shooter_root(api_root, "beta")
+    beta_root.mkdir(parents=True, exist_ok=True)
+    MatchProject.init(beta_root, name="beta")
+    match.shooters.append("beta")
+    match.save(api_root)
+    srv._sync_match_json_to_storage(state, api_root, match)
+
+    # A shooter-scoped request pulls match.json fresh from S3; beta must be
+    # registered (not reverted to the opened-at [alpha] roster). Without the
+    # push above, the pull overwrites local with [alpha] and this 404s.
+    with _BoundMatch(api_root, match_id):
+        assert state.shooter_root("beta").name == "beta"
+    # beta's project.json was seeded to S3 so the worker can read it.
+    assert storage.exists(f"matches/{match_id}/shooters/beta/{PROJECT_FILE}")
