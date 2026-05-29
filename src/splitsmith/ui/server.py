@@ -145,6 +145,7 @@ from ..match_registry import MatchRegistry
 from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from . import audio as audio_helpers
+from . import export_storage
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from .jobs import Job, JobBackend, JobCancelled, JobHandle, JobRegistry, ShutdownInProgressError
@@ -1612,6 +1613,11 @@ def register_job_bodies(state: AppState) -> None:
         if prim is None or prim.beep_time is None:
             raise RuntimeError("primary or beep disappeared mid-flight")
 
+        # Hosted: the audit JSON was written by the detect/audit job on
+        # another worker and lives in storage, not this container's FS. Pull
+        # it before the exporter reads it (no-op in local mode). Without this
+        # a cross-process export reads a stale or absent audit file.
+        state.pull_audit(slug, stage_number)
         audit_file = proj.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
         exports_dir = proj.exports_path(state.shooter_root(slug))
         source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
@@ -1695,6 +1701,10 @@ def register_job_bodies(state: AppState) -> None:
         proj.updated_at = datetime.now(UTC)
         proj.save(state.shooter_root(slug))
 
+        # Hosted: push every produced deliverable to storage so the API
+        # container can serve the download. No-op in local mode.
+        export_storage.push_stage_export_outputs(proj, result)
+
         # Final message summarises what shipped + flags any skipped
         # artefacts (FCPXML without a trim, etc). The full list lives in
         # the report.txt; the user can Reveal it for details.
@@ -1750,6 +1760,14 @@ def register_job_bodies(state: AppState) -> None:
             trimmed_path = exports_dir / f"{base}_trimmed.mp4"
             overlay_target = exports_dir / f"{base}_overlay.mov"
 
+            # Hosted: per-stage artifacts (audit JSON + trims + overlay) may
+            # have been produced + pushed by an earlier `export` job on a
+            # different worker. Pull them so the existence checks below reuse
+            # the cached work instead of re-cutting, and so the composer can
+            # read the audit JSON. No-op in local mode.
+            state.pull_audit(slug, stage_number)
+            export_storage.pull_export_file(proj, trimmed_path)
+
             # Decide what's missing. The match composer needs the
             # lossless trim + per-cam trims (when include_secondaries) +
             # optional overlay. Re-run the per-stage exporter for any
@@ -1759,6 +1777,8 @@ def register_job_bodies(state: AppState) -> None:
                 for sv in stg.videos:
                     if sv.role == "secondary" and sv.beep_time is not None:
                         wanted_secondary_ids.add(sv.video_id)
+            for vid in wanted_secondary_ids:
+                export_storage.pull_export_file(proj, exports_dir / f"{base}_cam_{vid}_trimmed.mp4")
             secondary_trims_present = all(
                 (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
             )
@@ -1772,6 +1792,10 @@ def register_job_bodies(state: AppState) -> None:
                 or req.overlay_max_fps is not None
                 or req.overlay_theme != "splitsmith"
             )
+            # Pull a cached overlay only when we'd actually reuse it -- a
+            # format override forces a re-render, so don't waste the download.
+            if req.include_overlay and not overlay_format_overridden:
+                export_storage.pull_export_file(proj, overlay_target)
             overlay_missing = req.include_overlay and (
                 not overlay_target.exists() or overlay_format_overridden
             )
@@ -1806,7 +1830,7 @@ def register_job_bodies(state: AppState) -> None:
                     scorecard_updated_at=stg.scorecard_updated_at,
                 )
                 try:
-                    export_helpers.export_stage(
+                    recut = export_helpers.export_stage(
                         request=export_helpers.StageExportRequest(
                             stage_number=stage_number,
                             write_trim=True,
@@ -1831,6 +1855,10 @@ def register_job_bodies(state: AppState) -> None:
                     )
                 except export_helpers.StageExportError as exc:
                     raise RuntimeError(f"stage {stage_number}: {exc}") from exc
+                # Hosted: a re-cut here produced the per-stage trims/overlay
+                # on this worker -- push them so other workers + the API
+                # download path see them. No-op in local mode.
+                export_storage.push_stage_export_outputs(proj, recut)
             else:
                 handle.update(
                     progress=0.02 + idx * per_stage_share,
@@ -1906,6 +1934,13 @@ def register_job_bodies(state: AppState) -> None:
             )
         except match_export_helpers.MatchExportError as exc:
             raise RuntimeError(str(exc)) from exc
+
+        # Hosted: push the stitched match deliverable (+ optional YouTube
+        # sidecars, when youtube_sidecar wrote them) so the API can serve the
+        # download. push_export_file skips any that don't exist. No-op local.
+        export_storage.push_export_file(proj, result.fcpxml_path)
+        export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
+        export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".json"))
 
         handle.set_result(
             {
@@ -7095,6 +7130,46 @@ def create_app(
         project = state.shooter_project(slug)
         rows = project.export_overview(state.shooter_root(slug))
         return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
+
+    @app.get("/api/shooters/{slug}/exports/file/{filename:path}")
+    def download_export_file(slug: str, filename: str) -> FileResponse:
+        """Serve an export deliverable for download.
+
+        Local mode reads the file straight off the project's ``exports/``
+        dir. Hosted mode pulls it from object storage first: the worker that
+        produced it ran in a separate container, so the bytes only exist in
+        S3 until this seam mirrors them down (the export analogue of
+        ``stream_video``'s ``pull_trimmed_video``). The SPA uses this in
+        place of "Reveal in Finder", which is meaningless across containers.
+
+        ``filename`` is confined to the ``exports/`` dir: the resolved path
+        must stay inside it, so ``..`` traversal is a 400.
+        """
+        project = state.shooter_project(slug)
+        exports_dir = project.exports_path(state.shooter_root(slug)).resolve()
+        target = (exports_dir / filename).resolve()
+        try:
+            target.relative_to(exports_dir)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="download path must be inside the exports folder"
+            ) from exc
+        if not (target.exists() and target.is_file()):
+            export_storage.pull_export_file(project, target)
+        if not (target.exists() and target.is_file()):
+            raise HTTPException(status_code=404, detail=f"export not found: {filename}")
+        media_types = {
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".fcpxml": "application/xml",
+            ".xml": "application/xml",
+            ".csv": "text/csv",
+            ".txt": "text/plain",
+            ".srt": "application/x-subrip",
+            ".json": "application/json",
+        }
+        media_type = media_types.get(target.suffix.lower(), "application/octet-stream")
+        return FileResponse(target, media_type=media_type, filename=target.name)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/export")
     async def export_stage(slug: str, stage_number: int, req: ExportStageRequest) -> JSONResponse:

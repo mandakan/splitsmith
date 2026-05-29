@@ -189,6 +189,60 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
         assert pulled.read_bytes() == b"MP4DATA"
 
 
+def test_export_media_round_trips_worker_to_api(tmp_path: Path) -> None:
+    """PR-epsilon part 2: a worker produces export deliverables and pushes
+    them to storage; the API mirrors them down via ``pull_export_file``.
+    Proves the scope wiring (``state.shooter_project`` bind) gives matching
+    push/pull keys across two working roots, the same seam the download
+    endpoint serves through."""
+    from splitsmith.ui import export_storage
+    from splitsmith.ui.exports import StageExportResult
+
+    storage = FilesystemStorage(tmp_path / "s3")
+    state = AppState()
+    state.storage = storage
+
+    api_root = tmp_path / "api"
+    match_id = _scaffold_match(api_root)
+    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
+
+    # Worker: produce a stage export bundle on a fresh root and push it.
+    worker_root = tmp_path / "worker"
+    worker_root.mkdir()
+    with _BoundMatch(worker_root, match_id):
+        wproj = state.shooter_project("alpha")
+        ed = wproj.exports_path(state.shooter_root("alpha"))
+        ed.mkdir(parents=True, exist_ok=True)
+        (ed / "stage1_one_trimmed.mp4").write_bytes(b"TRIM")
+        (ed / "stage1_one.fcpxml").write_bytes(b"<fcpxml/>")
+        (ed / "stage1_one_report.txt").write_bytes(b"REPORT")
+        result = StageExportResult(
+            stage_number=1,
+            trimmed_video_path=ed / "stage1_one_trimmed.mp4",
+            csv_path=None,
+            fcpxml_path=ed / "stage1_one.fcpxml",
+            report_path=ed / "stage1_one_report.txt",
+            overlay_path=None,
+            shots_written=2,
+            anomalies=[],
+        )
+        export_storage.push_stage_export_outputs(wproj, result)
+
+    # API: mirrors each deliverable down (the download endpoint's pull seam).
+    with _BoundMatch(api_root, match_id):
+        aproj = state.shooter_project("alpha")
+        aed = aproj.exports_path(state.shooter_root("alpha"))
+        for name, data in [
+            ("stage1_one_trimmed.mp4", b"TRIM"),
+            ("stage1_one.fcpxml", b"<fcpxml/>"),
+            ("stage1_one_report.txt", b"REPORT"),
+        ]:
+            target = aed / name
+            assert not target.exists()
+            assert export_storage.pull_export_file(aproj, target) is True
+            assert target.read_bytes() == data
+
+
 def test_seam_is_noop_without_storage(tmp_path: Path) -> None:
     """Local mode (storage None): pull/push audit + sync are no-ops, no error."""
     state = AppState()  # storage stays None
