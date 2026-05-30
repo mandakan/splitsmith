@@ -104,9 +104,10 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -527,16 +528,30 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
+
 # /api/* paths the auth gate lets through without resolving a user.
 # Anything else under /api/* requires ``state.auth.authenticate_request``
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
 # ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
 # prefix, not by this list.
+class AuthBeginRequest(BaseModel):
+    """Body of ``POST /api/v1/auth/begin`` -- the email to send a magic
+    link to. Module-level (not nested in ``create_app``) so FastAPI's
+    type-hint resolution recognises it as a request body under
+    ``from __future__ import annotations``."""
+
+    email: str
+
+
 _PUBLIC_API_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
         "/api/server/features",
         "/api/shutdown",
+        # Magic-link sign-in start: must be reachable before a user exists.
+        # (The ``/auth/callback`` redemption is not under /api/*, so the
+        # auth gate skips it by prefix.)
+        "/api/v1/auth/begin",
     }
 )
 
@@ -600,6 +615,7 @@ class TenantContext:
     never populated and the properties fall back to the process singletons.
     """
 
+    user_id: str
     recent_projects: user_config.RecentProjectsStore
     scoreboard_identity: user_config.ScoreboardIdentityStore
     jobs: JobBackend
@@ -649,9 +665,17 @@ class AppState:
     # what handlers depend on; ``JobRegistry`` is the local in-memory
     # implementation. In hosted mode the per-request / per-job tenant
     # backend resolves through the ``jobs`` property below; this backing
-    # slot then holds the boot-time backend (bodies registry + restart
-    # sweep). See ``_apply_hosted_mode_wiring``.
+    # slot stays the local ``JobRegistry`` and is consulted only when no
+    # tenant is pinned (boot-time body registration), never for queries.
     _jobs: JobBackend = field(default_factory=JobRegistry)
+    # Process-level ``kind`` -> body registry, shared by the local backend
+    # and every per-request hosted backend. ``register_job_bodies`` (and the
+    # dev routes) register here via ``state.jobs.bodies``; ``__post_init__``
+    # points the backing ``_jobs`` at it, and ``_apply_hosted_mode_wiring``
+    # injects it into each tenant backend. Decoupling the map from any one
+    # backend is what lets hosted mode build backends per request without
+    # re-registering bodies -- and what lets the loopback boot user go away.
+    job_bodies: JobBodyRegistry = field(default_factory=JobBodyRegistry)
     matches: MatchRegistry = field(default_factory=MatchRegistry)
     # Per-user ``matches`` table store (PR-delta). ``None`` in local mode;
     # in hosted mode resolved per request / per job via the property below.
@@ -701,6 +725,24 @@ class AppState:
     # Idempotency latch for /api/shutdown: first call kicks the drain
     # thread, subsequent calls return 202 without rescheduling.
     shutdown_initiated: bool = False
+
+    # Hosted-mode auth config, set by ``_apply_hosted_mode_wiring`` from
+    # ``SPLITSMITH_PUBLIC_URL``. ``public_base_url`` is the origin the
+    # magic-link callback lives under; ``cookie_secure`` is True iff that
+    # origin is https (so the session cookie's Secure flag round-trips
+    # over docker-compose http but is set in production). Both stay at
+    # their defaults in local mode (no auth, no cookies).
+    public_base_url: str | None = None
+    cookie_secure: bool = False
+
+    def __post_init__(self) -> None:
+        # Point the backing local backend's body map at the shared
+        # process-level registry so ``state.jobs.bodies.register(...)`` (used
+        # by ``register_job_bodies`` + the dev routes, all at boot with no
+        # tenant pinned) lands on the same registry the hosted per-tenant
+        # backends read from. In local mode this is also the registry the
+        # JobRegistry executes against.
+        self._jobs.bodies = self.job_bodies
 
     # ------------------------------------------------------------------
     # Per-user stores -- tenant-resolving in hosted mode, singletons local
@@ -3180,14 +3222,16 @@ def _resolve_create_target(
         )
 
     root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
-    user_id = getattr(state.auth, "user_id", None) if state.auth is not None else None
+    tenant = current_tenant.get()
+    user_id = tenant.user_id if tenant is not None else None
     if not user_id:
-        # _apply_hosted_mode_wiring guarantees state.auth.user_id is set
-        # in hosted mode; failing loud here is preferable to silently
-        # writing to a shared prefix.
+        # The auth gate pins ``current_tenant`` for every authenticated
+        # hosted request before the handler runs; reaching here without one
+        # means an unauthenticated request slipped through. Failing loud is
+        # preferable to silently writing to a shared / wrong prefix.
         raise HTTPException(
             status_code=500,
-            detail="hosted mode active but auth.user_id is not set",
+            detail="hosted mode active but no authenticated tenant is bound",
         )
     slug = match_model._slugify(name)
     return root / "users" / user_id / "projects" / slug
@@ -3286,6 +3330,15 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
 
 SPLITSMITH_MODE_ENV = "SPLITSMITH_MODE"
 SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
+# Public origin the deployment is reached at (e.g. https://splitsmith.app,
+# or http://localhost:5174 for docker-compose). Required in hosted mode: it
+# is the base of the magic-link callback URL and decides the session
+# cookie's Secure flag (Secure iff the scheme is https).
+SPLITSMITH_PUBLIC_URL_ENV = "SPLITSMITH_PUBLIC_URL"
+# Magic-link e-mail transport selector. Unset / "console" -> log the link
+# (docker / self-host). A provider name selects its HTTP sender. See
+# ``splitsmith.db.email.build_email_sender``.
+SPLITSMITH_EMAIL_BACKEND_ENV = "SPLITSMITH_EMAIL_BACKEND"
 # S3 / R2 / MinIO wiring. ``SPLITSMITH_S3_BUCKET`` is the single
 # switch: when set in hosted mode, ``_apply_hosted_mode_wiring``
 # constructs an ``S3Storage``. The remaining vars must accompany it
@@ -3369,27 +3422,32 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     ``SPLITSMITH_DATABASE_URL`` to point at a Postgres (or SQLite)
     engine the migrations have already applied.
 
-    Unlike the original single-user wiring, this does **not** bind the
-    per-user stores to one user at boot. It installs
-    :meth:`AppState.build_tenant`, which constructs a fresh
+    This does **not** bind the per-user stores to one user at boot. It
+    installs :meth:`AppState.build_tenant`, which constructs a fresh
     :class:`TenantContext` for a given ``user_id`` -- the auth gate calls
     it per request, the queue task per job. Each context's stores open
     sessions through :func:`tenant_session_factory`, so the ``app.user_id``
     GUC the RLS policies key on is set per transaction for the right user.
 
+    Auth is :class:`MagicLinkAuth`: real per-user accounts created on first
+    sign-in. There is no boot user -- identity is resolved per request from
+    the session cookie. The job-body registry lives on
+    :attr:`AppState.job_bodies` (process-level, shared by the backing local
+    backend and every per-tenant backend), so a per-request backend resolves
+    the same ``kind`` -> body map without re-registration and without a boot
+    backend to hold it.
+
     Process-level resources are built once and shared across tenants: the
-    engine + session factory, the queue deferrer, the S3 client, and the
-    job-body registry (the ``kind`` -> body mapping is a process constant).
-    The ``HostedLoopbackAuth`` boot user is still resolved here -- in this
-    chunk it remains the only user, and the backing job backend uses its id
-    for restart-sweep hygiene. :class:`MagicLinkAuth` replaces it next.
+    engine + session factory, the queue deferrer, and the S3 client (the
+    per-user isolation is purely the S3 key prefix + the per-transaction GUC).
     """
     from ..db import (
-        HostedLoopbackAuth,
+        MagicLinkAuth,
         PostgresJobBackend,
         PostgresMatchStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
+        build_email_sender,
         create_engine,
         sessionmaker,
         tenant_session_factory,
@@ -3402,40 +3460,56 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             f"{SPLITSMITH_MODE_ENV}=hosted requires {SPLITSMITH_DATABASE_URL_ENV} "
             "to be set (e.g. postgresql+asyncpg://user:pass@host/db)"
         )
+    public_url = os.environ.get(SPLITSMITH_PUBLIC_URL_ENV, "").strip()
+    if not public_url:
+        raise RuntimeError(
+            f"{SPLITSMITH_MODE_ENV}=hosted requires {SPLITSMITH_PUBLIC_URL_ENV} "
+            "to be set to the public origin (e.g. https://splitsmith.app, or "
+            "http://localhost:5174 for docker-compose). It is the base of the "
+            "magic-link callback URL and decides the session cookie's Secure "
+            "flag (Secure iff the scheme is https)."
+        )
+    state.public_base_url = public_url.rstrip("/")
+    # Secure cookies require HTTPS; a Secure cookie over http://localhost
+    # never round-trips. Derive it from the public URL scheme so prod
+    # (https) gets Secure and docker / self-host on http does not -- one
+    # source of truth, no separate knob to contradict it.
+    state.cookie_secure = public_url.lower().startswith("https://")
+
     # ``pool_disabled=True`` because the hosted-mode boot path runs
-    # multiple short-lived event loops (HostedLoopbackAuth bootstrap,
-    # PostgresJobBackend sweep, each worker thread's asyncio.run).
-    # asyncpg connections are loop-bound; a pooled connection from
-    # the bootstrap loop would crash on first reuse from the FastAPI
-    # request loop with "attached to a different loop". See
+    # multiple short-lived event loops (each worker thread's asyncio.run,
+    # the model-prefetch submit). asyncpg connections are loop-bound; a
+    # pooled connection from one loop would crash on first reuse from the
+    # FastAPI request loop with "attached to a different loop". See
     # ``splitsmith.db.engine.create_engine`` for the full rationale.
     engine = create_engine(url, pool_disabled=True)
     session_factory = sessionmaker(engine)
 
-    # HostedLoopbackAuth's ``__init__`` runs ``asyncio.run`` to
-    # upsert the user row; that's safe here because ``create_app``
-    # itself runs outside any event loop.
-    auth = HostedLoopbackAuth(session_factory)
-    state.auth = auth
+    # Auth resolves identity from ``users`` / ``sessions`` / ``magic_link_tokens``
+    # -- none under RLS -- so it holds the raw (non-tenant) session factory.
+    # The email transport is pluggable: console by default (docker / self-host),
+    # an HTTP provider when ``SPLITSMITH_EMAIL_BACKEND`` selects one.
+    email_sender = build_email_sender(os.environ.get(SPLITSMITH_EMAIL_BACKEND_ENV))
+    state.auth = MagicLinkAuth(session_factory, email_sender)
 
     # Process-level, tenant-agnostic resources shared by every
     # ``TenantContext``. The deferrer routes per-user inside ``_defer``
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
-    # tenant (only the key prefix is per-user, see ``_build_hosted_storage``);
-    # the body registry is the fixed ``kind`` -> body mapping.
+    # tenant (only the key prefix is per-user, see ``_tenant_s3_storage``).
     deferrer = make_deferrer(url)
     s3_client, s3_bucket = _build_hosted_s3_client()
-    job_bodies = JobBodyRegistry()
 
     def _build_tenant(user_id: str) -> TenantContext:
         # Every per-user store opens its sessions through a tenant-scoped
         # factory that sets the ``app.user_id`` GUC the RLS policies key on
         # (no-op on SQLite). ``sweep_on_boot=False``: a per-request /
         # per-job backend must never fail the in-flight jobs of the user it
-        # was just built for. The shared ``job_bodies`` registry is injected
-        # so a fresh backend resolves the same kinds without re-registration.
+        # was just built for. The shared ``state.job_bodies`` registry is
+        # injected so a fresh backend resolves the same kinds without
+        # re-registration.
         tenant_factory = tenant_session_factory(session_factory, user_id)
         return TenantContext(
+            user_id=user_id,
             recent_projects=PostgresRecentProjectsStore(tenant_factory, user_id=user_id),
             scoreboard_identity=PostgresScoreboardIdentityStore(tenant_factory, user_id=user_id),
             jobs=PostgresJobBackend(
@@ -3443,31 +3517,22 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
                 user_id=user_id,
                 deferrer=deferrer,
                 sweep_on_boot=False,
-                bodies=job_bodies,
+                bodies=state.job_bodies,
             ),
             matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
         )
 
     state._build_tenant = _build_tenant
-
-    # Backing job backend (read via ``state.jobs`` only when no tenant is
-    # pinned, i.e. boot + non-request code). It holds the shared body
-    # registry so ``register_job_bodies(state)`` -- which runs at boot with
-    # no ``current_tenant`` -- populates the registry every per-request
-    # backend shares. The API also uses it for one-shot restart hygiene:
-    # ``sweep_on_boot`` fails the boot user's stranded PENDING/RUNNING rows.
-    # The worker disables the sweep (it must not fail jobs queued for it to
-    # run). Multi-tenant restart hygiene -- sweeping *every* user's stranded
-    # rows, which can't be enumerated per-request -- is a follow-up for when
-    # MagicLinkAuth makes a second user real.
-    state._jobs = PostgresJobBackend(
-        tenant_session_factory(session_factory, auth.user_id),
-        user_id=auth.user_id,
-        deferrer=deferrer,
-        sweep_on_boot=not worker,
-        bodies=job_bodies,
-    )
+    # No boot job backend / no boot restart sweep: with MagicLinkAuth there
+    # is no boot user to bind one to, and an out-of-process Procrastinate
+    # worker (not this API process) now owns running jobs, so failing
+    # PENDING/RUNNING rows on an API restart would be wrong. The backing
+    # ``state._jobs`` stays the local ``JobRegistry`` (bodies shared via
+    # ``__post_init__``) and is consulted only for boot-time body
+    # registration, never for queries -- every request / job pins a tenant
+    # first. Per-tenant restart hygiene (sweep a user's stranded rows on
+    # next sign-in) is a tracked follow-up.
 
     if worker:
         worker_root = Path(
@@ -3696,6 +3761,84 @@ def create_app(
             raise HTTPException(status_code=401, detail="not authenticated")
         return user
 
+    # ----------------------------------------------------------------------
+    # Magic-link auth routes (hosted mode only)
+    # ----------------------------------------------------------------------
+    #
+    # The passwordless sign-in surface. All three 404 in local mode --
+    # ``LoopbackAuth`` has no login flow and the SPA renders no login UI
+    # there. The session cookie is httpOnly + SameSite=Lax + Secure (the
+    # last derived from the public URL scheme, so it round-trips over
+    # docker-compose http but is set in production https). SameSite=Lax is
+    # the CSRF baseline -- the cookie isn't sent on cross-site POSTs;
+    # double-submit CSRF tokens are a tracked follow-up.
+
+    def _set_session_cookie(response: Response, secret: str, expires_at: datetime) -> None:
+        max_age = max(0, int((expires_at - datetime.now(UTC)).total_seconds()))
+        from ..db import SESSION_COOKIE_NAME
+
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=secret,
+            max_age=max_age,
+            httponly=True,
+            secure=state.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+
+    @app.post("/api/v1/auth/begin")
+    async def _auth_begin(payload: AuthBeginRequest) -> JSONResponse:
+        """Start a magic-link sign-in: e-mail a link to ``payload.email``.
+
+        Always 200 regardless of whether the address has an account -- the
+        account is created on redemption and we never reveal existence.
+        """
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        email = payload.email.strip()
+        if not email or "@" not in email:
+            raise HTTPException(status_code=400, detail="a valid email is required")
+        await state.auth.begin_login(email, base_url=state.public_base_url)
+        return JSONResponse({"ok": True})
+
+    @app.get("/auth/callback")
+    async def _auth_callback(token: str, request: Request) -> Response:
+        """Redeem a magic-link token: set the session cookie + redirect.
+
+        On any invalid token (unknown / expired / already used) redirects
+        to ``/login?error=invalid_link`` with one generic reason -- the
+        backend never discloses which links exist.
+        """
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        from ..db import InvalidMagicLinkError
+
+        try:
+            issued = await state.auth.complete_login(
+                token,
+                user_agent=request.headers.get("user-agent"),
+                ip=request.client.host if request.client else None,
+            )
+        except InvalidMagicLinkError:
+            return RedirectResponse(url="/login?error=invalid_link", status_code=303)
+        response = RedirectResponse(url="/", status_code=303)
+        _set_session_cookie(response, issued.secret, issued.expires_at)
+        return response
+
+    @app.post("/api/v1/auth/logout")
+    async def _auth_logout(request: Request, user: User = Depends(get_current_user)) -> JSONResponse:
+        """Revoke the current session + clear the cookie. Auth-gated, so an
+        anonymous caller 401s before reaching here."""
+        from ..db import SESSION_COOKIE_NAME
+
+        cookie = request.cookies.get(SESSION_COOKIE_NAME)
+        if cookie:
+            await state.auth.end_session(cookie)
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return response
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -3739,6 +3882,26 @@ def create_app(
                     "detail": {
                         "code": "match_id_required",
                         "message": "expected /api/matches/{match_id}/...",
+                    }
+                },
+            )
+        # Tenant ownership gate (hosted mode). The in-memory ``MatchRegistry``
+        # below is process-global and keyed by ULID, so without this a user
+        # could resolve another user's match path by guessing its id. The
+        # per-tenant ``matches_store`` is RLS-scoped, so a match the current
+        # tenant doesn't own returns None here -> the same 404 an unknown id
+        # gets (existence and ownership are deliberately indistinguishable).
+        # ``current_tenant`` is pinned by the outer auth gate before this
+        # middleware runs. Local mode (no ``matches_store``) skips the check
+        # -- one operator, nothing to isolate.
+        owner_store = state.matches_store
+        if owner_store is not None and await owner_store.get(match_id) is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": {
+                        "code": "match_not_found",
+                        "message": f"unknown match_id {match_id!r}",
                     }
                 },
             )

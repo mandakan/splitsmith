@@ -5718,6 +5718,7 @@ def test_create_match_manual_hosted_mode_synthesizes_path(
         )
 
         state._build_tenant = lambda uid: TenantContext(
+            user_id=uid,
             recent_projects=JsonRecentProjectsStore(),
             scoreboard_identity=JsonScoreboardIdentityStore(),
             jobs=JobRegistry(),

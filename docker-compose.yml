@@ -93,6 +93,15 @@ services:
       # this role too, so it owns every table it creates.
       SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith_app:splitsmith_app@postgres:5432/splitsmith
       SPLITSMITH_MODE: hosted
+      # Public origin: base of the magic-link callback + decides the
+      # session cookie's Secure flag. http://localhost over the published
+      # 5174 port, so Secure is OFF (a Secure cookie wouldn't round-trip
+      # over plain http) -- production sets an https URL and gets Secure.
+      SPLITSMITH_PUBLIC_URL: http://localhost:5174
+      # Magic-link transport: console logs the link (no mail creds needed
+      # for the dev / smoke stack). The smoke's login dance reads it back
+      # via the in-process MagicLinkAuth against this same Postgres.
+      SPLITSMITH_EMAIL_BACKEND: console
       # S3Storage credentials -- wired once a hosted-mode codepath
       # actually constructs an S3Storage instance. Left in the compose
       # file for forward-compat so the smoke env is the same shape
@@ -139,6 +148,10 @@ services:
       # this role too, so it owns every table it creates.
       SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith_app:splitsmith_app@postgres:5432/splitsmith
       SPLITSMITH_MODE: hosted
+      # The worker has no login routes, but the hosted wiring it shares
+      # with the API requires these; console sender is never exercised here.
+      SPLITSMITH_PUBLIC_URL: http://localhost:5174
+      SPLITSMITH_EMAIL_BACKEND: console
       SPLITSMITH_S3_ENDPOINT_URL: http://minio:9000
       SPLITSMITH_S3_ACCESS_KEY_ID: splitsmith
       SPLITSMITH_S3_SECRET_ACCESS_KEY: splitsmithsplitsmith

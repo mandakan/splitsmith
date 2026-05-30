@@ -21,7 +21,6 @@ what handlers depend on; the future ``PostgresJobBackend`` /
 this DB layer internally without leaking SQL into handler code.
 """
 
-from .auth import HOSTED_LOOPBACK_EMAIL, HostedLoopbackAuth
 from .email import ConsoleEmailSender, EmailSender, build_email_sender
 from .engine import create_engine, sessionmaker, tenant_session_factory
 from .job_backend import PostgresJobBackend
@@ -51,8 +50,6 @@ __all__ = [
     "ComputeJobRow",
     "ConsoleEmailSender",
     "EmailSender",
-    "HOSTED_LOOPBACK_EMAIL",
-    "HostedLoopbackAuth",
     "InvalidMagicLinkError",
     "IssuedSession",
     "LoginChallenge",

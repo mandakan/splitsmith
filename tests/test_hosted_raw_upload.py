@@ -38,6 +38,47 @@ from splitsmith.ui.project import MatchProject  # noqa: E402
 BUCKET = "splitsmith-uploads-test"
 
 
+def _seed_session(url: str, *, email: str = "raw-tester@example.com") -> str:
+    """Insert a user + session row directly and return the raw session
+    secret, so a hosted TestClient can authenticate by carrying it in the
+    ``splitsmith_session`` cookie -- ``MagicLinkAuth`` now 401s anonymous
+    requests, and this avoids driving the full e-mail dance in every test."""
+    import hashlib
+    import secrets
+    from datetime import UTC, datetime, timedelta
+
+    from splitsmith.db import SessionRow, new_ulid, sessionmaker
+    from splitsmith.db import User as UserRow
+
+    secret = secrets.token_urlsafe(32)
+
+    async def _insert() -> None:
+        factory = sessionmaker(create_engine(url))
+        async with factory() as s:
+            uid = new_ulid()
+            s.add(UserRow(id=uid, email=email))
+            s.add(
+                SessionRow(
+                    token_hash=hashlib.sha256(secret.encode("utf-8")).hexdigest(),
+                    user_id=uid,
+                    expires_at=datetime.now(UTC) + timedelta(days=30),
+                )
+            )
+            await s.commit()
+
+    asyncio.run(_insert())
+    return secret
+
+
+def _authed(client: TestClient, url: str) -> TestClient:
+    """Attach a freshly-seeded session cookie to ``client`` so its requests
+    resolve to a real user under MagicLinkAuth."""
+    from splitsmith.db import SESSION_COOKIE_NAME
+
+    client.cookies.set(SESSION_COOKIE_NAME, _seed_session(url))
+    return client
+
+
 @pytest.fixture
 def hosted_db(tmp_path: Path) -> Iterator[str]:
     """SQLite-backed hosted DB so ``create_app`` doesn't need Postgres.
@@ -56,21 +97,20 @@ def hosted_db(tmp_path: Path) -> Iterator[str]:
 
     asyncio.run(_create_all())
 
-    prior_url = os.environ.get("SPLITSMITH_DATABASE_URL")
-    prior_mode = os.environ.get("SPLITSMITH_MODE")
+    prior = {
+        k: os.environ.get(k) for k in ("SPLITSMITH_DATABASE_URL", "SPLITSMITH_MODE", "SPLITSMITH_PUBLIC_URL")
+    }
     os.environ["SPLITSMITH_DATABASE_URL"] = url
     os.environ["SPLITSMITH_MODE"] = "hosted"
+    os.environ["SPLITSMITH_PUBLIC_URL"] = "http://localhost:5174"
     try:
         yield url
     finally:
-        if prior_url is None:
-            os.environ.pop("SPLITSMITH_DATABASE_URL", None)
-        else:
-            os.environ["SPLITSMITH_DATABASE_URL"] = prior_url
-        if prior_mode is None:
-            os.environ.pop("SPLITSMITH_MODE", None)
-        else:
-            os.environ["SPLITSMITH_MODE"] = prior_mode
+        for k, v in prior.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 @pytest.fixture
@@ -109,9 +149,11 @@ def hosted_client(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[t
 
         app = server_mod.create_app()
         with TestClient(app) as client:
+            _authed(client, hosted_db)
             # Drive one request so the per-request tenant builds a storage
-            # the test can read back; ``/api/me/raw`` resolves the tenant
-            # without needing a project. Any captured instance is equivalent.
+            # the test can read back; ``/api/me/recent-projects`` resolves
+            # the tenant without needing a project. Any captured instance is
+            # equivalent.
             client.get("/api/me/recent-projects")
             yield client, captured["storage"]
 
@@ -228,6 +270,7 @@ def test_upload_503_when_storage_unwired(
 
     app = create_app()
     with TestClient(app) as client:
+        _authed(client, hosted_db)
         resp = client.post(
             "/api/me/raw/upload",
             files={"file": ("clip.mp4", io.BytesIO(b"x"), "video/mp4")},
@@ -315,6 +358,7 @@ def test_list_503_when_storage_unwired(hosted_db: str, monkeypatch: pytest.Monke
 
     app = create_app()
     with TestClient(app) as client:
+        _authed(client, hosted_db)
         resp = client.get("/api/me/raw/list")
     assert resp.status_code == 503
 
@@ -357,6 +401,7 @@ def test_delete_503_when_storage_unwired(hosted_db: str, monkeypatch: pytest.Mon
 
     app = create_app()
     with TestClient(app) as client:
+        _authed(client, hosted_db)
         resp = client.delete("/api/me/raw/clip.mp4")
     assert resp.status_code == 503
 
@@ -609,6 +654,7 @@ def test_attach_503_when_storage_unwired(
 
     app = create_app()
     with TestClient(app) as client:
+        _authed(client, hosted_db)
         resp = client.post(
             "/api/matches/anything/shooters/me/raw-videos/attach",
             json={"filename": "clip.mp4"},
