@@ -524,19 +524,23 @@ def serve(
     """Start the splitsmith API in hosted mode (doc 01).
 
     Sets ``SPLITSMITH_MODE=hosted`` so :func:`create_app` swaps in
-    Postgres-backed stores (recent_projects, scoreboard_identity,
-    compute_jobs) and the :class:`HostedLoopbackAuth` bootstrap. The
-    hosted user row is upserted on the first call; restarts reuse the
-    same id.
+    Postgres-backed per-tenant stores (recent_projects,
+    scoreboard_identity, compute_jobs) and the :class:`MagicLinkAuth`
+    backend -- real per-user accounts created on first magic-link sign-in.
 
     Required env vars:
 
     - ``SPLITSMITH_DATABASE_URL`` -- e.g. ``postgresql+asyncpg://``.
       Asynced engine; the same URL Alembic uses.
+    - ``SPLITSMITH_PUBLIC_URL`` -- the public origin (e.g.
+      ``https://splitsmith.app`` or ``http://localhost:5174``). Base of the
+      magic-link callback + decides the session cookie's Secure flag.
 
     Optional:
 
     - ``SPLITSMITH_S3_*`` (when the storage backend is swapped to S3).
+    - ``SPLITSMITH_EMAIL_BACKEND`` -- magic-link transport (default
+      ``console``, which logs the link for docker / self-host).
 
     No browser auto-open, no ``--project`` (paths live in Postgres).
     Defaults bind ``0.0.0.0`` because the typical caller is a

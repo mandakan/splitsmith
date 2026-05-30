@@ -99,9 +99,14 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
     """Record a recent project, list it, restart the API container,
     list it again -- the entry must survive the restart because it
     lives in Postgres rather than process memory."""
+    # Sign in; the session lives in Postgres so it survives the restart
+    # below just like the recent-projects rows do.
+    _, secret = _magic_link_login("recent-projects@example.com")
+    cookies = {"splitsmith_session": secret}
+
     # Pre-state should be empty (the fixture's ``down -v`` wipes
     # Postgres between runs).
-    listed = httpx.get(f"{API_BASE}/api/me/recent-projects", timeout=5.0).json()
+    listed = httpx.get(f"{API_BASE}/api/me/recent-projects", cookies=cookies, timeout=5.0).json()
     assert listed == {"projects": []}
 
     # Record_open isn't exposed as a direct endpoint -- the closest
@@ -116,6 +121,7 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
     resp = httpx.post(
         f"{API_BASE}/api/me/recent-projects/forget",
         json={"path": "/nonexistent/project"},
+        cookies=cookies,
         timeout=5.0,
     )
     assert resp.status_code == 200
@@ -133,38 +139,76 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
     assert restart.returncode == 0, restart.stderr
     _wait_until_healthy()
 
-    listed = httpx.get(f"{API_BASE}/api/me/recent-projects", timeout=5.0).json()
+    listed = httpx.get(f"{API_BASE}/api/me/recent-projects", cookies=cookies, timeout=5.0).json()
     assert listed == {"projects": []}
 
 
-def test_hosted_user_row_persists_in_postgres(hosted_stack: None) -> None:
-    """The HostedLoopbackAuth bootstrap should have created exactly
-    one ``users`` row with the loopback email -- and a restart
-    must reuse it rather than spawning a duplicate (the email's
-    UNIQUE constraint would crash the boot otherwise)."""
-    out = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            str(COMPOSE_FILE),
-            "exec",
-            "-T",
-            "postgres",
-            "psql",
-            "-U",
-            "splitsmith",
-            "-d",
-            "splitsmith",
-            "-At",
-            "-c",
-            "SELECT COUNT(*) FROM users WHERE email = 'loopback@hosted.local'",
-        ],
-        capture_output=True,
-        text=True,
+HOST_DB_URL = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+
+
+def _magic_link_login(email: str) -> tuple[str, str]:
+    """Mint a real session against the compose Postgres and return
+    ``(user_id, session_secret)``.
+
+    Drives the in-process :class:`MagicLinkAuth` (the same backend the API
+    container runs) with a capturing e-mail sender so the test gets the raw
+    token the console transport would only log. The resulting session row
+    lands in the shared Postgres, so the API container's own MagicLinkAuth
+    resolves the returned cookie. This is the cross-process login dance
+    without scraping container logs."""
+    import asyncio
+    from urllib.parse import parse_qs, urlparse
+
+    from splitsmith.db import MagicLinkAuth, create_engine, sessionmaker
+
+    class _Cap:
+        token: str | None = None
+
+        async def send_magic_link(self, *, to: str, link: str) -> None:
+            self.token = parse_qs(urlparse(link).query)["token"][0]
+
+    cap = _Cap()
+
+    async def _flow() -> tuple[str, str]:
+        # One event loop for begin + complete: separate ``asyncio.run`` calls
+        # would each spin a fresh loop and the second would reuse an asyncpg
+        # connection bound to the first ("attached to a different loop").
+        auth = MagicLinkAuth(sessionmaker(create_engine(HOST_DB_URL, pool_disabled=True)), cap)
+        await auth.begin_login(email, base_url=API_BASE)
+        assert cap.token, "capturing sender never received a magic link"
+        issued = await auth.complete_login(cap.token)
+        return issued.user.id, issued.secret
+
+    return asyncio.run(_flow())
+
+
+def test_magic_link_login_round_trip(hosted_stack: None) -> None:
+    """End-to-end auth against the running container: an anonymous /api/me
+    is 401; after a magic-link sign-in the session cookie resolves to the
+    freshly-created account; the public begin endpoint accepts a request."""
+    # Anonymous is rejected.
+    assert httpx.get(f"{API_BASE}/api/me", timeout=5.0).status_code == 401
+
+    # The public begin endpoint is reachable without auth (console sender;
+    # always 200, never reveals account existence).
+    begin = httpx.post(
+        f"{API_BASE}/api/v1/auth/begin",
+        json={"email": "login-roundtrip@example.com"},
+        timeout=5.0,
     )
-    assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "1"
+    assert begin.status_code == 200, begin.text
+
+    # Mint a session the API container will recognise (shared Postgres).
+    user_id, secret = _magic_link_login("login-roundtrip@example.com")
+    me = httpx.get(
+        f"{API_BASE}/api/me",
+        cookies={"splitsmith_session": secret},
+        timeout=5.0,
+    )
+    assert me.status_code == 200, me.text
+    body = me.json()
+    assert body["id"] == user_id
+    assert body["email"] == "login-roundtrip@example.com"
 
 
 def _psql_run(query: str, *, user: str = "splitsmith") -> subprocess.CompletedProcess[str]:
@@ -302,9 +346,8 @@ def test_worker_runs_compute_job_end_to_end(hosted_stack: None) -> None:
 
     from splitsmith.queue import make_deferrer
 
-    host_url = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
-    user_id = _psql("SELECT id FROM users WHERE email = 'loopback@hosted.local'")
-    assert user_id, "loopback user row missing -- auth bootstrap did not run"
+    host_url = HOST_DB_URL
+    user_id, _ = _magic_link_login("worker-compute@example.com")
 
     job_id = uuid.uuid4().hex
     _psql(
@@ -378,6 +421,11 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
 
     from splitsmith.queue import make_deferrer
 
+    # Sign in: create-manual is auth-gated, and the match must be owned by
+    # the same user the worker job runs as.
+    user_id, secret = _magic_link_login("worker-delta@example.com")
+    cookies = {"splitsmith_session": secret}
+
     # 1. Create a match (no video) through the hosted API.
     resp = httpx.post(
         f"{API_BASE}/api/match/create-manual",
@@ -386,6 +434,7 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
             "stages": [{"stage_number": 1, "stage_name": "Stage 1"}],
             "primary_shooter": {"name": "Test Shooter"},
         },
+        cookies=cookies,
         timeout=30.0,
     )
     assert resp.status_code == 200, resp.text
@@ -393,9 +442,6 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     match_id = body["match_id"]
     slug = body["default_shooter_slug"]
     assert match_id and slug, body
-
-    user_id = _psql("SELECT id FROM users WHERE email = 'loopback@hosted.local'")
-    assert user_id
 
     # 2. The API upserted a matches row on real Postgres.
     assert _psql(f"SELECT count(*) FROM matches WHERE match_id = '{match_id}'") == "1"
