@@ -39,7 +39,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..auth import User
@@ -179,22 +180,47 @@ class MagicLinkAuth:
             ).scalar_one_or_none()
             if link_row is None:
                 raise InvalidMagicLinkError("not_found")
-            if link_row.consumed_at is not None:
-                raise InvalidMagicLinkError("consumed")
             if _aware(link_row.expires_at) < now:
                 raise InvalidMagicLinkError("expired")
 
-            # Single-use: stamp before issuing so a concurrent second
-            # redemption of the same token loses the race on commit.
-            link_row.consumed_at = now
+            # Single-use, race-safe: stamp ``consumed_at`` with a conditional
+            # UPDATE guarded on it still being NULL, rather than the read-then-
+            # write above. Two concurrent redemptions of the same token (an
+            # e-mail security scanner prefetching the link, then the user
+            # clicking it, is a real vector) both pass the read checks; the DB
+            # serialises the UPDATEs on the row lock, so exactly one flips
+            # NULL -> now and the other matches zero rows. Without this, both
+            # could mint a session from one link.
+            consumed = await session.execute(
+                update(MagicLinkTokenRow)
+                .where(
+                    MagicLinkTokenRow.token_hash == token_hash,
+                    MagicLinkTokenRow.consumed_at.is_(None),
+                )
+                .values(consumed_at=now)
+            )
+            if consumed.rowcount == 0:
+                raise InvalidMagicLinkError("consumed")
 
             user_row = (
                 await session.execute(select(UserRow).where(UserRow.email == link_row.email))
             ).scalar_one_or_none()
             if user_row is None:
-                user_row = UserRow(email=link_row.email, email_verified_at=now)
-                session.add(user_row)
-                await session.flush()
+                # First sign-in creates the account. Guard the insert in a
+                # savepoint: two concurrent first logins for the same new
+                # email both see None here, and the loser's INSERT hits the
+                # ``users.email`` unique constraint. Catch it, roll back just
+                # the savepoint (the consumed-token UPDATE survives), and
+                # re-select the row the winner committed.
+                try:
+                    async with session.begin_nested():
+                        user_row = UserRow(email=link_row.email, email_verified_at=now)
+                        session.add(user_row)
+                        await session.flush()
+                except IntegrityError:
+                    user_row = (
+                        await session.execute(select(UserRow).where(UserRow.email == link_row.email))
+                    ).scalar_one()
             elif user_row.email_verified_at is None:
                 user_row.email_verified_at = now
 
