@@ -529,11 +529,6 @@ def _raise_scoreboard_http(exc: ScoreboardError) -> None:
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
 
-# /api/* paths the auth gate lets through without resolving a user.
-# Anything else under /api/* requires ``state.auth.authenticate_request``
-# to return a non-None User -- see the ``_auth_gate`` middleware inside
-# ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
-# prefix, not by this list.
 class AuthBeginRequest(BaseModel):
     """Body of ``POST /api/v1/auth/begin`` -- the email to send a magic
     link to. Module-level (not nested in ``create_app``) so FastAPI's
@@ -543,6 +538,11 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+# /api/* paths the auth gate lets through without resolving a user.
+# Anything else under /api/* requires ``state.auth.authenticate_request``
+# to return a non-None User -- see the ``_auth_gate`` middleware inside
+# ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
+# prefix, not by this list.
 _PUBLIC_API_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
@@ -3756,7 +3756,13 @@ def create_app(
         path is ever exercised); in hosted mode an unauthenticated
         request short-circuits here before any handler runs.
         """
-        user = await state.auth.authenticate_request(request)
+        # The auth gate already resolved + stashed the user for gated
+        # ``/api/*`` requests; reuse it to avoid a second
+        # ``authenticate_request`` (a session + user DB lookup in hosted
+        # mode). Fall back to resolving for any caller not behind the gate.
+        user = getattr(request.state, "user", None)
+        if user is None:
+            user = await state.auth.authenticate_request(request)
         if user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
         return user
@@ -3822,6 +3828,14 @@ def create_app(
             )
         except InvalidMagicLinkError:
             return RedirectResponse(url="/login?error=invalid_link", status_code=303)
+        except Exception:
+            # ``/auth/callback`` is a top-level browser navigation, so an
+            # unhandled error here is a bare 500 page mid sign-in (and the
+            # token may already be consumed). Redirect to the login surface
+            # with a generic reason instead -- the user can request a new
+            # link. Logged for diagnosis; the reason isn't disclosed.
+            logger.exception("magic-link callback failed")
+            return RedirectResponse(url="/login?error=invalid_link", status_code=303)
         response = RedirectResponse(url="/", status_code=303)
         _set_session_cookie(response, issued.secret, issued.expires_at)
         return response
@@ -3836,7 +3850,17 @@ def create_app(
         if cookie:
             await state.auth.end_session(cookie)
         response = JSONResponse({"ok": True})
-        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        # Clear with the same attributes the cookie was set with -- stricter
+        # browsers match name + path + Secure/SameSite when deleting, and a
+        # mismatch can leave a Secure cookie in place. (The session is already
+        # revoked server-side, so a stale cookie is benign, but clear cleanly.)
+        response.delete_cookie(
+            SESSION_COOKIE_NAME,
+            path="/",
+            httponly=True,
+            secure=state.cookie_secure,
+            samesite="lax",
+        )
         return response
 
     @app.exception_handler(ShutdownInProgressError)
@@ -3966,6 +3990,12 @@ def create_app(
                 status_code=401,
                 content={"detail": "not authenticated"},
             )
+        # Stash the resolved user on the request so ``get_current_user``
+        # (depended on by ~20 handlers) reuses it instead of issuing a
+        # second ``authenticate_request`` -- a redundant session + user
+        # lookup per request in hosted mode. The scope is shared with the
+        # endpoint, so this propagates downstream.
+        request.state.user = user
         if not hosted:
             return await call_next(request)
         tenant_token = current_tenant.set(state.build_tenant(user.id))
