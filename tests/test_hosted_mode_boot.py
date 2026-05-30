@@ -101,30 +101,82 @@ def test_hosted_loopback_auth_bootstraps_a_user_row(hosted_db: str) -> None:
     assert asyncio.run(_count_rows()) == 1
 
 
-def test_create_app_swaps_in_postgres_backends(hosted_db: str) -> None:
-    """``create_app`` under ``SPLITSMITH_MODE=hosted`` must replace
-    the local-mode default stores on AppState with Postgres-backed
-    impls, all bound to the same user id."""
+def test_create_app_builds_postgres_tenant_per_user(hosted_db: str) -> None:
+    """``create_app`` under ``SPLITSMITH_MODE=hosted`` installs a tenant
+    factory that builds Postgres-backed stores bound to a given user id.
+
+    Stores are resolved per request (via ``current_tenant``) rather than
+    bound to one user at boot, so the assertion is on ``build_tenant`` --
+    every store in the returned context talks to the requested user."""
     from splitsmith.ui.server import create_app
 
     app = create_app()
     state = app.state.splitsmith_state
 
     assert isinstance(state.auth, HostedLoopbackAuth)
-    assert isinstance(state.recent_projects, PostgresRecentProjectsStore)
-    assert isinstance(state.scoreboard_identity, PostgresScoreboardIdentityStore)
-    assert isinstance(state.jobs, PostgresJobBackend)
+
+    uid = state.auth.user_id
+    tenant = state.build_tenant(uid)
+    assert isinstance(tenant.recent_projects, PostgresRecentProjectsStore)
+    assert isinstance(tenant.scoreboard_identity, PostgresScoreboardIdentityStore)
+    assert isinstance(tenant.jobs, PostgresJobBackend)
     # No S3 env vars set in this fixture -> storage stays unwired.
+    assert tenant.storage is None
+
+    # Probe the private attr so the test fails loudly if a future refactor
+    # renames it -- the invariant is that every store in a tenant context
+    # talks to that tenant's user, not the exact attr name.
+    assert tenant.recent_projects._user_id == uid
+    assert tenant.scoreboard_identity._user_id == uid
+    assert tenant.jobs._user_id == uid
+
+    # With no request in flight (no ``current_tenant`` pinned), the
+    # per-user properties fall back to the local-mode singletons. The
+    # hosted wiring never binds them, so ``storage`` reads back as None.
     assert state.storage is None
 
-    expected_uid = state.auth.user_id
-    # Probe the private attr so the test fails loudly if a future
-    # refactor renames it -- the invariant we want to lock down is
-    # that every store talks to the same user, not the exact attr
-    # name.
-    assert state.recent_projects._user_id == expected_uid
-    assert state.scoreboard_identity._user_id == expected_uid
-    assert state.jobs._user_id == expected_uid
+
+def test_per_user_properties_resolve_through_current_tenant(hosted_db: str) -> None:
+    """The seam itself: ``state.jobs`` / ``recent_projects`` /
+    ``scoreboard_identity`` / ``matches_store`` resolve to whichever
+    tenant is pinned in ``current_tenant``, and fall back to the local
+    singleton when none is. Two different tenants must resolve to stores
+    bound to two different user ids through the *same* AppState -- this is
+    what lets one process serve concurrent users without leaking across
+    them once MagicLinkAuth lands."""
+    from splitsmith.ui.server import create_app, current_tenant
+
+    app = create_app()
+    state = app.state.splitsmith_state
+
+    # No tenant pinned -> the backing slot. In hosted mode that's the
+    # boot backend (Postgres, holds the shared body registry + ran the
+    # restart sweep), not a per-request one.
+    assert current_tenant.get() is None
+    assert isinstance(state.jobs, PostgresJobBackend)
+
+    tenant_a = state.build_tenant("user-a")
+    tenant_b = state.build_tenant("user-b")
+
+    token = current_tenant.set(tenant_a)
+    try:
+        assert state.jobs._user_id == "user-a"
+        assert state.recent_projects._user_id == "user-a"
+        assert state.scoreboard_identity._user_id == "user-a"
+        assert state.matches_store._user_id == "user-a"
+    finally:
+        current_tenant.reset(token)
+
+    token = current_tenant.set(tenant_b)
+    try:
+        assert state.jobs._user_id == "user-b"
+        assert state.recent_projects._user_id == "user-b"
+    finally:
+        current_tenant.reset(token)
+
+    # The shared body registry is the same object across tenants (the
+    # kind -> body mapping is a process constant, not per-user).
+    assert tenant_a.jobs.bodies is tenant_b.jobs.bodies
 
 
 def test_hosted_storage_wired_when_bucket_env_set(
@@ -151,11 +203,12 @@ def test_hosted_storage_wired_when_bucket_env_set(
 
     with mock_aws():
         app = create_app()
-    state = app.state.splitsmith_state
+        state = app.state.splitsmith_state
+        storage = state.build_tenant(state.auth.user_id).storage
 
-    assert isinstance(state.storage, S3Storage)
-    assert state.storage.bucket == "splitsmith-test"
-    assert state.storage.prefix == f"users/{state.auth.user_id}/"
+    assert isinstance(storage, S3Storage)
+    assert storage.bucket == "splitsmith-test"
+    assert storage.prefix == f"users/{state.auth.user_id}/"
 
 
 def test_hosted_storage_misconfig_bucket_without_creds_fails_loud(
@@ -183,10 +236,11 @@ def test_recent_projects_round_trip_through_hosted_app(hosted_db: str) -> None:
 
     app = create_app()
     state = app.state.splitsmith_state
+    store = state.build_tenant(state.auth.user_id).recent_projects
 
     async def _flow() -> None:
-        await state.recent_projects.record_open(Path("/tmp/hosted-test-match"), "Hosted Test", kind="match")
-        rows = await state.recent_projects.list()
+        await store.record_open(Path("/tmp/hosted-test-match"), "Hosted Test", kind="match")
+        rows = await store.list()
         assert len(rows) == 1
         assert rows[0].name == "Hosted Test"
         assert rows[0].kind == "match"
