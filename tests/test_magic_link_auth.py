@@ -29,7 +29,9 @@ from splitsmith.db import (
 )
 from splitsmith.db.email import (
     CONSOLE_MAGIC_LINK_MARKER,
+    RESEND_API_URL,
     ConsoleEmailSender,
+    ResendEmailSender,
     build_email_sender,
 )
 from splitsmith.db.magic_link import (
@@ -319,6 +321,52 @@ def test_build_email_sender_defaults_to_console() -> None:
     assert isinstance(build_email_sender("CONSOLE"), ConsoleEmailSender)
 
 
-def test_build_email_sender_fails_loud_on_unimplemented_provider() -> None:
+def test_build_email_sender_fails_loud_on_unknown_provider() -> None:
     with pytest.raises(RuntimeError, match="not supported"):
+        build_email_sender("mailgun")
+
+
+def test_build_email_sender_resend_requires_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("SPLITSMITH_EMAIL_FROM", raising=False)
+    with pytest.raises(RuntimeError, match="RESEND_API_KEY"):
         build_email_sender("resend")
+
+
+def test_build_email_sender_resend_with_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("SPLITSMITH_EMAIL_FROM", "Splitsmith <login@splitsmith.test>")
+    assert isinstance(build_email_sender("resend"), ResendEmailSender)
+
+
+def test_resend_email_sender_posts_the_link() -> None:
+    respx = pytest.importorskip("respx")
+    import httpx
+
+    sender = ResendEmailSender(api_key="re_test", from_address="Splitsmith <login@splitsmith.test>")
+    link = f"{BASE_URL}/auth/callback?token=tok123"
+    with respx.mock:
+        route = respx.post(RESEND_API_URL).mock(return_value=httpx.Response(200, json={"id": "e1"}))
+        asyncio.run(sender.send_magic_link(to="user@example.com", link=link))
+
+    assert route.called
+    req = route.calls.last.request
+    assert req.headers["authorization"] == "Bearer re_test"
+    body = req.content.decode()
+    assert "user@example.com" in body
+    assert "tok123" in body  # the magic link is carried in the body
+
+
+def test_resend_email_sender_raises_on_provider_error() -> None:
+    respx = pytest.importorskip("respx")
+    import httpx
+
+    sender = ResendEmailSender(api_key="re_test", from_address="x@y.z")
+    with respx.mock:
+        respx.post(RESEND_API_URL).mock(
+            return_value=httpx.Response(422, json={"message": "domain not verified"})
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            asyncio.run(
+                sender.send_magic_link(to="user@example.com", link=f"{BASE_URL}/auth/callback?token=x")
+            )

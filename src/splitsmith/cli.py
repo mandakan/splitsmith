@@ -540,7 +540,9 @@ def serve(
 
     - ``SPLITSMITH_S3_*`` (when the storage backend is swapped to S3).
     - ``SPLITSMITH_EMAIL_BACKEND`` -- magic-link transport (default
-      ``console``, which logs the link for docker / self-host).
+      ``console``, which logs the link for docker / self-host). Set to
+      ``resend`` for production, with ``RESEND_API_KEY`` +
+      ``SPLITSMITH_EMAIL_FROM`` (e.g. ``Splitsmith <login@yourdomain>``).
 
     No browser auto-open, no ``--project`` (paths live in Postgres).
     Defaults bind ``0.0.0.0`` because the typical caller is a
