@@ -8,8 +8,13 @@
 # the final image to {venv + ffmpeg + baked models + base} only.
 #
 # Layout:
-# - builder: installs the venv (deps + the splitsmith package, editable)
-#   and bakes the slim ONNX models.
+# - spa: a Node stage that builds ``src/splitsmith/ui_static`` into dist/.
+#   This makes the image self-contained from a clean git checkout -- dist/
+#   is gitignored, so a host-prebuilt dist/ is no longer required (e.g. a
+#   Railway / Cloud build straight from the repo).
+# - builder: installs the venv (deps + the splitsmith package, editable),
+#   overlays the SPA dist from the ``spa`` stage, and bakes the slim ONNX
+#   models.
 # - runtime: a clean base + ffmpeg, with the venv, the (slim) source tree,
 #   alembic migrations, and baked models copied in. No uv, no SPA build
 #   inputs, no chown dup layer.
@@ -20,8 +25,10 @@
 # moves the package into site-packages and breaks that path math (alembic
 # then runs with no script_location). Editable keeps cli.py at
 # /app/src/splitsmith/cli.py so the repo-root assumption holds. The
-# ``.dockerignore`` strips ui_static/node_modules + the TS source so the
-# copied tree stays small; only ui_static/dist (the built SPA) ships.
+# The builder drops the ui_static TS source after copying ``src`` and
+# overlays the dist built in the ``spa`` stage, so only ui_static/dist (the
+# built SPA) ships in the runtime image -- the same lean result as before,
+# now without depending on a host-prebuilt dist.
 #
 # CRITICAL invariant: both stages use the SAME base image so the venv's
 # interpreter path (pyvenv.cfg -> /usr/local/bin/python3.11) stays valid
@@ -40,6 +47,22 @@
 #   API nor a worker downloads models at runtime (doc 04).
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+# --------------------------------------------------------------------------
+# SPA build (Node)
+# --------------------------------------------------------------------------
+# Builds the React SPA into dist/ so the runtime image is self-contained
+# from a clean checkout. node_modules is regenerated here via ``npm ci``
+# (the repo's node_modules + the alternate pnpm lockfile are kept out of the
+# build context by .dockerignore).
+FROM ${NODE_IMAGE} AS spa
+WORKDIR /spa
+# Lockfile-first so ``npm ci`` caches across SPA source-only edits.
+COPY src/splitsmith/ui_static/package.json src/splitsmith/ui_static/package-lock.json ./
+RUN npm ci
+COPY src/splitsmith/ui_static/ ./
+RUN npm run build
 
 # --------------------------------------------------------------------------
 # Builder
@@ -90,12 +113,13 @@ RUN uv sync --frozen --no-dev --extra hosted --no-install-project
 
 # Now the source + the editable project install.
 COPY src ./src
-# Fail fast if the SPA wasn't built before docker build: dist/ is not
-# committed, so a build from a clean checkout would otherwise ship an
-# image that serves no UI. Run ``npm --prefix src/splitsmith/ui_static run
-# build`` first (or copy a prebuilt dist into the context).
-RUN test -f src/splitsmith/ui_static/dist/index.html \
-    || (echo "ERROR: src/splitsmith/ui_static/dist/index.html missing -- build the SPA before docker build" && exit 1)
+# Replace the ui_static tree with just the dist built in the ``spa`` stage:
+# drop the TS source / configs / any stale host dist that rode in via the
+# context, then overlay the freshly-built SPA. The runtime image therefore
+# carries only ui_static/dist regardless of what was (or wasn't) prebuilt on
+# the host -- so ``docker build`` works from a clean git checkout.
+RUN rm -rf src/splitsmith/ui_static
+COPY --from=spa /spa/dist ./src/splitsmith/ui_static/dist
 RUN uv sync --frozen --no-dev --extra hosted
 
 # Slim the venv before it's copied to the runtime stage: drop bundled

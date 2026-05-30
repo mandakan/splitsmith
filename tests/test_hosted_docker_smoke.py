@@ -211,6 +211,20 @@ def test_magic_link_login_round_trip(hosted_stack: None) -> None:
     assert body["email"] == "login-roundtrip@example.com"
 
 
+def test_spa_index_served_from_in_image_build(hosted_stack: None) -> None:
+    """The SPA is built inside the image (Node ``spa`` stage), not from a
+    host-prebuilt dist/. Prove the runtime container actually serves it: a
+    non-API route returns the SPA shell, with a content-addressed asset
+    reference the Vite build emitted."""
+    resp = httpx.get(f"{API_BASE}/login", timeout=5.0)
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert '<div id="root">' in resp.text
+    # Vite emits a hashed module bundle under /assets/ -- its presence proves
+    # the in-image build produced + wired the dist, not just an empty shell.
+    assert "/assets/index-" in resp.text
+
+
 def _psql_run(query: str, *, user: str = "splitsmith") -> subprocess.CompletedProcess[str]:
     """Run ``query`` in the compose Postgres as ``user`` and return the
     completed process (no return-code assertion).
