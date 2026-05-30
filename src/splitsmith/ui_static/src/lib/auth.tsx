@@ -38,11 +38,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(me);
       setStatus("authed");
     } catch (err) {
-      // 401 is the expected "signed out" path; any other failure also
-      // resolves to anonymous so the login surface (not a broken shell)
-      // is what an unauthenticated visitor sees.
+      // 401 is the genuine "signed out" path. A transport/5xx failure is
+      // NOT proof of being signed out, but on the initial resolve we have
+      // no prior session to preserve, so both fall through to anonymous --
+      // the login surface, not a broken shell. The desktop app is protected
+      // separately: AuthGate never redirects in local mode (see App.tsx),
+      // so a flaky /api/me there can't strand the user on /login.
       if (!isUnauthorized(err)) {
-        // Surface unexpected failures for debugging without blocking render.
         console.warn("auth: /api/me failed", err);
       }
       setUser(null);
@@ -51,12 +53,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = React.useCallback(async () => {
-    try {
-      await api.authLogout();
-    } finally {
-      setUser(null);
-      setStatus("anon");
-    }
+    // Only claim signed-out once the server actually revoked the session.
+    // If authLogout throws (network / 5xx) the cookie is still live, so we
+    // must NOT flip the UI to anonymous -- that would falsely report a
+    // logout on a shared machine. The error propagates so the caller can
+    // reset its busy state; the user stays signed in and can retry.
+    await api.authLogout();
+    setUser(null);
+    setStatus("anon");
   }, []);
 
   React.useEffect(() => {

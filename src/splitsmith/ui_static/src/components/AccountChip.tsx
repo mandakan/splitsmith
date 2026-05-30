@@ -27,6 +27,11 @@ export function AccountChip({ className }: { className?: string }) {
     setBusy(true);
     try {
       await logout();
+    } catch {
+      // logout() only flips to anon on a confirmed server revoke; if it
+      // threw, the session is still live and the user stays signed in.
+      // Swallow so it isn't an unhandled rejection -- the button re-enables
+      // (finally) and they can retry.
     } finally {
       setBusy(false);
     }

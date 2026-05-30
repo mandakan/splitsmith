@@ -13,6 +13,7 @@ import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
 import { ModeProvider } from "@/lib/mode";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { useDeploymentMode } from "@/lib/features";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
@@ -78,14 +79,17 @@ function LegacyMatchRedirect() {
 
 /* Auth gate. Blocks the app on the initial ``/api/me`` resolve so an
  * anonymous hosted visitor never flashes protected chrome, then:
- *  - ``authed`` (local mode is always authed via the loopback user; hosted
- *    when the session cookie resolves) -> render the app,
+ *  - ``authed`` (hosted, when the session cookie resolves) -> render the app,
  *  - ``anon`` (hosted, signed out) -> redirect to /login, except when
  *    already there.
- * Local mode never reaches the ``anon`` branch -- ``/api/me`` returns the
- * loopback user -- so the desktop app sees no login surface. */
+ * Local mode is NEVER redirected: the login surface is hosted-only, so even
+ * if ``/api/me`` fails for a transient reason in local mode (which would set
+ * status to ``anon``), the desktop user must not be stranded on /login. The
+ * mode check is the hard guarantee; ``/api/me`` returning the loopback user
+ * is the normal-case reason status stays ``authed`` there. */
 function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
+  const mode = useDeploymentMode();
   const location = useLocation();
   if (status === "loading") {
     return (
@@ -100,6 +104,8 @@ function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
+  // Desktop is never gated -- no login route, no redirect, whatever /api/me did.
+  if (mode === "local") return <>{children}</>;
   if (status === "anon" && location.pathname !== "/login") {
     return <Navigate to="/login" replace />;
   }

@@ -15,7 +15,7 @@
  */
 
 import * as React from "react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, Mail } from "lucide-react";
 
 import { Brand } from "@/components/ui/Brand";
@@ -146,15 +146,6 @@ export function Login() {
             </form>
           )}
         </div>
-
-        <p className="mt-6 text-center text-xs text-subtle">
-          <Link
-            to="/"
-            className="underline-offset-4 transition-colors hover:text-muted hover:underline"
-          >
-            Back to splitsmith
-          </Link>
-        </p>
       </div>
     </main>
   );
