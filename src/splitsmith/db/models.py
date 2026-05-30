@@ -114,6 +114,95 @@ class User(Base):
         return f"<User id={self.id!r} email={self.email!r}>"
 
 
+class MagicLinkTokenRow(Base):
+    """One row per issued magic-link challenge (doc 02).
+
+    The passwordless login primitive: ``begin_login(email)`` inserts a row
+    with a freshly-minted high-entropy token (we store only its SHA-256
+    hash, never the raw value -- a DB leak must not yield usable links),
+    a 15-minute expiry, and the requested email. ``complete_login(token)``
+    hashes the presented token, finds the row, checks it is unexpired and
+    unconsumed, then stamps ``consumed_at`` so it is single-use.
+
+    The ``email`` is recorded as presented (not necessarily an existing
+    ``users`` row -- first sign-in creates the account on redemption), so
+    this table has **no** FK to ``users`` and is **not** under RLS: it is
+    auth infrastructure resolved before any ``app.user_id`` GUC exists,
+    same reasoning as ``users`` itself.
+    """
+
+    __tablename__ = "magic_link_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    # SHA-256 hex of the raw token the email link carries. Unique so a
+    # redemption is an indexed point lookup; the raw token never lands here.
+    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Single-use latch: set on the first successful redemption. A second
+    # redemption of the same token finds it non-null and is rejected.
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<MagicLinkTokenRow email={self.email!r} consumed={self.consumed_at is not None}>"
+
+
+class SessionRow(Base):
+    """One row per authenticated browser session (doc 02).
+
+    Created on a successful magic-link redemption; the browser carries an
+    httpOnly cookie holding the raw session secret, and we store only its
+    SHA-256 hash (``token_hash``) so the cookie is a bearer capability a DB
+    leak can't reconstruct. ``authenticate_request`` hashes the cookie,
+    looks the row up, and resolves it back to a ``users`` row.
+
+    Sessions live here (not in an auth vendor) so we can list a user's
+    devices, revoke one session without nuking the rest, and hold
+    last-used / UA metadata. 30-day sliding expiry: ``expires_at`` extends
+    on activity (bumped lazily to avoid a write per request).
+
+    Like ``magic_link_tokens`` this is auth infrastructure resolved before
+    any GUC exists, so it is **not** under RLS -- the ``user_id`` FK +
+    ``token_hash`` lookup are the isolation boundary.
+    """
+
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    # SHA-256 hex of the raw session secret stored in the cookie.
+    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Stored as text (not a Postgres INET) so the same model builds the
+    # SQLite test schema; the column is metadata for the "your devices"
+    # UI, never queried as a network type.
+    ip: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<SessionRow id={self.id!r} user_id={self.user_id!r}>"
+
+
 class RecentProjectRow(Base):
     """One row per (user, project path) the user has opened.
 

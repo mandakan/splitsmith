@@ -22,25 +22,52 @@ this DB layer internally without leaking SQL into handler code.
 """
 
 from .auth import HOSTED_LOOPBACK_EMAIL, HostedLoopbackAuth
+from .email import ConsoleEmailSender, EmailSender, build_email_sender
 from .engine import create_engine, sessionmaker, tenant_session_factory
 from .job_backend import PostgresJobBackend
+from .magic_link import (
+    SESSION_COOKIE_NAME,
+    InvalidMagicLinkError,
+    IssuedSession,
+    LoginChallenge,
+    MagicLinkAuth,
+)
 from .matches import PostgresMatchStore
-from .models import Base, ComputeJobRow, MatchRow, RecentProjectRow, User, new_ulid
+from .models import (
+    Base,
+    ComputeJobRow,
+    MagicLinkTokenRow,
+    MatchRow,
+    RecentProjectRow,
+    SessionRow,
+    User,
+    new_ulid,
+)
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
 
 __all__ = [
     "Base",
     "ComputeJobRow",
+    "ConsoleEmailSender",
+    "EmailSender",
     "HOSTED_LOOPBACK_EMAIL",
     "HostedLoopbackAuth",
+    "InvalidMagicLinkError",
+    "IssuedSession",
+    "LoginChallenge",
+    "MagicLinkAuth",
+    "MagicLinkTokenRow",
     "MatchRow",
     "PostgresJobBackend",
     "PostgresMatchStore",
     "PostgresRecentProjectsStore",
     "PostgresScoreboardIdentityStore",
     "RecentProjectRow",
+    "SESSION_COOKIE_NAME",
+    "SessionRow",
     "User",
+    "build_email_sender",
     "create_engine",
     "new_ulid",
     "sessionmaker",
