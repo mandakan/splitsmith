@@ -21,6 +21,7 @@ import {
   useParams,
 } from "react-router-dom";
 
+import { AccountChip } from "@/components/AccountChip";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, IconButton } from "@/components/ui";
 import {
@@ -363,6 +364,7 @@ export function MatchShell() {
             />
           ) : null}
           <div className="flex-1" />
+          <AccountChip />
           <IconButton variant="subtle" size="md" label="Help">
             <HelpCircle className="size-[18px]" />
           </IconButton>

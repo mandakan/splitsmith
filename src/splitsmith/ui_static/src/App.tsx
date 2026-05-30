@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -12,7 +12,10 @@ import { AppShell } from "@/components/AppShell";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
 import { ModeProvider } from "@/lib/mode";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { useDeploymentMode } from "@/lib/features";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
+import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
 import { BeepReview } from "@/pages/BeepReview";
 import { Coach } from "@/pages/Coach";
@@ -74,11 +77,49 @@ function LegacyMatchRedirect() {
   return <Navigate to={target} replace />;
 }
 
+/* Auth gate. Blocks the app on the initial ``/api/me`` resolve so an
+ * anonymous hosted visitor never flashes protected chrome, then:
+ *  - ``authed`` (hosted, when the session cookie resolves) -> render the app,
+ *  - ``anon`` (hosted, signed out) -> redirect to /login, except when
+ *    already there.
+ * Local mode is NEVER redirected: the login surface is hosted-only, so even
+ * if ``/api/me`` fails for a transient reason in local mode (which would set
+ * status to ``anon``), the desktop user must not be stranded on /login. The
+ * mode check is the hard guarantee; ``/api/me`` returning the loopback user
+ * is the normal-case reason status stays ``authed`` there. */
+function AuthGate({ children }: { children: ReactNode }) {
+  const { status } = useAuth();
+  const mode = useDeploymentMode();
+  const location = useLocation();
+  if (status === "loading") {
+    return (
+      <div
+        className="grid min-h-dvh place-items-center bg-bg"
+        role="status"
+        aria-label="Loading"
+      >
+        <span className="font-mono text-xs uppercase tracking-[0.16em] text-subtle">
+          Standby...
+        </span>
+      </div>
+    );
+  }
+  // Desktop is never gated -- no login route, no redirect, whatever /api/me did.
+  if (mode === "local") return <>{children}</>;
+  if (status === "anon" && location.pathname !== "/login") {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
+
 export function App() {
   return (
     <ModeProvider>
-      <BrowserRouter>
-        <Routes>
+      <AuthProvider>
+        <BrowserRouter>
+          <AuthGate>
+            <Routes>
+              <Route path="login" element={<Login />} />
           {/* Picker lives outside any shell -- it has its own header and
               runs whether or not a project is bound. MatchShell redirects
               here when it sees /api/health.bound === false. */}
@@ -160,8 +201,10 @@ export function App() {
               also goes through here so a fresh-bound match lands on its
               own overview without the picker needing to plumb the id. */}
           <Route path="*" element={<LegacyMatchRedirect />} />
-        </Routes>
-      </BrowserRouter>
+            </Routes>
+          </AuthGate>
+        </BrowserRouter>
+      </AuthProvider>
     </ModeProvider>
   );
 }

@@ -143,6 +143,11 @@ dev = [
     # ``test_hosted_raw_upload.py``. Dev-only; production never
     # imports moto.
     "moto[s3]>=5.0.0",
+    # Headless-browser driver for UI walkthroughs / screenshots of the
+    # hosted SPA (e.g. the magic-link login flow). Dev-only; needs a
+    # one-time ``uv run playwright install chromium`` to fetch the browser
+    # binary (not vendored in the repo or the wheel).
+    "playwright>=1.60.0",
     # Ensemble sweep analysis (issue #281 follow-up). pyarrow for the
     # signals/runs parquet store, matplotlib for the PNG plot layer.
     # Dev-only: the production API does not read these files.

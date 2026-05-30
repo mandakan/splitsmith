@@ -1125,6 +1125,16 @@ export interface ServerHealth {
   schema_version: number | null;
 }
 
+/** The authenticated account behind a request. ``GET /api/me`` returns
+ *  this (200) or 401 when unauthenticated. In local mode it is always the
+ *  loopback sentinel (``id === "local"``); in hosted mode it is the
+ *  database user resolved from the session cookie. */
+export interface AuthUser {
+  id: string;
+  email: string;
+  display_name: string | null;
+}
+
 /** Saved SSI Scoreboard identity for the operator. Returned by
  *  ``GET /api/me/scoreboard-identity``; null when nothing is pinned. */
 export interface ScoreboardIdentity {
@@ -1414,6 +1424,13 @@ class ApiError extends Error {
   ) {
     super(`${status}: ${detail}`);
   }
+}
+
+/** True when ``err`` is a 401 from the API -- i.e. the caller is not
+ *  authenticated. The auth context uses this to distinguish "logged out"
+ *  (expected, render the login surface) from a real server error. */
+export function isUnauthorized(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
 }
 
 /** Match id parsed from the current URL.
@@ -2061,6 +2078,23 @@ export const api = {
    *    filesystem pickers / project-folder inputs in hosted mode. */
   getServerFeatures: () =>
     request<{ lab: boolean; mode: "local" | "hosted" }>("/api/server/features"),
+
+  /** The authenticated account, or a 401 (caught via ``isUnauthorized``)
+   *  when signed out. Always 200 in local mode (loopback user). */
+  getMe: () => request<AuthUser>("/api/me"),
+
+  /** Hosted mode -- start a magic-link sign-in: the server e-mails a link
+   *  to ``email``. Always 200 (never reveals whether the address has an
+   *  account); the account is created when the link is redeemed. */
+  authBegin: (email: string) =>
+    request<{ ok: true }>("/api/v1/auth/begin", {
+      method: "POST",
+      json: { email },
+    }),
+
+  /** Hosted mode -- revoke the current session + clear the cookie. */
+  authLogout: () =>
+    request<{ ok: true }>("/api/v1/auth/logout", { method: "POST" }),
 
   /** Hosted-mode only -- list the operator's uploaded raw videos.
    *  Empty array (not 404) when nothing has been uploaded yet. The
