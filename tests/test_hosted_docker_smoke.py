@@ -229,8 +229,9 @@ def test_migrations_applied_against_postgres(hosted_stack: None) -> None:
     proc_funcs = _psql("SELECT count(*) FROM pg_proc WHERE proname LIKE 'procrastinate_%'")
     assert int(proc_funcs) > 0, "procrastinate PL/pgSQL functions missing"
 
-    # Our own tenant tables from the earlier migrations.
-    for table in ("users", "recent_projects", "compute_jobs"):
+    # Our own tenant tables from the earlier migrations + the auth-domain
+    # tables from the magic-link migration (c3f1a8e90d24).
+    for table in ("users", "recent_projects", "compute_jobs", "magic_link_tokens", "sessions"):
         exists = _psql(
             "SELECT count(*) FROM information_schema.tables "
             f"WHERE table_schema='public' AND table_name='{table}'"
