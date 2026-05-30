@@ -33,6 +33,7 @@ import {
   TickStrip,
   type TickState,
 } from "@/components/ui";
+import { AccountChip } from "@/components/AccountChip";
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
@@ -270,24 +271,27 @@ export function Pick() {
               </>
             }
           />
-          {identity?.display_name && (
-            <span className="ml-auto inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1.5 pl-1.5 pr-4">
-              <span
-                className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-                  boxShadow:
-                    "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
-                }}
-              >
-                {shooterInitials(identity.display_name).toUpperCase()}
+          <div className="ml-auto flex items-center gap-3">
+            {identity?.display_name && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1.5 pl-1.5 pr-4">
+                <span
+                  className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
+                    boxShadow:
+                      "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
+                  }}
+                >
+                  {shooterInitials(identity.display_name).toUpperCase()}
+                </span>
+                <span className="text-[0.8125rem] font-medium text-ink-2">
+                  {identity.display_name}
+                </span>
               </span>
-              <span className="text-[0.8125rem] font-medium text-ink-2">
-                {identity.display_name}
-              </span>
-            </span>
-          )}
+            )}
+            <AccountChip />
+          </div>
         </div>
         <div className="border-t border-rule bg-bg">
           <div className="mx-auto flex max-w-[1440px] items-center gap-4 px-8 py-2.5 text-xs text-muted">
