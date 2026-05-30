@@ -14,18 +14,13 @@
 **/*.pyc
 **/*.pyo
 
-# SPA build *inputs* -- only the built dist/ ships. node_modules alone is
-# ~280 MB and never needed at runtime; the TS source + tooling configs are
-# build-time only. Mirrors the wheel's hatch excludes.
+# SPA build inputs ARE needed: the ``spa`` Docker stage builds dist/ from
+# them. Keep only the regenerable / redundant bits out of the context --
+# node_modules (~280 MB, rebuilt by ``npm ci``), any host-built dist (the
+# image rebuilds it), and the alternate pnpm lockfile (we install with npm).
 src/splitsmith/ui_static/node_modules
-src/splitsmith/ui_static/src
-src/splitsmith/ui_static/package.json
-src/splitsmith/ui_static/package-lock.json
+src/splitsmith/ui_static/dist
 src/splitsmith/ui_static/pnpm-lock.yaml
-src/splitsmith/ui_static/vite.config.ts
-src/splitsmith/ui_static/tsconfig*.json
-src/splitsmith/ui_static/index.html
-src/splitsmith/ui_static/*.config.js
 **/*.map
 
 # Dev-only trees nothing in the image reads.
