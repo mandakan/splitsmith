@@ -39,6 +39,7 @@ from splitsmith.db.magic_link import (
     InvalidMagicLinkError,
     _hash,
 )
+from splitsmith.db.signup_policy import SignupPolicy, build_signup_policy
 
 BASE_URL = "https://splitsmith.test"
 
@@ -91,11 +92,12 @@ def session_factory(tmp_path) -> Iterator[object]:
     yield sessionmaker(engine)
 
 
-def _auth(session_factory, *, sender=None, clock=None) -> MagicLinkAuth:
+def _auth(session_factory, *, sender=None, clock=None, signup_policy=None) -> MagicLinkAuth:
     return MagicLinkAuth(
         session_factory,
         sender or _CapturingSender(),
         now=clock or (lambda: datetime.now(UTC)),
+        signup_policy=signup_policy,
     )
 
 
@@ -389,3 +391,113 @@ def test_lettermint_email_sender_raises_on_provider_error() -> None:
             asyncio.run(
                 sender.send_magic_link(to="user@example.com", link=f"{BASE_URL}/auth/callback?token=x")
             )
+
+
+# ----------------------------------------------------------------------
+# Signup policy parsing
+# ----------------------------------------------------------------------
+
+
+def test_signup_policy_defaults_open_when_unset() -> None:
+    policy = build_signup_policy(open_value=None, allowlist_value=None)
+    assert policy.signups_open is True
+    assert policy.allows_signup("anyone@example.com") is True
+
+
+def test_signup_policy_closed_blocks_unlisted() -> None:
+    policy = build_signup_policy(open_value="false", allowlist_value="")
+    assert policy.signups_open is False
+    assert policy.allows_signup("stranger@example.com") is False
+
+
+def test_signup_policy_allowlist_matches_email_and_domain() -> None:
+    policy = build_signup_policy(
+        open_value="false",
+        allowlist_value="vip@example.com, @thias.se  bare.dev",
+    )
+    # exact email (case-insensitive)
+    assert policy.allows_signup("VIP@example.com") is True
+    # @domain entry
+    assert policy.allows_signup("anyone@thias.se") is True
+    # bare domain entry
+    assert policy.allows_signup("dev@bare.dev") is True
+    # not listed
+    assert policy.allows_signup("nope@elsewhere.com") is False
+
+
+@pytest.mark.parametrize("raw,expected", [("1", True), ("yes", True), ("off", False), ("0", False)])
+def test_signup_policy_bool_parsing(raw: str, expected: bool) -> None:
+    assert build_signup_policy(open_value=raw, allowlist_value="").signups_open is expected
+
+
+# ----------------------------------------------------------------------
+# Signup gating in begin_login
+# ----------------------------------------------------------------------
+
+_CLOSED = SignupPolicy(signups_open=False, allowed_emails=frozenset({"vip@example.com"}))
+
+
+def test_begin_login_blocks_new_email_when_closed(session_factory) -> None:
+    sender = _CapturingSender()
+    auth = _auth(session_factory, sender=sender, signup_policy=_CLOSED)
+
+    challenge = asyncio.run(auth.begin_login("stranger@example.com", base_url=BASE_URL))
+
+    # Neutral, challenge-shaped response, but nothing minted or sent.
+    assert challenge.email == "stranger@example.com"
+    assert sender.sent == []
+
+    async def _count_tokens() -> int:
+        async with session_factory() as s:
+            return len((await s.execute(select(MagicLinkTokenRow))).scalars().all())
+
+    assert asyncio.run(_count_tokens()) == 0
+
+
+def test_begin_login_allows_allowlisted_email_when_closed(session_factory) -> None:
+    sender = _CapturingSender()
+    auth = _auth(session_factory, sender=sender, signup_policy=_CLOSED)
+
+    asyncio.run(auth.begin_login("vip@example.com", base_url=BASE_URL))
+
+    assert len(sender.sent) == 1
+    assert sender.sent[0][0] == "vip@example.com"
+
+
+def test_begin_login_allows_returning_user_when_closed(session_factory) -> None:
+    # Create the account while open, then close signups: the returning user
+    # must still be able to request a link.
+    open_sender = _CapturingSender()
+    open_auth = _auth(session_factory, sender=open_sender)
+    asyncio.run(open_auth.begin_login("member@example.com", base_url=BASE_URL))
+    asyncio.run(open_auth.complete_login(open_sender.last_token()))
+
+    closed_sender = _CapturingSender()
+    closed_auth = _auth(session_factory, sender=closed_sender, signup_policy=_CLOSED)
+    asyncio.run(closed_auth.begin_login("member@example.com", base_url=BASE_URL))
+
+    assert len(closed_sender.sent) == 1
+
+
+# ----------------------------------------------------------------------
+# Signup gating in complete_login (defense in depth)
+# ----------------------------------------------------------------------
+
+
+def test_complete_login_refuses_new_account_when_closed(session_factory) -> None:
+    # Mint a token while signups are open, then redeem it after closing.
+    open_sender = _CapturingSender()
+    open_auth = _auth(session_factory, sender=open_sender)
+    asyncio.run(open_auth.begin_login("late@example.com", base_url=BASE_URL))
+    token = open_sender.last_token()
+
+    closed_auth = _auth(session_factory, signup_policy=_CLOSED)
+    with pytest.raises(InvalidMagicLinkError) as exc:
+        asyncio.run(closed_auth.complete_login(token))
+    assert exc.value.reason == "signups_closed"
+
+    async def _count_users() -> int:
+        async with session_factory() as s:
+            return len((await s.execute(select(UserRow))).scalars().all())
+
+    assert asyncio.run(_count_users()) == 0

@@ -544,6 +544,10 @@ def serve(
       ``lettermint`` for production, with ``LETTERMINT_API_TOKEN`` +
       ``SPLITSMITH_EMAIL_FROM`` (e.g. ``Splitsmith <login@yourdomain>``)
       and an optional ``LETTERMINT_ROUTE``.
+    - ``SPLITSMITH_SIGNUPS_OPEN`` -- ``true`` (default) lets anyone sign
+      up; ``false`` closes signups to all but ``SPLITSMITH_SIGNUP_ALLOWLIST``
+      (comma/space-separated exact emails or ``@domain`` entries).
+      Returning users always sign in regardless.
 
     No browser auto-open, no ``--project`` (paths live in Postgres).
     Defaults bind ``0.0.0.0`` because the typical caller is a
