@@ -1,0 +1,75 @@
+name: Deploy app (Railway)
+
+# CI-controlled deploys to Railway (not Railway's auto-deploy-on-push) so
+# the timing is ours. `railway up` uploads the repo and Railway builds the
+# Dockerfile; the env-scoped project token (a per-GitHub-Environment
+# RAILWAY_TOKEN secret) decides which Railway environment it lands in.
+#
+#   push to main          -> staging
+#   release published     -> production  (release-please release, doc 11)
+#   workflow_dispatch      -> the chosen environment (manual button)
+#
+# Both services build from the same image (ENTRYPOINT `splitsmith`); the
+# `serve` and `worker` Railway services differ only by start command, set
+# on the service itself. `serve` runs `alembic upgrade head` on boot.
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  target:
+    name: resolve target environment
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.pick.outputs.env }}
+    steps:
+      - id: pick
+        run: |
+          case "${{ github.event_name }}" in
+            workflow_dispatch) echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT" ;;
+            release)           echo "env=production" >> "$GITHUB_OUTPUT" ;;
+            *)                 echo "env=staging" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  deploy:
+    name: railway up (${{ needs.target.outputs.env }})
+    needs: target
+    runs-on: ubuntu-latest
+    # Pulls this GitHub Environment's RAILWAY_TOKEN (the env-scoped Railway
+    # project token), so the same workflow targets staging or production
+    # purely by which environment it runs under.
+    environment: ${{ needs.target.outputs.env }}
+    # One in-flight deploy per Railway environment; let a running deploy
+    # finish rather than cancelling it mid-build.
+    concurrency:
+      group: deploy-app-${{ needs.target.outputs.env }}
+      cancel-in-progress: false
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      # `--ci` streams the build log and exits non-zero if the build or
+      # deploy fails, so a broken deploy fails the job. The API service
+      # migrates the DB on boot.
+      - name: Deploy API (serve)
+        run: railway up --service serve --ci
+
+      - name: Deploy worker
+        run: railway up --service worker --ci
