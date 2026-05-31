@@ -131,19 +131,25 @@ later steps are blocked on earlier ones.
 
 ### Hosted infrastructure
 
-- [ ] Pick deploy target (Fly.io vs Railway -- doc 00 open question).
-- [ ] Pick auth provider (Clerk vs WorkOS vs Auth.js -- doc 00 open
-  question). Build a v1-shaped prototype with each first.
-- [ ] Provision R2 bucket + lifecycle rule for incomplete multipart
-  uploads.
-- [ ] Provision Postgres (Neon free tier likely).
+- [x] Pick deploy target -- **Railway** (API + worker containers),
+  resolved 2026-05-30. Fly.io dropped.
+- [x] Pick auth -- **in-house `MagicLinkAuth`** (not Clerk/WorkOS/Auth.js),
+  shipped in the 2026-05-30 auth-swap stack.
+- [x] Define the **environment strategy** (staging + prod across all
+  providers; apex-marketing / `my.splitsmith.app` app domain layout) --
+  doc 11, resolved 2026-05-31.
+- [ ] Provision R2 buckets (`splitsmith-uploads-prod` +
+  `splitsmith-uploads-staging`) + lifecycle rule for incomplete
+  multipart uploads.
+- [ ] Provision Neon (`main` = prod, long-lived `staging` branch).
 - [x] ~~Provision Redis if going with `arq`~~ -- not needed:
   Procrastinate (Postgres-native) is the picked job queue
   (resolved 2026-05-27, doc 00).
 - [ ] Wire Sentry on the API + worker.
 - [x] Wire Lettermint for magic-link email delivery
   (`SPLITSMITH_EMAIL_BACKEND=lettermint`; `splitsmith.app` DNS verified).
-- [ ] Set up the `splitsmith.app` domain + Cloudflare in front.
+- [ ] Provision Railway (`staging` + `production` envs); add the `www`,
+  `my`, `my.staging` Cloudflare records (doc 11 provisioning order).
 
 ### Auth + identity (doc 02)
 
@@ -347,5 +353,12 @@ get their own short note.
 - 2026-05-15 -- 00 -- Initial doc set drafted. Four-question + three-
   question ideation captured in 00. Locked-in decisions table
   established.
+- 2026-05-31 -- 11 -- Environment strategy decided. Two environments
+  (staging + prod) across Railway / Neon / R2 / Lettermint /
+  Cloudflare. Domain layout: apex `splitsmith.app` = marketing,
+  `my.splitsmith.app` = the app (chose `my.` over `app.` to avoid the
+  `.app` TLD stutter). Neon staging = long-lived branch. Promotion:
+  merge to main -> staging, release-please release -> prod. Staging
+  email = console (no real sends).
 
 (future entries appended below as the architecture evolves.)
