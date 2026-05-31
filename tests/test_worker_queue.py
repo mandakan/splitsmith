@@ -14,9 +14,35 @@ import pytest
 from typer.testing import CliRunner
 
 from splitsmith.cli import app
-from splitsmith.queue import build_app, run_worker
+from splitsmith.queue import _to_psycopg_dsn, build_app, run_worker
 
 _FAKE_PG_URL = "postgresql+asyncpg://u:p@localhost:5432/db"
+
+
+def test_to_psycopg_dsn_strips_async_dialect() -> None:
+    assert _to_psycopg_dsn(_FAKE_PG_URL) == "postgresql://u:p@localhost:5432/db"
+
+
+def test_to_psycopg_dsn_translates_ssl_and_drops_asyncpg_params() -> None:
+    """A Neon-style asyncpg URL must become a valid libpq DSN: ``ssl`` ->
+    ``sslmode`` and asyncpg-only ``prepared_statement_cache_size`` dropped,
+    else psycopg raises ``invalid URI query parameter: "ssl"`` and the
+    worker can't connect."""
+    url = (
+        "postgresql+asyncpg://u:p@ep-x-pooler.eu-central-1.aws.neon.tech/neondb"
+        "?ssl=require&prepared_statement_cache_size=0"
+    )
+    dsn = _to_psycopg_dsn(url)
+    assert dsn.startswith("postgresql://u:p@ep-x-pooler.eu-central-1.aws.neon.tech/neondb?")
+    assert "sslmode=require" in dsn
+    assert "ssl=require" not in dsn  # the asyncpg key must be gone
+    assert "prepared_statement_cache_size" not in dsn
+
+
+def test_to_psycopg_dsn_preserves_other_query_params() -> None:
+    dsn = _to_psycopg_dsn("postgresql+asyncpg://u:p@h:5432/db?ssl=require&application_name=ss")
+    assert "sslmode=require" in dsn
+    assert "application_name=ss" in dsn
 
 
 def test_build_app_registers_ping_task() -> None:
