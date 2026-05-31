@@ -10,11 +10,11 @@ different transports without touching the backend:
   :class:`ConsoleEmailSender` logs the link. ``docker compose up`` works
   with zero external configuration, and the smoke test reads the link
   back from the container logs.
-- **production hosted**: :class:`ResendEmailSender`, selected by
-  ``SPLITSMITH_EMAIL_BACKEND=resend`` (+ ``RESEND_API_KEY`` /
-  ``SPLITSMITH_EMAIL_FROM``). :func:`build_email_sender` fails loud for any
-  unknown backend so a misconfigured prod deploy can't silently drop
-  sign-in mail.
+- **production hosted**: :class:`LettermintEmailSender`, selected by
+  ``SPLITSMITH_EMAIL_BACKEND=lettermint`` (+ ``LETTERMINT_API_TOKEN`` /
+  ``SPLITSMITH_EMAIL_FROM``, with an optional ``LETTERMINT_ROUTE``).
+  :func:`build_email_sender` fails loud for any unknown backend so a
+  misconfigured prod deploy can't silently drop sign-in mail.
 """
 
 from __future__ import annotations
@@ -28,8 +28,11 @@ logger = logging.getLogger(__name__)
 # Env var selecting the transport. Unset -> console (the dev / self-host
 # default). Any recognised provider name selects its HTTP sender.
 SPLITSMITH_EMAIL_BACKEND_ENV = "SPLITSMITH_EMAIL_BACKEND"
-# Resend transport config (only read when the backend is ``resend``).
-RESEND_API_KEY_ENV = "RESEND_API_KEY"
+# Lettermint transport config (only read when the backend is ``lettermint``).
+LETTERMINT_API_TOKEN_ENV = "LETTERMINT_API_TOKEN"
+# Optional Lettermint route (e.g. ``production``); omitted from the payload
+# when unset so the account default applies.
+LETTERMINT_ROUTE_ENV = "LETTERMINT_ROUTE"
 # The verified ``From`` address, e.g. ``Splitsmith <login@splitsmith.app>``.
 SPLITSMITH_EMAIL_FROM_ENV = "SPLITSMITH_EMAIL_FROM"
 
@@ -37,7 +40,7 @@ SPLITSMITH_EMAIL_FROM_ENV = "SPLITSMITH_EMAIL_FROM"
 # (the docker smoke's login dance) can pull the URL back out reliably.
 CONSOLE_MAGIC_LINK_MARKER = "MAGIC_LINK"
 
-RESEND_API_URL = "https://api.resend.com/emails"
+LETTERMINT_API_URL = "https://api.lettermint.co/v1/send"
 
 
 class EmailSender(Protocol):
@@ -86,35 +89,39 @@ def _magic_link_email_body(link: str) -> tuple[str, str]:
     return text, html
 
 
-class ResendEmailSender:
-    """Sends magic links via the Resend HTTP API (production transport).
+class LettermintEmailSender:
+    """Sends magic links via the Lettermint HTTP API (production transport).
 
-    Uses ``httpx`` (already a runtime dep) rather than the ``resend`` SDK to
-    avoid a new dependency for one POST. A transport / provider error raises
-    (the contract allows it) -- ``begin_login`` then surfaces it; the SPA
-    shows a "couldn't send, retry" message. It never inspects the recipient,
-    so it can't leak whether an address has an account.
+    Uses ``httpx`` (already a runtime dep) rather than the ``lettermint`` SDK
+    to avoid a new dependency for one POST. A transport / provider error
+    raises (the contract allows it) -- ``begin_login`` then surfaces it; the
+    SPA shows a "couldn't send, retry" message. It never inspects the
+    recipient, so it can't leak whether an address has an account.
     """
 
-    def __init__(self, *, api_key: str, from_address: str) -> None:
-        self._api_key = api_key
+    def __init__(self, *, api_token: str, from_address: str, route: str | None = None) -> None:
+        self._api_token = api_token
         self._from = from_address
+        self._route = route
 
     async def send_magic_link(self, *, to: str, link: str) -> None:
         import httpx
 
         text, html = _magic_link_email_body(link)
+        payload: dict[str, object] = {
+            "from": self._from,
+            "to": [to],
+            "subject": "Your Splitsmith sign-in link",
+            "text": text,
+            "html": html,
+        }
+        if self._route:
+            payload["route"] = self._route
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
-                RESEND_API_URL,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json={
-                    "from": self._from,
-                    "to": [to],
-                    "subject": "Your Splitsmith sign-in link",
-                    "text": text,
-                    "html": html,
-                },
+                LETTERMINT_API_URL,
+                headers={"x-lettermint-token": self._api_token},
+                json=payload,
             )
         resp.raise_for_status()
 
@@ -124,27 +131,29 @@ def build_email_sender(backend: str | None) -> EmailSender:
     ``SPLITSMITH_EMAIL_BACKEND``).
 
     - ``None`` / ``""`` / ``"console"`` -> :class:`ConsoleEmailSender`.
-    - ``"resend"`` -> :class:`ResendEmailSender`, configured from
-      ``RESEND_API_KEY`` + ``SPLITSMITH_EMAIL_FROM`` (both required; missing
-      either fails loud rather than silently dropping sign-in mail).
+    - ``"lettermint"`` -> :class:`LettermintEmailSender`, configured from
+      ``LETTERMINT_API_TOKEN`` + ``SPLITSMITH_EMAIL_FROM`` (both required;
+      missing either fails loud rather than silently dropping sign-in mail)
+      and an optional ``LETTERMINT_ROUTE``.
     - anything else -> raises.
     """
     name = (backend or "console").strip().lower()
     if name == "console":
         return ConsoleEmailSender()
-    if name == "resend":
-        api_key = os.environ.get(RESEND_API_KEY_ENV, "").strip()
+    if name == "lettermint":
+        api_token = os.environ.get(LETTERMINT_API_TOKEN_ENV, "").strip()
         from_address = os.environ.get(SPLITSMITH_EMAIL_FROM_ENV, "").strip()
-        if not api_key or not from_address:
+        if not api_token or not from_address:
             raise RuntimeError(
-                f"{SPLITSMITH_EMAIL_BACKEND_ENV}=resend requires both "
-                f"{RESEND_API_KEY_ENV} and {SPLITSMITH_EMAIL_FROM_ENV} "
+                f"{SPLITSMITH_EMAIL_BACKEND_ENV}=lettermint requires both "
+                f"{LETTERMINT_API_TOKEN_ENV} and {SPLITSMITH_EMAIL_FROM_ENV} "
                 "(e.g. 'Splitsmith <login@yourdomain>') to be set."
             )
-        return ResendEmailSender(api_key=api_key, from_address=from_address)
+        route = os.environ.get(LETTERMINT_ROUTE_ENV, "").strip() or None
+        return LettermintEmailSender(api_token=api_token, from_address=from_address, route=route)
     raise RuntimeError(
         f"{SPLITSMITH_EMAIL_BACKEND_ENV}={backend!r} is not supported. "
-        f"Use 'console' (dev / self-host) or 'resend' (production). Set "
+        f"Use 'console' (dev / self-host) or 'lettermint' (production). Set "
         f"{SPLITSMITH_EMAIL_BACKEND_ENV}=console (or leave it unset) for "
         "docker-compose / self-host."
     )

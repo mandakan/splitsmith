@@ -46,8 +46,8 @@ The bias order is:
 
 1. **Hosted service** -- rent, don't run. If a managed offering is
    cheap enough at our scale, we use it (Stripe for billing, Clerk
-   for auth, Cloudflare R2 for storage, Sentry for errors, Resend for
-   email, Neon for Postgres).
+   for auth, Cloudflare R2 for storage, Sentry for errors, Lettermint
+   for email, Neon for Postgres).
 2. **Library** -- open-source, well-maintained, fits the use case.
    Use it inside our own deploy (fsspec for storage abstraction,
    SQLAlchemy for ORM, Procrastinate for job queue).
@@ -70,7 +70,7 @@ is measured, not preemptively.
 | Object storage | [Cloudflare R2](https://www.cloudflare.com/products/r2/) | S3-compatible API, **$0 egress**, ~$0.015/GB stored. Massive cost advantage over S3 for media workloads. |
 | Database hosting | [Neon](https://neon.tech/) (Postgres) or [Turso](https://turso.tech/) (SQLite-as-a-service) | Free tiers for v1; both scale up with usage |
 | Background workers (hosted) | [Inngest](https://www.inngest.com/) or [Trigger.dev](https://trigger.dev/) | Use only if in-deploy Procrastinate turns into too much ops |
-| Email (magic links + transactional) | [Resend](https://resend.com/) or [Postmark](https://postmarkapp.com/) | No SMTP self-hosting; generous free tiers |
+| Email (magic links + transactional) | [Lettermint](https://lettermint.co/) | Picked + wired (`SPLITSMITH_EMAIL_BACKEND=lettermint`); no SMTP self-hosting |
 | Billing | [Stripe Checkout](https://stripe.com/docs/payments/checkout) + [Stripe webhooks](https://stripe.com/docs/webhooks) | Stripe-hosted checkout page; we never touch card data |
 | Errors / monitoring | [Sentry](https://sentry.io/) | Hosted; free tier covers our scale |
 | Analytics (optional v2) | [PostHog](https://posthog.com/) or [Plausible](https://plausible.io/) | Privacy-respecting; PostHog also handles feature flags + session replay |

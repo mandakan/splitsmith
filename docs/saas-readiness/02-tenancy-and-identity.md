@@ -51,12 +51,10 @@ MFA setup, or password reset. Magic link is the only flow.
   All login-flow methods raise `NotImplementedError` (they should
   never be called -- the local UI doesn't render login affordances).
 
-- **`MagicLinkAuth`** -- hosted mode. Wraps Clerk or WorkOS or Auth.js
-  depending on the final pick. Routes magic-link emails through
-  Resend / Postmark.
-
-The wrapper is thin: we don't reimplement session storage, token
-rotation, etc. Whatever the provider does is fine.
+- **`MagicLinkAuth`** -- hosted mode. In-house magic-link domain (token
+  issue / verify / session), not a third-party auth wrapper. Routes
+  magic-link emails through Lettermint
+  (`SPLITSMITH_EMAIL_BACKEND=lettermint`).
 
 ## Magic-link flow (hosted mode)
 
