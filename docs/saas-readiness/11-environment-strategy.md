@@ -96,12 +96,14 @@ Both `serve` and `worker` in a given environment share these. The
 | Variable | prod | staging |
 | --- | --- | --- |
 | `SPLITSMITH_MODE` | `hosted` | `hosted` |
-| `SPLITSMITH_DATABASE_URL` | Neon `main`, direct endpoint | Neon `staging`, direct endpoint |
+| `SPLITSMITH_DATABASE_URL` | Neon `production` branch, direct endpoint | Neon `staging` branch, direct endpoint |
 | `SPLITSMITH_PUBLIC_URL` | `https://my.splitsmith.app` | `https://my.staging.splitsmith.app` |
 | `SPLITSMITH_EMAIL_BACKEND` | `lettermint` | `console` |
 | `LETTERMINT_API_TOKEN` | set | unset (console) |
 | `SPLITSMITH_EMAIL_FROM` | `Splitsmith <login@splitsmith.app>` | unset (console) |
 | `LETTERMINT_ROUTE` | `production` (optional) | unset |
+| `SPLITSMITH_SIGNUPS_OPEN` | `false` at launch (allowlist only) | `false` |
+| `SPLITSMITH_SIGNUP_ALLOWLIST` | the launch allowlist (emails / `@domain`) | your own address |
 | `SPLITSMITH_S3_*` | `splitsmith-uploads-prod` bucket creds | `splitsmith-uploads-staging` bucket creds |
 
 A public https `SPLITSMITH_PUBLIC_URL` turns on the Secure cookie flag

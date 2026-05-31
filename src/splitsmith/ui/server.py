@@ -3448,6 +3448,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
         build_email_sender,
+        build_signup_policy,
         create_engine,
         sessionmaker,
         tenant_session_factory,
@@ -3490,7 +3491,11 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # The email transport is pluggable: console by default (docker / self-host),
     # an HTTP provider when ``SPLITSMITH_EMAIL_BACKEND`` selects one.
     email_sender = build_email_sender(os.environ.get(SPLITSMITH_EMAIL_BACKEND_ENV))
-    state.auth = MagicLinkAuth(session_factory, email_sender)
+    # Signup gating (anti-spam): open by default; the hosted deploy closes
+    # signups to all but an allowlist via SPLITSMITH_SIGNUPS_OPEN=false +
+    # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
+    signup_policy = build_signup_policy()
+    state.auth = MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy)
 
     # Process-level, tenant-agnostic resources shared by every
     # ``TenantContext``. The deferrer routes per-user inside ``_defer``

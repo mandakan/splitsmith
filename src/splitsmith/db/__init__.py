@@ -44,6 +44,7 @@ from .models import (
 )
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
+from .signup_policy import SignupPolicy, build_signup_policy
 
 __all__ = [
     "Base",
@@ -64,8 +65,10 @@ __all__ = [
     "RecentProjectRow",
     "SESSION_COOKIE_NAME",
     "SessionRow",
+    "SignupPolicy",
     "User",
     "build_email_sender",
+    "build_signup_policy",
     "create_engine",
     "new_ulid",
     "sessionmaker",

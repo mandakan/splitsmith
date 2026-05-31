@@ -47,6 +47,7 @@ from ..auth import User
 from .email import EmailSender
 from .models import MagicLinkTokenRow, SessionRow
 from .models import User as UserRow
+from .signup_policy import SignupPolicy
 
 # Cookie the browser carries the raw session secret in. httpOnly + Secure
 # + SameSite=Lax are set by the route when it writes the cookie (doc 02);
@@ -121,12 +122,23 @@ class MagicLinkAuth:
         email_sender: EmailSender,
         *,
         now: Callable[[], datetime] = _utcnow,
+        signup_policy: SignupPolicy | None = None,
     ) -> None:
         # Raw (non-tenant) factory: this backend writes users / sessions /
         # magic_link_tokens, none under RLS, and runs before any GUC.
         self._session_factory = session_factory
         self._email = email_sender
         self._now = now
+        # Unconfigured -> open signups (local / self-host / tests). The
+        # hosted deploy passes a closed policy + allowlist.
+        self._signup_policy = signup_policy or SignupPolicy.open()
+
+    async def _email_has_account(self, email: str) -> bool:
+        async with self._session_factory() as session:
+            existing = (
+                await session.execute(select(UserRow.id).where(UserRow.email == email))
+            ).scalar_one_or_none()
+        return existing is not None
 
     # ------------------------------------------------------------------
     # Sign-in flow
@@ -141,10 +153,21 @@ class MagicLinkAuth:
         send the link regardless of whether ``email`` has an account -- the
         account is created on redemption, and not revealing account
         existence is deliberate.
+
+        Signup gating (anti-spam): when signups are closed and ``email`` is
+        neither allowlisted nor an existing account, we mint nothing and
+        send nothing, but still return a challenge-shaped handle so the
+        response is indistinguishable from a real one (no enumeration). A
+        returning user is always let through -- the gate blocks only *new*
+        accounts.
         """
         normalized = _normalize_email(email)
-        token = secrets.token_urlsafe(32)
         now = self._now()
+        if not self._signup_policy.allows_signup(normalized) and not await self._email_has_account(
+            normalized
+        ):
+            return LoginChallenge(id="blocked", email=normalized, expires_at=now + MAGIC_LINK_TTL)
+        token = secrets.token_urlsafe(32)
         row = MagicLinkTokenRow(
             email=normalized,
             token_hash=_hash(token),
@@ -206,6 +229,13 @@ class MagicLinkAuth:
                 await session.execute(select(UserRow).where(UserRow.email == link_row.email))
             ).scalar_one_or_none()
             if user_row is None:
+                # Signup gating, defense in depth: a token minted while
+                # signups were open but redeemed after they closed must not
+                # create a new account. (``begin_login`` already blocks the
+                # common path; this covers stale tokens.) The token is
+                # consumed above either way; a blocked attempt just burns it.
+                if not self._signup_policy.allows_signup(link_row.email):
+                    raise InvalidMagicLinkError("signups_closed")
                 # First sign-in creates the account. Guard the insert in a
                 # savepoint: two concurrent first logins for the same new
                 # email both see None here, and the loser's INSERT hits the
