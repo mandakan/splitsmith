@@ -84,6 +84,13 @@ touching.
     what's a violation (`AppState._bound_root`, `JobRegistry`,
     `user_config.*`), and the order of elimination.
 
+12. **[11 -- Environment strategy](./11-environment-strategy.md)**
+    The staging/production split across Railway, Neon, R2, Lettermint,
+    and Cloudflare; the `splitsmith.app` apex-marketing /
+    `my.splitsmith.app` app domain layout; the promotion flow
+    (main -> staging, release -> prod); the per-environment env-var
+    matrix; and the provisioning order.
+
 ## Working principle (one-line restate)
 
 Use off-the-shelf frameworks, libraries, and hosted services. Don't
