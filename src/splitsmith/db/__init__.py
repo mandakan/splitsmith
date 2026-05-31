@@ -21,7 +21,7 @@ what handlers depend on; the future ``PostgresJobBackend`` /
 this DB layer internally without leaking SQL into handler code.
 """
 
-from .email import ConsoleEmailSender, EmailSender, ResendEmailSender, build_email_sender
+from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build_email_sender
 from .engine import create_engine, sessionmaker, tenant_session_factory
 from .job_backend import PostgresJobBackend
 from .magic_link import (
@@ -52,11 +52,11 @@ __all__ = [
     "EmailSender",
     "InvalidMagicLinkError",
     "IssuedSession",
+    "LettermintEmailSender",
     "LoginChallenge",
     "MagicLinkAuth",
     "MagicLinkTokenRow",
     "MatchRow",
-    "ResendEmailSender",
     "PostgresJobBackend",
     "PostgresMatchStore",
     "PostgresRecentProjectsStore",

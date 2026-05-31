@@ -141,7 +141,8 @@ later steps are blocked on earlier ones.
   Procrastinate (Postgres-native) is the picked job queue
   (resolved 2026-05-27, doc 00).
 - [ ] Wire Sentry on the API + worker.
-- [ ] Wire Resend (or Postmark) for magic-link email delivery.
+- [x] Wire Lettermint for magic-link email delivery
+  (`SPLITSMITH_EMAIL_BACKEND=lettermint`; `splitsmith.app` DNS verified).
 - [ ] Set up the `splitsmith.app` domain + Cloudflare in front.
 
 ### Auth + identity (doc 02)

@@ -29,9 +29,9 @@ from splitsmith.db import (
 )
 from splitsmith.db.email import (
     CONSOLE_MAGIC_LINK_MARKER,
-    RESEND_API_URL,
+    LETTERMINT_API_URL,
     ConsoleEmailSender,
-    ResendEmailSender,
+    LettermintEmailSender,
     build_email_sender,
 )
 from splitsmith.db.magic_link import (
@@ -326,45 +326,64 @@ def test_build_email_sender_fails_loud_on_unknown_provider() -> None:
         build_email_sender("mailgun")
 
 
-def test_build_email_sender_resend_requires_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+def test_build_email_sender_lettermint_requires_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LETTERMINT_API_TOKEN", raising=False)
     monkeypatch.delenv("SPLITSMITH_EMAIL_FROM", raising=False)
-    with pytest.raises(RuntimeError, match="RESEND_API_KEY"):
-        build_email_sender("resend")
+    with pytest.raises(RuntimeError, match="LETTERMINT_API_TOKEN"):
+        build_email_sender("lettermint")
 
 
-def test_build_email_sender_resend_with_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+def test_build_email_sender_lettermint_with_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LETTERMINT_API_TOKEN", "lm_test")
     monkeypatch.setenv("SPLITSMITH_EMAIL_FROM", "Splitsmith <login@splitsmith.test>")
-    assert isinstance(build_email_sender("resend"), ResendEmailSender)
+    monkeypatch.delenv("LETTERMINT_ROUTE", raising=False)
+    assert isinstance(build_email_sender("lettermint"), LettermintEmailSender)
 
 
-def test_resend_email_sender_posts_the_link() -> None:
+def test_lettermint_email_sender_posts_the_link() -> None:
     respx = pytest.importorskip("respx")
     import httpx
 
-    sender = ResendEmailSender(api_key="re_test", from_address="Splitsmith <login@splitsmith.test>")
+    sender = LettermintEmailSender(api_token="lm_test", from_address="Splitsmith <login@splitsmith.test>")
     link = f"{BASE_URL}/auth/callback?token=tok123"
     with respx.mock:
-        route = respx.post(RESEND_API_URL).mock(return_value=httpx.Response(200, json={"id": "e1"}))
+        route = respx.post(LETTERMINT_API_URL).mock(
+            return_value=httpx.Response(200, json={"message_id": "e1", "status": "queued"})
+        )
         asyncio.run(sender.send_magic_link(to="user@example.com", link=link))
 
     assert route.called
     req = route.calls.last.request
-    assert req.headers["authorization"] == "Bearer re_test"
+    assert req.headers["x-lettermint-token"] == "lm_test"
     body = req.content.decode()
     assert "user@example.com" in body
     assert "tok123" in body  # the magic link is carried in the body
+    assert "route" not in body  # omitted when unset
 
 
-def test_resend_email_sender_raises_on_provider_error() -> None:
+def test_lettermint_email_sender_includes_route_when_set() -> None:
     respx = pytest.importorskip("respx")
     import httpx
 
-    sender = ResendEmailSender(api_key="re_test", from_address="x@y.z")
+    sender = LettermintEmailSender(api_token="lm_test", from_address="x@y.z", route="production")
     with respx.mock:
-        respx.post(RESEND_API_URL).mock(
-            return_value=httpx.Response(422, json={"message": "domain not verified"})
+        route = respx.post(LETTERMINT_API_URL).mock(
+            return_value=httpx.Response(200, json={"message_id": "e1", "status": "queued"})
+        )
+        asyncio.run(sender.send_magic_link(to="user@example.com", link=f"{BASE_URL}/auth/callback?token=x"))
+
+    body = route.calls.last.request.content.decode()
+    assert '"route"' in body and "production" in body
+
+
+def test_lettermint_email_sender_raises_on_provider_error() -> None:
+    respx = pytest.importorskip("respx")
+    import httpx
+
+    sender = LettermintEmailSender(api_token="lm_test", from_address="x@y.z")
+    with respx.mock:
+        respx.post(LETTERMINT_API_URL).mock(
+            return_value=httpx.Response(422, json={"error": "domain not verified"})
         )
         with pytest.raises(httpx.HTTPStatusError):
             asyncio.run(
