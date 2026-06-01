@@ -751,3 +751,33 @@ def test_multipart_create_503_when_storage_unwired(hosted_db: str, monkeypatch) 
         _authed(client, hosted_db)
         resp = client.post("/api/me/raw/upload/multipart/create", json={"filename": "x.mp4"})
     assert resp.status_code == 503
+
+
+def test_bind_resolves_by_match_id_when_local_path_is_gone(hosted_client) -> None:
+    """Hosted picker reopen survives a redeploy: after the ephemeral
+    working dir is wiped, binding the recorded (now-missing) path resolves
+    the match through Postgres via its stored match_id instead of 404'ing
+    with project_path_missing."""
+    import shutil
+
+    client, _ = hosted_client
+    resp = client.post(
+        "/api/match/create-manual",
+        json={
+            "name": "Reopen Test",
+            "stages": [{"stage_number": 1, "stage_name": "S1"}],
+            "primary_shooter": {"name": "Me"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    health = resp.json()
+    match_id, project_root = health["match_id"], health["project_root"]
+
+    # Simulate a redeploy: the container's ephemeral working dir is gone.
+    shutil.rmtree(project_root, ignore_errors=True)
+    assert not Path(project_root).exists()
+
+    rebind = client.post("/api/me/recent-projects/bind", json={"path": project_root})
+    assert rebind.status_code == 200, rebind.text
+    assert rebind.json()["match_id"] == match_id
+    assert rebind.json()["bound"] is True

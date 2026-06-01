@@ -76,6 +76,11 @@ class RecentProject(BaseModel):
     # entries written before this field existed; the picker resolves them
     # at open time. Issue #320.
     kind: str | None = None
+    # Stable match id (hosted). When set, the picker/bind resolves the
+    # match through Postgres rather than the ephemeral on-disk ``path``,
+    # which doesn't survive a redeploy. ``None`` in local mode and for
+    # rows written before this field existed.
+    match_id: str | None = None
 
 
 class ProjectsIndex(BaseModel):
@@ -244,7 +249,9 @@ def _save_projects_index(index: ProjectsIndex) -> None:
         logger.warning("Could not write %s: %s", PROJECTS_FILENAME, exc)
 
 
-def record_project_open(path: Path, name: str, *, kind: str | None = None) -> None:
+def record_project_open(
+    path: Path, name: str, *, kind: str | None = None, match_id: str | None = None
+) -> None:
     """Append or refresh a project entry in ``projects.json``.
 
     Resolves ``path`` so two opens of the same project via different
@@ -265,7 +272,7 @@ def record_project_open(path: Path, name: str, *, kind: str | None = None) -> No
     index = _load_projects_index()
     remaining = [p for p in index.projects if p.path != resolved]
     updated = [
-        RecentProject(path=resolved, name=name, last_opened_at=now, kind=kind),
+        RecentProject(path=resolved, name=name, last_opened_at=now, kind=kind, match_id=match_id),
         *remaining,
     ]
     if len(updated) > RECENT_PROJECTS_LIMIT:
@@ -370,7 +377,9 @@ class RecentProjectsStore(Protocol):
 
     async def list(self) -> list[RecentProject]: ...
 
-    async def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None: ...
+    async def record_open(
+        self, path: Path, name: str, *, kind: str | None = None, match_id: str | None = None
+    ) -> None: ...
 
     async def remove(self, path: Path) -> bool: ...
 
@@ -405,8 +414,10 @@ class JsonRecentProjectsStore:
     async def list(self) -> list[RecentProject]:
         return get_recent_projects()
 
-    async def record_open(self, path: Path, name: str, *, kind: str | None = None) -> None:
-        record_project_open(path, name, kind=kind)
+    async def record_open(
+        self, path: Path, name: str, *, kind: str | None = None, match_id: str | None = None
+    ) -> None:
+        record_project_open(path, name, kind=kind, match_id=match_id)
 
     async def remove(self, path: Path) -> bool:
         return remove_recent_project(path)
