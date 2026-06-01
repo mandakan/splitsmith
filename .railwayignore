@@ -1,0 +1,36 @@
+# `railway up` tars the working dir respecting .gitignore + THIS file (it
+# ignores .dockerignore). Without it the upload includes tests/fixtures/*.wav
+# (~150 MB of audio) and times out. Keep the upload to what the Dockerfile
+# build actually needs: the package source (incl. the SPA build inputs at
+# src/splitsmith/ui_static/), the dependency manifests, and alembic/.
+#
+# Mirror .dockerignore's exclusions. The Docker build still applies
+# .dockerignore on top; this just keeps the upload small.
+
+.git
+.github
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+
+# Regenerable / redundant SPA bits (node_modules rebuilt by `npm ci`, dist
+# rebuilt by the spa stage, alternate lockfile unused).
+src/splitsmith/ui_static/node_modules
+src/splitsmith/ui_static/dist
+src/splitsmith/ui_static/pnpm-lock.yaml
+**/*.map
+
+# Dev-only trees nothing in the image reads (tests/ holds the heavy .wav
+# fixtures that caused the upload timeout).
+tests
+docs
+examples
+build
+scripts
+site
+functions
+*.egg-info

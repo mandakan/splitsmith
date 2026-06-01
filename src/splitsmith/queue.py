@@ -44,8 +44,21 @@ import asyncio
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import procrastinate
+
+# asyncpg-only SQLAlchemy URL query params that libpq / psycopg3 does not
+# understand and rejects with "invalid URI query parameter". They're
+# meaningful only to the SQLAlchemy asyncpg dialect, so we drop them when
+# building the psycopg DSN for Procrastinate.
+_ASYNCPG_ONLY_QUERY_KEYS = frozenset(
+    {
+        "prepared_statement_cache_size",
+        "statement_cache_size",
+        "prepared_statement_name_func",
+    }
+)
 
 # Procrastinate task name for the unified compute-job dispatcher. The
 # API enqueues it via :func:`make_deferrer` (``configure_task`` -- no
@@ -64,6 +77,14 @@ def _to_psycopg_dsn(sqlalchemy_url: str) -> str:
     the same ``SPLITSMITH_DATABASE_URL`` they already pass to
     SQLAlchemy.
 
+    The query string also has to be reconciled: the SQLAlchemy asyncpg
+    URL carries asyncpg-flavoured params that libpq rejects. We map
+    ``ssl=<mode>`` -> ``sslmode=<mode>`` (asyncpg's SSL knob vs libpq's)
+    and drop asyncpg-only keys like ``prepared_statement_cache_size``.
+    Without this, a Neon URL (``?ssl=require&prepared_statement_cache_size=0``)
+    makes psycopg raise ``invalid URI query parameter: "ssl"`` and the
+    worker can't connect.
+
     SQLite URLs raise: Procrastinate is Postgres-only, and the
     alembic migration that lands its schema is a no-op on SQLite.
     Callers must not construct the App against a SQLite URL.
@@ -74,7 +95,19 @@ def _to_psycopg_dsn(sqlalchemy_url: str) -> str:
             "SQLite-backed dev/smoke runs don't exercise the queue."
         )
     # ``postgresql+asyncpg://...`` -> ``postgresql://...``
-    return re.sub(r"^postgresql\+\w+://", "postgresql://", sqlalchemy_url)
+    url = re.sub(r"^postgresql\+\w+://", "postgresql://", sqlalchemy_url)
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    translated: list[tuple[str, str]] = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        if key == "ssl":
+            translated.append(("sslmode", value))
+        elif key in _ASYNCPG_ONLY_QUERY_KEYS:
+            continue
+        else:
+            translated.append((key, value))
+    return urlunsplit(parts._replace(query=urlencode(translated)))
 
 
 def build_app(database_url: str) -> procrastinate.App:
