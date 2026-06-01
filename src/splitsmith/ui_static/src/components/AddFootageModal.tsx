@@ -758,13 +758,8 @@ interface PendingUpload {
    *  persist this. */
   id: string;
   file: File;
-  status: "queued" | "hashing" | "uploading" | "done" | "error" | "cancelled";
+  status: "queued" | "uploading" | "done" | "error" | "cancelled";
   bytesSent: number;
-  /** Computed client-side before the upload starts so the server can
-   *  roll back transit corruption via ``X-Content-SHA256``. Optional
-   *  -- a very large file on a slow CPU may skip the hash to start
-   *  uploading sooner, at the cost of weaker end-to-end checking. */
-  sha256?: string;
   errorMessage?: string;
   controller?: AbortController;
 }
@@ -851,11 +846,16 @@ function HostedUploadBody({
     [],
   );
 
-  // Pump the queue: for every upload still in ``queued``, kick off
-  // the hash + upload pipeline. Runs serially per file (one XHR at
-  // a time) so a slow uplink doesn't get starved by concurrent
-  // 500 MB transfers. The browser opens one TCP connection per
-  // upload anyway and S3 backpressures the rest.
+  // Pump the queue: for every upload still in ``queued``, kick off the
+  // upload. Runs serially per file (one XHR at a time) so a slow uplink
+  // doesn't get starved by concurrent multi-hundred-MB transfers. The
+  // browser opens one TCP connection per upload anyway and S3
+  // backpressures the rest.
+  //
+  // No client-side hashing: footage runs to many GB, and hashing the
+  // whole file in the browser (one ``arrayBuffer`` + ``crypto.subtle``)
+  // blocks/OOMs the tab. The server computes its own digest on receipt,
+  // so the integrity check lives there.
   useEffect(() => {
     const next = uploads.find((u) => u.status === "queued");
     if (!next) return;
@@ -863,25 +863,13 @@ function HostedUploadBody({
 
     void (async () => {
       const controller = new AbortController();
-      updateOne(next.id, { status: "hashing", controller });
-      let sha256: string | undefined;
-      try {
-        sha256 = await hashFile(next.file);
-        if (cancelled) return;
-      } catch {
-        // Hashing failures are rare (browser crypto SubtleCrypto is
-        // universal) but we still proceed with an unhashed upload --
-        // the server computes its own digest, the client just loses
-        // the round-trip integrity check.
-      }
       updateOne(next.id, {
         status: "uploading",
-        sha256,
         bytesSent: 0,
+        controller,
       });
       try {
         await api.uploadRawFile(next.file, {
-          sha256,
           signal: controller.signal,
           onProgress: (loaded) => {
             if (cancelled) return;
@@ -972,7 +960,7 @@ function HostedUploadBody({
   );
 
   const inFlight = uploads.some(
-    (u) => u.status === "queued" || u.status === "hashing" || u.status === "uploading",
+    (u) => u.status === "queued" || u.status === "uploading",
   );
 
   return (
@@ -1128,7 +1116,7 @@ function UploadRow({
           </div>
           <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
             {formatBytes(upload.file.size)}
-            {upload.status === "hashing" && " . hashing"}
+            {upload.status === "queued" && " . queued"}
             {upload.status === "uploading" && ` . ${pct}%`}
             {upload.status === "done" && " . done"}
             {upload.status === "cancelled" && " . cancelled"}
@@ -1137,9 +1125,7 @@ function UploadRow({
             )}
           </div>
         </div>
-        {(upload.status === "queued" ||
-          upload.status === "hashing" ||
-          upload.status === "uploading") && (
+        {(upload.status === "queued" || upload.status === "uploading") && (
           <button
             type="button"
             onClick={onCancel}
@@ -1158,13 +1144,11 @@ function UploadRow({
           </span>
         )}
       </div>
-      {(upload.status === "uploading" || upload.status === "hashing") && (
+      {upload.status === "uploading" && (
         <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface">
           <div
             className="h-full bg-led transition-all"
-            style={{
-              width: `${upload.status === "hashing" ? 0 : pct}%`,
-            }}
+            style={{ width: `${pct}%` }}
           />
         </div>
       )}
@@ -1237,14 +1221,6 @@ function ExistingRow({
       </button>
     </li>
   );
-}
-
-async function hashFile(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function formatBytes(n: number): string {
