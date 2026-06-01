@@ -1667,18 +1667,27 @@ def register_job_bodies(state: AppState) -> None:
             fresh.save(root)
         # Worker callback runs in a ThreadPoolExecutor thread with no
         # event loop; bridge to the async JobBackend via ``asyncio.run``.
+        #
+        # Read ``beep_reviewed`` from the freshly reloaded video, NOT the
+        # snapshot captured at job start: a "Mark reviewed" click that
+        # lands while ffmpeg is running flips the flag on disk but
+        # ``set_beep_reviewed`` no-ops (the trim isn't cached yet), so
+        # this is the only place left to honor it. Falls back to the
+        # snapshot when the video vanished mid-flight.
+        beep_reviewed_now = v_fresh.beep_reviewed if v_fresh is not None else video.beep_reviewed
         if (
             chain_shot_detect
             and video.role == "primary"
-            and video.beep_reviewed
+            and beep_reviewed_now
             and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
         ):
             # Same gate as the detect-then-trim path (#71): don't burn
             # CLAP / GBDT / PANN cycles on a beep the user hasn't
             # confirmed. Manual entries pre-set ``beep_reviewed`` to True
-            # so this still runs; the auto-detect path waits for the
-            # user's explicit "Mark reviewed" click which re-fires
-            # shot_detect from there.
+            # so this still runs; the auto-detect / select-candidate path
+            # leaves it False until the user's explicit "Mark reviewed"
+            # click -- which fires shot_detect itself when the trim is
+            # already cached, or relies on this fresh read when it isn't.
             #
             # Layered automation gate (#215): a global / project
             # opt-out can suppress this auto-trigger.

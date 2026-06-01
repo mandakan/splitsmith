@@ -5310,6 +5310,57 @@ def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> 
     assert any(j["kind"] == "shot_detect" for j in jobs_after)
 
 
+def test_trim_chains_shot_detect_when_reviewed_lands_mid_trim(tmp_path: Path, monkeypatch) -> None:
+    """A "Mark reviewed" click that lands WHILE the trim is encoding must
+    still unblock shot detection.
+
+    Repro for "approved a beep, then nothing to audit": the user selects a
+    ranked candidate (beep_reviewed -> False, trim cache cleared), the
+    re-trim starts, and the user immediately marks the beep reviewed. At
+    that moment ``set_beep_reviewed`` no-ops because the trim isn't cached
+    yet, so the running trim worker is the only thing left that can chain
+    shot-detect. It must read ``beep_reviewed`` from the freshly reloaded
+    project, not the stale snapshot it captured at job start.
+    """
+    import splitsmith.ui.server as server_mod
+    from splitsmith.ui import audio as audio_helpers_mod
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    primary.beep_reviewed = False  # candidate just selected; not yet reviewed
+    project.stages[0].time_seconds = 10.0
+    project.save(shooter_root)
+    project.resolve_video_path(shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    monkeypatch.setattr(server_mod, "_get_ensemble_runtime", lambda: object())
+
+    def fake_trim(root, *a, **kw):  # type: ignore[no-untyped-def]
+        # Simulate the user clicking "Mark reviewed" while ffmpeg runs:
+        # the flag flips on disk, but set_beep_reviewed has already
+        # no-op'd because processed["trim"] was still False.
+        proj = MatchProject.load(root)
+        prim = proj.stages[0].primary()
+        assert prim is not None
+        prim.beep_reviewed = True
+        proj.save(root)
+        return Path("dummy.mp4")
+
+    monkeypatch.setattr(audio_helpers_mod, "ensure_video_audit_trim", fake_trim)
+
+    resp = client.post("/api/shooters/me/stages/1/trim")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    jobs_after = client.get("/api/me/jobs").json()
+    assert any(j["kind"] == "shot_detect" for j in jobs_after), [(j["kind"], j["status"]) for j in jobs_after]
+
+
 # ---------------------------------------------------------------------------
 # Global user-config endpoints (#75)
 # ---------------------------------------------------------------------------
