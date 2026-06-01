@@ -90,6 +90,10 @@ _ME_ROUTES_REQUIRING_AUTH: list[tuple[str, str, str]] = [
     ("DELETE", "/api/me/scoreboard-identity", "/api/me/scoreboard-identity"),
     ("POST", "/api/me/projects/import", "/api/me/projects/import"),
     ("POST", "/api/me/raw/upload", "/api/me/raw/upload"),
+    ("POST", "/api/me/raw/upload/multipart/create", "/api/me/raw/upload/multipart/create"),
+    ("POST", "/api/me/raw/upload/multipart/part-url", "/api/me/raw/upload/multipart/part-url"),
+    ("POST", "/api/me/raw/upload/multipart/complete", "/api/me/raw/upload/multipart/complete"),
+    ("POST", "/api/me/raw/upload/multipart/abort", "/api/me/raw/upload/multipart/abort"),
     ("GET", "/api/me/raw/list", "/api/me/raw/list"),
     ("DELETE", "/api/me/raw/{filename:path}", "/api/me/raw/clip.mp4"),
 ]
