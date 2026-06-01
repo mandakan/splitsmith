@@ -92,7 +92,7 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
-    from ..db import PostgresMatchStore
+    from ..db import PostgresMatchStore, ProjectStateStore
 
 from fastapi import (
     Body,
@@ -124,6 +124,7 @@ from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
+from ..async_bridge import run_sync
 from ..auth import AuthBackend, LoopbackAuth, User
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -620,6 +621,7 @@ class TenantContext:
     scoreboard_identity: user_config.ScoreboardIdentityStore
     jobs: JobBackend
     matches_store: PostgresMatchStore | None
+    project_state: ProjectStateStore | None
     storage: Storage | None
 
 
@@ -681,6 +683,12 @@ class AppState:
     # in hosted mode resolved per request / per job via the property below.
     # See ``splitsmith.db.matches.PostgresMatchStore``.
     _matches_store: PostgresMatchStore | None = None
+    # Per-user ``state_docs`` store (state refactor). Holds the match /
+    # per-shooter project / per-stage audit JSON docs in Postgres with
+    # optimistic locking. ``None`` in local mode (state stays file-based);
+    # in hosted mode resolved per request / per job via the property below.
+    # See ``splitsmith.db.project_state.ProjectStateStore``.
+    _project_state: ProjectStateStore | None = None
     # Per-user preference stores (Tier 3 of doc 10). Local mode
     # delegates to the ``~/.splitsmith/*.json`` module functions;
     # in hosted mode resolved per request from the authenticated user
@@ -793,6 +801,15 @@ class AppState:
         self._matches_store = value
 
     @property
+    def project_state(self) -> ProjectStateStore | None:
+        tenant = current_tenant.get()
+        return tenant.project_state if tenant is not None else self._project_state
+
+    @project_state.setter
+    def project_state(self, value: ProjectStateStore | None) -> None:
+        self._project_state = value
+
+    @property
     def storage(self) -> Storage | None:
         tenant = current_tenant.get()
         return tenant.storage if tenant is not None else self._storage
@@ -848,15 +865,24 @@ class AppState:
         scoped_root = current_match_root.get()
         if scoped_root is None:
             raise _no_project_error()
-        # Hosted: a separate worker process has none of the match's files
-        # on disk. Pull match.json down (S3 authoritative) before reading
-        # it so a worker can see the shooter roster the API wrote. No-op
-        # in local mode (storage is None). See _pull_json.
+        # Roster / ownership check. Hosted: the match doc lives in Postgres
+        # (state_docs), so read the shooter list from there -- a worker or a
+        # post-redeploy replica has no match.json on disk. Local: load the
+        # on-disk match.json. Either way the returned value is the on-disk
+        # path, which is where *media* (S3-mirrored) lives for ffmpeg.
         mid = current_match_id.get()
-        if mid is not None:
-            self._pull_json(f"matches/{mid}/{match_model.MATCH_FILE}", scoped_root / match_model.MATCH_FILE)
-        match = match_model.Match.load(scoped_root)
-        if slug not in match.shooters:
+        store = self.project_state
+        if store is not None and mid is not None:
+            doc, _ = run_sync(store.load_match(mid))
+            if doc is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"match {mid!r} has no state document",
+                )
+            shooters = doc.get("shooters", [])
+        else:
+            shooters = match_model.Match.load(scoped_root).shooters
+        if slug not in shooters:
             raise HTTPException(
                 status_code=404,
                 detail=f"shooter {slug!r} is not registered on this match",
@@ -909,6 +935,96 @@ class AppState:
         """Push a stage's audit JSON up after writing it (hosted)."""
         self._push_json(self._audit_key(slug, stage_number), self._audit_file(slug, stage_number))
 
+    # ------------------------------------------------------------------
+    # State-doc accessors (state refactor)
+    # ------------------------------------------------------------------
+
+    def match(self) -> match_model.Match:
+        """Load the match for the current ``/api/matches/{match_id}/`` scope.
+
+        Hosted: from the ``state_docs`` table, with the state store bound so
+        a subsequent ``.save()`` round-trips back under optimistic locking
+        (carrying the loaded version). Local: from the on-disk ``match.json``
+        (``Match.load`` may self-assign + save a pre-v4 ``match_id`` -- that
+        path is file-only and never reached for a store-backed match, whose
+        docs are born with an id).
+        """
+        scoped_root = current_match_root.get()
+        if scoped_root is None:
+            raise _no_project_error()
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            doc, version = run_sync(store.load_match(mid))
+            if doc is None:
+                raise HTTPException(status_code=404, detail=f"match {mid!r} has no state document")
+            match = match_model.Match.model_validate(doc)
+            match.bind_state(store, match_id=mid, version=version)
+            return match
+        return match_model.Match.load(scoped_root)
+
+    def load_audit(self, slug: str, stage_number: int) -> tuple[dict | None, int]:
+        """Load a stage's audit doc + its version. ``(None, 0)`` when none
+        exists yet. Hosted: from ``state_docs``. Local: from the on-disk
+        ``audit/stage<N>.json`` (version always 0 -- no locking on files)."""
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return run_sync(store.load_audit(mid, slug, stage_number))
+        audit_file = self._audit_file(slug, stage_number)
+        if not audit_file.exists():
+            return None, 0
+        try:
+            return json.loads(audit_file.read_text(encoding="utf-8")), 0
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
+
+    def save_audit(self, slug: str, stage_number: int, doc: dict, *, version: int) -> int:
+        """Persist a stage's audit doc; return the new version.
+
+        Hosted: ``state_docs`` under optimistic locking -- ``version==0``
+        INSERTs, ``>0`` UPDATEs at that version, a stale version raises
+        ``StateConflictError`` (-> 409). Local: atomic ``.tmp`` -> ``.bak``
+        rotate -> rename file write (returns 0)."""
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return run_sync(store.save_audit(mid, slug, stage_number, doc, expected_version=version))
+        audit_file = self._audit_file(slug, stage_number)
+        audit_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        try:
+            tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+            if audit_file.exists():
+                if backup.exists():
+                    backup.unlink()
+                audit_file.replace(backup)
+            tmp.replace(audit_file)
+        except OSError as exc:
+            if tmp.exists():
+                tmp.unlink()
+            raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
+        return 0
+
+    def materialize_audit(self, slug: str, stage_number: int) -> Path:
+        """Ensure the stage's audit doc is present at its on-disk path and
+        return that path.
+
+        For file-path consumers that hand the audit *path* to downstream
+        readers (the FCPXML/report exporters, the lab). Hosted: the doc
+        lives in ``state_docs``, so write it to the local file first.
+        Local: the file is already on disk, return its path. When no audit
+        doc exists the returned path simply won't exist -- the caller's
+        existing "missing audit" handling fires, same as before."""
+        audit_file = self._audit_file(slug, stage_number)
+        if self.project_state is not None:
+            doc, _ = self.load_audit(slug, stage_number)
+            if doc is not None:
+                audit_file.parent.mkdir(parents=True, exist_ok=True)
+                audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        return audit_file
+
     def shooter_project(self, slug: str) -> MatchProject:
         """Load the per-shooter ``MatchProject`` (each shooter slot
         inside a Match folder owns its own ``project.json``).
@@ -926,11 +1042,22 @@ class AppState:
         shooter_root = self.shooter_root(slug)
         match_id = current_match_id.get()
         scope = f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
-        # Hosted: pull project.json fresh (S3 authoritative) before load so
-        # the API sees a worker's saved beep_time/processed and vice versa.
-        if scope is not None:
-            self._pull_json(f"{scope}/{PROJECT_FILE}", shooter_root / PROJECT_FILE)
-        project = MatchProject.load(shooter_root)
+        store = self.project_state
+        if store is not None and match_id is not None:
+            # Hosted: the project doc lives in Postgres. Load it, bind the
+            # store so save() round-trips back under optimistic locking
+            # (carrying the version we just read), and bind storage for
+            # media mirroring. No project.json on disk is involved.
+            doc, version = run_sync(store.load_project(match_id, slug))
+            if doc is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"shooter {slug!r} has no project document",
+                )
+            project = MatchProject.model_validate(doc)
+            project.bind_state(store, match_id=match_id, slug=slug, version=version)
+        else:
+            project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
         return project
 
@@ -1602,16 +1729,8 @@ def register_job_bodies(state: AppState) -> None:
         # apriori boost) and we'll merge results back into the same dict.
         # Hosted: pull the existing audit fresh first so a prior API/worker
         # write isn't lost when we merge + push back.
-        state.pull_audit(slug, stage_number)
-        audit_dir = proj.audit_path(state.shooter_root(slug))
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        audit_file = audit_dir / f"stage{stage_number}.json"
-        if audit_file.exists():
-            try:
-                existing_json = json.loads(audit_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                existing_json = {}
-        else:
+        existing_json, audit_version = state.load_audit(slug, stage_number)
+        if existing_json is None:
             existing_json = {
                 "stage_number": stg.stage_number,
                 "stage_name": stg.stage_name,
@@ -1731,18 +1850,11 @@ def register_job_bodies(state: AppState) -> None:
         )
         existing_json["audit_events"] = events
 
-        # Atomic write + .bak (mirrors put_stage_audit).
-        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        tmp.write_text(json.dumps(existing_json, indent=2) + "\n", encoding="utf-8")
-        if audit_file.exists():
-            if backup.exists():
-                backup.unlink()
-            audit_file.replace(backup)
-        tmp.replace(audit_file)
-        # Hosted: push the detected shots up so the API's audit page sees
-        # them (this is shot_detect's primary result).
-        state.push_audit(slug, stage_number)
+        # Persist the merged audit. Hosted: state_docs under optimistic
+        # locking; local: atomic file write. Phase 4 wraps this in a
+        # re-load + re-merge retry on StateConflictError for the worker's
+        # concurrent read-modify-write case.
+        state.save_audit(slug, stage_number, existing_json, version=audit_version)
 
         # Read-modify-write the project file: a long-running shot_detect
         # job must not save the snapshot it loaded at start, because the
@@ -1772,12 +1884,12 @@ def register_job_bodies(state: AppState) -> None:
         if prim is None or prim.beep_time is None:
             raise RuntimeError("primary or beep disappeared mid-flight")
 
-        # Hosted: the audit JSON was written by the detect/audit job on
-        # another worker and lives in storage, not this container's FS. Pull
-        # it before the exporter reads it (no-op in local mode). Without this
-        # a cross-process export reads a stale or absent audit file.
-        state.pull_audit(slug, stage_number)
-        audit_file = proj.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
+        # Hosted: the audit doc was written by the detect job and lives in
+        # state_docs, not this container's FS. Materialize it to the local
+        # path the exporter reads (no-op in local mode -- the file is
+        # already there). Without this a cross-process export reads a stale
+        # or absent audit file.
+        audit_file = state.materialize_audit(slug, stage_number)
         exports_dir = proj.exports_path(state.shooter_root(slug))
         source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
         engine_stage = EngineStageData(
@@ -1919,12 +2031,13 @@ def register_job_bodies(state: AppState) -> None:
             trimmed_path = exports_dir / f"{base}_trimmed.mp4"
             overlay_target = exports_dir / f"{base}_overlay.mov"
 
-            # Hosted: per-stage artifacts (audit JSON + trims + overlay) may
-            # have been produced + pushed by an earlier `export` job on a
-            # different worker. Pull them so the existence checks below reuse
-            # the cached work instead of re-cutting, and so the composer can
-            # read the audit JSON. No-op in local mode.
-            state.pull_audit(slug, stage_number)
+            # Hosted: per-stage artifacts may have been produced by an
+            # earlier job on a different worker. Materialize the audit doc
+            # (state_docs -> local file) so the composer + per-stage
+            # exporter can read it, and pull the cached trim so the
+            # existence checks below reuse it instead of re-cutting. No-op
+            # in local mode.
+            state.materialize_audit(slug, stage_number)
             export_storage.pull_export_file(proj, trimmed_path)
 
             # Decide what's missing. The match composer needs the
@@ -3141,6 +3254,16 @@ async def _register_match_at(
             status_code=400,
             detail=f"failed to load match at {resolved}: {exc}",
         ) from exc
+    # Hosted: the on-disk match.json is the stale shell Match.init wrote
+    # at creation -- the authoritative doc (with stages + shooters) lives
+    # in Postgres because the creation saves were store-bound. Reload it
+    # so the ``match_empty`` check and the registration name see the real
+    # roster. ``match_id`` itself is correct in the file (assigned before
+    # binding), so it keys the lookup.
+    if state.project_state is not None and match.match_id:
+        doc, _ = await state.project_state.load_match(match.match_id)
+        if doc is not None:
+            match = match_model.Match.model_validate(doc)
     if not match.shooters:
         raise HTTPException(
             status_code=409,
@@ -3157,14 +3280,14 @@ async def _register_match_at(
     if match.match_id:
         state.matches.register(match.match_id, resolved)
         # Hosted: record the match in Postgres so a separate worker can
-        # resolve this ``match_id``, and seed its JSON in S3 so the worker
-        # can read what the API wrote. A job is only submittable from an
-        # open match, so this runs before any worker touches it.
+        # resolve this ``match_id``. A job is only submittable from an open
+        # match, so this runs before any worker touches it. The match /
+        # project / audit docs themselves now live in ``state_docs`` (the
+        # creation saves were store-bound), so the old S3 JSON seeding is
+        # gone -- the worker reads the docs from Postgres via its tenant
+        # ``project_state``.
         if state.matches_store is not None:
             await state.matches_store.upsert(match.match_id, name, f"matches/{match.match_id}")
-            # Blocking boto3 PUT/HEAD round-trips -- offload so they don't
-            # stall the event loop (this runs inside an async handler).
-            await asyncio.to_thread(_sync_match_json_to_storage, state, resolved, match)
     return name, match.match_id
 
 
@@ -3447,6 +3570,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         PostgresMatchStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
+        ProjectStateStore,
         build_email_sender,
         build_signup_policy,
         create_engine,
@@ -3525,6 +3649,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
                 bodies=state.job_bodies,
             ),
             matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
+            project_state=ProjectStateStore(tenant_factory, user_id=user_id),
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
         )
 
@@ -3876,6 +4001,31 @@ def create_app(
             content={"detail": {"code": "shutting_down", "message": str(exc)}},
         )
 
+    # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
+    # SPA can reload + retry. Registered only when the db layer imports
+    # (hosted, or any dev env with the deps); local slim installs never
+    # raise it -- ``project_state`` is None and every save is file-based.
+    try:
+        from ..db import StateConflictError
+
+        _have_state_conflict = True
+    except Exception:  # noqa: BLE001 -- slim local install lacks the db deps
+        _have_state_conflict = False
+    if _have_state_conflict:
+
+        @app.exception_handler(StateConflictError)
+        async def _state_conflict_handler(request: Request, exc: Exception) -> JSONResponse:
+            """Map a lost optimistic-lock race to 409 ``version_conflict``."""
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": {
+                        "code": "version_conflict",
+                        "message": ("this match state changed since you loaded it; " "reload and try again"),
+                    }
+                },
+            )
+
     # ----------------------------------------------------------------------
     # /api/matches/{match_id}/... alias middleware (#353 Phase 3 PR B/C)
     # ----------------------------------------------------------------------
@@ -3924,28 +4074,53 @@ def create_app(
         # middleware runs. Local mode (no ``matches_store``) skips the check
         # -- one operator, nothing to isolate.
         owner_store = state.matches_store
-        if owner_store is not None and await owner_store.get(match_id) is None:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": {
-                        "code": "match_not_found",
-                        "message": f"unknown match_id {match_id!r}",
-                    }
-                },
+        if owner_store is not None:
+            # Hosted: a match's authoritative state is Postgres (this row) +
+            # S3 (its files). The in-memory ``MatchRegistry`` is process-local
+            # and empty after a redeploy or on a second replica, so it can't
+            # be the source of truth for existence -- relying on it 404'd
+            # every match URL after a deploy until the picker re-registered.
+            # Instead: confirm ownership in the RLS-scoped store, then
+            # establish a deterministic local working root the ``state``
+            # accessors mirror match.json / project.json down into (S3 is
+            # authoritative). This makes match resolution stateless across
+            # restarts + replicas. A match the tenant doesn't own returns
+            # None -> the same 404 an unknown id gets (existence and
+            # ownership stay indistinguishable).
+            if await owner_store.get(match_id) is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": {
+                            "code": "match_not_found",
+                            "message": f"unknown match_id {match_id!r}",
+                        }
+                    },
+                )
+            work_root = (
+                Path(
+                    os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
+                )
+                / match_id
             )
-        try:
-            match_root = state.matches.resolve(match_id)
-        except KeyError:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": {
-                        "code": "match_not_found",
-                        "message": f"unknown match_id {match_id!r}",
-                    }
-                },
-            )
+            work_root.mkdir(parents=True, exist_ok=True)
+            state.matches.register(match_id, work_root)
+            match_root = work_root.resolve()
+        else:
+            # Local mode: one operator, no tenancy. Resolve via the local
+            # recent-projects scan (the registry's miss_resolver is None).
+            try:
+                match_root = state.matches.resolve(match_id)
+            except KeyError:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": {
+                            "code": "match_not_found",
+                            "message": f"unknown match_id {match_id!r}",
+                        }
+                    },
+                )
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
@@ -4048,8 +4223,13 @@ def create_app(
         this response is for; the live ``/api/health`` route never
         returns these fields anymore.
         """
-        match = match_model.Match.load(root)
-        shooters = sorted(match.shooters)
+        # Hosted: read the authoritative roster from Postgres (the on-disk
+        # match.json is the stale creation shell). Local: from disk.
+        if state.project_state is not None and match_id is not None:
+            doc, _ = run_sync(state.project_state.load_match(match_id))
+            shooters = sorted(doc.get("shooters", [])) if doc is not None else []
+        else:
+            shooters = sorted(match_model.Match.load(root).shooters)
         default_slug = shooters[0] if shooters else None
         return HealthResponse(
             bound=True,
@@ -6517,15 +6697,11 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        # Hosted: pull fresh so a worker's shot_detect result is visible.
-        state.pull_audit(slug, stage_number)
-        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
-        if not audit_file.exists():
+        # Hosted: from state_docs (a worker's shot_detect result); local:
+        # from disk. 200 null when no audit exists yet.
+        payload, _ = state.load_audit(slug, stage_number)
+        if payload is None:
             return JSONResponse(None)
-        try:
-            payload = json.loads(audit_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
         return JSONResponse(payload)
 
     @app.put("/api/shooters/{slug}/stages/{stage_number}/audit")
@@ -6549,25 +6725,14 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_dir = project.audit_path(state.shooter_root(slug))
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        target = audit_dir / f"stage{stage_number}.json"
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        backup = target.with_suffix(target.suffix + ".bak")
-        try:
-            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-            if target.exists():
-                if backup.exists():
-                    backup.unlink()
-                target.replace(backup)
-            tmp.replace(target)
-        except OSError as exc:
-            if tmp.exists():
-                tmp.unlink()
-            raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
-        # Hosted: push the manual audit edit up so the worker (and other
-        # browsers) see it.
-        state.push_audit(slug, stage_number)
+        # Read the current version so the save is optimistic-locked. The
+        # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
+        # this load-then-save has a tiny race window: if a concurrent
+        # worker bumps the version in between, save_audit raises
+        # StateConflictError -> 409 and the SPA re-fetches. Local: version
+        # is always 0 and this is a plain atomic file write.
+        _, version = state.load_audit(slug, stage_number)
+        state.save_audit(slug, stage_number, payload, version=version)
         return JSONResponse(payload)
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
@@ -6591,13 +6756,9 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
-        if not audit_file.exists():
+        audit_payload, _ = state.load_audit(slug, stage_number)
+        if audit_payload is None:
             return JSONResponse({"anomalies": []})
-        try:
-            audit_payload = json.loads(audit_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
 
         prim = stg.primary()
         beep_time = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
@@ -6669,45 +6830,32 @@ def create_app(
     def _load_audit_for_coach(
         slug: str,
         stage_number: int,
-    ) -> tuple[dict[str, Any], Path, float | None, Any, MatchProject]:
-        """Shared loader: validates the stage, reads the audit JSON,
-        returns (payload, path, primary_beep_in_clip, stage, project).
-        """
+    ) -> tuple[dict[str, Any], int, float | None, Any, MatchProject]:
+        """Shared loader: validates the stage, reads the audit doc,
+        returns (payload, version, primary_beep_in_clip, stage, project).
+        404 when no audit doc exists yet. The version rides back so a
+        coach mutation saves under the same optimistic lock."""
         project = state.shooter_project(slug)
         try:
             stg = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
-        if not audit_file.exists():
+        payload, version = state.load_audit(slug, stage_number)
+        if payload is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"no audit JSON yet for stage {stage_number}",
             )
-        try:
-            payload = json.loads(audit_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
         prim = stg.primary()
         primary_beep_in_clip = (
             _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
         )
-        return payload, audit_file, primary_beep_in_clip, stg, project
+        return payload, version, primary_beep_in_clip, stg, project
 
-    def _coach_atomic_write(audit_file: Path, payload: dict[str, Any]) -> None:
-        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        try:
-            tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-            if audit_file.exists():
-                if backup.exists():
-                    backup.unlink()
-                audit_file.replace(backup)
-            tmp.replace(audit_file)
-        except OSError as exc:
-            if tmp.exists():
-                tmp.unlink()
-            raise HTTPException(status_code=500, detail=f"coach write failed: {exc}") from exc
+    def _coach_save(slug: str, stage_number: int, payload: dict[str, Any], version: int) -> None:
+        """Persist a coach-mutated audit doc under optimistic locking
+        (hosted) / atomically to disk (local). A lost race -> 409."""
+        state.save_audit(slug, stage_number, payload, version=version)
 
     def _build_coach_response(
         slug: str,
@@ -6789,10 +6937,10 @@ def create_app(
             stg = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        audit_file = project.audit_path(state.shooter_root(slug)) / f"stage{stage_number}.json"
-        if not audit_file.exists():
+        audit_payload, _ = state.load_audit(slug, stage_number)
+        if audit_payload is None:
             return JSONResponse(None)
-        payload, _audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        payload, _version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
@@ -6802,7 +6950,7 @@ def create_app(
         every shot whose source is unset or ``"auto"``. Manual entries are
         preserved. Idempotent.
         """
-        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
@@ -6817,7 +6965,7 @@ def create_app(
             }
         )
         payload["audit_events"] = events
-        _coach_atomic_write(audit_file, payload)
+        _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
     @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
@@ -6830,7 +6978,7 @@ def create_app(
         """Patch the coaching annotation fields on one shot. Returns the
         updated coach response for the stage so the client can refresh.
         """
-        payload, audit_file, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
@@ -6869,7 +7017,7 @@ def create_app(
             }
         )
         payload["audit_events"] = events
-        _coach_atomic_write(audit_file, payload)
+        _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/coach/distributions")
@@ -6880,7 +7028,7 @@ def create_app(
         Empty classes still appear in the response with count=0 so the
         UI can render an empty histogram without a special case.
         """
-        payload, _audit_file, _beep_in_clip, stg, _project = _load_audit_for_coach(slug, stage_number)
+        payload, _version, _beep_in_clip, stg, _project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
@@ -6901,19 +7049,11 @@ def create_app(
         """
         project = state.shooter_project(slug)
         cfg = CoachAutoClassifyConfig()
-        audit_dir = project.audit_path(state.shooter_root(slug))
         triples: list[tuple[int, str, list[dict[str, Any]]]] = []
         for stg in project.stages:
-            audit_file = audit_dir / f"stage{stg.stage_number}.json"
-            if not audit_file.exists():
+            stage_payload, _ = state.load_audit(slug, stg.stage_number)
+            if stage_payload is None:
                 continue
-            try:
-                stage_payload = json.loads(audit_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"audit read failed for stage {stg.stage_number}: {exc}",
-                ) from exc
             shots = stage_payload.get("shots") or []
             if not isinstance(shots, list):
                 continue
@@ -7945,6 +8085,12 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         match = match_model.Match.init(target, name=req.name)
+        # Hosted: bind the state store so every save() from here INSERTs /
+        # UPDATEs the match doc in Postgres (the ephemeral disk file
+        # Match.init just wrote is abandoned). version=0 -> the save below
+        # is the INSERT. Local: no store, saves stay file-based.
+        if state.project_state is not None and match.match_id is not None:
+            match.bind_state(state.project_state, match_id=match.match_id, version=0)
         match.match_date = req.match_date
         match.stages = [
             match_model.MatchStageDefinition(
@@ -7978,6 +8124,8 @@ def create_app(
         # have stages to operate on. We seed it directly rather than relying
         # on the user re-importing scoreboard data.
         legacy = MatchProject.init(shooter_root, name=req.name)
+        if state.project_state is not None and match.match_id is not None:
+            legacy.bind_state(state.project_state, match_id=match.match_id, slug=shooter_slug, version=0)
         legacy.competitor_name = req.primary_shooter.name
         legacy.match_date = req.match_date
         if not legacy.stages:
@@ -8048,6 +8196,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         match = match_model.Match.init(target, name=req.name)
+        if state.project_state is not None and match.match_id is not None:
+            match.bind_state(state.project_state, match_id=match.match_id, version=0)
         match.scoreboard_match_id = str(req.match_id)
         match.scoreboard_content_type = req.content_type
         match.save(target)
@@ -8082,6 +8232,8 @@ def create_app(
 
             shooter_root = match_model.Match.shooter_root(target, shooter_slug)
             legacy = MatchProject.init(shooter_root, name=req.name)
+            if state.project_state is not None and match.match_id is not None:
+                legacy.bind_state(state.project_state, match_id=match.match_id, slug=shooter_slug, version=0)
             legacy.competitor_name = pick.name
             legacy.scoreboard_match_id = str(req.match_id)
             legacy.scoreboard_content_type = req.content_type
@@ -8136,11 +8288,13 @@ def create_app(
         shooter-listing / merge / compare endpoints are match-only).
         """
         match_root = state.match_root
-        return match_root, match_model.Match.load(match_root)
+        return match_root, state.match()
 
     def _classify_shooter(shooter_root: Path, match: match_model.Match) -> ShooterListEntry:
         """Build a list entry for a single shooter directory."""
-        legacy = MatchProject.load(shooter_root)
+        # ``shooter_root.name`` is the slug; the accessor loads the project
+        # doc from Postgres (hosted) or disk (local) + binds storage.
+        legacy = state.shooter_project(shooter_root.name)
         # ``audited`` requires the operator to have hit Save & next on
         # the stage (see :func:`stage_audit_status`). Set-up-but-not-
         # touched stages used to count here; they no longer do.
@@ -8361,6 +8515,11 @@ def create_app(
 
         shooter_root = match_model.Match.shooter_root(match_root, slug)
         legacy = MatchProject.init(shooter_root, name=match.name)
+        # Hosted: bind the new project doc (version=0 -> the save below
+        # INSERTs it into state_docs). ``match.add_shooter`` above already
+        # persisted the updated roster to the match doc.
+        if state.project_state is not None and match.match_id is not None:
+            legacy.bind_state(state.project_state, match_id=match.match_id, slug=slug, version=0)
         legacy.competitor_name = req.name
         legacy.match_date = match.match_date
         legacy.scoreboard_match_id = match.scoreboard_match_id
@@ -8377,12 +8536,6 @@ def create_app(
                     )
                 )
         legacy.save(shooter_root)
-        # Hosted: match.json now carries the new slug and S3 is authoritative
-        # (shooter_root always pulls it). Push the updated roster + seed the
-        # new shooter's project.json so the next request -- and the worker --
-        # see the addition instead of the stale opened-at roster. Sync call
-        # is fine: this is a sync endpoint (FastAPI runs it off the loop).
-        _sync_match_json_to_storage(state, match_root, match)
         return list_match_shooters()
 
     @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
@@ -8400,9 +8553,10 @@ def create_app(
             shutil.rmtree(shooter_root, ignore_errors=True)
         match.shooters = [s for s in match.shooters if s != slug]
         match.save(match_root)
-        # Hosted: push the updated roster so the always-pull in shooter_root
-        # doesn't resurrect the removed shooter from the stale S3 copy.
-        _sync_match_json_to_storage(state, match_root, match)
+        # The store-bound match.save above persists the dropped roster.
+        # (The shooter's now-orphaned project/audit state_docs rows are
+        # unreachable -- shooter_root rejects the slug -- and are left for a
+        # future cascade-delete; harmless meanwhile.)
         return list_match_shooters()
 
     @app.post("/api/match/shooters/{slug}/build-trim-caches")
@@ -8424,7 +8578,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
         try:
-            proj = MatchProject.load(shooter_root)
+            proj = state.shooter_project(shooter_root.name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -8513,8 +8667,8 @@ def create_app(
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                legacy = MatchProject.load(shooter_root)
-            except FileNotFoundError:
+                legacy = state.shooter_project(shooter_root.name)
+            except (FileNotFoundError, HTTPException):
                 continue
             stage = next(
                 (s for s in legacy.stages if s.stage_number == stage_number),
@@ -8560,30 +8714,27 @@ def create_app(
             # Shots come from audit; convert each shot.time to time-after-beep.
             shots: list[CompareShotPoint] = []
             if stage is not None and primary is not None and primary.beep_time is not None:
-                audit_path = shooter_root / "audit" / f"stage{stage_number}.json"
-                if audit_path.exists():
-                    try:
-                        audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
-                    except (OSError, json.JSONDecodeError):
-                        audit_data = None
-                    if isinstance(audit_data, dict):
-                        for shot in audit_data.get("shots") or []:
-                            t = shot.get("time")
-                            if t is None:
-                                continue
-                            # Audit stores time in the trim's local clock;
-                            # subtract the trim's beep offset to get
-                            # time-since-beep.
-                            audit_beep = audit_data.get("beep_time")
-                            if audit_beep is None:
-                                continue
-                            shots.append(
-                                CompareShotPoint(
-                                    shot_number=int(shot.get("shot_number", 0)),
-                                    time_after_beep=float(t) - float(audit_beep),
-                                    source=("manual" if shot.get("source") == "manual" else "detected"),
-                                )
+                # ``shooter_root.name`` is the slug; load the audit doc from
+                # state_docs (hosted) or disk (local).
+                audit_data, _ = state.load_audit(shooter_root.name, stage_number)
+                if isinstance(audit_data, dict):
+                    for shot in audit_data.get("shots") or []:
+                        t = shot.get("time")
+                        if t is None:
+                            continue
+                        # Audit stores time in the trim's local clock;
+                        # subtract the trim's beep offset to get
+                        # time-since-beep.
+                        audit_beep = audit_data.get("beep_time")
+                        if audit_beep is None:
+                            continue
+                        shots.append(
+                            CompareShotPoint(
+                                shot_number=int(shot.get("shot_number", 0)),
+                                time_after_beep=float(t) - float(audit_beep),
+                                source=("manual" if shot.get("source") == "manual" else "detected"),
                             )
+                        )
 
             records.append(
                 CompareShooterRecord(
@@ -8621,7 +8772,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
         try:
-            shooter_project = MatchProject.load(shooter_root)
+            shooter_project = state.shooter_project(shooter_root.name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"shooter project missing: {exc}") from exc
 
@@ -8716,8 +8867,8 @@ def create_app(
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                proj = MatchProject.load(shooter_root)
-            except FileNotFoundError:
+                proj = state.shooter_project(shooter_root.name)
+            except (FileNotFoundError, HTTPException):
                 continue
             for stage in proj.stages:
                 if stage.skipped:
@@ -8797,7 +8948,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, req.slug)
         try:
-            proj = MatchProject.load(shooter_root)
+            proj = state.shooter_project(shooter_root.name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         target_stage = next(
@@ -8995,7 +9146,7 @@ def create_app(
                 stg = project.stage(stage_n)
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-            audit_json = project.audit_path(state.shooter_root(slug)) / f"stage{stage_n}.json"
+            audit_json = state.materialize_audit(slug, stage_n)
             try:
                 audit_audio = _resolve_audit_audio(slug, project, stage_n)
             except HTTPException:

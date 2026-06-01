@@ -5723,6 +5723,7 @@ def test_create_match_manual_hosted_mode_synthesizes_path(
             scoreboard_identity=JsonScoreboardIdentityStore(),
             jobs=JobRegistry(),
             matches_store=None,
+            project_state=None,
             storage=None,
         )
 

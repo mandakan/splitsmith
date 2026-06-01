@@ -289,7 +289,7 @@ def test_migrations_applied_against_postgres(hosted_stack: None) -> None:
 
     # Our own tenant tables from the earlier migrations + the auth-domain
     # tables from the magic-link migration (c3f1a8e90d24).
-    for table in ("users", "recent_projects", "compute_jobs", "magic_link_tokens", "sessions"):
+    for table in ("users", "recent_projects", "compute_jobs", "magic_link_tokens", "sessions", "state_docs"):
         exists = _psql(
             "SELECT count(*) FROM information_schema.tables "
             f"WHERE table_schema='public' AND table_name='{table}'"
@@ -422,9 +422,10 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
 
     Covers the chunk's new machinery against real containers:
     1. ``create-manual`` upserts a ``matches`` row on real Postgres, and
-    2. pushes ``match.json`` + the shooter's ``project.json`` to real MinIO,
+    2. writes the match + shooter project docs to ``state_docs`` (Postgres),
     3. so a ``detect_beep`` job the worker pops gets *past* match resolution
-       (no ``MatchNotRegisteredError`` -- the gamma stopgap's failure mode).
+       (no ``MatchNotRegisteredError`` -- the gamma stopgap's failure mode)
+       and reads the shooter's project doc from Postgres cross-process.
 
     The job then fails because no video is assigned -- proving resolution +
     cross-container metadata pull worked without needing an uploaded video
@@ -460,10 +461,19 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     # 2. The API upserted a matches row on real Postgres.
     assert _psql(f"SELECT count(*) FROM matches WHERE match_id = '{match_id}'") == "1"
 
-    # 3. The API pushed match.json + project.json to real MinIO (S3).
-    prefix = f"users/{user_id}/matches/{match_id}"
-    assert _s3_object_exists(f"{prefix}/match.json"), "match.json missing in MinIO"
-    assert _s3_object_exists(f"{prefix}/shooters/{slug}/project.json"), "project.json missing in MinIO"
+    # 3. The API wrote the match + project docs to Postgres state_docs
+    #    (the state refactor replaced the old S3 match.json/project.json
+    #    seeding). The worker reads them cross-process from there.
+    assert (
+        _psql(f"SELECT count(*) FROM state_docs WHERE match_id = '{match_id}' AND doc_kind = 'match'") == "1"
+    ), "match doc missing in state_docs"
+    assert (
+        _psql(
+            f"SELECT count(*) FROM state_docs WHERE match_id = '{match_id}' "
+            f"AND doc_kind = 'project' AND slug = '{slug}'"
+        )
+        == "1"
+    ), "project doc missing in state_docs"
 
     # 4. The worker container resolves the match cross-process. Mirror the
     #    backend's submit (PENDING row + defer) for a detect_beep job with no
@@ -504,9 +514,9 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     ), f"worker failed to resolve the match cross-process: {err!r}"
 
 
-# The three per-user tenant tables RLS protects. Keep in sync with the
+# The per-user tenant tables RLS protects. Keep in sync with the
 # migration's TENANT_TABLES and the multi-tenant store classes.
-_RLS_TABLES = ("recent_projects", "matches", "compute_jobs")
+_RLS_TABLES = ("recent_projects", "matches", "compute_jobs", "state_docs")
 
 
 def _seed_two_tenants() -> tuple[str, str]:
@@ -539,6 +549,12 @@ def _seed_two_tenants() -> tuple[str, str]:
         f"('j-b', '{uid_b}', 'model_download', 'pending', false, false) "
         "ON CONFLICT (id) DO NOTHING"
     )
+    _psql(
+        "INSERT INTO state_docs (id, user_id, match_id, doc_kind, doc, version) VALUES "
+        f"('sd-a', '{uid_a}', 'mid-a', 'match', '{{}}'::jsonb, 1), "
+        f"('sd-b', '{uid_b}', 'mid-b', 'match', '{{}}'::jsonb, 1) "
+        "ON CONFLICT (id) DO NOTHING"
+    )
     return uid_a, uid_b
 
 
@@ -562,16 +578,16 @@ def test_rls_blocks_cross_tenant_reads_and_writes(hosted_stack: None) -> None:
     assert (
         _psql(
             "SELECT count(*) FROM pg_policies WHERE policyname='tenant_isolation' "
-            "AND tablename IN ('recent_projects','matches','compute_jobs')"
+            "AND tablename IN ('recent_projects','matches','compute_jobs','state_docs')"
         )
-        == "3"
+        == "4"
     )
     assert (
         _psql(
             "SELECT count(*) FROM pg_class WHERE relforcerowsecurity "
-            "AND relname IN ('recent_projects','matches','compute_jobs')"
+            "AND relname IN ('recent_projects','matches','compute_jobs','state_docs')"
         )
-        == "3"
+        == "4"
     )
 
     for table in _RLS_TABLES:

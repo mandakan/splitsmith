@@ -39,9 +39,11 @@ from .models import (
     MatchRow,
     RecentProjectRow,
     SessionRow,
+    StateDocRow,
     User,
     new_ulid,
 )
+from .project_state import ProjectStateStore, StateConflictError
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
 from .signup_policy import SignupPolicy, build_signup_policy
@@ -62,10 +64,13 @@ __all__ = [
     "PostgresMatchStore",
     "PostgresRecentProjectsStore",
     "PostgresScoreboardIdentityStore",
+    "ProjectStateStore",
     "RecentProjectRow",
     "SESSION_COOKIE_NAME",
     "SessionRow",
     "SignupPolicy",
+    "StateConflictError",
+    "StateDocRow",
     "User",
     "build_email_sender",
     "build_signup_policy",

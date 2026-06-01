@@ -32,8 +32,9 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
+from .async_bridge import run_sync
 from .config import StageRounds
 from .ui.project import (
     PROJECT_FILE,
@@ -219,6 +220,23 @@ class Match(BaseModel):
     #: Ordered list of shooter slugs (= subdir names under ``shooters/``).
     shooters: list[str] = Field(default_factory=list)
 
+    # Hosted-mode state-doc binding (state refactor). When set, ``save()``
+    # persists the match doc to the ``state_docs`` table via the bound
+    # ``ProjectStateStore`` under optimistic locking instead of writing
+    # ``match.json``. ``state.match()`` binds these after loading the doc
+    # from Postgres; creation sites bind with ``version=0``. Not persisted.
+    _state_store: Any = PrivateAttr(default=None)
+    _state_match_id: str | None = PrivateAttr(default=None)
+    _state_version: int = PrivateAttr(default=0)
+
+    def bind_state(self, store: Any, *, match_id: str, version: int) -> None:
+        """Bind a ``ProjectStateStore`` so ``save()`` round-trips the match
+        doc through Postgres (hosted mode). ``version`` is the
+        optimistic-lock version the doc was loaded at (0 to INSERT)."""
+        self._state_store = store
+        self._state_match_id = match_id
+        self._state_version = version
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -269,8 +287,23 @@ class Match(BaseModel):
         return match
 
     def save(self, root: Path) -> None:
-        """Atomically persist the match to ``<root>/match.json``."""
+        """Persist the match.
+
+        Hosted mode (a state store bound via :meth:`bind_state`): write the
+        match doc to the ``state_docs`` table under optimistic locking; no
+        file is touched. A stale version raises ``StateConflictError`` (->
+        409). Local desktop: atomic write to ``<root>/match.json``.
+        """
         self.updated_at = datetime.now(UTC)
+        if self._state_store is not None:
+            self._state_version = run_sync(
+                self._state_store.save_match(
+                    self._state_match_id,
+                    self.model_dump(mode="json"),
+                    expected_version=self._state_version,
+                )
+            )
+            return
         atomic_write_json(root / MATCH_FILE, self.model_dump(mode="json"))
 
     # ------------------------------------------------------------------

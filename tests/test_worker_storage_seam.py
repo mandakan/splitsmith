@@ -1,41 +1,62 @@
-"""Hosted-mode JSON storage seam (PR-delta).
+"""Hosted-mode worker<->API seam (state refactor).
 
-Proves the bidirectional round-trip that lets a separate worker process
-run match-carrying kinds: the API seeds S3 with a match's JSON, a worker
-(here: a second local working root pointed at the same storage) reads it,
-writes results back, and the API sees them on its next read. S3 is the
-source of truth for the small JSON files, so loads pull fresh.
+The small JSON state (match / project / audit docs) now lives in the
+``state_docs`` Postgres table via :class:`ProjectStateStore`, not in
+S3-mirrored files. The unit-level coverage of that round-trip lives in
+``test_project_state_store.py``; the live-Postgres RLS + serve->worker
+proof lives in ``test_hosted_docker_smoke.py``.
 
-Uses :class:`FilesystemStorage` against a temp dir as the S3 stand-in --
-it implements the full ``Storage`` protocol, so the seam exercises real
-push/pull, not a mock.
+What stays specific to this file is the **media** seam: the heavy binary
+artifacts (audit-trim MP4s, export deliverables) still round-trip through
+S3, keyed by the per-shooter ``scope`` that ``state.shooter_project``
+binds. This file proves a worker can cut media on one working root, push
+it, and the API mirrors it down on another -- with the project doc itself
+resolved from a shared Postgres store rather than a mirrored file.
+
+Uses an in-memory SQLite ``ProjectStateStore`` (the state docs) +
+:class:`FilesystemStorage` against a temp dir (the S3 media stand-in), so
+the seam exercises real reads/writes, not mocks.
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionmaker
 from splitsmith.match_model import Match
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui import audio as audio_helpers
-from splitsmith.ui import server as srv
 from splitsmith.ui.project import PROJECT_FILE, MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import AppState, current_match_id, current_match_root
 
 
-def _scaffold_match(root: Path, *, name: str = "Test Match", slug: str = "alpha") -> str:
-    """Create an on-disk match with one shooter; return its match_id."""
-    match = Match.init(root, name=name)
-    shooter_root = Match.shooter_root(root, slug)
-    shooter_root.mkdir(parents=True, exist_ok=True)
-    MatchProject.init(shooter_root, name=slug)
-    match.shooters.append(slug)
-    match.save(root)
-    assert match.match_id is not None
-    return match.match_id
+def _store_with_match(slug: str = "alpha") -> tuple[ProjectStateStore, str]:
+    """Build an in-memory state store seeded with a one-shooter match +
+    its (empty) project doc. Returns ``(store, match_id)``."""
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = sessionmaker(engine)
+    match_id = "m_seam_test"
+
+    async def _setup() -> ProjectStateStore:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            user = User(email="seam@thias.se")
+            s.add(user)
+            await s.commit()
+            await s.refresh(user)
+            uid = user.id
+        store = ProjectStateStore(session_factory, user_id=uid)
+        await store.save_match(match_id, {"name": "Seam", "shooters": [slug]}, expected_version=0)
+        await store.save_project(
+            match_id, slug, MatchProject(name=slug).model_dump(mode="json"), expected_version=0
+        )
+        return store
+
+    return asyncio.run(_setup()), match_id
 
 
 class _BoundMatch:
@@ -54,96 +75,74 @@ class _BoundMatch:
         current_match_root.reset(self._rt)
 
 
-def test_save_pushes_project_json_when_storage_bound(tmp_path: Path) -> None:
-    storage_root = tmp_path / "s3"
-    storage = FilesystemStorage(storage_root)
-    shooter_root = tmp_path / "local" / "shooters" / "alpha"
-    proj = MatchProject.init(shooter_root, name="alpha")
-    proj.bind_storage(storage, scope="matches/m1/shooters/alpha")
-
-    proj.competitor_name = "Pushed"
-    proj.save(shooter_root)
-
-    key = storage_root / "matches" / "m1" / "shooters" / "alpha" / PROJECT_FILE
-    assert key.exists()
-    assert json.loads(key.read_text())["competitor_name"] == "Pushed"
-
-
 def test_save_is_noop_in_local_mode(tmp_path: Path) -> None:
-    """No storage bound (desktop) -> save just writes locally, no error."""
+    """No state store bound (desktop) -> save just writes locally."""
+    import json
+
     shooter_root = tmp_path / "shooters" / "alpha"
     proj = MatchProject.init(shooter_root, name="alpha")
     proj.competitor_name = "Local"
-    proj.save(shooter_root)  # _storage is None -> push branch skipped
+    proj.save(shooter_root)  # _state_store is None -> file write
     assert json.loads((shooter_root / PROJECT_FILE).read_text())["competitor_name"] == "Local"
 
 
-def test_project_json_round_trips_api_worker_api(tmp_path: Path) -> None:
+def test_project_doc_round_trips_api_worker_api(tmp_path: Path) -> None:
     """API write -> worker read+write -> API re-read sees the worker's
-    value (always-fresh load beats the API's stale local copy)."""
-    storage = FilesystemStorage(tmp_path / "s3")
+    value, with the project doc resolved from a shared state store across
+    two distinct working roots (no file mirror involved)."""
+    store, match_id = _store_with_match()
     state = AppState()
-    state.storage = storage
+    state.project_state = store
 
     api_root = tmp_path / "api"
-    match_id = _scaffold_match(api_root)
-    # API "opens" the match: seed S3 with match.json + project.json.
-    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
-
+    api_root.mkdir()
     with _BoundMatch(api_root, match_id):
         proj = state.shooter_project("alpha")
         proj.competitor_name = "ApiWritten"
         proj.save(state.shooter_root("alpha"))
 
-    # Worker: a fresh, empty working root pointed at the same storage.
     worker_root = tmp_path / "worker"
     worker_root.mkdir()
     with _BoundMatch(worker_root, match_id):
-        wproj = state.shooter_project("alpha")  # pulls match.json + project.json down
+        wproj = state.shooter_project("alpha")
         assert wproj.competitor_name == "ApiWritten"
         wproj.competitor_name = "WorkerWritten"
-        wproj.save(state.shooter_root("alpha"))  # pushes the worker's result
+        wproj.save(state.shooter_root("alpha"))
 
-    # API re-reads: its local copy still says "ApiWritten", but the load
-    # pulls fresh from storage and sees the worker's write.
-    assert (
-        json.loads((api_root / "shooters" / "alpha" / PROJECT_FILE).read_text())["competitor_name"]
-        == "ApiWritten"
-    )
     with _BoundMatch(api_root, match_id):
         reread = state.shooter_project("alpha")
         assert reread.competitor_name == "WorkerWritten"
+    # No project.json was written on either root -- state lives in Postgres.
+    assert not (api_root / "shooters" / "alpha" / PROJECT_FILE).exists()
+    assert not (worker_root / "shooters" / "alpha" / PROJECT_FILE).exists()
 
 
-def test_audit_json_round_trips(tmp_path: Path) -> None:
-    """shot_detect's result (audit JSON) written on the worker is visible
-    to the API via push_audit / pull_audit."""
-    storage = FilesystemStorage(tmp_path / "s3")
+def test_audit_doc_round_trips_api_worker_api(tmp_path: Path) -> None:
+    """shot_detect's result (audit doc) written on the worker is visible to
+    the API via the shared state store."""
+    store, match_id = _store_with_match()
     state = AppState()
-    state.storage = storage
-
-    api_root = tmp_path / "api"
-    match_id = _scaffold_match(api_root)
+    state.project_state = store
 
     worker_root = tmp_path / "worker"
+    worker_root.mkdir()
     with _BoundMatch(worker_root, match_id):
-        audit_dir = Match.shooter_root(worker_root, "alpha") / "audit"
-        audit_dir.mkdir(parents=True)
-        (audit_dir / "stage1.json").write_text('{"shots": [0.21, 0.55]}')
-        state.push_audit("alpha", 1)
+        state.save_audit("alpha", 1, {"shots": [0.21, 0.55]}, version=0)
 
+    api_root = tmp_path / "api"
+    api_root.mkdir()
     with _BoundMatch(api_root, match_id):
-        state.pull_audit("alpha", 1)
-        api_audit = Match.shooter_root(api_root, "alpha") / "audit" / "stage1.json"
-        assert json.loads(api_audit.read_text())["shots"] == [0.21, 0.55]
+        doc, version = state.load_audit("alpha", 1)
+        assert doc == {"shots": [0.21, 0.55]}
+        assert version == 1
 
 
 def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The heavy binary seam: a worker cuts the audit-trim MP4 and pushes
-    it to storage; the API mirrors it down to serve the scrub clip. Proves
-    the scope wiring (``state.shooter_project`` bind) produces matching
-    push/pull keys across two working roots."""
-    # Fake the ffmpeg-backed trim so the test has no binary dependency.
+    it to storage; the API mirrors it down to serve the scrub clip. The
+    project doc resolves from the shared state store; only the MP4 rides
+    S3. Proves the scope wiring (``state.shooter_project`` bind) produces
+    matching push/pull keys across two working roots."""
     monkeypatch.setattr("splitsmith.trim.select_audit_encoder", lambda *a, **k: "libx264")
 
     def fake_trim_video(**kwargs: object) -> None:
@@ -153,17 +152,12 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
 
     monkeypatch.setattr("splitsmith.trim.trim_video", fake_trim_video)
 
+    store, match_id = _store_with_match()
     storage = FilesystemStorage(tmp_path / "s3")
     state = AppState()
+    state.project_state = store
     state.storage = storage
 
-    api_root = tmp_path / "api"
-    match_id = _scaffold_match(api_root)
-    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
-
-    # Worker: fresh root pointed at the same storage. Add a stage with a
-    # primary video (round-trips via project.json), then cut the trim ->
-    # pushes the MP4 to storage.
     worker_root = tmp_path / "worker"
     worker_root.mkdir()
     with _BoundMatch(worker_root, match_id):
@@ -177,7 +171,8 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
         source.write_bytes(b"video bytes")
         audio_helpers.ensure_video_audit_trim(wshooter, 1, video, source, 3.5, 10.0, project=wproj)
 
-    # API: pulls project.json (sees the stage), then mirrors the trim down.
+    api_root = tmp_path / "api"
+    api_root.mkdir()
     with _BoundMatch(api_root, match_id):
         aproj = state.shooter_project("alpha")
         prim = aproj.stage(1).primary()
@@ -190,23 +185,18 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
 
 
 def test_export_media_round_trips_worker_to_api(tmp_path: Path) -> None:
-    """PR-epsilon part 2: a worker produces export deliverables and pushes
-    them to storage; the API mirrors them down via ``pull_export_file``.
-    Proves the scope wiring (``state.shooter_project`` bind) gives matching
-    push/pull keys across two working roots, the same seam the download
-    endpoint serves through."""
+    """A worker produces export deliverables and pushes them to storage;
+    the API mirrors them down via ``pull_export_file``. Project doc from
+    the shared state store; deliverables ride S3."""
     from splitsmith.ui import export_storage
     from splitsmith.ui.exports import StageExportResult
 
+    store, match_id = _store_with_match()
     storage = FilesystemStorage(tmp_path / "s3")
     state = AppState()
+    state.project_state = store
     state.storage = storage
 
-    api_root = tmp_path / "api"
-    match_id = _scaffold_match(api_root)
-    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
-
-    # Worker: produce a stage export bundle on a fresh root and push it.
     worker_root = tmp_path / "worker"
     worker_root.mkdir()
     with _BoundMatch(worker_root, match_id):
@@ -228,7 +218,8 @@ def test_export_media_round_trips_worker_to_api(tmp_path: Path) -> None:
         )
         export_storage.push_stage_export_outputs(wproj, result)
 
-    # API: mirrors each deliverable down (the download endpoint's pull seam).
+    api_root = tmp_path / "api"
+    api_root.mkdir()
     with _BoundMatch(api_root, match_id):
         aproj = state.shooter_project("alpha")
         aed = aproj.exports_path(state.shooter_root("alpha"))
@@ -244,44 +235,14 @@ def test_export_media_round_trips_worker_to_api(tmp_path: Path) -> None:
 
 
 def test_seam_is_noop_without_storage(tmp_path: Path) -> None:
-    """Local mode (storage None): pull/push audit + sync are no-ops, no error."""
-    state = AppState()  # storage stays None
+    """Local mode (no state store, no storage): audit save/load go to disk."""
+    state = AppState()  # project_state + storage stay None
     api_root = tmp_path / "api"
-    match_id = _scaffold_match(api_root)
-    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))  # no-op
-    with _BoundMatch(api_root, match_id):
-        state.pull_audit("alpha", 1)  # no-op
-        state.push_audit("alpha", 1)  # no-op
-
-
-def test_added_shooter_survives_shooter_root_always_pull(tmp_path: Path) -> None:
-    """Regression (bug_001): a shooter added after match open must push the
-    updated roster to S3. ``shooter_root`` always-pulls match.json and
-    overwrites local, so without the push it would revert to the opened-at
-    roster and the new shooter would 404 (and corrupt local match.json)."""
-    storage = FilesystemStorage(tmp_path / "s3")
-    state = AppState()
-    state.storage = storage
-
-    api_root = tmp_path / "api"
-    match_id = _scaffold_match(api_root, slug="alpha")
-    # Open: seed match.json ([alpha]) + alpha's project.json to S3.
-    srv._sync_match_json_to_storage(state, api_root, Match.load(api_root))
-
-    # Add shooter "beta" the way add_match_shooter does: update match.json +
-    # create the shooter's project.json locally, then push (the fix).
-    match = Match.load(api_root)
-    beta_root = Match.shooter_root(api_root, "beta")
-    beta_root.mkdir(parents=True, exist_ok=True)
-    MatchProject.init(beta_root, name="beta")
-    match.shooters.append("beta")
-    match.save(api_root)
-    srv._sync_match_json_to_storage(state, api_root, match)
-
-    # A shooter-scoped request pulls match.json fresh from S3; beta must be
-    # registered (not reverted to the opened-at [alpha] roster). Without the
-    # push above, the pull overwrites local with [alpha] and this 404s.
-    with _BoundMatch(api_root, match_id):
-        assert state.shooter_root("beta").name == "beta"
-    # beta's project.json was seeded to S3 so the worker can read it.
-    assert storage.exists(f"matches/{match_id}/shooters/beta/{PROJECT_FILE}")
+    Match.init(api_root, name="Local")
+    (Match.shooter_root(api_root, "alpha")).mkdir(parents=True, exist_ok=True)
+    with _BoundMatch(api_root, "m_local"):
+        assert state.load_audit("alpha", 1) == (None, 0)
+        state.save_audit("alpha", 1, {"shots": []}, version=0)
+        doc, version = state.load_audit("alpha", 1)
+        assert doc == {"shots": []}
+        assert version == 0  # files have no optimistic-lock version
