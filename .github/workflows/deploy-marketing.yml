@@ -21,7 +21,7 @@ jobs:
     name: wrangler pages deploy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Once a root package.json + pnpm-lock.yaml landed (for the
       # wrangler dev dep used by the waitlist backend), wrangler-action
