@@ -205,6 +205,37 @@ def test_shutdown_calls_handler_after_drain(tmp_path: Path) -> None:
     assert stopped.wait(timeout=2.0), "shutdown_handler not invoked after drain"
 
 
+def test_print_active_jobs_skips_quietly_under_running_loop(caplog) -> None:
+    """Regression: hosted ``serve`` handles SIGTERM (a redeploy) while
+    uvicorn's event loop is still running. ``_print_active_jobs`` must not
+    call ``asyncio.run`` there -- the old code did, caught the resulting
+    "cannot be called from a running event loop" RuntimeError, and logged a
+    traceback on every redeploy. It should now skip the job dump quietly."""
+    import logging
+
+    from fastapi import FastAPI
+
+    from splitsmith.ui.server import _print_active_jobs
+
+    class _JobsThatMustNotRun:
+        async def list(self):  # pragma: no cover -- must never be driven here
+            raise AssertionError("jobs.list() must not run from inside a live loop")
+
+    class _State:
+        jobs = _JobsThatMustNotRun()
+
+    app = FastAPI()
+    app.state.splitsmith_state = _State()
+
+    async def _call() -> None:
+        _print_active_jobs(app)  # a loop is running -> must just return
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(_call())  # must not raise
+
+    assert "could not enumerate jobs on shutdown" not in caplog.text
+
+
 def test_shutdown_drains_in_flight_job_before_calling_handler(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
     state = client.app.state.splitsmith_state

@@ -10588,8 +10588,21 @@ def _print_active_jobs(app: FastAPI) -> None:
     if state is None:
         return
     try:
-        # Signal handler runs synchronously; no event loop here. Use
-        # ``asyncio.run`` to drive the async JobBackend.list() call.
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop_running = False
+    else:
+        loop_running = True
+    if loop_running:
+        # Hosted ``serve`` under uvicorn: SIGTERM (a redeploy) is handled
+        # while uvicorn's event loop is still running, so ``asyncio.run``
+        # would raise "cannot be called from a running event loop". This
+        # job dump is a local Ctrl-C nicety, not a hosted concern -- skip
+        # it rather than spam a traceback on every redeploy.
+        return
+    try:
+        # Local ``splitsmith ui`` Ctrl-C: no loop is running, so drive the
+        # async JobBackend.list() call with ``asyncio.run``.
         jobs = asyncio.run(state.jobs.list())
     except Exception:  # pragma: no cover -- defensive: never block shutdown
         logger.warning("could not enumerate jobs on shutdown", exc_info=True)
