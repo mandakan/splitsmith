@@ -114,7 +114,9 @@ def hosted_db(tmp_path: Path) -> Iterator[str]:
 
 
 @pytest.fixture
-def hosted_client(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, S3Storage]]:
+def hosted_client(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[tuple[TestClient, S3Storage]]:
     """Boot the FastAPI app in hosted mode against a moto bucket.
 
     Replaces ``_tenant_s3_storage`` (the per-request wrapper) so each
@@ -131,6 +133,11 @@ def hosted_client(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[t
     monkeypatch.setenv("SPLITSMITH_S3_REGION", "us-east-1")
     monkeypatch.setenv("SPLITSMITH_S3_ACCESS_KEY_ID", "key")
     monkeypatch.setenv("SPLITSMITH_S3_SECRET_ACCESS_KEY", "secret")
+    # The hosted match-id alias middleware establishes a local working
+    # root at ``<SPLITSMITH_PROJECTS_DIR>/<match_id>`` for media. Point it
+    # at a writable tmp dir; the production default (/home/splitsmith/data)
+    # isn't creatable on a dev/CI box.
+    monkeypatch.setenv("SPLITSMITH_PROJECTS_DIR", str(tmp_path / "hosted-root"))
 
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-east-1")
