@@ -270,6 +270,39 @@ def _cancellable_runner(handle: JobHandle):
 
 logger = logging.getLogger(__name__)
 
+
+def _configure_app_logging(stream: Any | None = None) -> None:
+    """Route ``splitsmith.*`` INFO logs to stdout.
+
+    Without this the app's own log lines are invisible in a deployed
+    container: ``uvicorn.Config(log_level="info")`` configures only
+    uvicorn's loggers, never the root logger, so ``splitsmith.*`` records
+    propagate to a root logger left at its WARNING default and INFO is
+    dropped. The most visible casualty is the console e-mail backend's
+    ``MAGIC_LINK <to> <link>`` line (``splitsmith.db.email``) -- the whole
+    point of that transport is that the operator can read the sign-in link
+    from the logs, which silently never happened in hosted deploys.
+
+    Attaches one stdout ``StreamHandler`` to the ``splitsmith`` package
+    logger and raises that logger's level to INFO so its records reach the
+    handler. Propagation is left ON (the default): severing it would cut
+    ``splitsmith.*`` records off from the root logger, breaking pytest's
+    ``caplog`` and the file-logging sidecar (which both attach at root).
+    In a deployed serve process root carries no stdout handler, so there is
+    no double-emit; uvicorn's own loggers (propagate off) are untouched and
+    keep emitting access logs. Idempotent.
+    """
+    pkg_logger = logging.getLogger("splitsmith")
+    if any(getattr(h, "_splitsmith_stdout", False) for h in pkg_logger.handlers):
+        return
+    handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
+    handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+    handler._splitsmith_stdout = True  # type: ignore[attr-defined]  # idempotence marker
+    pkg_logger.addHandler(handler)
+    if pkg_logger.level == logging.NOTSET or pkg_logger.level > logging.INFO:
+        pkg_logger.setLevel(logging.INFO)
+
+
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
 UI_SOURCE_DIR = Path(__file__).parent.parent / "ui_static"
 
@@ -10673,6 +10706,11 @@ def serve(
     ``skip_system_check=True`` bypasses the probe (used by tests).
     """
     import uvicorn
+
+    # Make the app's own INFO logs (incl. the console magic-link line)
+    # visible -- uvicorn only configures its own loggers, leaving ours
+    # muted at the root WARNING default. See _configure_app_logging.
+    _configure_app_logging()
 
     if not skip_system_check:
         from ..system_check import check_ffmpeg
