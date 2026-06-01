@@ -131,6 +131,16 @@ export function MatchShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
   const shooterCount = shooters.length || undefined;
+  // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
+  // the URL. Rather than forcing the user to the shooter list, default to
+  // one -- the URL slug if present, else the first shooter with footage,
+  // else just the first shooter. The top shooter chips let them switch.
+  // ``undefined`` only when the match has no shooters yet.
+  const defaultShooterSlug =
+    slug ??
+    shooters.find((s) => s.video_count > 0)?.slug ??
+    shooters[0]?.slug ??
+    undefined;
 
   useEffect(() => {
     let alive = true;
@@ -412,12 +422,15 @@ export function MatchShell() {
           // (Audit / Coach / Export). See #425 for the rationale.
           hasFootage={shooters.some((s) => s.video_count > 0)}
           onStageClick={(n) => {
-            const target = slug ?? health?.default_shooter_slug;
             const mid = urlMatchId ?? health?.match_id ?? null;
             const base = mid ? `/match/${mid}` : "";
-            navigate(target ? `${base}/audit/${target}/${n}` : `${base}/shooters`);
+            navigate(
+              defaultShooterSlug
+                ? `${base}/audit/${defaultShooterSlug}/${n}`
+                : `${base}/shooters`,
+            );
           }}
-          shooterSlug={slug ?? health?.default_shooter_slug ?? undefined}
+          shooterSlug={defaultShooterSlug}
           matchId={urlMatchId ?? health?.match_id ?? undefined}
           collapsed={sidebarCollapsed}
           onCollapseToggle={toggleSidebar}
