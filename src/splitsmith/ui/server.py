@@ -3924,28 +3924,53 @@ def create_app(
         # middleware runs. Local mode (no ``matches_store``) skips the check
         # -- one operator, nothing to isolate.
         owner_store = state.matches_store
-        if owner_store is not None and await owner_store.get(match_id) is None:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": {
-                        "code": "match_not_found",
-                        "message": f"unknown match_id {match_id!r}",
-                    }
-                },
+        if owner_store is not None:
+            # Hosted: a match's authoritative state is Postgres (this row) +
+            # S3 (its files). The in-memory ``MatchRegistry`` is process-local
+            # and empty after a redeploy or on a second replica, so it can't
+            # be the source of truth for existence -- relying on it 404'd
+            # every match URL after a deploy until the picker re-registered.
+            # Instead: confirm ownership in the RLS-scoped store, then
+            # establish a deterministic local working root the ``state``
+            # accessors mirror match.json / project.json down into (S3 is
+            # authoritative). This makes match resolution stateless across
+            # restarts + replicas. A match the tenant doesn't own returns
+            # None -> the same 404 an unknown id gets (existence and
+            # ownership stay indistinguishable).
+            if await owner_store.get(match_id) is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": {
+                            "code": "match_not_found",
+                            "message": f"unknown match_id {match_id!r}",
+                        }
+                    },
+                )
+            work_root = (
+                Path(
+                    os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
+                )
+                / match_id
             )
-        try:
-            match_root = state.matches.resolve(match_id)
-        except KeyError:
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": {
-                        "code": "match_not_found",
-                        "message": f"unknown match_id {match_id!r}",
-                    }
-                },
-            )
+            work_root.mkdir(parents=True, exist_ok=True)
+            state.matches.register(match_id, work_root)
+            match_root = work_root.resolve()
+        else:
+            # Local mode: one operator, no tenancy. Resolve via the local
+            # recent-projects scan (the registry's miss_resolver is None).
+            try:
+                match_root = state.matches.resolve(match_id)
+            except KeyError:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": {
+                            "code": "match_not_found",
+                            "message": f"unknown match_id {match_id!r}",
+                        }
+                    },
+                )
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
