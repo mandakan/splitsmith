@@ -289,7 +289,7 @@ def test_migrations_applied_against_postgres(hosted_stack: None) -> None:
 
     # Our own tenant tables from the earlier migrations + the auth-domain
     # tables from the magic-link migration (c3f1a8e90d24).
-    for table in ("users", "recent_projects", "compute_jobs", "magic_link_tokens", "sessions"):
+    for table in ("users", "recent_projects", "compute_jobs", "magic_link_tokens", "sessions", "state_docs"):
         exists = _psql(
             "SELECT count(*) FROM information_schema.tables "
             f"WHERE table_schema='public' AND table_name='{table}'"
@@ -504,9 +504,9 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     ), f"worker failed to resolve the match cross-process: {err!r}"
 
 
-# The three per-user tenant tables RLS protects. Keep in sync with the
+# The per-user tenant tables RLS protects. Keep in sync with the
 # migration's TENANT_TABLES and the multi-tenant store classes.
-_RLS_TABLES = ("recent_projects", "matches", "compute_jobs")
+_RLS_TABLES = ("recent_projects", "matches", "compute_jobs", "state_docs")
 
 
 def _seed_two_tenants() -> tuple[str, str]:
@@ -539,6 +539,12 @@ def _seed_two_tenants() -> tuple[str, str]:
         f"('j-b', '{uid_b}', 'model_download', 'pending', false, false) "
         "ON CONFLICT (id) DO NOTHING"
     )
+    _psql(
+        "INSERT INTO state_docs (id, user_id, match_id, doc_kind, doc, version) VALUES "
+        f"('sd-a', '{uid_a}', 'mid-a', 'match', '{{}}'::jsonb, 1), "
+        f"('sd-b', '{uid_b}', 'mid-b', 'match', '{{}}'::jsonb, 1) "
+        "ON CONFLICT (id) DO NOTHING"
+    )
     return uid_a, uid_b
 
 
@@ -562,16 +568,16 @@ def test_rls_blocks_cross_tenant_reads_and_writes(hosted_stack: None) -> None:
     assert (
         _psql(
             "SELECT count(*) FROM pg_policies WHERE policyname='tenant_isolation' "
-            "AND tablename IN ('recent_projects','matches','compute_jobs')"
+            "AND tablename IN ('recent_projects','matches','compute_jobs','state_docs')"
         )
-        == "3"
+        == "4"
     )
     assert (
         _psql(
             "SELECT count(*) FROM pg_class WHERE relforcerowsecurity "
-            "AND relname IN ('recent_projects','matches','compute_jobs')"
+            "AND relname IN ('recent_projects','matches','compute_jobs','state_docs')"
         )
-        == "3"
+        == "4"
     )
 
     for table in _RLS_TABLES:

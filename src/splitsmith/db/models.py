@@ -19,6 +19,7 @@ from datetime import datetime
 
 import ulid
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -304,6 +305,109 @@ class MatchRow(Base):
 
     def __repr__(self) -> str:
         return f"<MatchRow user_id={self.user_id!r} match_id={self.match_id!r}>"
+
+
+class StateDocRow(Base):
+    """One row per hosted match-state JSON document (state refactor).
+
+    Hosted-mode per-match state used to live in JSON files on each
+    serve/worker container's ephemeral local disk, mirrored whole to S3
+    (``match.json``, per-shooter ``project.json``, ``audit/stage<N>.json``).
+    That model lost the state on every redeploy (empty working dir) and,
+    even fully mirrored, was whole-file last-writer-wins on S3 -- two
+    writers silently clobbered each other. This table holds those same
+    small JSON docs in Postgres with optimistic-concurrency versioning, so
+    match resolution is stateless across redeploys/replicas and concurrent
+    edits are *detected* (409) instead of lost.
+
+    **Polymorphic on ``doc_kind``** -- one table for all three kinds
+    because they share an identical load-whole / save-whole lifecycle and
+    are never queried *into* (the ``doc`` column is read and written
+    whole, never filtered on a key). Three near-duplicate tables would buy
+    nothing. The shape per kind:
+
+    - ``"match"``   -- the match-level doc (``Match`` model). ``slug`` and
+      ``stage_number`` are NULL.
+    - ``"project"`` -- a per-shooter project doc (``MatchProject`` model).
+      ``slug`` is the shooter slug; ``stage_number`` is NULL.
+    - ``"audit"``   -- a per-stage audit doc (raw dict, no model).
+      ``slug`` is the shooter slug; ``stage_number`` is the 1-based stage.
+
+    The existing ``matches`` table (:class:`MatchRow`) stays as the
+    ownership/index registry resolved by ``(user_id, match_id)``; this
+    table holds the bodies.
+
+    **Uniqueness.** Logically a doc is unique on
+    ``(user_id, match_id, doc_kind, slug, stage_number)``. But NULL is
+    distinct-from-NULL in a SQL unique index, so a plain
+    :class:`UniqueConstraint` over those columns would happily admit two
+    ``match`` rows (both with NULL slug + stage). The real guard is a
+    Postgres ``coalesce`` expression index created in the migration
+    (``coalesce(slug,'')``, ``coalesce(stage_number,-1)``). The
+    ``UniqueConstraint`` declared here is only so SQLite's ``create_all``
+    builds *a* unique index for the test engine -- tests never create
+    duplicates, so its NULL-distinct weakness is harmless there.
+
+    **Optimistic concurrency.** ``version`` starts at 1 on insert and the
+    store bumps it on every save guarded by ``WHERE version =
+    expected_version``; a stale writer's UPDATE matches 0 rows and raises
+    ``StateConflictError`` (-> 409). See
+    :class:`splitsmith.db.project_state.ProjectStateStore`.
+
+    **Multi-tenant:** ``user_id`` is non-nullable, CASCADEs on user
+    delete, and is added to the ``tenant_isolation`` RLS policy in the
+    migration. Every query in ``ProjectStateStore`` filters by
+    ``user_id``; isolation tests guard the invariant.
+    """
+
+    __tablename__ = "state_docs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "match_id",
+            "doc_kind",
+            "slug",
+            "stage_number",
+            name="uq_state_docs_identity",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    match_id: Mapped[str] = mapped_column(String, nullable=False)
+    doc_kind: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str | None] = mapped_column(String, nullable=True)
+    stage_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Read whole, written whole, never queried into -> generic JSON for
+    # SQLite tests, JSONB on Postgres (migration ALTERs the type). JSONB
+    # buys nothing on read-whole access but is the right column type and
+    # keeps the door open to future indexed access without a migration.
+    doc: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StateDocRow user_id={self.user_id!r} match_id={self.match_id!r} "
+            f"kind={self.doc_kind!r} slug={self.slug!r} stage={self.stage_number!r} "
+            f"v={self.version}>"
+        )
 
 
 class ComputeJobRow(Base):
