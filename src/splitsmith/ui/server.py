@@ -3581,6 +3581,59 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
     return detail
 
 
+async def _enrich_recent_project_hosted(
+    state: AppState, rp: user_config.RecentProject
+) -> RecentProjectDetail | None:
+    """Hosted picker detail, read from Postgres instead of the filesystem.
+
+    The recorded ``path`` is an ephemeral container working root a redeploy
+    wipes, so the filesystem enricher reports the match as ``missing`` even
+    though its state is safe in ``state_docs``. When the row carries a
+    ``match_id`` and the match doc is present, build the detail from the
+    match + per-shooter project docs. Returns ``None`` to fall back to the
+    filesystem path (local mode, or no stored match_id / doc -- a genuinely
+    gone match).
+    """
+    if state.project_state is None or not rp.match_id:
+        return None
+    match_doc, _ = await state.project_state.load_match(rp.match_id)
+    if match_doc is None:
+        return None
+    detail = RecentProjectDetail(
+        path=rp.path,
+        name=match_doc.get("name") or rp.name,
+        last_opened_at=rp.last_opened_at,
+        kind="match",
+    )
+    detail.match_id = rp.match_id
+    shooters = match_doc.get("shooters") or []
+    detail.shooter_count = len(shooters)
+    detail.stage_count = len(match_doc.get("stages") or [])
+    detail.match_date = match_doc.get("match_date")  # JSON doc -> ISO str | None
+    detail.manual = match_doc.get("scoreboard_match_id") is None
+
+    names: list[str] = []
+    video_total = 0
+    for slug in shooters:
+        pdoc, _ = await state.project_state.load_project(rp.match_id, slug)
+        if pdoc is None:
+            names.append(slug)
+            continue
+        try:
+            proj = MatchProject.model_validate(pdoc)
+            names.append(proj.competitor_name or slug)
+            video_total += len(proj.all_videos())
+        except Exception:  # noqa: BLE001 -- never break the listing on one bad doc
+            names.append(slug)
+    detail.shooter_names = names
+    detail.video_count = video_total
+    # Per-stage audited counts live in separate state_docs rows; loading
+    # them all for a list view isn't worth it, so leave stages_audited at 0
+    # (the Audit screen shows the real per-stage status).
+    detail.status = "awaiting_footage" if video_total == 0 else "in_progress"
+    return detail
+
+
 SPLITSMITH_MODE_ENV = "SPLITSMITH_MODE"
 SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
 # Public origin the deployment is reached at (e.g. https://splitsmith.app,
@@ -8243,7 +8296,14 @@ def create_app(
         """
         projects = await state.recent_projects.list()
         if detail:
-            enriched = [_enrich_recent_project(p) for p in projects]
+            enriched: list[RecentProjectDetail] = []
+            for p in projects:
+                # Hosted: resolve detail from Postgres so a redeploy-wiped
+                # working dir doesn't show the match as "missing". Falls
+                # back to the filesystem enricher (local mode, or no stored
+                # match_id / a genuinely-gone match).
+                hosted = await _enrich_recent_project_hosted(state, p)
+                enriched.append(hosted if hosted is not None else _enrich_recent_project(p))
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 

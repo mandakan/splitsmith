@@ -781,3 +781,38 @@ def test_bind_resolves_by_match_id_when_local_path_is_gone(hosted_client) -> Non
     assert rebind.status_code == 200, rebind.text
     assert rebind.json()["match_id"] == match_id
     assert rebind.json()["bound"] is True
+
+
+def test_recent_projects_detail_reads_from_store_after_path_wiped(hosted_client) -> None:
+    """Hosted picker detail must come from Postgres, not the filesystem:
+    after a redeploy wipes the working dir, the match still shows real
+    metadata (kind=match, name, shooter/stage counts) instead of the scary
+    'missing / folder not found'."""
+    import shutil
+
+    client, _ = hosted_client
+    resp = client.post(
+        "/api/match/create-manual",
+        json={
+            "name": "Picker Detail Test",
+            "stages": [{"stage_number": 1, "stage_name": "S1"}],
+            "primary_shooter": {"name": "Anton"},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    health = resp.json()
+    match_id, project_root = health["match_id"], health["project_root"]
+
+    shutil.rmtree(project_root, ignore_errors=True)
+    assert not Path(project_root).exists()
+
+    detail = client.get("/api/me/recent-projects?detail=true")
+    assert detail.status_code == 200, detail.text
+    entries = detail.json()["projects"]
+    entry = next((p for p in entries if p.get("match_id") == match_id), None)
+    assert entry is not None, entries
+    assert entry["kind"] == "match"  # not "missing"
+    assert entry["name"] == "Picker Detail Test"
+    assert entry["shooter_count"] == 1
+    assert entry["stage_count"] == 1
+    assert entry["shooter_names"] == ["Anton"]
