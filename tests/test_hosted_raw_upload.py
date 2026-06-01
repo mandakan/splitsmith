@@ -659,3 +659,95 @@ def test_attach_503_when_storage_unwired(
     assert resp.status_code in (503, 404)
     # 503 is the storage-off contract; 404 is the alias middleware
     # rejecting an unknown match_id. Either is "fails closed".
+
+
+# -- Presigned multipart upload endpoints (#467) ------------------------
+
+
+def test_multipart_create_returns_upload_id_and_part_size(hosted_client) -> None:
+    client, _ = hosted_client
+    resp = client.post(
+        "/api/me/raw/upload/multipart/create",
+        json={"filename": "GH010099.mp4"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["upload_id"]
+    assert body["filename"] == "GH010099.mp4"
+    assert body["key"] == "raw/GH010099.mp4"
+    assert body["part_size"] >= 5 * 1024 * 1024  # >= S3 non-final-part minimum
+
+
+def test_multipart_part_url_is_presigned(hosted_client) -> None:
+    client, _ = hosted_client
+    create = client.post("/api/me/raw/upload/multipart/create", json={"filename": "clip.mp4"}).json()
+    resp = client.post(
+        "/api/me/raw/upload/multipart/part-url",
+        json={"filename": "clip.mp4", "upload_id": create["upload_id"], "part_number": 1},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["url"].startswith("http")
+
+
+def test_multipart_round_trip_then_attach(hosted_client_with_match) -> None:
+    client, storage, match_id, slug = hosted_client_with_match
+
+    # 1. Create the multipart upload.
+    create = client.post("/api/me/raw/upload/multipart/create", json={"filename": "big.mp4"}).json()
+    upload_id = create["upload_id"]
+
+    # 2. Upload two parts straight to the (moto) store the way the browser
+    #    would PUT to the presigned URLs. Use the backend client + the
+    #    prefixed key the storage resolves to.
+    full_key = f"{storage.prefix}raw/big.mp4"
+    part1 = b"x" * (5 * 1024 * 1024)
+    part2 = b"y" * 2048
+    etags = []
+    for n, body in ((1, part1), (2, part2)):
+        out = storage._client.upload_part(
+            Bucket=storage.bucket, Key=full_key, UploadId=upload_id, PartNumber=n, Body=body
+        )
+        etags.append({"part_number": n, "etag": out["ETag"]})
+
+    # 3. Complete -> the object is assembled; serve returns the path.
+    done = client.post(
+        "/api/me/raw/upload/multipart/complete",
+        json={"filename": "big.mp4", "upload_id": upload_id, "parts": etags},
+    )
+    assert done.status_code == 200, done.text
+    body = done.json()
+    assert body["path"] == "raw/big.mp4"
+    assert body["size"] == len(part1) + len(part2)
+    assert body["sha256"] is None  # serve never saw the bytes
+    assert storage.read_bytes("raw/big.mp4") == part1 + part2
+
+    # 4. The completed object attaches like any raw video.
+    attach = client.post(
+        _attach_url(match_id, slug),
+        json={"filename": body["filename"], "size_bytes": body["size"]},
+    )
+    assert attach.status_code == 200, attach.text
+    project = _get_project(client, match_id, slug)
+    assert any(rv["storage_path"] == "raw/big.mp4" for rv in project["raw_videos"])
+
+
+def test_multipart_abort_discards_upload(hosted_client) -> None:
+    client, storage = hosted_client
+    create = client.post("/api/me/raw/upload/multipart/create", json={"filename": "scratch.mp4"}).json()
+    resp = client.post(
+        "/api/me/raw/upload/multipart/abort",
+        json={"filename": "scratch.mp4", "upload_id": create["upload_id"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert not storage.exists("raw/scratch.mp4")
+
+
+def test_multipart_create_503_when_storage_unwired(hosted_db: str, monkeypatch) -> None:
+    monkeypatch.delenv("SPLITSMITH_S3_BUCKET", raising=False)
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        _authed(client, hosted_db)
+        resp = client.post("/api/me/raw/upload/multipart/create", json={"filename": "x.mp4"})
+    assert resp.status_code == 503

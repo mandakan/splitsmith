@@ -323,6 +323,12 @@ def _state_conflict_excs() -> tuple[type[BaseException], ...]:
 # thundering herd. Exhausting it re-raises -> the job fails loudly.
 _AUDIT_SAVE_MAX_ATTEMPTS = 4
 
+# Chunk size the multipart-upload client splits a file into. 16 MiB is
+# comfortably above S3/R2's 5 MiB non-final-part minimum and keeps the part
+# count modest (a 2 GB file = 128 parts), so per-part presign round-trips
+# stay cheap.
+_RAW_UPLOAD_PART_SIZE = 16 * 1024 * 1024
+
 
 def _save_audit_with_remerge(
     state: AppState,
@@ -2771,6 +2777,49 @@ class AttachRawVideoRequest(BaseModel):
     covers_stages: list[int] | None = None
 
 
+class MultipartCreateRequest(BaseModel):
+    """Body for POST /api/me/raw/upload/multipart/create (#467).
+
+    Only the filename is needed; the server sanitizes it, mints the R2
+    multipart upload, and tells the client the part size to chunk with.
+    Everything downstream keys off ``filename`` + ``upload_id`` (the
+    server re-derives the storage key), so a request body can't point the
+    upload outside the user's ``raw/`` prefix.
+    """
+
+    filename: str
+
+
+class MultipartPartUrlRequest(BaseModel):
+    """Body for POST /api/me/raw/upload/multipart/part-url (#467)."""
+
+    filename: str
+    upload_id: str
+    part_number: int
+
+
+class MultipartPart(BaseModel):
+    """One finished part: its 1-based number + the ETag R2 returned."""
+
+    part_number: int
+    etag: str
+
+
+class MultipartCompleteRequest(BaseModel):
+    """Body for POST /api/me/raw/upload/multipart/complete (#467)."""
+
+    filename: str
+    upload_id: str
+    parts: list[MultipartPart]
+
+
+class MultipartAbortRequest(BaseModel):
+    """Body for POST /api/me/raw/upload/multipart/abort (#467)."""
+
+    filename: str
+    upload_id: str
+
+
 class ScoreboardIdentityRequest(BaseModel):
     """Body for PUT /api/user/scoreboard-identity (#75).
 
@@ -4588,6 +4637,106 @@ def create_app(
                 "filename": name,
             }
         )
+
+    # ------------------------------------------------------------------
+    # Presigned multipart upload (#467): direct browser -> R2 for large
+    # files. The single-shot endpoint above proxies bytes through this
+    # process, which 502s past a few hundred MB on Railway. Here the
+    # client PUTs parts straight to R2 via presigned URLs; serve only
+    # mints the upload, signs parts, and finalizes. No bytes (and so no
+    # server-side sha256) pass through serve -- attach treats sha256 as
+    # optional, and R2's per-part ETags + the completed size are the
+    # integrity signal. Hosted-only (503 when storage is unwired).
+    # ------------------------------------------------------------------
+
+    def _require_storage() -> Storage:
+        storage = state.storage
+        if storage is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "raw video upload is hosted-mode only; "
+                    "local mode writes raw/<name> symlinks via the desktop UI"
+                ),
+            )
+        return storage
+
+    @app.post("/api/me/raw/upload/multipart/create")
+    def create_multipart_upload(
+        req: MultipartCreateRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Begin a multipart upload; return the upload id + chunk size.
+
+        The client splits the file into ``part_size``-byte parts, asks
+        ``/part-url`` for a presigned URL per part, PUTs each straight to
+        R2, then calls ``/complete`` with the parts' ETags.
+        """
+        storage = _require_storage()
+        name = _sanitize_raw_filename(req.filename)
+        key = f"raw/{name}"
+        try:
+            upload_id = storage.create_multipart_upload(key)
+        except Exception as exc:  # noqa: BLE001 -- surface as a clean 500
+            raise HTTPException(status_code=500, detail=f"could not start upload: {exc}") from exc
+        return JSONResponse(
+            {
+                "upload_id": upload_id,
+                "filename": name,
+                "key": key,
+                "part_size": _RAW_UPLOAD_PART_SIZE,
+            }
+        )
+
+    @app.post("/api/me/raw/upload/multipart/part-url")
+    def sign_multipart_part(
+        req: MultipartPartUrlRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Return a presigned URL the client PUTs one part to."""
+        storage = _require_storage()
+        if req.part_number < 1:
+            raise HTTPException(status_code=422, detail="part_number must be >= 1")
+        key = f"raw/{_sanitize_raw_filename(req.filename)}"
+        try:
+            url = storage.presign_upload_part(key, req.upload_id, req.part_number)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"could not sign part: {exc}") from exc
+        return JSONResponse({"url": url})
+
+    @app.post("/api/me/raw/upload/multipart/complete")
+    def complete_multipart_upload(
+        req: MultipartCompleteRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Finalize the upload. Returns the same shape the single-shot
+        endpoint echoes (minus ``sha256``, which serve never computed)."""
+        storage = _require_storage()
+        if not req.parts:
+            raise HTTPException(status_code=422, detail="parts must not be empty")
+        name = _sanitize_raw_filename(req.filename)
+        key = f"raw/{name}"
+        try:
+            size = storage.complete_multipart_upload(
+                key, req.upload_id, [(p.part_number, p.etag) for p in req.parts]
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"could not complete upload: {exc}") from exc
+        return JSONResponse({"path": key, "size": size, "sha256": None, "filename": name})
+
+    @app.post("/api/me/raw/upload/multipart/abort")
+    def abort_multipart_upload(
+        req: MultipartAbortRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Discard an in-progress upload (client cancelled / failed)."""
+        storage = _require_storage()
+        key = f"raw/{_sanitize_raw_filename(req.filename)}"
+        try:
+            storage.abort_multipart_upload(key, req.upload_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"could not abort upload: {exc}") from exc
+        return JSONResponse({"ok": True})
 
     @app.get("/api/me/raw/list")
     def list_raw_uploads(user: User = Depends(get_current_user)) -> JSONResponse:

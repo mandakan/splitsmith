@@ -273,3 +273,51 @@ def test_satisfies_storage_protocol() -> None:
         client.create_bucket(Bucket=BUCKET)
         store: Storage = S3Storage(bucket=BUCKET, client=client)
         assert store is not None
+
+
+# -- Presigned multipart upload (state-refactor follow-up / #467) -------
+
+
+def test_presign_upload_part_returns_url(s3_client) -> None:
+    storage = _storage(s3_client, prefix="users/u1/")
+    upload_id = storage.create_multipart_upload("raw/big.mov")
+    assert isinstance(upload_id, str) and upload_id
+    url = storage.presign_upload_part("raw/big.mov", upload_id, 1)
+    assert url.startswith("http")
+    # The presigned URL targets the prefixed key + this part of the upload.
+    assert "users/u1/raw/big.mov" in url
+    assert "partNumber=1" in url.lower().replace("part_number", "partnumber") or "partnumber=1" in url.lower()
+    storage.abort_multipart_upload("raw/big.mov", upload_id)
+
+
+def test_multipart_round_trip_assembles_object(s3_client) -> None:
+    storage = _storage(s3_client, prefix="users/u1/")
+    key = "raw/big.mov"
+    upload_id = storage.create_multipart_upload(key)
+
+    # Upload two parts via the raw client (the browser would PUT these to
+    # the presigned URLs; here we exercise create/complete + size).
+    full_key = "users/u1/raw/big.mov"
+    part1 = b"a" * (5 * 1024 * 1024)  # >=5 MiB so it's a valid non-final part
+    part2 = b"b" * 1024
+    e1 = s3_client.upload_part(Bucket=BUCKET, Key=full_key, UploadId=upload_id, PartNumber=1, Body=part1)[
+        "ETag"
+    ]
+    e2 = s3_client.upload_part(Bucket=BUCKET, Key=full_key, UploadId=upload_id, PartNumber=2, Body=part2)[
+        "ETag"
+    ]
+
+    # Parts deliberately out of order -- complete must sort them.
+    size = storage.complete_multipart_upload(key, upload_id, [(2, e2), (1, e1)])
+    assert size == len(part1) + len(part2)
+    assert storage.exists(key)
+    assert storage.read_bytes(key) == part1 + part2
+
+
+def test_abort_multipart_discards_upload(s3_client) -> None:
+    storage = _storage(s3_client)
+    key = "raw/scratch.mov"
+    upload_id = storage.create_multipart_upload(key)
+    storage.abort_multipart_upload(key, upload_id)
+    # The object was never completed, so nothing is published.
+    assert not storage.exists(key)

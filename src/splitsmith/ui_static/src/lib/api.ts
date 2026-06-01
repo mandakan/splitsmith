@@ -1518,6 +1518,124 @@ async function request<T>(
   return (await resp.json()) as T;
 }
 
+/** Files at or above this size use the presigned multipart path (direct
+ *  browser -> R2); smaller files take the single-shot serve-proxied
+ *  upload. The serve proxy 502s on Railway past a few hundred MB, so the
+ *  threshold sits well below that. */
+const MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024;
+
+interface RawUploadResult {
+  path: string;
+  size: number;
+  sha256: string | null;
+  filename: string;
+}
+
+/** PUT one part's bytes straight to R2 via its presigned URL. Resolves
+ *  with the part's ETag (which the complete call needs). The ETag header
+ *  is only readable when the R2 bucket CORS exposes it
+ *  (Access-Control-Expose-Headers: ETag). */
+function putUploadPart(
+  url: string,
+  blob: Blob,
+  opts: { onProgress?: (bytesSent: number) => void; signal?: AbortSignal },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) opts.onProgress?.(e.loaded);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const etag = xhr.getResponseHeader("ETag");
+        if (!etag) {
+          reject(
+            new ApiError(
+              0,
+              "R2 returned no ETag for the part -- check the bucket CORS exposes the ETag header",
+              null,
+            ),
+          );
+          return;
+        }
+        resolve(etag);
+        return;
+      }
+      reject(new ApiError(xhr.status, `part upload failed: ${xhr.statusText}`, null));
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network error during part upload", null));
+    xhr.onabort = () => reject(new ApiError(0, "upload cancelled", null));
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        reject(new ApiError(0, "upload cancelled", null));
+        return;
+      }
+      opts.signal.addEventListener("abort", () => xhr.abort());
+    }
+    xhr.send(blob);
+  });
+}
+
+/** Upload a large file by splitting it into parts and PUTting each
+ *  straight to R2 via presigned URLs, so no bytes pass through the API
+ *  process. ``onProgress`` reports cumulative bytes across all parts. On
+ *  any failure the in-progress multipart is best-effort aborted so R2
+ *  doesn't keep staged parts. */
+async function uploadRawMultipart(
+  file: File,
+  opts: { onProgress?: (bytesSent: number, total: number) => void; signal?: AbortSignal },
+): Promise<RawUploadResult> {
+  const create = await request<{
+    upload_id: string;
+    filename: string;
+    key: string;
+    part_size: number;
+  }>("/api/me/raw/upload/multipart/create", {
+    method: "POST",
+    json: { filename: file.name },
+  });
+  const { upload_id, filename, part_size } = create;
+  const partCount = Math.max(1, Math.ceil(file.size / part_size));
+  const parts: { part_number: number; etag: string }[] = [];
+  let uploadedBytes = 0;
+
+  try {
+    for (let i = 0; i < partCount; i++) {
+      if (opts.signal?.aborted) throw new ApiError(0, "upload cancelled", null);
+      const start = i * part_size;
+      const blob = file.slice(start, Math.min(start + part_size, file.size));
+      const partNumber = i + 1;
+      const { url } = await request<{ url: string }>(
+        "/api/me/raw/upload/multipart/part-url",
+        { method: "POST", json: { filename, upload_id, part_number: partNumber } },
+      );
+      const etag = await putUploadPart(url, blob, {
+        signal: opts.signal,
+        onProgress: (sent) => opts.onProgress?.(uploadedBytes + sent, file.size),
+      });
+      uploadedBytes += blob.size;
+      opts.onProgress?.(uploadedBytes, file.size);
+      parts.push({ part_number: partNumber, etag });
+    }
+  } catch (err) {
+    try {
+      await request("/api/me/raw/upload/multipart/abort", {
+        method: "POST",
+        json: { filename, upload_id },
+      });
+    } catch {
+      /* best-effort: R2's lifecycle rule also sweeps abandoned multiparts */
+    }
+    throw err;
+  }
+
+  return request<RawUploadResult>("/api/me/raw/upload/multipart/complete", {
+    method: "POST",
+    json: { filename, upload_id, parts },
+  });
+}
+
 export const api = {
   getProject: (slug: string) =>
     request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/project`),
@@ -2133,8 +2251,15 @@ export const api = {
       onProgress?: (bytesSent: number, totalBytes: number) => void;
       signal?: AbortSignal;
     } = {},
-  ) =>
-    new Promise<{ path: string; size: number; sha256: string; filename: string }>(
+  ): Promise<RawUploadResult> => {
+    // Large files go direct browser -> R2 via presigned multipart; the
+    // serve-proxied single-shot below 502s on Railway past a few hundred
+    // MB. Small files keep the simpler single-shot (one round-trip, and
+    // serve can still compute the integrity sha256).
+    if (file.size >= MULTIPART_THRESHOLD_BYTES) {
+      return uploadRawMultipart(file, { onProgress: opts.onProgress, signal: opts.signal });
+    }
+    return new Promise<RawUploadResult>(
       (resolve, reject) => {
         const xhr = new XMLHttpRequest();
         const url = "/api/me/raw/upload";
@@ -2195,7 +2320,8 @@ export const api = {
         }
         xhr.send(form);
       },
-    ),
+    );
+  },
 
   /** Hosted-mode only -- register an uploaded raw video on the
    *  shooter's project (``POST /api/shooters/{slug}/raw-videos/attach``).

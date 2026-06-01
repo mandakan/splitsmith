@@ -100,6 +100,29 @@ class Storage(Protocol):
     def delete(self, path: str) -> None:
         """Remove the object. No-op if absent."""
 
+    # -- Presigned multipart upload (large files, direct browser->store) --
+    #
+    # The client uploads parts straight to the store via presigned URLs, so
+    # multi-GB raw footage never streams through the API process (which on
+    # Railway 502s past a few hundred MB). Hosted-only: only S3Storage
+    # implements it; the filesystem stand-in raises NotImplementedError.
+
+    def create_multipart_upload(self, path: str) -> str:
+        """Begin a multipart upload at ``path``; return its ``upload_id``."""
+
+    def presign_upload_part(
+        self, path: str, upload_id: str, part_number: int, *, expires_in: int = 3600
+    ) -> str:
+        """Return a presigned URL the client PUTs one part (1-based
+        ``part_number``) to. Valid for ``expires_in`` seconds."""
+
+    def complete_multipart_upload(self, path: str, upload_id: str, parts: list[tuple[int, str]]) -> int:
+        """Finalize the upload from ``parts`` (``(part_number, etag)`` pairs,
+        any order) and return the assembled object's size in bytes."""
+
+    def abort_multipart_upload(self, path: str, upload_id: str) -> None:
+        """Discard an in-progress multipart upload and its staged parts."""
+
 
 class FilesystemStorage:
     """Local-disk implementation backed by ``pathlib.Path``.
@@ -237,6 +260,24 @@ class FilesystemStorage:
             shutil.rmtree(target)
         elif target.exists():
             target.unlink()
+
+    # Presigned multipart is an object-store (S3/R2) capability with no
+    # filesystem analogue -- there is no URL for a browser to PUT a part
+    # to. Local desktop uploads go through the on-disk raw/<name> path
+    # instead, so these never fire in local mode.
+    def create_multipart_upload(self, path: str) -> str:
+        raise NotImplementedError("FilesystemStorage has no presigned multipart upload")
+
+    def presign_upload_part(
+        self, path: str, upload_id: str, part_number: int, *, expires_in: int = 3600
+    ) -> str:
+        raise NotImplementedError("FilesystemStorage has no presigned multipart upload")
+
+    def complete_multipart_upload(self, path: str, upload_id: str, parts: list[tuple[int, str]]) -> int:
+        raise NotImplementedError("FilesystemStorage has no presigned multipart upload")
+
+    def abort_multipart_upload(self, path: str, upload_id: str) -> None:
+        raise NotImplementedError("FilesystemStorage has no presigned multipart upload")
 
 
 class _S3StreamWrapper:
@@ -448,3 +489,38 @@ class S3Storage:
         # S3 ``delete_object`` is a no-op when the key doesn't exist
         # (same contract as :class:`FilesystemStorage.delete`).
         self._client.delete_object(Bucket=self._bucket, Key=self._key(path))
+
+    def create_multipart_upload(self, path: str) -> str:
+        resp = self._client.create_multipart_upload(Bucket=self._bucket, Key=self._key(path))
+        return resp["UploadId"]
+
+    def presign_upload_part(
+        self, path: str, upload_id: str, part_number: int, *, expires_in: int = 3600
+    ) -> str:
+        return self._client.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": self._bucket,
+                "Key": self._key(path),
+                "UploadId": upload_id,
+                "PartNumber": part_number,
+            },
+            ExpiresIn=expires_in,
+        )
+
+    def complete_multipart_upload(self, path: str, upload_id: str, parts: list[tuple[int, str]]) -> int:
+        # S3 requires parts ascending by PartNumber. ETags are returned to
+        # the client by the per-part PUT (the ``ETag`` response header) and
+        # echoed back here verbatim, quotes and all.
+        ordered = sorted(parts, key=lambda p: p[0])
+        self._client.complete_multipart_upload(
+            Bucket=self._bucket,
+            Key=self._key(path),
+            UploadId=upload_id,
+            MultipartUpload={"Parts": [{"PartNumber": n, "ETag": etag} for n, etag in ordered]},
+        )
+        head = self._client.head_object(Bucket=self._bucket, Key=self._key(path))
+        return int(head["ContentLength"])
+
+    def abort_multipart_upload(self, path: str, upload_id: str) -> None:
+        self._client.abort_multipart_upload(Bucket=self._bucket, Key=self._key(path), UploadId=upload_id)
