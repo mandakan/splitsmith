@@ -329,6 +329,13 @@ _AUDIT_SAVE_MAX_ATTEMPTS = 4
 # stay cheap.
 _RAW_UPLOAD_PART_SIZE = 16 * 1024 * 1024
 
+# The engine's ``StageData`` requires a non-None ``scorecard_updated_at``
+# (the video-matching heuristic keys off it), but manually-timed stages on
+# scoreboard-less matches have none. Export never reads the field, so feed
+# this sentinel rather than inventing a real-looking time -- same approach
+# as ``splitsmith.mcp.export_tools``.
+_PLACEHOLDER_SCORECARD_TIME = datetime(2000, 1, 1, tzinfo=UTC)
+
 
 def _save_audit_with_remerge(
     state: AppState,
@@ -1975,7 +1982,7 @@ def register_job_bodies(state: AppState) -> None:
             stage_number=stg.stage_number,
             stage_name=stg.stage_name,
             time_seconds=stg.time_seconds,
-            scorecard_updated_at=stg.scorecard_updated_at,
+            scorecard_updated_at=stg.scorecard_updated_at or _PLACEHOLDER_SCORECARD_TIME,
         )
 
         # Phase progress is approximate; trim dominates wall time when the
@@ -2178,7 +2185,7 @@ def register_job_bodies(state: AppState) -> None:
                     stage_number=stg.stage_number,
                     stage_name=stg.stage_name,
                     time_seconds=stg.time_seconds,
-                    scorecard_updated_at=stg.scorecard_updated_at,
+                    scorecard_updated_at=stg.scorecard_updated_at or _PLACEHOLDER_SCORECARD_TIME,
                 )
                 try:
                     recut = export_helpers.export_stage(

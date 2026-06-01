@@ -6158,6 +6158,12 @@ def test_export_stage_allows_a_manually_timed_stage(tmp_path: Path) -> None:
     # Gate passed -> the job is queued (not a 400 placeholder rejection).
     assert resp.status_code == 200, resp.text
     assert resp.json()["kind"] == "export"
+    # And it runs to completion: the engine StageData requires a non-None
+    # scorecard_updated_at, which a manual stage lacks -- the job body must
+    # substitute the sentinel rather than crash. Without that fix this job
+    # fails with a pydantic datetime validation error.
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
 
 
 def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> None:
