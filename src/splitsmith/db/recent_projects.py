@@ -91,6 +91,7 @@ class PostgresRecentProjectsStore:
                 name=row.name,
                 last_opened_at=row.last_opened_at,
                 kind=row.kind,
+                match_id=row.match_id,
             )
             for row in rows
         ]
@@ -101,6 +102,7 @@ class PostgresRecentProjectsStore:
         name: str,
         *,
         kind: str | None = None,
+        match_id: str | None = None,
     ) -> None:
         """Insert or refresh the row for ``(user_id, resolved_path)``.
 
@@ -128,12 +130,17 @@ class PostgresRecentProjectsStore:
                         path=resolved,
                         name=name,
                         kind=kind,
+                        match_id=match_id,
                         last_opened_at=now,
                     )
                 )
             else:
                 existing.name = name
                 existing.kind = kind
+                # Don't clobber a known match_id with None on a re-open that
+                # didn't carry one (e.g. a bare bind); only update when given.
+                if match_id is not None:
+                    existing.match_id = match_id
                 existing.last_opened_at = now
             await session.commit()
             await self._trim_to_limit(session)

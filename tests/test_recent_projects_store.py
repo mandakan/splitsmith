@@ -261,3 +261,25 @@ def test_kind_round_trips_for_all_values(tmp_path, kind) -> None:
         assert rows[0].kind == kind
 
     asyncio.run(_go())
+
+
+def test_record_open_persists_match_id_and_list_returns_it() -> None:
+    """Hosted picker/bind resolves a match through its stable match_id
+    rather than the ephemeral on-disk path; record_open must persist it
+    and list() must surface it."""
+    store, _ = _build_store_for_new_user()
+    asyncio.run(store.record_open(Path("/work/m1"), "Oden", kind="match", match_id="oden-abc-123"))
+    rows = asyncio.run(store.list())
+    assert len(rows) == 1
+    assert rows[0].match_id == "oden-abc-123"
+
+
+def test_record_open_does_not_clobber_match_id_on_bare_reopen() -> None:
+    """A re-open that carries no match_id (e.g. a bare bind) must not wipe
+    a previously-stored one -- otherwise the next reopen loses Postgres
+    resolution and falls back to the (missing) path."""
+    store, _ = _build_store_for_new_user()
+    asyncio.run(store.record_open(Path("/work/m1"), "Oden", kind="match", match_id="oden-abc-123"))
+    asyncio.run(store.record_open(Path("/work/m1"), "Oden", kind="match"))  # no match_id
+    rows = asyncio.run(store.list())
+    assert rows[0].match_id == "oden-abc-123"

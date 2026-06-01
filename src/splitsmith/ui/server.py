@@ -3423,7 +3423,11 @@ async def _register_match_at(
             },
         )
     name = match.name or fallback_name
-    await state.recent_projects.record_open(resolved, name, kind="match")
+    # Record the match_id so the hosted picker/bind can resolve this match
+    # through Postgres on a later open, even after the ephemeral on-disk
+    # path is gone (a redeploy wiped it). Local mode stores it too; the
+    # filesystem flow there just doesn't need it.
+    await state.recent_projects.record_open(resolved, name, kind="match", match_id=match.match_id)
     loaded_env = _load_env_files(resolved)
     if loaded_env:
         logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
@@ -8270,6 +8274,36 @@ def create_app(
         timestamp is bumped so the picker re-orders to the top.
         """
         target = Path(req.path).expanduser()
+        resolved_str = str(target.resolve())
+
+        # Hosted: resolve the match through Postgres, not the filesystem.
+        # The recorded path is an ephemeral container working root that a
+        # redeploy wipes, so requiring it to exist (below) 404'd every
+        # reopen of an existing match. If the recent-projects row carries a
+        # match_id and the tenant still owns it, bind succeeds regardless of
+        # local disk -- the alias middleware re-establishes the working root
+        # on the next /api/matches/{id}/ request.
+        if state.matches_store is not None:
+            entry = next(
+                (p for p in await state.recent_projects.list() if p.path == resolved_str),
+                None,
+            )
+            if entry is not None and entry.match_id:
+                if await state.matches_store.get(entry.match_id) is None:
+                    # Unknown / not owned -> same 404 an unknown id gets.
+                    raise HTTPException(
+                        status_code=404,
+                        detail={
+                            "code": "match_not_found",
+                            "message": f"unknown match_id {entry.match_id!r}",
+                        },
+                    )
+                name = entry.name or req.name or target.name or "match"
+                await state.recent_projects.record_open(
+                    target, name, kind=entry.kind or "match", match_id=entry.match_id
+                )
+                return _register_response(target, name, entry.match_id)
+
         if not target.exists():
             if not req.create:
                 # Conservative default: don't silently scaffold a brand-new

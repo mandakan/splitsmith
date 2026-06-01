@@ -246,6 +246,11 @@ class RecentProjectRow(Base):
     path: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Stable match identifier (hosted). Lets the picker/bind resolve the
+    # match through Postgres instead of the ephemeral on-disk ``path``,
+    # which doesn't survive a redeploy. ``None`` for local-mode rows and
+    # rows written before this column existed.
+    match_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
