@@ -160,7 +160,6 @@ from .jobs import (
     ShutdownInProgressError,
 )
 from .project import (
-    PROJECT_FILE,
     VIDEO_EXTENSIONS,
     MatchProject,
     RawVideo,
@@ -301,6 +300,60 @@ def _configure_app_logging(stream: Any | None = None) -> None:
     pkg_logger.addHandler(handler)
     if pkg_logger.level == logging.NOTSET or pkg_logger.level > logging.INFO:
         pkg_logger.setLevel(logging.INFO)
+
+
+def _state_conflict_excs() -> tuple[type[BaseException], ...]:
+    """Resolve the optimistic-lock conflict type for the audit re-merge
+    retry, lazily so ``import splitsmith.ui.server`` never pulls the hosted
+    db deps (local-mode invariant; guarded by
+    ``test_local_mode_no_hosted_imports``). Empty tuple on a slim local
+    install without the db extras -- ``except ():`` then catches nothing,
+    which is correct: local file saves never raise a conflict."""
+    try:
+        from ..db import StateConflictError
+
+        return (StateConflictError,)
+    except Exception:  # pragma: no cover - slim local install without db extras
+        return ()
+
+
+# How many times the worker re-loads + re-merges a stage's audit doc when a
+# concurrent writer wins the optimistic-lock race before its save. Small:
+# real contention is a manual SPA edit landing while shot_detect runs, not a
+# thundering herd. Exhausting it re-raises -> the job fails loudly.
+_AUDIT_SAVE_MAX_ATTEMPTS = 4
+
+
+def _save_audit_with_remerge(
+    state: AppState,
+    slug: str,
+    stage_number: int,
+    *,
+    doc: dict,
+    version: int,
+    merge: Callable[[dict], dict],
+    default: Callable[[], dict],
+) -> int:
+    """Save an audit doc under optimistic locking with a bounded re-merge.
+
+    ``merge`` folds the caller's results into a doc; the first attempt
+    applies it to ``doc`` (loaded at ``version``). If the hosted save loses
+    the version race (a concurrent writer bumped it), re-load the winner's
+    doc and re-apply ``merge`` to *that* -- so the concurrent edit survives
+    instead of being clobbered -- then save again. ``default`` rebuilds a
+    fresh doc if the row vanished between attempts. Returns the new version.
+    Local file saves never raise, so the loop runs exactly once there.
+    """
+    conflict_excs = _state_conflict_excs()
+    for attempt in range(_AUDIT_SAVE_MAX_ATTEMPTS):
+        try:
+            return state.save_audit(slug, stage_number, merge(doc), version=version)
+        except conflict_excs:
+            if attempt + 1 >= _AUDIT_SAVE_MAX_ATTEMPTS:
+                raise  # bounded retries exhausted -> fail the job loudly
+            reloaded, version = state.load_audit(slug, stage_number)
+            doc = reloaded if reloaded is not None else default()
+    raise AssertionError("unreachable: loop returns or raises")  # pragma: no cover
 
 
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
@@ -922,51 +975,15 @@ class AppState:
             )
         return match_model.Match.shooter_root(scoped_root, slug)
 
-    # ------------------------------------------------------------------
-    # Hosted-mode JSON storage seam (PR-delta)
-    # ------------------------------------------------------------------
-    #
-    # match.json / project.json / audit stage<N>.json are the small,
-    # mutable JSON files that carry match + shooter state. In hosted mode
-    # they round-trip through S3 so a worker process can read the inputs
-    # the API wrote and the API can read the results the worker wrote.
-    # S3 is the source of truth: load pulls fresh (overwrite local),
-    # save/write pushes. JSON is tiny, so always-pull is cheap. Whole-file
-    # last-writer-wins -- a compute job and a manual SPA edit don't touch
-    # the same stage concurrently (the SPA shows the job in progress).
-    # All four helpers no-op in local mode (storage is None).
-
-    def _pull_json(self, key: str | None, dest: Path) -> None:
-        """Mirror a JSON object down from storage, overwriting ``dest``."""
-        if self.storage is None or key is None:
-            return
-        MatchProject._mirror_from_storage(self.storage, key, dest)
-
-    def _push_json(self, key: str | None, src: Path) -> None:
-        """Push a locally-written JSON file up to storage."""
-        if self.storage is None or key is None or not src.exists():
-            return
-        self.storage.write_bytes(key, src.read_bytes())
-
-    def _audit_key(self, slug: str, stage_number: int) -> str | None:
-        mid = current_match_id.get()
-        if mid is None:
-            return None
-        return f"matches/{mid}/shooters/{slug}/audit/stage{stage_number}.json"
-
     def _audit_file(self, slug: str, stage_number: int) -> Path:
+        """The on-disk path for a stage's audit JSON. Used only by the
+        *local-mode* branches of ``load_audit`` / ``save_audit`` /
+        ``materialize_audit`` -- hosted mode keeps audit docs in
+        ``state_docs`` and never touches this file."""
         scoped_root = current_match_root.get()
         if scoped_root is None:
             raise _no_project_error()
         return match_model.Match.shooter_root(scoped_root, slug) / "audit" / f"stage{stage_number}.json"
-
-    def pull_audit(self, slug: str, stage_number: int) -> None:
-        """Pull a stage's audit JSON down before reading it (hosted)."""
-        self._pull_json(self._audit_key(slug, stage_number), self._audit_file(slug, stage_number))
-
-    def push_audit(self, slug: str, stage_number: int) -> None:
-        """Push a stage's audit JSON up after writing it (hosted)."""
-        self._push_json(self._audit_key(slug, stage_number), self._audit_file(slug, stage_number))
 
     # ------------------------------------------------------------------
     # State-doc accessors (state refactor)
@@ -1093,16 +1110,6 @@ class AppState:
             project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
         return project
-
-    def register_match(self, root: Path) -> str | None:
-        """Load the match at ``root`` and pin its ``match_id`` into
-        the registry so the alias middleware can resolve it
-        immediately. Returns the match_id (``None`` if the on-disk
-        file somehow lacks one)."""
-        match = match_model.Match.load(root)
-        if match.match_id:
-            self.matches.register(match.match_id, root)
-        return match.match_id
 
 
 async def _any_active_job(state: AppState) -> Job | None:
@@ -1837,57 +1844,90 @@ def register_job_bodies(state: AppState) -> None:
             )
 
         handle.update(progress=0.85, message="Saving audit JSON...")
-        existing_json["_candidates_pending_audit"] = {
-            "_note": (
-                "3-voter ensemble (PANN gunshot folded into voter C). "
-                "vote_a/b/c=1 means the voter kept the candidate; "
-                "ensemble_score = vote_total + apriori_boost. shots[] is "
-                "seeded from candidates with ensemble_score >= consensus."
-            ),
-            "consensus": result.consensus,
-            "expected_rounds": result.expected_rounds,
-            "candidates": candidates,
-        }
-        if reset:
-            existing_json["shots"] = []
-        seeded_shots = False
-        if not existing_json.get("shots"):
-            kept = [c for c in result.candidates if c.kept]
-            existing_json["shots"] = [
-                {
-                    "shot_number": i,
-                    "candidate_number": c.candidate_number,
-                    "time": c.time,
-                    "ms_after_beep": c.ms_after_beep,
-                    "source": "detected",
-                    "ensemble_votes": c.vote_total,
-                    "apriori_boost": c.apriori_boost,
-                    "ensemble_score": c.ensemble_score,
-                }
-                for i, c in enumerate(kept, start=1)
-            ]
-            seeded_shots = True
-        events = list(existing_json.get("audit_events") or [])
-        events.append(
-            {
-                "ts": _now_iso(),
-                "kind": "shot_detect_run",
-                "payload": {
-                    "candidate_count": len(candidates),
-                    "kept_count": sum(1 for c in result.candidates if c.kept),
-                    "consensus": result.consensus,
-                    "expected_rounds": result.expected_rounds,
-                    "seeded_shots": seeded_shots,
-                },
-            }
-        )
-        existing_json["audit_events"] = events
 
-        # Persist the merged audit. Hosted: state_docs under optimistic
-        # locking; local: atomic file write. Phase 4 wraps this in a
-        # re-load + re-merge retry on StateConflictError for the worker's
-        # concurrent read-modify-write case.
-        state.save_audit(slug, stage_number, existing_json, version=audit_version)
+        def _default_audit_doc() -> dict[str, Any]:
+            return {
+                "stage_number": stg.stage_number,
+                "stage_name": stg.stage_name,
+                "stage_time_seconds": stg.time_seconds,
+                "beep_time": round(beep_in_clip, 4),
+                "shots": [],
+            }
+
+        def _merge_detection_into(doc: dict[str, Any]) -> dict[str, Any]:
+            """Fold this run's detection results into ``doc``.
+
+            Re-appliable against a freshly-loaded doc so a lost
+            optimistic-lock race re-merges into the winner's document
+            instead of clobbering it: project ``stage_rounds`` wins, the
+            candidate block is rewritten, ``shots[]`` is seeded only when
+            empty (or on ``reset``) so a concurrent manual edit survives,
+            and the run is appended to the ``audit_events`` log.
+            """
+            if stg.stage_rounds is not None:
+                doc["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
+            doc["_candidates_pending_audit"] = {
+                "_note": (
+                    "3-voter ensemble (PANN gunshot folded into voter C). "
+                    "vote_a/b/c=1 means the voter kept the candidate; "
+                    "ensemble_score = vote_total + apriori_boost. shots[] is "
+                    "seeded from candidates with ensemble_score >= consensus."
+                ),
+                "consensus": result.consensus,
+                "expected_rounds": result.expected_rounds,
+                "candidates": candidates,
+            }
+            if reset:
+                doc["shots"] = []
+            seeded_shots = False
+            if not doc.get("shots"):
+                kept = [c for c in result.candidates if c.kept]
+                doc["shots"] = [
+                    {
+                        "shot_number": i,
+                        "candidate_number": c.candidate_number,
+                        "time": c.time,
+                        "ms_after_beep": c.ms_after_beep,
+                        "source": "detected",
+                        "ensemble_votes": c.vote_total,
+                        "apriori_boost": c.apriori_boost,
+                        "ensemble_score": c.ensemble_score,
+                    }
+                    for i, c in enumerate(kept, start=1)
+                ]
+                seeded_shots = True
+            events = list(doc.get("audit_events") or [])
+            events.append(
+                {
+                    "ts": _now_iso(),
+                    "kind": "shot_detect_run",
+                    "payload": {
+                        "candidate_count": len(candidates),
+                        "kept_count": sum(1 for c in result.candidates if c.kept),
+                        "consensus": result.consensus,
+                        "expected_rounds": result.expected_rounds,
+                        "seeded_shots": seeded_shots,
+                    },
+                }
+            )
+            doc["audit_events"] = events
+            return doc
+
+        # Persist the merged audit with a bounded re-load + re-merge retry.
+        # Hosted state_docs saves are optimistic-locked: a concurrent manual
+        # SPA edit (or another job) can bump the version between our load and
+        # save -> StateConflictError. Re-loading and re-merging into the
+        # winner's doc preserves that edit (this job *merges*, never blindly
+        # overwrites). Local file saves never raise, so this runs once.
+        _save_audit_with_remerge(
+            state,
+            slug,
+            stage_number,
+            doc=existing_json,
+            version=audit_version,
+            merge=_merge_detection_into,
+            default=_default_audit_doc,
+        )
 
         # Read-modify-write the project file: a long-running shot_detect
         # job must not save the snapshot it loaded at start, because the
@@ -3322,30 +3362,6 @@ async def _register_match_at(
         if state.matches_store is not None:
             await state.matches_store.upsert(match.match_id, name, f"matches/{match.match_id}")
     return name, match.match_id
-
-
-def _sync_match_json_to_storage(state: AppState, root: Path, match: match_model.Match) -> None:
-    """Seed S3 with a match's JSON so a worker process can read it.
-
-    ``match.json`` is pushed unconditionally -- the API is its sole
-    writer, so there is no worker result to clobber. Each shooter's
-    ``project.json`` is seeded only when absent in storage: a worker job
-    may already have written newer results (beep_time/processed), and S3
-    is authoritative for that file, so the API must not overwrite it with
-    its possibly-stale local copy. Subsequent project.json writes (API or
-    worker) push via :meth:`MatchProject.save`. No-op without storage.
-    """
-    if state.storage is None or not match.match_id:
-        return
-    state.storage.write_bytes(
-        f"matches/{match.match_id}/{match_model.MATCH_FILE}",
-        (root / match_model.MATCH_FILE).read_bytes(),
-    )
-    for slug in match.shooters:
-        key = f"matches/{match.match_id}/shooters/{slug}/{PROJECT_FILE}"
-        local = match_model.Match.shooter_root(root, slug) / PROJECT_FILE
-        if local.exists() and not state.storage.exists(key):
-            state.storage.write_bytes(key, local.read_bytes())
 
 
 def _resolve_create_target(
