@@ -422,9 +422,10 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
 
     Covers the chunk's new machinery against real containers:
     1. ``create-manual`` upserts a ``matches`` row on real Postgres, and
-    2. pushes ``match.json`` + the shooter's ``project.json`` to real MinIO,
+    2. writes the match + shooter project docs to ``state_docs`` (Postgres),
     3. so a ``detect_beep`` job the worker pops gets *past* match resolution
-       (no ``MatchNotRegisteredError`` -- the gamma stopgap's failure mode).
+       (no ``MatchNotRegisteredError`` -- the gamma stopgap's failure mode)
+       and reads the shooter's project doc from Postgres cross-process.
 
     The job then fails because no video is assigned -- proving resolution +
     cross-container metadata pull worked without needing an uploaded video
@@ -460,10 +461,19 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     # 2. The API upserted a matches row on real Postgres.
     assert _psql(f"SELECT count(*) FROM matches WHERE match_id = '{match_id}'") == "1"
 
-    # 3. The API pushed match.json + project.json to real MinIO (S3).
-    prefix = f"users/{user_id}/matches/{match_id}"
-    assert _s3_object_exists(f"{prefix}/match.json"), "match.json missing in MinIO"
-    assert _s3_object_exists(f"{prefix}/shooters/{slug}/project.json"), "project.json missing in MinIO"
+    # 3. The API wrote the match + project docs to Postgres state_docs
+    #    (the state refactor replaced the old S3 match.json/project.json
+    #    seeding). The worker reads them cross-process from there.
+    assert (
+        _psql(f"SELECT count(*) FROM state_docs WHERE match_id = '{match_id}' AND doc_kind = 'match'") == "1"
+    ), "match doc missing in state_docs"
+    assert (
+        _psql(
+            f"SELECT count(*) FROM state_docs WHERE match_id = '{match_id}' "
+            f"AND doc_kind = 'project' AND slug = '{slug}'"
+        )
+        == "1"
+    ), "project doc missing in state_docs"
 
     # 4. The worker container resolves the match cross-process. Mirror the
     #    backend's submit (PENDING row + defer) for a detect_beep job with no

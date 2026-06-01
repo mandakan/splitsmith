@@ -37,6 +37,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from .. import video_match
+from ..async_bridge import run_sync
 from ..automation import AutomationOverride
 from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from ..storage import Storage
@@ -806,6 +807,30 @@ class MatchProject(BaseModel):
     # is unbound (local mode) or when there's no match scope yet.
     _storage_scope: str | None = PrivateAttr(default=None)
 
+    # Hosted-mode state-doc binding (state refactor). When set, ``save()``
+    # persists this project to the ``state_docs`` table via the bound
+    # ``ProjectStateStore`` under optimistic locking instead of writing
+    # ``project.json`` to disk. ``state.shooter_project`` binds these after
+    # loading the doc from Postgres; a creation site binds with
+    # ``version=0`` so the first ``save()`` INSERTs at version 1. Not
+    # persisted -- request-scope state, must not ride model_dump.
+    # ``Any`` rather than the concrete store type to keep this module free
+    # of the hosted-only db import.
+    _state_store: Any = PrivateAttr(default=None)
+    _state_match_id: str | None = PrivateAttr(default=None)
+    _state_slug: str | None = PrivateAttr(default=None)
+    _state_version: int = PrivateAttr(default=0)
+
+    def bind_state(self, store: Any, *, match_id: str, slug: str, version: int) -> None:
+        """Bind a ``ProjectStateStore`` so ``save()`` round-trips through
+        Postgres (hosted mode). ``version`` is the optimistic-lock version
+        the doc was loaded at (0 for a not-yet-created project, so the
+        first save INSERTs)."""
+        self._state_store = store
+        self._state_match_id = match_id
+        self._state_slug = slug
+        self._state_version = version
+
     def bind_storage(self, storage: Storage | None, *, scope: str | None = None) -> None:
         """Attach a per-request ``Storage`` so resolvers can mirror
         hosted-mode artifacts into the project's local cache on first
@@ -881,23 +906,30 @@ class MatchProject(BaseModel):
         return project
 
     def save(self, root: Path) -> None:
-        """Atomically persist the project to ``root/project.json``.
+        """Persist the project.
 
-        In hosted mode (storage + a match scope bound via
-        :meth:`bind_storage`) the saved ``project.json`` is also pushed to
-        S3. It is the worker<->API channel for a shooter's state
-        (``beep_time``, ``processed`` flags): the worker writes it during a
-        job, the API reads it back. S3 is authoritative, so every save
-        pushes and the load path (``state.shooter_project``) pulls fresh.
-        Local desktop leaves ``_storage`` ``None`` and this is a no-op.
+        Hosted mode (a :class:`ProjectStateStore` bound via
+        :meth:`bind_state`): the doc is written to the ``state_docs`` table
+        under optimistic locking and **no file is touched**. A stale
+        version raises ``StateConflictError`` (-> 409). The new version is
+        stashed back so a second ``save()`` on the same instance chains
+        cleanly.
+
+        Local desktop (no state store): atomic write to
+        ``root/project.json``, unchanged.
         """
         self.updated_at = datetime.now(UTC)
-        atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
-        if self._storage is not None and self._storage_scope is not None:
-            self._storage.write_bytes(
-                f"{self._storage_scope}/{PROJECT_FILE}",
-                (root / PROJECT_FILE).read_bytes(),
+        if self._state_store is not None:
+            self._state_version = run_sync(
+                self._state_store.save_project(
+                    self._state_match_id,
+                    self._state_slug,
+                    self.model_dump(mode="json"),
+                    expected_version=self._state_version,
+                )
             )
+            return
+        atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
 
     def stage(self, stage_number: int) -> StageEntry:
         """Return the stage with this number; raises ``KeyError`` if absent."""
