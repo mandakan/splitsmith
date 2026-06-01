@@ -2419,7 +2419,9 @@ export const api = {
 
   /** Build a streaming URL for one shooter's lossless trim (#328). */
   shooterVideoStreamUrl: (slug: string, path: string): string =>
-    `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`,
+    scopeRequestPath(
+      `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`,
+    ),
 
   /** Cross-shooter beep review queue (#326). Pass
    *  ``includeConfirmed`` to also receive already-reviewed items so
@@ -2547,13 +2549,15 @@ export const api = {
   },
 
   stageAudioUrl: (slug: string, stageNumber: number) =>
-    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audio`,
+    scopeRequestPath(`/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audio`),
 
   /** Per-video WAV URL. Primary forwards to the legacy stage audio
    *  endpoint (trimmed audit clip preferred); secondary serves the full
    *  per-cam WAV so the picker has the whole clip to scrub. */
   videoAudioUrl: (slug: string, stageNumber: number, videoId: string) =>
-    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/audio`,
+    scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/audio`,
+    ),
 
   /** URL for a tiny MP4 around a beep timestamp (#27, #22). ``t`` is
    *  passed to the server (which centres the clip there) AND ms-rounded
@@ -2561,7 +2565,9 @@ export const api = {
    *  candidate picker uses this with arbitrary candidate times; the
    *  default flow passes ``primary.beep_time``. */
   stageBeepPreviewUrl: (slug: string, stageNumber: number, beepTime: number) =>
-    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
+    scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
+    ),
 
   /** Per-video beep preview URL. Same caching semantics as the primary
    *  endpoint (cached on source mtime/size + center time + duration). */
@@ -2571,7 +2577,9 @@ export const api = {
     videoId: string,
     beepTime: number,
   ) =>
-    `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-preview?t=${beepTime.toFixed(3)}`,
+    scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-preview?t=${beepTime.toFixed(3)}`,
+    ),
 
   /** Stream URL for a registered video.
    *
@@ -2587,7 +2595,9 @@ export const api = {
     videoPath: string,
     kind: "auto" | "trim" | "source" = "auto",
   ) =>
-    `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
+    scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
+    ),
 
   /** Build a download URL for one finished export deliverable (#447 part 2).
    *  ``filename`` is the basename under the project's ``exports/`` dir.
@@ -2597,7 +2607,9 @@ export const api = {
    *  container. Mirrors ``videoStreamUrl``: a bare path consumed as an
    *  ``<a href download>``, not a fetch. */
   exportFileUrl: (slug: string, filename: string) =>
-    `/api/shooters/${encodeURIComponent(slug)}/exports/file/${encodeURIComponent(filename)}`,
+    scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/exports/file/${encodeURIComponent(filename)}`,
+    ),
 
   getStagePeaks: (slug: string, stageNumber: number, bins = 1200) =>
     request<PeaksResult>(
@@ -3046,7 +3058,9 @@ export const api = {
     if (opts?.includeRaw) params.set("include_raw", "true");
     if (opts?.includeAudio) params.set("include_audio", "true");
     const qs = params.toString();
-    return `/api/shooters/${encodeURIComponent(slug)}/project/export${qs ? `?${qs}` : ""}`;
+    return scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/project/export${qs ? `?${qs}` : ""}`,
+    );
   },
 
   /** Restore a previously exported project. The server extracts the

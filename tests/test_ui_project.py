@@ -1788,3 +1788,40 @@ def test_storage_binding_not_persisted_in_project_json(tmp_path: Path) -> None:
     dumped = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
     assert "_storage" not in dumped
     assert "storage" not in dumped
+
+
+def test_export_overview_hosted_uses_storage_and_audit_docs(tmp_path) -> None:
+    """Hosted: the worker wrote the audit to state_docs and the export
+    deliverables to object storage, neither on this process's disk. The
+    overview must read shot counts from the injected audit docs and file
+    presence from storage -- not stat an empty local exports/ dir."""
+    from splitsmith.storage import FilesystemStorage
+    from splitsmith.ui.project import MatchProject, StageEntry
+
+    root = tmp_path / "shooters" / "me"
+    proj = MatchProject.init(root, name="X")
+    proj.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=10.0)]
+    proj.save(root)
+
+    storage = FilesystemStorage(tmp_path / "s3")
+    scope = "matches/m1/shooters/me"
+    storage.write_bytes(f"{scope}/exports/stage1_stage-1_splits.csv", b"a,b\n1,2\n")
+    storage.write_bytes(f"{scope}/exports/stage1_stage-1.fcpxml", b"<fcpxml/>")
+    proj.bind_storage(storage, scope=scope)
+
+    rows = proj.export_overview(
+        root,
+        audit_docs={
+            1: {"shots": [{"shot_number": 1}], "_candidates_pending_audit": {"candidates": [1, 2, 3]}}
+        },
+    )
+    r = rows[0]
+    assert r.audit_shot_count == 1
+    assert r.total_candidate_count == 3
+    assert r.has_exports is True
+    assert r.csv_path is not None
+    assert r.fcpxml_path is not None
+    assert r.report_path is None  # not present in storage
+    assert r.last_export_at is not None
+    # Nothing was written to the local exports/ dir.
+    assert not any(proj.exports_path(root).glob("*"))
