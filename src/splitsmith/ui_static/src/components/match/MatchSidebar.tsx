@@ -200,7 +200,7 @@ export function MatchSidebar({
           Overview
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters`}
+          to={shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters?pick=audit`}
           icon={<Crosshair className="size-[15px]" />}
           collapsed={collapsed}
           disabled={!hasFootage}
@@ -209,7 +209,7 @@ export function MatchSidebar({
           Audit
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters`}
+          to={shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters?pick=coach`}
           icon={<ClipboardCheck className="size-[15px]" />}
           collapsed={collapsed}
           disabled={!hasFootage}
@@ -227,7 +227,7 @@ export function MatchSidebar({
           Shooters
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters`}
+          to={shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters?pick=videos`}
           icon={<Film className="size-[15px]" />}
           collapsed={collapsed}
         >
@@ -243,7 +243,7 @@ export function MatchSidebar({
           Beep review
         </SidebarLink>
         <SidebarLink
-          to={shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters`}
+          to={shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters?pick=export`}
           icon={<ArrowDownToLine className="size-[15px]" />}
           collapsed={collapsed}
           disabled={!hasFootage}

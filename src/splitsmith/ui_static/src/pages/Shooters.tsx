@@ -27,7 +27,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -98,9 +98,21 @@ const PALETTE_STYLE: Record<Palette, {
   },
 };
 
+// Sections that are per-shooter: clicking them in the sidebar without a
+// shooter in focus routes here with ``?pick=<section>`` so we can explain
+// why, instead of silently dumping the user on the shooter list.
+const PICK_SECTION_LABELS: Record<string, string> = {
+  audit: "Audit",
+  coach: "Coach",
+  videos: "Videos",
+  export: "Export",
+};
+
 export function Shooters() {
   const navigate = useNavigate();
   const href = useMatchHref();
+  const [searchParams] = useSearchParams();
+  const pickSection = PICK_SECTION_LABELS[searchParams.get("pick") ?? ""] ?? null;
   const [data, setData] = useState<ShooterListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -195,6 +207,13 @@ export function Shooters() {
           </p>
         </div>
       </div>
+
+      {pickSection && (
+        <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink">
+          <b className="font-bold">{pickSection}</b> is per-shooter — pick a
+          shooter below to open it.
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
