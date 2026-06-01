@@ -7935,11 +7935,18 @@ def create_app(
                     "finish ingest + audit before exporting"
                 ),
             )
-        if stage.time_seconds <= 0 or stage.scorecard_updated_at is None:
+        # A stage is exportable once it has a real duration: either a
+        # scoreboard import (``scorecard_updated_at`` set) OR a manually
+        # entered time (``set_stage_time`` stamps ``time_seconds_manual``
+        # for exactly the no-scoreboard flow). Blocking the manual case
+        # left manual matches able to detect but not export -- the gate
+        # only meant to reject untouched placeholders.
+        if stage.time_seconds <= 0 or (stage.scorecard_updated_at is None and not stage.time_seconds_manual):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"stage {stage_number} is a placeholder; import a real " "scoreboard before exporting"
+                    f"stage {stage_number} is a placeholder; set a stage time "
+                    "or import a scoreboard before exporting"
                 ),
             )
         # Source-reachability surfaces as a structured 424 so the SPA

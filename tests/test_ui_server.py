@@ -6121,6 +6121,45 @@ def test_match_export_endpoint_writes_fcpxml(tmp_path: Path, monkeypatch: pytest
     assert result["duration_seconds"] == pytest.approx(4.0, abs=0.1)
 
 
+def _export_csv_only(client, stage_number: int = 1):
+    return client.post(
+        f"/api/shooters/me/stages/{stage_number}/export",
+        json={
+            "write_trim": False,
+            "write_csv": True,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+
+
+def test_export_stage_400_on_untouched_placeholder(tmp_path: Path) -> None:
+    """A stage with neither a scoreboard import nor a manual time is a
+    placeholder and must not export."""
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    # The seed leaves scorecard_updated_at unset + time not manually
+    # stamped, so the stage is an untouched placeholder.
+    resp = _export_csv_only(client)
+    assert resp.status_code == 400
+    assert "placeholder" in resp.json()["detail"]
+
+
+def test_export_stage_allows_a_manually_timed_stage(tmp_path: Path) -> None:
+    """Manual matches (no scoreboard) set the duration via
+    ``set_stage_time``; the export gate must then accept the stage rather
+    than demanding a scoreboard import. Regression for manual matches
+    being able to detect but not export."""
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    # The no-scoreboard flow: stamp a manual duration.
+    r = client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 12.0})
+    assert r.status_code == 200, r.text
+    resp = _export_csv_only(client)
+    # Gate passed -> the job is queued (not a 400 placeholder rejection).
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["kind"] == "export"
+
+
 def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> None:
     client, _ = _seed_match_export_project(tmp_path, stage_count=1)
     resp = client.post("/api/shooters/me/export/match", json={"stage_numbers": []})
