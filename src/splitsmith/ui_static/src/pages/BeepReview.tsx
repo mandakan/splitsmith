@@ -978,12 +978,18 @@ function BeepVideoMini({
           {label}
         </span>
       </div>
+      {/* kind="source": beep review must play the full source, never the
+          trim. The waveform (_resolve_video_audio) is always the source WAV
+          so a beep outside the trim window stays visible, and the shared
+          playhead (this <video>'s currentTime) only lines up with that
+          waveform when the video is source too. kind="auto" would serve the
+          cached audit trim once detect-beep has run, drifting the playhead. */}
       <video
         ref={(el) => {
           localRef.current = el;
           videoRef.current = el;
         }}
-        src={api.videoStreamUrl(slug, videoPath)}
+        src={api.videoStreamUrl(slug, videoPath, "source")}
         playsInline
         controls
         preload="metadata"
