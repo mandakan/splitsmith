@@ -1012,12 +1012,22 @@ class MatchProject(BaseModel):
             out.extend(s.videos)
         return out
 
-    def export_overview(self, root: Path) -> list[StageExportStatus]:
+    def export_overview(
+        self, root: Path, *, audit_docs: dict[int, dict] | None = None
+    ) -> list[StageExportStatus]:
         """Per-stage audit + export status for the Analysis & Export screen.
 
-        Pure: stat-only inspection of the audit/exports directories; never
-        re-runs detection. The returned list mirrors :attr:`stages` order so
-        the SPA can iterate cards directly.
+        Stat-only inspection; never re-runs detection. The returned list
+        mirrors :attr:`stages` order so the SPA can iterate cards directly.
+
+        Hosted: the worker that produced the audit + export deliverables
+        ran in a different container, so neither lives on this process's
+        disk. ``audit_docs`` (stage_number -> audit doc, loaded from
+        ``state_docs`` by the caller) supplies the shot counts, and export
+        deliverables are looked up in object storage via a single
+        ``list`` rather than the local ``exports/`` dir. Local desktop
+        passes ``audit_docs=None`` and has no bound storage, so this stays
+        pure disk I/O.
         """
         from . import exports as exports_mod  # local: avoid import cycle
 
@@ -1025,21 +1035,56 @@ class MatchProject(BaseModel):
         exports_dir = self.exports_path(root)
         trimmed_dir = self.trimmed_path(root)
 
+        # Hosted: one storage list of the exports prefix -> {basename:
+        # last_modified}, so file-presence checks below are in-memory
+        # membership tests rather than N storage HEADs per stage.
+        storage = self._storage
+        scope = self._storage_scope
+        stored_exports: dict[str, datetime | None] | None = None
+        if storage is not None and scope is not None:
+            stored_exports = {}
+            try:
+                for obj in storage.list(f"{scope}/exports/"):
+                    stored_exports[obj.path.rsplit("/", 1)[-1]] = obj.last_modified
+            except Exception:  # noqa: BLE001 -- a storage hiccup degrades to "no exports", not a 500
+                stored_exports = {}
+
+        def _present(p: Path) -> tuple[bool, datetime | None]:
+            """(exists, last_modified) for an export deliverable -- from
+            storage in hosted mode, local disk otherwise."""
+            if stored_exports is not None:
+                mt = stored_exports.get(p.name)
+                return (p.name in stored_exports), mt
+            if p.exists():
+                return True, datetime.fromtimestamp(p.stat().st_mtime, tz=UTC)
+            return False, None
+
         out: list[StageExportStatus] = []
         for stage in self.stages:
             primary = stage.primary()
             audit_file = audit_dir / f"stage{stage.stage_number}.json"
             shot_count = 0
             total_candidates = 0
-            if audit_file.exists():
+            # Hosted: the audit doc comes from state_docs via ``audit_docs``;
+            # local: read it off disk. ``audit_present`` drives ``audit_path``
+            # below so the SPA still knows an audit exists in hosted mode.
+            if audit_docs is not None:
+                raw: dict | None = audit_docs.get(stage.stage_number)
+                audit_present = raw is not None
+            elif audit_file.exists():
                 try:
                     raw = json.loads(audit_file.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     raw = {}
-                shots = raw.get("shots") if isinstance(raw, dict) else None
+                audit_present = True
+            else:
+                raw = None
+                audit_present = False
+            if isinstance(raw, dict):
+                shots = raw.get("shots")
                 if isinstance(shots, list):
                     shot_count = len(shots)
-                cand_block = raw.get("_candidates_pending_audit") if isinstance(raw, dict) else None
+                cand_block = raw.get("_candidates_pending_audit")
                 if isinstance(cand_block, dict):
                     cands = cand_block.get("candidates")
                     if isinstance(cands, list):
@@ -1061,18 +1106,21 @@ class MatchProject(BaseModel):
                 if primary is not None
                 else None
             )
-            audit_trim_exists = audit_trim_p is not None and audit_trim_p.exists()
+            audit_trim_present, _ = _present(audit_trim_p) if audit_trim_p is not None else (False, None)
+            lossless_present, _ = _present(lossless_trim_p)
             trimmed_p = (
                 lossless_trim_p
-                if lossless_trim_p.exists()
-                else (audit_trim_p if audit_trim_exists else lossless_trim_p)
+                if lossless_present
+                else (audit_trim_p if audit_trim_present else lossless_trim_p)
             )
 
-            csv_exists = csv_p.exists()
-            fcpxml_exists = fcpxml_p.exists()
-            report_exists = report_p.exists()
-            trim_exists = lossless_trim_p.exists()
-            overlay_exists = overlay_p.exists()
+            csv_exists, csv_mt = _present(csv_p)
+            fcpxml_exists, fcpxml_mt = _present(fcpxml_p)
+            report_exists, report_mt = _present(report_p)
+            trim_exists, trim_mt = lossless_present, None
+            if trim_exists:
+                _, trim_mt = _present(lossless_trim_p)
+            overlay_exists, overlay_mt = _present(overlay_p)
             # Per-cam lossless trims (issue #54) live next to the primary's
             # trim under the same base; surface them to ``has_exports`` /
             # ``last_export_at`` so a stage that's only had its secondaries
@@ -1082,25 +1130,25 @@ class MatchProject(BaseModel):
                 for sv in stage.videos
                 if sv.role == "secondary"
             ]
-            sec_trim_existing = [p for p in sec_trim_paths if p.exists()]
+            sec_trim_present: list[tuple[Path, datetime | None]] = []
+            for p in sec_trim_paths:
+                ok, mt = _present(p)
+                if ok:
+                    sec_trim_present.append((p, mt))
             has_exports = (
                 csv_exists
                 or fcpxml_exists
                 or report_exists
                 or trim_exists
                 or overlay_exists
-                or bool(sec_trim_existing)
+                or bool(sec_trim_present)
             )
             last_export_at: datetime | None = None
             if has_exports:
-                mtimes = [
-                    p.stat().st_mtime
-                    for p in (csv_p, fcpxml_p, report_p, lossless_trim_p, overlay_p)
-                    if p.exists()
-                ]
-                mtimes.extend(p.stat().st_mtime for p in sec_trim_existing)
+                mtimes = [m for m in (csv_mt, fcpxml_mt, report_mt, trim_mt, overlay_mt) if m is not None]
+                mtimes.extend(m for _, m in sec_trim_present if m is not None)
                 if mtimes:
-                    last_export_at = datetime.fromtimestamp(max(mtimes), tz=UTC)
+                    last_export_at = max(mtimes)
 
             processed = (
                 dict(primary.processed)
@@ -1127,7 +1175,7 @@ class MatchProject(BaseModel):
                 if sv.role != "secondary":
                     continue
                 sec_trim = exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4"
-                sec_trim_exists = sec_trim.exists()
+                sec_trim_exists, _ = _present(sec_trim)
                 try:
                     sec_src = self.resolve_video_path(root, sv.path)
                     sec_reachable = sec_src.exists()
@@ -1155,8 +1203,8 @@ class MatchProject(BaseModel):
                     primary_processed=processed,
                     audit_shot_count=shot_count,
                     total_candidate_count=total_candidates,
-                    audit_path=audit_file if audit_file.exists() else None,
-                    trimmed_video_path=trimmed_p if trimmed_p.exists() else None,
+                    audit_path=audit_file if audit_present else None,
+                    trimmed_video_path=(trimmed_p if (lossless_present or audit_trim_present) else None),
                     csv_path=csv_p if csv_exists else None,
                     fcpxml_path=fcpxml_p if fcpxml_exists else None,
                     report_path=report_p if report_exists else None,

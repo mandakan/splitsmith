@@ -2084,6 +2084,27 @@ def register_job_bodies(state: AppState) -> None:
             n = len(result.anomalies)
             word = "anomaly" if n == 1 else "anomalies"
             summary += f" ({n} {word} -- see report.txt)"
+
+        # Record the deliverables on the job so the SPA can offer downloads
+        # without a separate overview round-trip. Basenames only: the
+        # download endpoint (and the hosted storage pull) key off the name
+        # within the shooter's exports/ scope. Persisted to the compute_jobs
+        # row in hosted mode, so it survives the cross-process worker.
+        def _name(p: Path | None) -> str | None:
+            return p.name if p is not None else None
+
+        handle.set_result(
+            {
+                "stage_number": stage_number,
+                "trimmed_video": _name(result.trimmed_video_path),
+                "csv": _name(result.csv_path),
+                "fcpxml": _name(result.fcpxml_path),
+                "report": _name(result.report_path),
+                "overlay": _name(result.overlay_path),
+                "secondary_trims": [p.name for p in result.secondary_trimmed_paths],
+                "anomalies": result.anomalies,
+            }
+        )
         handle.update(progress=1.0, message=f"Done: {summary}")
 
     def _run_match_export(handle: JobHandle, slug: str, req: MatchExportRequest) -> None:
@@ -7869,7 +7890,16 @@ def create_app(
         flag). Pure stat: no detection, no rewriting of audit JSON.
         """
         project = state.shooter_project(slug)
-        rows = project.export_overview(state.shooter_root(slug))
+        # Hosted: audit docs live in state_docs, not on this container's
+        # disk, so load each stage's doc and hand it to the overview
+        # (which would otherwise read an absent local file -> 0 shots).
+        # Local: load_audit reads the file, same as before.
+        audit_docs: dict[int, dict] = {}
+        for stg in project.stages:
+            doc, _ = state.load_audit(slug, stg.stage_number)
+            if doc is not None:
+                audit_docs[stg.stage_number] = doc
+        rows = project.export_overview(state.shooter_root(slug), audit_docs=audit_docs)
         return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
 
     @app.get("/api/shooters/{slug}/exports/file/{filename:path}")
