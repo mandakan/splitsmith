@@ -63,11 +63,121 @@ def test_run_worker_is_async() -> None:
     assert inspect.iscoroutinefunction(run_worker)
 
 
+def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Worker boot must: init Sentry once, build state, configure logging, then
+    warm the ensemble singleton before draining -- so the first ``shot_detect``
+    does not pay a hidden cold model load."""
+    import asyncio
+    import sys
+    import types
+
+    calls: list[str] = []
+
+    # Stub the ui.server symbols run_worker imports lazily.
+    server = types.ModuleType("splitsmith.ui.server")
+
+    def _build_worker_state() -> object:
+        calls.append("build_worker_state")
+        return object()
+
+    def _configure_app_logging() -> None:
+        calls.append("configure_logging")
+
+    def _warm() -> None:
+        calls.append("warm")
+
+    server.build_worker_state = _build_worker_state  # type: ignore[attr-defined]
+    server._configure_app_logging = _configure_app_logging  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = _warm  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: calls.append("sentry"))
+
+    class _FakeApp:
+        def open_async(self) -> object:
+            outer = self
+
+            class _Ctx:
+                async def __aenter__(self) -> object:
+                    return outer
+
+                async def __aexit__(self, *exc: object) -> bool:
+                    return False
+
+            return _Ctx()
+
+        async def run_worker_async(self, **_kwargs: object) -> None:
+            calls.append("drain")
+
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+
+    asyncio.run(run_worker(_FAKE_PG_URL))
+
+    assert calls == ["sentry", "build_worker_state", "configure_logging", "warm", "drain"]
+
+
+def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model-load failure at boot must not crash the worker: it logs a
+    warning and still drains (non-shot_detect jobs are unaffected; the cold
+    cost is re-timed as the ``cold_model_load`` phase on the first detection)."""
+    import asyncio
+    import sys
+    import types
+
+    calls: list[str] = []
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+
+    def _warm_boom() -> None:
+        raise RuntimeError("model weights unreachable")
+
+    server.warm_ensemble_runtime = _warm_boom  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+
+    class _FakeApp:
+        def open_async(self) -> object:
+            outer = self
+
+            class _Ctx:
+                async def __aenter__(self) -> object:
+                    return outer
+
+                async def __aexit__(self, *exc: object) -> bool:
+                    return False
+
+            return _Ctx()
+
+        async def run_worker_async(self, **_kwargs: object) -> None:
+            calls.append("drain")
+
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+
+    asyncio.run(run_worker(_FAKE_PG_URL))
+
+    assert calls == ["drain"]  # warmup raised but the worker still reached drain
+
+
 def test_worker_command_requires_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Missing ``SPLITSMITH_DATABASE_URL`` exits 2 with a clear message,
     before any attempt to connect."""
     monkeypatch.delenv("SPLITSMITH_DATABASE_URL", raising=False)
-    # Tracked by monkeypatch so the command's ``setdefault`` is undone.
+    # The ``worker`` command ``setdefault``s SPLITSMITH_MODE=hosted in the
+    # shared ``os.environ`` (CliRunner does NOT isolate env). A bare
+    # ``delenv(raising=False)`` on an already-absent var records nothing on
+    # monkeypatch's undo stack, so the in-process mutation would leak to
+    # later tests (e.g. ui.server boots in hosted mode and raises). Setting
+    # the key first forces monkeypatch to track it, then deleting it gives
+    # the command a clean "unset" starting point; teardown restores absence.
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
     monkeypatch.delenv("SPLITSMITH_MODE", raising=False)
 
     result = CliRunner().invoke(app, ["worker"])

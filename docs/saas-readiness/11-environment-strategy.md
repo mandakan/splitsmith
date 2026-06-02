@@ -105,9 +105,21 @@ Both `serve` and `worker` in a given environment share these. The
 | `SPLITSMITH_SIGNUPS_OPEN` | `false` at launch (allowlist only) | `false` |
 | `SPLITSMITH_SIGNUP_ALLOWLIST` | the launch allowlist (emails / `@domain`) | your own address |
 | `SPLITSMITH_S3_*` | `splitsmith-uploads-prod` bucket creds | `splitsmith-uploads-staging` bucket creds |
+| `SENTRY_DSN` | prod Sentry project DSN | staging Sentry project DSN |
+| `SPLITSMITH_ENV` | `production` (optional override) | `staging` (optional override) |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0`-`1.0` (optional, default `0.0`) | same |
 
 A public https `SPLITSMITH_PUBLIC_URL` turns on the Secure cookie flag
 in both environments.
+
+`SENTRY_DSN` gates error monitoring for both `serve` and `worker`
+(`splitsmith.observability.init_sentry`): leave it unset and Sentry is a
+no-op, so local and test runs never phone home. The Sentry environment tag
+comes from `SPLITSMITH_ENV` when set, otherwise it falls back to
+`SPLITSMITH_MODE` (so a bare hosted process still tags `hosted`). PII is
+scrubbed (`send_default_pii=False` plus a `before_send` hook that drops
+cookies, the `Authorization` header, and the magic-link `token` query
+param), and cancelled jobs are logged but not raised as Sentry events.
 
 ## DNS plan (Cloudflare zone `splitsmith.app`)
 

@@ -18,7 +18,17 @@ from __future__ import annotations
 from datetime import datetime
 
 import ulid
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -460,6 +470,10 @@ class ComputeJobRow(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     acknowledged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Per-job observability metadata (queue_wait_ms, total_ms, phases[], meta{}).
+    # Generic ``JSON`` on SQLite (unit tests); the migration ALTERs to JSONB on
+    # Postgres. Nullable: populated once by the backend on job completion.
+    timings: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

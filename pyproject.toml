@@ -81,6 +81,12 @@ hosted = [
     # pure ``psycopg[pool]`` and leaves the backend choice to us.
     "procrastinate>=2.0.0",
     "psycopg[binary]>=3.2.0",
+    # Error + performance monitoring for the hosted web + worker processes
+    # (doc: observability primitives). The ``[fastapi]`` extra pulls the
+    # Starlette/FastAPI integration; ``splitsmith.observability.init_sentry``
+    # is a no-op when ``SENTRY_DSN`` is unset, and the import is guarded so
+    # a slim local install without the wheel is also a no-op.
+    "sentry-sdk[fastapi]>=2.0.0",
 ]
 
 [build-system]

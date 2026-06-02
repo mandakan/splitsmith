@@ -41,12 +41,17 @@ today is zero.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import procrastinate
+
+from .observability import init_sentry
+
+logger = logging.getLogger(__name__)
 
 # asyncpg-only SQLAlchemy URL query params that libpq / psycopg3 does not
 # understand and rejects with "invalid URI query parameter". They're
@@ -309,10 +314,31 @@ async def run_worker(
     bootstrap upserts the user row synchronously), so it can't run inside
     this coroutine's event loop -- it's offloaded to a worker thread,
     which has no running loop of its own.
+
+    Sentry is initialised first (no-op unless ``SENTRY_DSN`` is set). After
+    the state is built, ``_configure_app_logging`` attaches the same stdout
+    handler the web process uses -- in hosted mode that is the structured
+    JSON formatter, so worker ``job.completed`` / ``job.failed`` events are
+    captured by the platform the same way. Finally the ensemble singleton is
+    warmed on a worker thread so the first ``shot_detect`` does not pay a
+    hidden cold model load; a warmup failure is logged and swallowed so the
+    worker still drains non-shot_detect jobs (the cold cost is then timed as
+    the ``cold_model_load`` phase on the first detection).
     """
-    from .ui.server import build_worker_state
+    init_sentry(component="worker")
+
+    from .ui.server import (
+        _configure_app_logging,
+        build_worker_state,
+        warm_ensemble_runtime,
+    )
 
     state = await asyncio.to_thread(build_worker_state)
+    _configure_app_logging()
+    try:
+        await asyncio.to_thread(warm_ensemble_runtime)
+    except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
+        logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
     app = build_app(database_url)
     register_compute_task(app, state)
     async with app.open_async():

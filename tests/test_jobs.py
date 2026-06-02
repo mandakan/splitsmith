@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 
@@ -714,3 +715,49 @@ def test_submit_unregistered_kind_raises_unknown_job_kind() -> None:
     reg = _Sync(JobRegistry())
     with pytest.raises(UnknownJobKindError):
         reg.submit(kind="never_registered", args={})
+
+
+def test_run_threads_timer_and_persists_timings_and_emits_completed(caplog) -> None:
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def work(handle):
+        with handle.timer.phase("step_one"):
+            pass
+        handle.timer.set_meta(input_bytes=42)
+
+    with caplog.at_level(logging.INFO, logger="splitsmith.ui.jobs"):
+        job = reg.submit(kind="trim", fn=work)
+        assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+
+    snap = reg.get(job.id)
+    assert snap.timings is not None
+    assert [p["name"] for p in snap.timings["phases"]] == ["step_one"]
+    assert snap.timings["meta"] == {"input_bytes": 42}
+    assert "total_ms" in snap.timings
+
+    completed = [r for r in caplog.records if getattr(r, "event", None) == "job.completed"]
+    assert len(completed) == 1
+    assert completed[0].job_kind == "trim"
+    assert completed[0].status == JobStatus.SUCCEEDED.value
+
+
+def test_run_failed_emits_job_failed_with_partial_timings(caplog) -> None:
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def boom(handle):
+        with handle.timer.phase("started"):
+            raise RuntimeError("crash")
+
+    with caplog.at_level(logging.INFO, logger="splitsmith.ui.jobs"):
+        job = reg.submit(kind="trim", fn=boom)
+        assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    snap = reg.get(job.id)
+    assert snap.timings is not None
+    assert [p["name"] for p in snap.timings["phases"]] == ["started"]
+    assert "total_ms" in snap.timings
+
+    failed = [r for r in caplog.records if getattr(r, "event", None) == "job.failed"]
+    assert len(failed) == 1
+    assert failed[0].status == JobStatus.FAILED.value
+    assert failed[0].job_error == "crash"

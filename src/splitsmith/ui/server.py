@@ -144,6 +144,7 @@ from ..fixture_schema import (
     probe_camera_metadata,
 )
 from ..match_registry import MatchRegistry
+from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from . import audio as audio_helpers
@@ -295,7 +296,13 @@ def _configure_app_logging(stream: Any | None = None) -> None:
     if any(getattr(h, "_splitsmith_stdout", False) for h in pkg_logger.handlers):
         return
     handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
-    handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+    if _hosted_mode_active():
+        # Hosted stdout is captured by the platform as structured logs: emit
+        # one JSON line per record (folding in the job.completed/job.failed
+        # observability extras). Local file logging stays plain text.
+        handler.setFormatter(StructuredJsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
     handler._splitsmith_stdout = True  # type: ignore[attr-defined]  # idempotence marker
     pkg_logger.addHandler(handler)
     if pkg_logger.level == logging.NOTSET or pkg_logger.level > logging.INFO:
@@ -1211,6 +1218,33 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
     return _ENSEMBLE_RUNTIME
 
 
+def _ensemble_runtime_is_warm() -> bool:
+    """``True`` when the ensemble singleton is already loaded in this process.
+
+    Cheap, lock-free read of the module global. Used by ``_run_shot_detect``
+    to decide whether the upcoming model resolution pays a cold load (timed
+    as the ``cold_model_load`` phase) or hits the warm cache. The worker's
+    boot-time warmup populates the singleton so the steady-state path reports
+    warm.
+    """
+    return _ENSEMBLE_RUNTIME is not None
+
+
+def warm_ensemble_runtime() -> None:
+    """Force the ensemble singleton to load now (worker-boot warmup).
+
+    Thin public wrapper over :func:`_get_ensemble_runtime` so the worker
+    entrypoint (``splitsmith.queue.run_worker``) can populate
+    ``_ENSEMBLE_RUNTIME`` before the first ``shot_detect`` job runs, keeping
+    the underscore-private loader internal. Returns nothing -- callers warm
+    the cache for its side effect, not its value. The model load happens on
+    a worker thread (``asyncio.to_thread``) so it never blocks the event
+    loop; a failure here is non-fatal and is re-attempted (and timed as the
+    ``cold_model_load`` phase) on the first shot-detect job.
+    """
+    _get_ensemble_runtime()
+
+
 def _run_model_download_job(handle: JobHandle) -> None:
     """Prefetch every missing slim ONNX artifact from R2.
 
@@ -1396,26 +1430,29 @@ def register_job_bodies(state: AppState) -> None:
         own and the SPA can re-trim later.
         """
         handle.update(progress=0.05, message="Loading project...")
-        proj = state.shooter_project(slug)
-        stg = proj.stage(stage_number)
-        video = stg.find_video_by_id(video_id)
-        if video is None:
-            raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
-        source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+        with handle.timer.phase("load_project"):
+            proj = state.shooter_project(slug)
+            stg = proj.stage(stage_number)
+            video = stg.find_video_by_id(video_id)
+            if video is None:
+                raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
+            source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+        handle.timer.set_meta(role=video.role)
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(
             progress=0.15,
             message=f"Extracting audio + detecting beep ({role_label})...",
         )
         try:
-            beep = audio_helpers.detect_video_beep(
-                state.shooter_root(slug),
-                stage_number,
-                video,
-                source,
-                project=proj,
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
+            with handle.timer.phase("beep_detect"):
+                beep = audio_helpers.detect_video_beep(
+                    state.shooter_root(slug),
+                    stage_number,
+                    video,
+                    source,
+                    project=proj,
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                )
         except beep_detect.BeepNotFoundError as exc:
             # Primary failure is fatal -- the entire downstream pipeline
             # (trim window, shot timeline) hangs off the primary beep.
@@ -1439,7 +1476,8 @@ def register_job_bodies(state: AppState) -> None:
             # same room means the loudness envelopes line up modulo a
             # constant time offset, even when the secondary's mic missed
             # the sustained 2-5 kHz tone the in-stream detector wants.
-            aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
+            with handle.timer.phase("cross_align"):
+                aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
             video.beep_peak_amplitude = None
             video.beep_duration_ms = None
             video.beep_candidates = []
@@ -1518,7 +1556,10 @@ def register_job_bodies(state: AppState) -> None:
             # trust the in-stream answer; when they disagree we let the
             # user decide.
             if video.role != "primary":
-                check = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
+                with handle.timer.phase("cross_align"):
+                    check = _try_align_secondary_to_primary(
+                        state.shooter_root(slug), proj, stg, video, handle
+                    )
                 if check is not None and check.confidence >= _align_confidence_floor:
                     video.beep_alignment_confidence = check.confidence
                     video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
@@ -1528,17 +1569,18 @@ def register_job_bodies(state: AppState) -> None:
             handle.check_cancel()
             handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
             try:
-                audio_helpers.ensure_video_audit_trim(
-                    state.shooter_root(slug),
-                    stage_number,
-                    video,
-                    source,
-                    video.beep_time,
-                    stg.time_seconds,
-                    project=proj,
-                    runner=_cancellable_runner(handle),
-                    ffmpeg_binary=process_runtime().ffmpeg_binary,
-                )
+                with handle.timer.phase("trim"):
+                    audio_helpers.ensure_video_audit_trim(
+                        state.shooter_root(slug),
+                        stage_number,
+                        video,
+                        source,
+                        video.beep_time,
+                        stg.time_seconds,
+                        project=proj,
+                        runner=_cancellable_runner(handle),
+                        ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    )
                 video.processed["trim"] = True
                 trimmed_ok = True
             except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
@@ -1558,27 +1600,29 @@ def register_job_bodies(state: AppState) -> None:
         # copying our targeted fields onto the fresh project preserves
         # those concurrent edits instead of stomping them with the
         # snapshot we loaded at job start.
-        fresh = state.shooter_project(slug)
-        try:
-            stg_fresh = fresh.stage(stage_number)
-        except KeyError:
-            stg_fresh = None
-        v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
-        if v_fresh is not None:
-            v_fresh.beep_time = video.beep_time
-            v_fresh.beep_source = video.beep_source
-            v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
-            v_fresh.beep_duration_ms = video.beep_duration_ms
-            v_fresh.beep_confidence = video.beep_confidence
-            v_fresh.beep_candidates = list(video.beep_candidates)
-            v_fresh.beep_reviewed = video.beep_reviewed
-            v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
-            v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
-            v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
-            v_fresh.processed["beep"] = True
-            if trimmed_ok:
-                v_fresh.processed["trim"] = True
-            fresh.save(state.shooter_root(slug))
+        with handle.timer.phase("persist"):
+            fresh = state.shooter_project(slug)
+            try:
+                stg_fresh = fresh.stage(stage_number)
+            except KeyError:
+                stg_fresh = None
+            v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
+            if v_fresh is not None:
+                v_fresh.beep_time = video.beep_time
+                v_fresh.beep_source = video.beep_source
+                v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
+                v_fresh.beep_duration_ms = video.beep_duration_ms
+                v_fresh.beep_confidence = video.beep_confidence
+                v_fresh.beep_candidates = list(video.beep_candidates)
+                v_fresh.beep_reviewed = video.beep_reviewed
+                v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
+                v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
+                v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
+                v_fresh.processed["beep"] = True
+                if trimmed_ok:
+                    v_fresh.processed["trim"] = True
+                fresh.save(state.shooter_root(slug))
+        handle.timer.set_meta(trimmed=trimmed_ok)
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
             # Shot detection is primary-only AND gated on
             # ``beep_reviewed`` (#71). That flag is True either because
@@ -1635,36 +1679,40 @@ def register_job_bodies(state: AppState) -> None:
         trim caches without re-running detection over the whole match.
         """
         handle.update(progress=0.1, message="Preparing trim...")
-        proj = state.shooter_project(slug)
-        root = state.shooter_root(slug)
-        stg = proj.stage(stage_number)
-        video = stg.find_video_by_id(video_id)
-        if video is None or video.beep_time is None:
-            raise RuntimeError("video or beep disappeared mid-flight")
-        source = proj.resolve_video_path(root, video.path)
+        with handle.timer.phase("load_project"):
+            proj = state.shooter_project(slug)
+            root = state.shooter_root(slug)
+            stg = proj.stage(stage_number)
+            video = stg.find_video_by_id(video_id)
+            if video is None or video.beep_time is None:
+                raise RuntimeError("video or beep disappeared mid-flight")
+            source = proj.resolve_video_path(root, video.path)
+        handle.timer.set_meta(role=video.role)
         handle.check_cancel()
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
-        audio_helpers.ensure_video_audit_trim(
-            root,
-            stage_number,
-            video,
-            source,
-            video.beep_time,
-            stg.time_seconds,
-            project=proj,
-            runner=_cancellable_runner(handle),
-            ffmpeg_binary=process_runtime().ffmpeg_binary,
-        )
+        with handle.timer.phase("trim"):
+            audio_helpers.ensure_video_audit_trim(
+                root,
+                stage_number,
+                video,
+                source,
+                video.beep_time,
+                stg.time_seconds,
+                project=proj,
+                runner=_cancellable_runner(handle),
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
+            )
         handle.update(progress=0.85, message="Saving project...")
-        # Read-modify-write to avoid stomping concurrent edits made
-        # while ffmpeg was running (e.g. another stage's beep review).
-        fresh = state.shooter_project(slug)
-        stg_fresh = fresh.stage(stage_number)
-        v_fresh = stg_fresh.find_video_by_id(video_id)
-        if v_fresh is not None:
-            v_fresh.processed["trim"] = True
-            fresh.save(root)
+        with handle.timer.phase("persist"):
+            # Read-modify-write to avoid stomping concurrent edits made
+            # while ffmpeg was running (e.g. another stage's beep review).
+            fresh = state.shooter_project(slug)
+            stg_fresh = fresh.stage(stage_number)
+            v_fresh = stg_fresh.find_video_by_id(video_id)
+            if v_fresh is not None:
+                v_fresh.processed["trim"] = True
+                fresh.save(root)
         # Worker callback runs in a ThreadPoolExecutor thread with no
         # event loop; bridge to the async JobBackend via ``asyncio.run``.
         #
@@ -1725,17 +1773,18 @@ def register_job_bodies(state: AppState) -> None:
         top-(K+slack) mode and the apriori boost lifts the top-K
         confidence-ranked candidates over the consensus line.
         """
-        proj = state.shooter_project(slug)
-        stg = proj.stage(stage_number)
-        prim = stg.primary()
-        if prim is None or prim.beep_time is None:
-            raise RuntimeError(f"stage {stage_number} has no primary or no beep yet")
-        if stg.time_seconds <= 0:
-            raise RuntimeError(
-                f"stage {stage_number} has time_seconds=0; import a "
-                "scoreboard before running shot detection"
-            )
-        source = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+        with handle.timer.phase("load_project"):
+            proj = state.shooter_project(slug)
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None or prim.beep_time is None:
+                raise RuntimeError(f"stage {stage_number} has no primary or no beep yet")
+            if stg.time_seconds <= 0:
+                raise RuntimeError(
+                    f"stage {stage_number} has time_seconds=0; import a "
+                    "scoreboard before running shot detection"
+                )
+            source = proj.resolve_video_path(state.shooter_root(slug), prim.path)
 
         # Re-detect-all on an old project (and the v1->v2 cache migration in
         # #298) leaves stages with no trimmed MP4 cached. Without that file,
@@ -1746,25 +1795,26 @@ def register_job_bodies(state: AppState) -> None:
         # the audit cache in the same state the beep-detect path would have.
         handle.update(progress=0.05, message="Ensuring audit trim...")
         try:
-            audio_helpers.ensure_video_audit_trim(
-                state.shooter_root(slug),
-                stage_number,
-                prim,
-                source,
-                prim.beep_time,
-                stg.time_seconds,
-                project=proj,
-                runner=_cancellable_runner(handle),
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
-            trim_fresh = state.shooter_project(slug)
-            try:
-                v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
-            except KeyError:
-                v_fresh = None
-            if v_fresh is not None and not v_fresh.processed.get("trim"):
-                v_fresh.processed["trim"] = True
-                trim_fresh.save(state.shooter_root(slug))
+            with handle.timer.phase("ensure_trim"):
+                audio_helpers.ensure_video_audit_trim(
+                    state.shooter_root(slug),
+                    stage_number,
+                    prim,
+                    source,
+                    prim.beep_time,
+                    stg.time_seconds,
+                    project=proj,
+                    runner=_cancellable_runner(handle),
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                )
+                trim_fresh = state.shooter_project(slug)
+                try:
+                    v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
+                except KeyError:
+                    v_fresh = None
+                if v_fresh is not None and not v_fresh.processed.get("trim"):
+                    v_fresh.processed["trim"] = True
+                    trim_fresh.save(state.shooter_root(slug))
         except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
             # Soft failure: detection can still proceed against the source
             # WAV. ensure_audit_audio's fallback handles the missing trim,
@@ -1776,14 +1826,15 @@ def register_job_bodies(state: AppState) -> None:
             )
 
         handle.update(progress=0.1, message="Preparing audio...")
-        audit = audio_helpers.ensure_audit_audio(
-            state.shooter_root(slug),
-            stage_number,
-            source,
-            prim.beep_time,
-            project=proj,
-            ffmpeg_binary=process_runtime().ffmpeg_binary,
-        )
+        with handle.timer.phase("prepare_audio"):
+            audit = audio_helpers.ensure_audit_audio(
+                state.shooter_root(slug),
+                stage_number,
+                source,
+                prim.beep_time,
+                project=proj,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
+            )
         beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
 
         # Read existing audit JSON up-front: we need ``stage_rounds.expected``
@@ -1791,33 +1842,34 @@ def register_job_bodies(state: AppState) -> None:
         # apriori boost) and we'll merge results back into the same dict.
         # Hosted: pull the existing audit fresh first so a prior API/worker
         # write isn't lost when we merge + push back.
-        existing_json, audit_version = state.load_audit(slug, stage_number)
-        if existing_json is None:
-            existing_json = {
-                "stage_number": stg.stage_number,
-                "stage_name": stg.stage_name,
-                "stage_time_seconds": stg.time_seconds,
-                "beep_time": round(beep_in_clip, 4),
-                "shots": [],
-            }
-        # Carry stage_rounds (min_rounds + target breakdown) from the
-        # project state into the audit JSON so the ensemble's adaptive
-        # voter C + apriori boost can consume ``stage_rounds.expected``.
-        # Project value wins over a stale audit-JSON copy: re-running
-        # detection after a scoreboard refresh should pick up the new
-        # round count without manual edits.
-        if stg.stage_rounds is not None:
-            existing_json["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
-        expected_rounds: int | None = None
-        sr_block = existing_json.get("stage_rounds")
-        if isinstance(sr_block, dict):
-            raw = sr_block.get("expected")
-            if isinstance(raw, int) and raw > 0:
-                expected_rounds = raw
+        with handle.timer.phase("load_audit_state"):
+            existing_json, audit_version = state.load_audit(slug, stage_number)
+            if existing_json is None:
+                existing_json = {
+                    "stage_number": stg.stage_number,
+                    "stage_name": stg.stage_name,
+                    "stage_time_seconds": stg.time_seconds,
+                    "beep_time": round(beep_in_clip, 4),
+                    "shots": [],
+                }
+            # Carry stage_rounds (min_rounds + target breakdown) from the
+            # project state into the audit JSON so the ensemble's adaptive
+            # voter C + apriori boost can consume ``stage_rounds.expected``.
+            # Project value wins over a stale audit-JSON copy: re-running
+            # detection after a scoreboard refresh should pick up the new
+            # round count without manual edits.
+            if stg.stage_rounds is not None:
+                existing_json["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
+            expected_rounds: int | None = None
+            sr_block = existing_json.get("stage_rounds")
+            if isinstance(sr_block, dict):
+                raw = sr_block.get("expected")
+                if isinstance(raw, int) and raw > 0:
+                    expected_rounds = raw
 
         handle.update(progress=0.2, message="Loading ensemble models...")
-        handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
-        audio_array, sr = beep_detect.load_audio(audit.audio_path)
+        with handle.timer.phase("audio_load"):
+            audio_array, sr = beep_detect.load_audio(audit.audio_path)
         # Camera-class dispatch (issue #143). When the primary's mount
         # is set, look up handheld vs. headcam thresholds; otherwise
         # the ensemble falls back to the default class (headcam).
@@ -1828,42 +1880,57 @@ def register_job_bodies(state: AppState) -> None:
         # AND the source video to be reachable.
         enable_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
         ensemble_cfg = ensemble_module.EnsembleConfig(enable_voter_e=enable_e)
-        result = state.compute.detect_stage(
-            audio=audio_array,
-            sample_rate=sr,
-            beep_time_in_clip=beep_in_clip,
-            stage_time_seconds=stg.time_seconds,
-            expected_rounds=expected_rounds,
-            ensemble_config=ensemble_cfg,
-            camera_class=cam_class,
-            camera_make=prim.camera_make,
-            camera_model=prim.camera_model,
-            video_path=source if enable_e else None,
-            source_beep_time=prim.beep_time if enable_e else None,
-        )
+
+        # Cold-model-load is timed as its own phase ONLY when the singleton
+        # isn't already populated (a worker that warmed at boot, or a prior
+        # detect in this process, reports warm and skips it). Forcing the
+        # resolution here so ``detect_stage`` below then hits the warm cache
+        # means the heavy weight load never hides inside ``ensemble_infer``.
+        cold = not _ensemble_runtime_is_warm()
+        handle.timer.set_meta(cold_model_load=cold, expected_rounds=expected_rounds)
+        if cold:
+            with handle.timer.phase("cold_model_load"):
+                _get_ensemble_runtime()
+
+        handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
+        with handle.timer.phase("ensemble_infer"):
+            result = state.compute.detect_stage(
+                audio=audio_array,
+                sample_rate=sr,
+                beep_time_in_clip=beep_in_clip,
+                stage_time_seconds=stg.time_seconds,
+                expected_rounds=expected_rounds,
+                ensemble_config=ensemble_cfg,
+                camera_class=cam_class,
+                camera_make=prim.camera_make,
+                camera_model=prim.camera_model,
+                video_path=source if enable_e else None,
+                source_beep_time=prim.beep_time if enable_e else None,
+            )
 
         candidates: list[dict[str, Any]] = []
-        for cand in result.candidates:
-            candidates.append(
-                {
-                    "candidate_number": cand.candidate_number,
-                    "time": cand.time,
-                    "ms_after_beep": cand.ms_after_beep,
-                    "peak_amplitude": cand.peak_amplitude,
-                    "confidence": cand.confidence,
-                    "vote_a": cand.vote_a,
-                    "vote_b": cand.vote_b,
-                    "vote_c": cand.vote_c,
-                    "vote_e": cand.vote_e,
-                    "vote_total": cand.vote_total,
-                    "apriori_boost": cand.apriori_boost,
-                    "ensemble_score": cand.ensemble_score,
-                    "score_c": cand.score_c,
-                    "clap_diff": cand.clap_diff,
-                    "gunshot_prob": cand.gunshot_prob,
-                    "voter_e_signal": cand.voter_e_signal,
-                }
-            )
+        with handle.timer.phase("build_candidates"):
+            for cand in result.candidates:
+                candidates.append(
+                    {
+                        "candidate_number": cand.candidate_number,
+                        "time": cand.time,
+                        "ms_after_beep": cand.ms_after_beep,
+                        "peak_amplitude": cand.peak_amplitude,
+                        "confidence": cand.confidence,
+                        "vote_a": cand.vote_a,
+                        "vote_b": cand.vote_b,
+                        "vote_c": cand.vote_c,
+                        "vote_e": cand.vote_e,
+                        "vote_total": cand.vote_total,
+                        "apriori_boost": cand.apriori_boost,
+                        "ensemble_score": cand.ensemble_score,
+                        "score_c": cand.score_c,
+                        "clap_diff": cand.clap_diff,
+                        "gunshot_prob": cand.gunshot_prob,
+                        "voter_e_signal": cand.voter_e_signal,
+                    }
+                )
 
         handle.update(progress=0.85, message="Saving audit JSON...")
 
@@ -1941,28 +2008,35 @@ def register_job_bodies(state: AppState) -> None:
         # save -> StateConflictError. Re-loading and re-merging into the
         # winner's doc preserves that edit (this job *merges*, never blindly
         # overwrites). Local file saves never raise, so this runs once.
-        _save_audit_with_remerge(
-            state,
-            slug,
-            stage_number,
-            doc=existing_json,
-            version=audit_version,
-            merge=_merge_detection_into,
-            default=_default_audit_doc,
-        )
+        with handle.timer.phase("save_audit"):
+            _save_audit_with_remerge(
+                state,
+                slug,
+                stage_number,
+                doc=existing_json,
+                version=audit_version,
+                merge=_merge_detection_into,
+                default=_default_audit_doc,
+            )
 
-        # Read-modify-write the project file: a long-running shot_detect
-        # job must not save the snapshot it loaded at start, because the
-        # user may have toggled ``beep_reviewed`` on other stages in the
-        # interim (the review action kicks shot_detect, so concurrent
-        # bursts are the common case). Reloading from disk and mutating
-        # only the targeted field preserves those concurrent edits.
-        fresh = state.shooter_project(slug)
-        stg_fresh = fresh.stage(stage_number)
-        prim_fresh = stg_fresh.primary()
-        if prim_fresh is not None:
-            prim_fresh.processed["shot_detect"] = True
-            fresh.save(state.shooter_root(slug))
+        with handle.timer.phase("persist_project"):
+            # Read-modify-write the project file: a long-running shot_detect
+            # job must not save the snapshot it loaded at start, because the
+            # user may have toggled ``beep_reviewed`` on other stages in the
+            # interim (the review action kicks shot_detect, so concurrent
+            # bursts are the common case). Reloading from disk and mutating
+            # only the targeted field preserves those concurrent edits.
+            fresh = state.shooter_project(slug)
+            stg_fresh = fresh.stage(stage_number)
+            prim_fresh = stg_fresh.primary()
+            if prim_fresh is not None:
+                prim_fresh.processed["shot_detect"] = True
+                fresh.save(state.shooter_root(slug))
+        handle.timer.set_meta(
+            candidate_count=len(candidates),
+            kept_count=sum(1 for c in result.candidates if c.kept),
+            consensus=result.consensus,
+        )
         handle.update(progress=1.0, message=f"Done -- {len(candidates)} candidates")
 
     def _run_export_for_stage(
@@ -1973,18 +2047,20 @@ def register_job_bodies(state: AppState) -> None:
         from ..config import StageData as EngineStageData
 
         handle.update(progress=0.05, message="Loading project...")
-        proj = state.shooter_project(slug)
-        stg = proj.stage(stage_number)
-        prim = stg.primary()
-        if prim is None or prim.beep_time is None:
-            raise RuntimeError("primary or beep disappeared mid-flight")
+        with handle.timer.phase("load_project"):
+            proj = state.shooter_project(slug)
+            stg = proj.stage(stage_number)
+            prim = stg.primary()
+            if prim is None or prim.beep_time is None:
+                raise RuntimeError("primary or beep disappeared mid-flight")
 
         # Hosted: the audit doc was written by the detect job and lives in
         # state_docs, not this container's FS. Materialize it to the local
         # path the exporter reads (no-op in local mode -- the file is
         # already there). Without this a cross-process export reads a stale
         # or absent audit file.
-        audit_file = state.materialize_audit(slug, stage_number)
+        with handle.timer.phase("materialize_audit"):
+            audit_file = state.materialize_audit(slug, stage_number)
         exports_dir = proj.exports_path(state.shooter_root(slug))
         source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
         engine_stage = EngineStageData(
@@ -2015,48 +2091,51 @@ def register_job_bodies(state: AppState) -> None:
         allowed_ids: set[str] | None = (
             set(req.secondary_video_ids) if req.secondary_video_ids is not None else None
         )
-        secondaries: list[export_helpers.SecondaryExport] = []
-        for sv in stg.videos:
-            if sv.role != "secondary":
-                continue
-            if sv.beep_time is None:
-                continue
-            if allowed_ids is not None and sv.video_id not in allowed_ids:
-                continue
-            sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
-            secondaries.append(
-                export_helpers.SecondaryExport(
-                    video_id=sv.video_id,
-                    source_path=sec_source,
-                    beep_time_in_source=sv.beep_time,
-                    label=f"Cam {sv.video_id}",
+        with handle.timer.phase("prepare_inputs"):
+            secondaries: list[export_helpers.SecondaryExport] = []
+            for sv in stg.videos:
+                if sv.role != "secondary":
+                    continue
+                if sv.beep_time is None:
+                    continue
+                if allowed_ids is not None and sv.video_id not in allowed_ids:
+                    continue
+                sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
+                secondaries.append(
+                    export_helpers.SecondaryExport(
+                        video_id=sv.video_id,
+                        source_path=sec_source,
+                        beep_time_in_source=sv.beep_time,
+                        label=f"Cam {sv.video_id}",
+                    )
                 )
-            )
+        handle.timer.set_meta(secondary_count=len(secondaries))
 
         try:
-            result = export_helpers.export_stage(
-                request=export_helpers.StageExportRequest(
-                    stage_number=stage_number,
-                    write_trim=req.write_trim,
-                    write_csv=req.write_csv,
-                    write_fcpxml=req.write_fcpxml,
-                    write_report=req.write_report,
-                    write_overlay=req.write_overlay,
-                    overlay_codec=req.overlay_codec,
-                    overlay_max_height=req.overlay_max_height,
-                    overlay_max_fps=req.overlay_max_fps,
-                    overlay_theme=req.overlay_theme,
-                ),
-                audit_path=audit_file,
-                exports_dir=exports_dir,
-                source_video_path=source_video if source_video.exists() else None,
-                stage_data=engine_stage,
-                beep_time_in_source=prim.beep_time,
-                pre_buffer_seconds=proj.trim_pre_buffer_seconds,
-                post_buffer_seconds=proj.trim_post_buffer_seconds,
-                config=Config(),
-                secondaries=secondaries,
-            )
+            with handle.timer.phase("export_stage"):
+                result = export_helpers.export_stage(
+                    request=export_helpers.StageExportRequest(
+                        stage_number=stage_number,
+                        write_trim=req.write_trim,
+                        write_csv=req.write_csv,
+                        write_fcpxml=req.write_fcpxml,
+                        write_report=req.write_report,
+                        write_overlay=req.write_overlay,
+                        overlay_codec=req.overlay_codec,
+                        overlay_max_height=req.overlay_max_height,
+                        overlay_max_fps=req.overlay_max_fps,
+                        overlay_theme=req.overlay_theme,
+                    ),
+                    audit_path=audit_file,
+                    exports_dir=exports_dir,
+                    source_video_path=source_video if source_video.exists() else None,
+                    stage_data=engine_stage,
+                    beep_time_in_source=prim.beep_time,
+                    pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                    post_buffer_seconds=proj.trim_post_buffer_seconds,
+                    config=Config(),
+                    secondaries=secondaries,
+                )
         except export_helpers.StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
             # the JobsPanel row reads "audit JSON has no shots in shots[]"
@@ -2064,12 +2143,14 @@ def register_job_bodies(state: AppState) -> None:
             raise RuntimeError(str(exc)) from exc
 
         handle.update(progress=0.95, message="Saving project...")
-        proj.updated_at = datetime.now(UTC)
-        proj.save(state.shooter_root(slug))
+        with handle.timer.phase("persist_project"):
+            proj.updated_at = datetime.now(UTC)
+            proj.save(state.shooter_root(slug))
 
         # Hosted: push every produced deliverable to storage so the API
         # container can serve the download. No-op in local mode.
-        export_storage.push_stage_export_outputs(proj, result)
+        with handle.timer.phase("r2_upload"):
+            export_storage.push_stage_export_outputs(proj, result)
 
         # Final message summarises what shipped + flags any skipped
         # artefacts (FCPXML without a trim, etc). The full list lives in
@@ -2125,210 +2206,217 @@ def register_job_bodies(state: AppState) -> None:
         from . import exports as exports_mod
 
         handle.update(progress=0.02, message="Loading project...")
-        proj = state.shooter_project(slug)
-        exports_dir = proj.exports_path(state.shooter_root(slug))
-        audit_dir = proj.audit_path(state.shooter_root(slug))
+        with handle.timer.phase("load_project"):
+            proj = state.shooter_project(slug)
+            exports_dir = proj.exports_path(state.shooter_root(slug))
+            audit_dir = proj.audit_path(state.shooter_root(slug))
 
         n = len(req.stage_numbers)
+        handle.timer.set_meta(stage_count=n)
         # Reserve the last 10% for the match compose step; the rest is
         # split evenly across per-stage trims (the dominant wall time).
         # Stages that already have a trim skip ahead within their slice
         # instead of contributing to the wait.
         per_stage_share = 0.85 / max(1, n)
 
-        for idx, stage_number in enumerate(req.stage_numbers):
-            handle.check_cancel()
-            stg = proj.stage(stage_number)
-            prim = stg.primary()
-            if prim is None or prim.beep_time is None:
-                raise RuntimeError(f"stage {stage_number}: primary or beep disappeared mid-flight")
+        with handle.timer.phase("per_stage"):
+            for idx, stage_number in enumerate(req.stage_numbers):
+                handle.check_cancel()
+                stg = proj.stage(stage_number)
+                prim = stg.primary()
+                if prim is None or prim.beep_time is None:
+                    raise RuntimeError(f"stage {stage_number}: primary or beep disappeared mid-flight")
 
-            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
-            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
-            overlay_target = exports_dir / f"{base}_overlay.mov"
+                base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+                trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+                overlay_target = exports_dir / f"{base}_overlay.mov"
 
-            # Hosted: per-stage artifacts may have been produced by an
-            # earlier job on a different worker. Materialize the audit doc
-            # (state_docs -> local file) so the composer + per-stage
-            # exporter can read it, and pull the cached trim so the
-            # existence checks below reuse it instead of re-cutting. No-op
-            # in local mode.
-            state.materialize_audit(slug, stage_number)
-            export_storage.pull_export_file(proj, trimmed_path)
+                # Hosted: per-stage artifacts may have been produced by an
+                # earlier job on a different worker. Materialize the audit doc
+                # (state_docs -> local file) so the composer + per-stage
+                # exporter can read it, and pull the cached trim so the
+                # existence checks below reuse it instead of re-cutting. No-op
+                # in local mode.
+                state.materialize_audit(slug, stage_number)
+                export_storage.pull_export_file(proj, trimmed_path)
 
-            # Decide what's missing. The match composer needs the
-            # lossless trim + per-cam trims (when include_secondaries) +
-            # optional overlay. Re-run the per-stage exporter for any
-            # stage where any required artefact isn't on disk.
-            wanted_secondary_ids: set[str] = set()
-            if req.include_secondaries:
-                for sv in stg.videos:
-                    if sv.role == "secondary" and sv.beep_time is not None:
-                        wanted_secondary_ids.add(sv.video_id)
-            for vid in wanted_secondary_ids:
-                export_storage.pull_export_file(proj, exports_dir / f"{base}_cam_{vid}_trimmed.mp4")
-            secondary_trims_present = all(
-                (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
-            )
-            # Treat any non-default overlay format option as "force re-render"
-            # so the dialog's codec / max-height / max-fps choices actually
-            # apply when a stale overlay sits on disk. With all defaults we
-            # keep the legacy "skip if present" behaviour for fast re-stitching.
-            overlay_format_overridden = (
-                req.overlay_codec != "auto"
-                or req.overlay_max_height is not None
-                or req.overlay_max_fps is not None
-                or req.overlay_theme != "splitsmith"
-            )
-            # Pull a cached overlay only when we'd actually reuse it -- a
-            # format override forces a re-render, so don't waste the download.
-            if req.include_overlay and not overlay_format_overridden:
-                export_storage.pull_export_file(proj, overlay_target)
-            overlay_missing = req.include_overlay and (
-                not overlay_target.exists() or overlay_format_overridden
-            )
-
-            needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
-            if needs_per_stage:
-                handle.update(
-                    progress=0.02 + idx * per_stage_share,
-                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
-                )
-                # Build the secondaries list for the per-stage exporter --
-                # mirrors the single-stage endpoint's logic.
-                secondaries_in: list[export_helpers.SecondaryExport] = []
+                # Decide what's missing. The match composer needs the
+                # lossless trim + per-cam trims (when include_secondaries) +
+                # optional overlay. Re-run the per-stage exporter for any
+                # stage where any required artefact isn't on disk.
+                wanted_secondary_ids: set[str] = set()
                 if req.include_secondaries:
                     for sv in stg.videos:
-                        if sv.role != "secondary" or sv.beep_time is None:
-                            continue
-                        sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
-                        secondaries_in.append(
-                            export_helpers.SecondaryExport(
-                                video_id=sv.video_id,
-                                source_path=sec_source,
-                                beep_time_in_source=sv.beep_time,
-                                label=f"Cam {sv.video_id}",
-                            )
-                        )
-                source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
-                engine_stage = EngineStageData(
-                    stage_number=stg.stage_number,
-                    stage_name=stg.stage_name,
-                    time_seconds=stg.time_seconds,
-                    scorecard_updated_at=stg.scorecard_updated_at or _PLACEHOLDER_SCORECARD_TIME,
+                        if sv.role == "secondary" and sv.beep_time is not None:
+                            wanted_secondary_ids.add(sv.video_id)
+                for vid in wanted_secondary_ids:
+                    export_storage.pull_export_file(proj, exports_dir / f"{base}_cam_{vid}_trimmed.mp4")
+                secondary_trims_present = all(
+                    (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
                 )
-                try:
-                    recut = export_helpers.export_stage(
-                        request=export_helpers.StageExportRequest(
-                            stage_number=stage_number,
-                            write_trim=True,
-                            write_csv=True,
-                            write_fcpxml=True,
-                            write_report=True,
-                            write_overlay=req.include_overlay,
-                            overlay_codec=req.overlay_codec,
-                            overlay_max_height=req.overlay_max_height,
-                            overlay_max_fps=req.overlay_max_fps,
-                            overlay_theme=req.overlay_theme,
-                        ),
-                        audit_path=audit_dir / f"stage{stage_number}.json",
-                        exports_dir=exports_dir,
-                        source_video_path=source_video if source_video.exists() else None,
-                        stage_data=engine_stage,
-                        beep_time_in_source=prim.beep_time,
-                        pre_buffer_seconds=proj.trim_pre_buffer_seconds,
-                        post_buffer_seconds=proj.trim_post_buffer_seconds,
-                        config=Config(),
-                        secondaries=secondaries_in,
+                # Treat any non-default overlay format option as "force re-render"
+                # so the dialog's codec / max-height / max-fps choices actually
+                # apply when a stale overlay sits on disk. With all defaults we
+                # keep the legacy "skip if present" behaviour for fast re-stitching.
+                overlay_format_overridden = (
+                    req.overlay_codec != "auto"
+                    or req.overlay_max_height is not None
+                    or req.overlay_max_fps is not None
+                    or req.overlay_theme != "splitsmith"
+                )
+                # Pull a cached overlay only when we'd actually reuse it -- a
+                # format override forces a re-render, so don't waste the download.
+                if req.include_overlay and not overlay_format_overridden:
+                    export_storage.pull_export_file(proj, overlay_target)
+                overlay_missing = req.include_overlay and (
+                    not overlay_target.exists() or overlay_format_overridden
+                )
+
+                needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
+                if needs_per_stage:
+                    handle.update(
+                        progress=0.02 + idx * per_stage_share,
+                        message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
                     )
-                except export_helpers.StageExportError as exc:
-                    raise RuntimeError(f"stage {stage_number}: {exc}") from exc
-                # Hosted: a re-cut here produced the per-stage trims/overlay
-                # on this worker -- push them so other workers + the API
-                # download path see them. No-op in local mode.
-                export_storage.push_stage_export_outputs(proj, recut)
-            else:
-                handle.update(
-                    progress=0.02 + idx * per_stage_share,
-                    message=(f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"),
-                )
+                    # Build the secondaries list for the per-stage exporter --
+                    # mirrors the single-stage endpoint's logic.
+                    secondaries_in: list[export_helpers.SecondaryExport] = []
+                    if req.include_secondaries:
+                        for sv in stg.videos:
+                            if sv.role != "secondary" or sv.beep_time is None:
+                                continue
+                            sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
+                            secondaries_in.append(
+                                export_helpers.SecondaryExport(
+                                    video_id=sv.video_id,
+                                    source_path=sec_source,
+                                    beep_time_in_source=sv.beep_time,
+                                    label=f"Cam {sv.video_id}",
+                                )
+                            )
+                    source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+                    engine_stage = EngineStageData(
+                        stage_number=stg.stage_number,
+                        stage_name=stg.stage_name,
+                        time_seconds=stg.time_seconds,
+                        scorecard_updated_at=stg.scorecard_updated_at or _PLACEHOLDER_SCORECARD_TIME,
+                    )
+                    try:
+                        recut = export_helpers.export_stage(
+                            request=export_helpers.StageExportRequest(
+                                stage_number=stage_number,
+                                write_trim=True,
+                                write_csv=True,
+                                write_fcpxml=True,
+                                write_report=True,
+                                write_overlay=req.include_overlay,
+                                overlay_codec=req.overlay_codec,
+                                overlay_max_height=req.overlay_max_height,
+                                overlay_max_fps=req.overlay_max_fps,
+                                overlay_theme=req.overlay_theme,
+                            ),
+                            audit_path=audit_dir / f"stage{stage_number}.json",
+                            exports_dir=exports_dir,
+                            source_video_path=source_video if source_video.exists() else None,
+                            stage_data=engine_stage,
+                            beep_time_in_source=prim.beep_time,
+                            pre_buffer_seconds=proj.trim_pre_buffer_seconds,
+                            post_buffer_seconds=proj.trim_post_buffer_seconds,
+                            config=Config(),
+                            secondaries=secondaries_in,
+                        )
+                    except export_helpers.StageExportError as exc:
+                        raise RuntimeError(f"stage {stage_number}: {exc}") from exc
+                    # Hosted: a re-cut here produced the per-stage trims/overlay
+                    # on this worker -- push them so other workers + the API
+                    # download path see them. No-op in local mode.
+                    export_storage.push_stage_export_outputs(proj, recut)
+                else:
+                    handle.update(
+                        progress=0.02 + idx * per_stage_share,
+                        message=(
+                            f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"
+                        ),
+                    )
 
         handle.check_cancel()
         handle.update(progress=0.92, message="Stitching match FCPXML...")
 
         # Re-load the project: the per-stage worker writes processed flags
         # via project.save() side-effects, so a fresh load picks those up.
-        proj = state.shooter_project(slug)
-        stages_input: list[match_export_helpers.MatchStageInput] = []
-        for stage_number in req.stage_numbers:
-            stg = proj.stage(stage_number)
-            prim = stg.primary()
-            assert prim is not None and prim.beep_time is not None
-            base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
-            trimmed_path = exports_dir / f"{base}_trimmed.mp4"
-            audit_path = audit_dir / f"stage{stage_number}.json"
-            overlay_path = exports_dir / f"{base}_overlay.mov"
-            secondaries: list[match_export_helpers.MatchSecondaryInput] = []
-            for sv in stg.videos:
-                if sv.role != "secondary" or sv.beep_time is None:
-                    continue
-                sec_clip_beep = min(proj.trim_pre_buffer_seconds, sv.beep_time)
-                secondaries.append(
-                    match_export_helpers.MatchSecondaryInput(
-                        video_id=sv.video_id,
-                        trimmed_path=exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4",
-                        beep_offset_seconds=sec_clip_beep,
-                        label=f"Cam {sv.video_id}",
+        with handle.timer.phase("compose"):
+            proj = state.shooter_project(slug)
+            stages_input: list[match_export_helpers.MatchStageInput] = []
+            for stage_number in req.stage_numbers:
+                stg = proj.stage(stage_number)
+                prim = stg.primary()
+                assert prim is not None and prim.beep_time is not None
+                base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+                trimmed_path = exports_dir / f"{base}_trimmed.mp4"
+                audit_path = audit_dir / f"stage{stage_number}.json"
+                overlay_path = exports_dir / f"{base}_overlay.mov"
+                secondaries: list[match_export_helpers.MatchSecondaryInput] = []
+                for sv in stg.videos:
+                    if sv.role != "secondary" or sv.beep_time is None:
+                        continue
+                    sec_clip_beep = min(proj.trim_pre_buffer_seconds, sv.beep_time)
+                    secondaries.append(
+                        match_export_helpers.MatchSecondaryInput(
+                            video_id=sv.video_id,
+                            trimmed_path=exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4",
+                            beep_offset_seconds=sec_clip_beep,
+                            label=f"Cam {sv.video_id}",
+                        )
+                    )
+                primary_clip_beep = min(proj.trim_pre_buffer_seconds, prim.beep_time)
+                stages_input.append(
+                    match_export_helpers.MatchStageInput(
+                        stage_number=stage_number,
+                        stage_name=stg.stage_name,
+                        audit_path=audit_path,
+                        trimmed_path=trimmed_path,
+                        beep_offset_seconds=primary_clip_beep,
+                        secondaries=tuple(secondaries),
+                        overlay_path=overlay_path,
                     )
                 )
-            primary_clip_beep = min(proj.trim_pre_buffer_seconds, prim.beep_time)
-            stages_input.append(
-                match_export_helpers.MatchStageInput(
-                    stage_number=stage_number,
-                    stage_name=stg.stage_name,
-                    audit_path=audit_path,
-                    trimmed_path=trimmed_path,
-                    beep_offset_seconds=primary_clip_beep,
-                    secondaries=tuple(secondaries),
-                    overlay_path=overlay_path,
-                )
-            )
 
-        project_name = req.project_name or proj.name or "match"
-        request_data = match_export_helpers.MatchExportRequestData(
-            stage_numbers=tuple(req.stage_numbers),
-            head_pad_seconds=req.head_pad_seconds,
-            tail_pad_seconds=req.tail_pad_seconds,
-            include_secondaries=req.include_secondaries,
-            include_overlay=req.include_overlay,
-            project_name=project_name,
-            pip_layout=req.pip_layout,
-            output_format=req.output_format,
-            transition_kind=req.transition_kind,
-            transition_duration_seconds=req.transition_duration_seconds,
-            title_kind=req.title_kind,
-            title_duration_seconds=req.title_duration_seconds,
-            intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
-            outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
-            youtube_sidecar=req.youtube_sidecar,
-            youtube_preset=req.youtube_preset,
-        )
-        try:
-            result = match_export_helpers.export_match(
-                stages=stages_input,
-                request=request_data,
-                exports_dir=exports_dir,
-                config=Config().output,
+            project_name = req.project_name or proj.name or "match"
+            request_data = match_export_helpers.MatchExportRequestData(
+                stage_numbers=tuple(req.stage_numbers),
+                head_pad_seconds=req.head_pad_seconds,
+                tail_pad_seconds=req.tail_pad_seconds,
+                include_secondaries=req.include_secondaries,
+                include_overlay=req.include_overlay,
+                project_name=project_name,
+                pip_layout=req.pip_layout,
+                output_format=req.output_format,
+                transition_kind=req.transition_kind,
+                transition_duration_seconds=req.transition_duration_seconds,
+                title_kind=req.title_kind,
+                title_duration_seconds=req.title_duration_seconds,
+                intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
+                outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
+                youtube_sidecar=req.youtube_sidecar,
+                youtube_preset=req.youtube_preset,
             )
-        except match_export_helpers.MatchExportError as exc:
-            raise RuntimeError(str(exc)) from exc
+            try:
+                result = match_export_helpers.export_match(
+                    stages=stages_input,
+                    request=request_data,
+                    exports_dir=exports_dir,
+                    config=Config().output,
+                )
+            except match_export_helpers.MatchExportError as exc:
+                raise RuntimeError(str(exc)) from exc
 
         # Hosted: push the stitched match deliverable (+ optional YouTube
         # sidecars, when youtube_sidecar wrote them) so the API can serve the
         # download. push_export_file skips any that don't exist. No-op local.
-        export_storage.push_export_file(proj, result.fcpxml_path)
-        export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
-        export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".json"))
+        with handle.timer.phase("r2_upload"):
+            export_storage.push_export_file(proj, result.fcpxml_path)
+            export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
+            export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".json"))
 
         handle.set_result(
             {
@@ -3992,6 +4080,10 @@ def create_app(
     ``/api/server/features`` on mount to know whether to show the Lab
     nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
     """
+    # Initialise Sentry before constructing FastAPI so its integrations can
+    # hook the app. No-op unless ``SENTRY_DSN`` is set (local installs and the
+    # test suite stay untouched); see ``splitsmith.observability.init_sentry``.
+    init_sentry(component="web")
     state = AppState()
     # Route the compute backend through the module-level lazy loader so
     # the shared cache + existing test monkeypatches on

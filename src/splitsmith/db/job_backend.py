@@ -42,6 +42,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from ..observability import PhaseTimer, capture_job_exception, emit_job_event
 from ..ui.jobs import (
     Job,
     JobBodyRegistry,
@@ -87,6 +88,7 @@ _ROW_TO_JOB_FIELDS = (
     "cancel_requested",
     "acknowledged",
     "result",
+    "timings",
     "created_at",
     "updated_at",
     "started_at",
@@ -482,16 +484,26 @@ class PostgresJobBackend:
                 # worker; the row is already terminal. Nothing to run.
                 return
 
-            handle = JobHandle(self, job_id)  # type: ignore[arg-type]
+            # Build the timer from the row's wall-clock timestamps so
+            # queue_wait_ms (enqueue->start, across processes) is derived from
+            # the persisted ts, not perf_counter. The body opens phases via
+            # ``handle.timer``; this thread owns the single persist + emit.
+            timer = PhaseTimer(
+                created_at=row_snapshot.created_at,
+                started_at=row_snapshot.started_at,
+            )
+            handle = JobHandle(self, job_id, timer=timer)  # type: ignore[arg-type]
+            kind = row_snapshot.kind
             try:
                 fn(handle)
             except JobCancelled:
-                asyncio.run(self._finalize_run(job_id, JobStatus.CANCELLED, error=None))
+                self._finalize_with_timings(job_id, kind, JobStatus.CANCELLED, timer, error=None)
                 return
             except Exception as exc:  # noqa: BLE001 -- surface as FAILED
-                asyncio.run(self._finalize_run(job_id, JobStatus.FAILED, error=str(exc)))
+                capture_job_exception(exc, kind=kind, user_id=self._user_id)
+                self._finalize_with_timings(job_id, kind, JobStatus.FAILED, timer, error=str(exc))
                 return
-            asyncio.run(self._finalize_run(job_id, JobStatus.SUCCEEDED, error=None))
+            self._finalize_with_timings(job_id, kind, JobStatus.SUCCEEDED, timer, error=None)
         finally:
             with self._lock:
                 self._inflight = max(0, self._inflight - 1)
@@ -531,7 +543,45 @@ class PostgresJobBackend:
             await session.commit()
             return _row_to_job(row)
 
-    async def _finalize_run(self, job_id: str, status: JobStatus, *, error: str | None) -> None:
+    def _finalize_with_timings(
+        self,
+        job_id: str,
+        kind: str,
+        status: JobStatus,
+        timer: PhaseTimer,
+        *,
+        error: str | None,
+    ) -> None:
+        """Persist terminal status + timings in one write, then emit one event.
+
+        Runs on the worker thread (synchronous, bridges to async DB via
+        ``asyncio.run`` exactly like the existing finalize path -- no second
+        event loop). The timer is built once here so a body that raised
+        mid-phase still carries its partial timeline. The structured
+        ``job.completed`` / ``job.failed`` log is emitted once per job from
+        this single terminal path.
+        """
+        timings = timer.build()
+        asyncio.run(self._finalize_run(job_id, status, error=error, timings=timings))
+        event = "job.completed" if status == JobStatus.SUCCEEDED else "job.failed"
+        emit_job_event(
+            logger,
+            event=event,
+            kind=kind,
+            user_id=self._user_id,
+            status=status.value,
+            timings=timings,
+            error=error,
+        )
+
+    async def _finalize_run(
+        self,
+        job_id: str,
+        status: JobStatus,
+        *,
+        error: str | None,
+        timings: dict[str, Any] | None = None,
+    ) -> None:
         now = datetime.now(UTC)
         async with self._session_factory() as session:
             row = (
@@ -547,6 +597,8 @@ class PostgresJobBackend:
             row.status = status.value
             row.finished_at = now
             row.updated_at = now
+            if timings is not None:
+                row.timings = timings
             if status == JobStatus.SUCCEEDED:
                 row.progress = 1.0
                 row.error = None

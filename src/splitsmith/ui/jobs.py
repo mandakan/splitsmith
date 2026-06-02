@@ -58,6 +58,8 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
+from ..observability import PhaseTimer, emit_job_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -213,6 +215,11 @@ class Job(BaseModel):
     # kind: the SPA branches on ``Job.kind`` to interpret the dict. Stays
     # ``None`` for jobs that signal success solely by writing files.
     result: dict[str, Any] | None = None
+    # Per-job observability metadata persisted on completion: queue_wait_ms,
+    # total_ms, phases[], and a small meta{} of job-specific scalars. Set once
+    # by the backend from the run's :class:`PhaseTimer`; ``None`` until the job
+    # finishes (and on jobs that pre-date the column).
+    timings: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None
@@ -227,13 +234,43 @@ class JobHandle:
     the polling endpoint always observing a consistent snapshot.
     """
 
-    def __init__(self, registry: JobRegistry, job_id: str) -> None:
+    def __init__(
+        self,
+        registry: JobRegistry,
+        job_id: str,
+        *,
+        timer: PhaseTimer | None = None,
+    ) -> None:
         self._registry = registry
         self._job_id = job_id
+        # The per-run :class:`PhaseTimer`, attached by the backend's ``_run``
+        # before the body executes. A body opens phases via
+        # ``with handle.timer.phase("..."):`` and records scalars via
+        # ``handle.timer.set_meta(...)``. The backend owns the single
+        # persist + emit of ``timer.build()`` on the terminal path; the body
+        # never persists or logs the timings itself.
+        self._timer = timer if timer is not None else PhaseTimer()
 
     @property
     def id(self) -> str:
         return self._job_id
+
+    @property
+    def timer(self) -> PhaseTimer:
+        """The :class:`PhaseTimer` for this run.
+
+        Always non-``None`` so bodies can call ``handle.timer.phase(...)``
+        unconditionally in either backend (local desktop or hosted worker).
+        """
+        return self._timer
+
+    def set_timings(self, payload: dict[str, Any]) -> None:
+        """Persist the built timings dict onto the job snapshot/row.
+
+        Normally the backend persists ``handle.timer.build()`` itself on the
+        terminal path; this is the explicit bridge for that single write.
+        """
+        self._registry._patch(self._job_id, timings=payload)
 
     def update(
         self,
@@ -644,6 +681,7 @@ class JobRegistry:
     # ------------------------------------------------------------------
 
     def _run(self, job_id: str, fn: Callable[[JobHandle], None]) -> None:
+        timer: PhaseTimer | None = None
         try:
             with self._lock:
                 j = self._jobs.get(job_id)
@@ -663,17 +701,28 @@ class JobRegistry:
                 j.status = JobStatus.RUNNING
                 j.started_at = datetime.now(UTC)
                 j.updated_at = j.started_at
+                kind = j.kind
+                created_at = j.created_at
+                started_at = j.started_at
+            # Build the timer AFTER the row is RUNNING so created_at/started_at
+            # are populated; the body opens phases through ``handle.timer``.
+            timer = PhaseTimer(created_at=created_at, started_at=started_at)
             try:
-                fn(JobHandle(self, job_id))
+                fn(JobHandle(self, job_id, timer=timer))
             except JobCancelled:
                 with self._lock:
                     j = self._jobs.get(job_id)
                     if j is not None:
                         j.status = JobStatus.CANCELLED
+                        j.timings = timer.build()
                         j.finished_at = datetime.now(UTC)
                         j.updated_at = j.finished_at
+                        final_status = JobStatus.CANCELLED
+                    else:
+                        final_status = None
                     self._subprocs.pop(job_id, None)
                     self._trim_retained_locked()
+                self._emit_terminal_event(job_id, kind, final_status, timer, error=None)
                 return
             except Exception as exc:  # noqa: BLE001 -- worker exceptions become job state
                 logger.exception("job %s failed", job_id)
@@ -686,29 +735,72 @@ class JobRegistry:
                         # asked for the abort, the noisy stderr is expected.
                         if j.cancel_requested:
                             j.status = JobStatus.CANCELLED
+                            final_status = JobStatus.CANCELLED
+                            final_error = None
                         else:
                             j.status = JobStatus.FAILED
                             j.error = str(exc)
+                            final_status = JobStatus.FAILED
+                            final_error = str(exc)
+                        j.timings = timer.build()
                         j.finished_at = datetime.now(UTC)
                         j.updated_at = j.finished_at
+                    else:
+                        final_status = None
+                        final_error = None
                     self._subprocs.pop(job_id, None)
                     self._trim_retained_locked()
+                self._emit_terminal_event(job_id, kind, final_status, timer, error=final_error)
                 return
             with self._lock:
                 j = self._jobs.get(job_id)
+                final_status = None
                 if j is not None and j.status == JobStatus.RUNNING:
                     j.status = JobStatus.SUCCEEDED
                     if j.progress is None or j.progress < 1.0:
                         j.progress = 1.0
+                    j.timings = timer.build()
                     j.finished_at = datetime.now(UTC)
                     j.updated_at = j.finished_at
+                    final_status = JobStatus.SUCCEEDED
                 self._subprocs.pop(job_id, None)
                 self._trim_retained_locked()
+            self._emit_terminal_event(job_id, kind, final_status, timer, error=None)
         finally:
             with self._lock:
                 self._running_count = max(0, self._running_count - 1)
                 self._dispatch_locked()
                 self._signal_drain_if_complete_locked()
+
+    def _emit_terminal_event(
+        self,
+        job_id: str,
+        kind: str,
+        status: JobStatus | None,
+        timer: PhaseTimer,
+        *,
+        error: str | None,
+    ) -> None:
+        """Emit exactly one ``job.completed``/``job.failed`` log line.
+
+        Called once per job from each terminal path of :meth:`_run`. Local
+        mode has no tenant, so ``user_id`` is the ``"local"`` sentinel; the
+        plain-text formatter renders the record as an ordinary INFO line.
+        ``status is None`` means the row vanished mid-run (evicted) -- nothing
+        to report.
+        """
+        if status is None:
+            return
+        event = "job.completed" if status == JobStatus.SUCCEEDED else "job.failed"
+        emit_job_event(
+            logger,
+            event=event,
+            kind=kind,
+            user_id="local",
+            status=status.value,
+            timings=timer.build(),
+            error=error,
+        )
 
     def _dispatch_locked(self) -> None:
         """Hand the highest-priority pending job to the executor.
