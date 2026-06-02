@@ -41,6 +41,7 @@ from .ui.project import (
     SUBDIRS,
     MatchProject,
     StageVideo,
+    _stage_rounds_from_info,
     atomic_write_json,
 )
 
@@ -260,6 +261,28 @@ class Match(BaseModel):
         match.match_id = generate_match_id(match.name, match.created_at)
         match.save(root)
         return match
+
+    def stages_from_match_data(self, match_data: Any) -> None:
+        """Populate match-level stage definitions from a scoreboard shell.
+
+        The match-side mirror of
+        :meth:`MatchProject.populate_from_match_data`. A scoreboard-created
+        match must carry its own stage list: a shooter ADDED LATER gets a
+        project mirrored from ``match.stages`` (see the add-shooter path),
+        so an empty list would hand them zero stages -- and per-shooter
+        coverage counts that divide by ``len(match.stages)`` would read 0.
+        Stages are flagged ``placeholder`` exactly as the per-shooter
+        import flags them; per-competitor timing arrives separately.
+        """
+        self.stages = [
+            MatchStageDefinition(
+                stage_number=s.stage_number,
+                stage_name=s.name,
+                stage_rounds=_stage_rounds_from_info(s),
+                placeholder=True,
+            )
+            for s in sorted(match_data.stages, key=lambda s: s.stage_number)
+        ]
 
     @classmethod
     def load(cls, root: Path) -> Match:

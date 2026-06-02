@@ -668,6 +668,13 @@ def test_create_from_scoreboard_creates_n_shooters_from_local(
         assert project["selected_competitor_id"] in {alice["id"], bob["id"]}
         assert len(project["stages"]) >= 1
 
+    # Regression: the match itself must carry the stage definitions, not
+    # just the per-shooter projects. An empty match.stages would hand a
+    # shooter added LATER zero stages (their project is mirrored from it)
+    # and make len(match.stages)-based coverage counts read 0.
+    assert len(match_json["stages"]) == len(project["stages"])
+    assert {s["stage_number"] for s in match_json["stages"]} == {s["stage_number"] for s in project["stages"]}
+
 
 def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Path) -> None:
     """Dropping the legacy ``examples/*.json`` shape (single competitor with

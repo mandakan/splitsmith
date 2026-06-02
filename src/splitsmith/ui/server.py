@@ -8558,6 +8558,15 @@ def create_app(
             except ScoreboardError as exc:
                 _raise_scoreboard_http(exc)
 
+        # Carry the stage shell onto the match itself BEFORE adding shooters
+        # (mirrors the manual-create order). Without this match.stages stays
+        # empty: a shooter added later -- whose project is mirrored from
+        # match.stages -- would get zero stages, and coverage counts that
+        # divide by len(match.stages) read 0. Per-shooter projects below are
+        # populated independently via populate_from_match_data.
+        match.stages_from_match_data(match_data)
+        match.save(target)
+
         # Stable alphabetical materialisation so reruns / re-imports
         # land in the same shooter order. No "primary" shooter -- the
         # operator may not be in the roster at all (#350).
