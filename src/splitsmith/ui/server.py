@@ -8700,7 +8700,14 @@ def create_app(
             selected_shooter_id=legacy.selected_shooter_id,
             selected_competitor_id=legacy.selected_competitor_id,
             stages_audited=stages_audited,
-            stages_total=len(match.stages),
+            # Denominator must match the numerator's source: stages_audited
+            # is counted over the shooter's OWN project (legacy.stages), so
+            # the total has to be len(legacy.stages) too. Using
+            # len(match.stages) breaks the ratio when the match-level stage
+            # list wasn't populated (e.g. stages arrived via a per-shooter
+            # scoreboard import, not match creation) -- that produced a "0
+            # stages" card next to a 12-stage match.
+            stages_total=len(legacy.stages),
             video_count=total_videos,
             cameras=cameras,
             stages_missing_trim=stages_missing_trim,

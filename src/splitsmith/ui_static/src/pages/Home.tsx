@@ -398,7 +398,15 @@ function ActiveVariant({
             <ShooterCard
               key={s.slug}
               name={s.name}
-              stats={`${s.stages_total} stages`}
+              // "{audited}/{total} audited" instead of a bare "{total}
+              // stages" -- the latter read as "this shooter has N stages"
+              // and clashed with the match's stage count elsewhere. The
+              // ratio names the metric so it can't be misread.
+              stats={
+                s.stages_total > 0
+                  ? `${s.stages_audited}/${s.stages_total} audited`
+                  : "no stages yet"
+              }
               progress={
                 s.stages_total > 0 ? s.stages_audited / s.stages_total : 0
               }
@@ -422,13 +430,22 @@ function ActiveVariant({
         title="Stages"
         count={
           <>
-            <b className="font-bold text-ink-2">{pad2(totalsByTone.done)}</b>{" "}
+            <b className="font-bold text-ink-2">
+              {pad2(totalsByTone.done + totalsByTone.skipped)}
+            </b>{" "}
             audited <span className="text-whisper">&middot;</span>{" "}
             <b className="font-bold text-ink-2">
-              {pad2(totalsByTone.partial + totalsByTone.flagged)}
+              {pad2(totalsByTone.in_progress)}
             </b>{" "}
             in progress <span className="text-whisper">&middot;</span>{" "}
-            <b className="font-bold text-ink-2">{pad2(totalsByTone.todo)}</b>{" "}
+            <b className="font-bold text-ink-2">
+              {pad2(
+                totalsByTone.todo +
+                  totalsByTone.ready +
+                  totalsByTone.partial +
+                  totalsByTone.flagged,
+              )}
+            </b>{" "}
             pending
           </>
         }

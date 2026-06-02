@@ -5885,6 +5885,43 @@ def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_con
     assert slugs == ["ma", "jl"]
 
 
+def test_list_match_shooters_stages_total_from_project_not_match(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """stages_total must come from each shooter's own project, not
+    ``len(match.stages)``.
+
+    When stages arrive via a per-shooter scoreboard import, the
+    match-level stage list can stay empty while the project carries the
+    stages. Using ``len(match.stages)`` then rendered a "0 stages" card
+    next to a multi-stage match (and broke the audited ratio, whose
+    numerator is counted over the project). Regression for that mismatch.
+    """
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Empty-match-stages")
+    assert match.stages == []  # deliberately empty at the match level
+    match.save(target)
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    sroot = match_model.Match.shooter_root(target, "ma")
+    legacy = MatchProject.init(sroot, name="Empty-match-stages")
+    legacy.competitor_name = "Mathias"
+    legacy.stages = [StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=0.0) for n in (1, 2, 3)]
+    legacy.save(sroot)
+
+    app = create_app()
+    client = _MatchClient(app)
+    resp = client.post("/api/me/recent-projects/bind", json={"path": str(target.resolve())})
+    assert resp.status_code == 200
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+
+    body = client.get(f"/api/matches/{match_id}/match/shooters").json()
+    me = next(s for s in body["shooters"] if s["slug"] == "ma")
+    # 3 from legacy.stages -- NOT 0 from the empty match.stages.
+    assert me["stages_total"] == 3
+
+
 def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import match_model
 
