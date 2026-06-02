@@ -2740,6 +2740,154 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
+def test_shot_detect_job_records_phase_timings(tmp_path: Path, monkeypatch) -> None:
+    """The instrumented ``shot_detect`` body opens a phase per natural
+    boundary; the backend persists ``timer.build()`` onto the job so the
+    snapshot carries the full timings dict (phases in order + meta). The
+    runtime is warm here (``_get_ensemble_runtime`` stubbed to a value)
+    so there is NO ``cold_model_load`` phase and ``meta.cold_model_load``
+    is False."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
+    # Warm runtime: the singleton resolver returns a value, and the warm
+    # probe reports True -> the body skips the cold_model_load phase.
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: object())
+    monkeypatch.setattr(server_module, "_ensemble_runtime_is_warm", lambda: True)
+    monkeypatch.setattr(
+        ensemble_module,
+        "detect_shots_ensemble",
+        lambda *a, **kw: _fake_ensemble_result(
+            [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
+            consensus=2,
+        ),
+    )
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    timings = final["timings"]
+    assert timings is not None, final
+    phase_names = [p["name"] for p in timings["phases"]]
+    # Every shot_detect phase that runs on the warm path, in completion order.
+    assert phase_names == [
+        "load_project",
+        "ensure_trim",
+        "prepare_audio",
+        "load_audit_state",
+        "audio_load",
+        "ensemble_infer",
+        "build_candidates",
+        "save_audit",
+        "persist_project",
+    ]
+    assert "cold_model_load" not in phase_names
+    assert all(isinstance(p["ms"], (int, float)) and p["ms"] >= 0 for p in timings["phases"])
+    assert isinstance(timings["total_ms"], (int, float))
+    # total_ms covers the whole body, so it is at least the sum of phases.
+    assert timings["total_ms"] >= sum(p["ms"] for p in timings["phases"]) - 1e-6
+    meta = timings["meta"]
+    assert meta["cold_model_load"] is False
+    assert meta["candidate_count"] == 1
+    assert meta["consensus"] == 2
+
+
+def test_shot_detect_job_times_cold_model_load_when_runtime_cold(tmp_path: Path, monkeypatch) -> None:
+    """When the ensemble singleton is not yet warm, the body forces the
+    resolution inside an explicit ``cold_model_load`` phase and records
+    ``meta.cold_model_load=True`` -- so the weight-load cost is visible in
+    timings instead of hiding inside ``ensemble_infer``."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    cold_loads: list[int] = []
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
+    monkeypatch.setattr(server_module, "_ensemble_runtime_is_warm", lambda: False)
+    monkeypatch.setattr(
+        server_module,
+        "_get_ensemble_runtime",
+        lambda: cold_loads.append(1) or object(),
+    )
+    monkeypatch.setattr(
+        ensemble_module,
+        "detect_shots_ensemble",
+        lambda *a, **kw: _fake_ensemble_result([], consensus=2),
+    )
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    timings = final["timings"]
+    phase_names = [p["name"] for p in timings["phases"]]
+    assert "cold_model_load" in phase_names
+    # cold_model_load lands between audio_load and ensemble_infer.
+    assert phase_names.index("cold_model_load") == phase_names.index("audio_load") + 1
+    assert phase_names.index("cold_model_load") < phase_names.index("ensemble_infer")
+    assert timings["meta"]["cold_model_load"] is True
+    # The body forced the resolution inside the cold_model_load phase; the
+    # compute backend's runtime_loader resolves again inside detect_stage
+    # (a no-op warm-cache hit in production), so at least one load fired.
+    assert len(cold_loads) >= 1
+
+
 def test_shot_detect_endpoint_ensures_trim_before_detection(tmp_path: Path, monkeypatch) -> None:
     """Re-detect on a project whose trims were wiped (e.g. by the v1->v2
     cache migration in #298) must rebuild the trimmed MP4. Without this
