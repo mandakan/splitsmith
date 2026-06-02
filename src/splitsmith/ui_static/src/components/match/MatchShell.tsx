@@ -36,6 +36,7 @@ import {
   type ShooterListEntry,
 } from "@/lib/api";
 import { useMode } from "@/lib/mode";
+import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
@@ -133,14 +134,10 @@ export function MatchShell() {
   const shooterCount = shooters.length || undefined;
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
-  // one -- the URL slug if present, else the first shooter with footage,
-  // else just the first shooter. The top shooter chips let them switch.
+  // one -- the URL slug if present, else the shared default-shooter rule
+  // (same one DefaultShooterRedirect uses, so chrome and redirect agree).
   // ``undefined`` only when the match has no shooters yet.
-  const defaultShooterSlug =
-    slug ??
-    shooters.find((s) => s.video_count > 0)?.slug ??
-    shooters[0]?.slug ??
-    undefined;
+  const defaultShooterSlug = slug ?? pickDefaultShooterSlug(shooters);
 
   useEffect(() => {
     let alive = true;

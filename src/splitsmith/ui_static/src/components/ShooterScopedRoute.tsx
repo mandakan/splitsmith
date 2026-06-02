@@ -6,25 +6,45 @@
  * via the slug-derived key so each page's effects start fresh on the new
  * shooter without page-specific reset plumbing.
  *
- * Slugless visits (e.g. ``/audit``) redirect to ``/shooters`` so the user
- * picks one explicitly -- there is no "active shooter" fallback any more.
+ * A slug-less visit shouldn't happen -- every route that mounts this
+ * supplies ``:slug`` -- but if one ever slips through, resolve it to the
+ * default shooter via ``DefaultShooterRedirect`` (base derived from the
+ * first path segment) rather than dumping the operator on the shooter
+ * list. The list is only the right destination for a genuinely empty
+ * match, which ``DefaultShooterRedirect`` already handles.
  */
 
-import { Navigate, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
+
+import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
 
 interface Props {
   element: React.ReactElement;
 }
 
+type ScopedBase = "audit" | "coach" | "export" | "ingest";
+
+function baseFromPath(pathname: string): ScopedBase {
+  // Path is /match/:matchId/<base>/... -- the segment after matchId names
+  // the page. Default to "audit" if the shape is unexpected.
+  const segs = pathname.split("/").filter(Boolean);
+  const idx = segs.indexOf("match");
+  const candidate = idx >= 0 ? segs[idx + 2] : segs[0];
+  if (
+    candidate === "coach" ||
+    candidate === "export" ||
+    candidate === "ingest"
+  ) {
+    return candidate;
+  }
+  return "audit";
+}
+
 export function ShooterScopedRoute({ element }: Props) {
-  const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
+  const { slug } = useParams<{ slug: string; matchId?: string }>();
+  const { pathname } = useLocation();
   if (!slug) {
-    return (
-      <Navigate
-        to={matchId ? `/match/${matchId}/shooters` : "/shooters"}
-        replace
-      />
-    );
+    return <DefaultShooterRedirect base={baseFromPath(pathname)} />;
   }
   return (
     <span key={slug} style={{ display: "contents" }}>
