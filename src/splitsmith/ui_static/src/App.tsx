@@ -11,6 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
+import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
 import { ModeProvider } from "@/lib/mode";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
@@ -137,7 +138,7 @@ export function App() {
               path="ingest/:slug"
               element={<ShooterScopedRoute element={<Ingest />} />}
             />
-            <Route path="ingest" element={<Navigate to="../shooters" replace />} />
+            <Route path="ingest" element={<DefaultShooterRedirect base="ingest" />} />
             <Route element={<MatchShell />}>
               <Route index element={<Home />} />
               <Route
@@ -148,7 +149,7 @@ export function App() {
                 path="audit/:slug/:stage"
                 element={<ShooterScopedRoute element={<Audit />} />}
               />
-              <Route path="audit" element={<Navigate to="../shooters" replace />} />
+              <Route path="audit" element={<DefaultShooterRedirect base="audit" />} />
               <Route path="compare/:stage" element={<Compare />} />
               <Route
                 path="coach/:slug"
@@ -158,7 +159,7 @@ export function App() {
                 path="coach/:slug/:stage"
                 element={<ShooterScopedRoute element={<Coach />} />}
               />
-              <Route path="coach" element={<Navigate to="../shooters" replace />} />
+              <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
               <Route path="shooters" element={<Shooters />} />
               <Route path="beep-review" element={<BeepReview />} />
               <Route
@@ -169,7 +170,7 @@ export function App() {
                 path="export/:slug/:stage"
                 element={<ShooterScopedRoute element={<Export />} />}
               />
-              <Route path="export" element={<Navigate to="../shooters" replace />} />
+              <Route path="export" element={<DefaultShooterRedirect base="export" />} />
             </Route>
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
