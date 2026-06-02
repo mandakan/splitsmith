@@ -372,11 +372,14 @@ export function Audit() {
   useEffect(() => {
     if (stageNumber != null) return;
     if (stagesWithPrimary.length === 0) return;
-    const target = slugParam
-      ? `/audit/${slugParam}/${stagesWithPrimary[0].stage_number}`
-      : `/audit/${stagesWithPrimary[0].stage_number}`;
-    navigate(target, { replace: true });
-  }, [stageNumber, stagesWithPrimary, navigate, slugParam]);
+    // Must go through ``href`` so the target keeps the ``/match/:matchId``
+    // prefix. A bare ``/audit/...`` escapes the match scope, matches no
+    // route, and the catch-all redirect dead-ends at /pick (health.bound
+    // is always false post-state-refactor, so it can't re-prefix).
+    navigate(href("audit", slug, String(stagesWithPrimary[0].stage_number)), {
+      replace: true,
+    });
+  }, [stageNumber, stagesWithPrimary, navigate, href, slug]);
 
   const stage = useMemo(() => {
     if (!project || stageNumber == null) return null;
@@ -1193,10 +1196,11 @@ export function Audit() {
       if (isDirtyRef.current) {
         await performSave({ silent: true });
       }
-      const target = slugParam ? `/audit/${slugParam}/${n}` : `/audit/${n}`;
-      navigate(target);
+      // Match-prefixed (see the stage-redirect effect above): a bare
+      // ``/audit/...`` would escape the match scope and bounce to /pick.
+      navigate(href("audit", slug, String(n)));
     },
-    [navigate, performSave, stageNumber, slugParam],
+    [navigate, performSave, stageNumber, href, slug],
   );
 
   // Open the /beep-review queue with this exact item active. Replaces
