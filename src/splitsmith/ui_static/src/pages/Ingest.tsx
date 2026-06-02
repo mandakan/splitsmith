@@ -20,10 +20,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Camera,
+  ChevronUp,
   Clock,
   Folder,
   Info,
+  Loader2,
   Package,
+  Play,
   Plus,
   Video,
   XCircle,
@@ -917,6 +920,17 @@ function VideoRow({
   onError: (msg: string | null) => void;
 }) {
   const [detecting, setDetecting] = useState(false);
+  // Local per-row pending: ``onMove`` (the page-level moveAssignment)
+  // awaits the move + a full project reload before resolving, so this
+  // spans the whole operation and gives the row a spinner instead of the
+  // silent input-freeze the page-level ``busy`` produced on its own.
+  const [rowBusy, setRowBusy] = useState(false);
+  // Inline preview: the leading icon toggles a scrubbable <video>. For
+  // timestamp-less footage the operator can't tell which stage it is
+  // without watching, and the stage dropdown lives on this same row --
+  // so watch-and-assign stays one motion. Lazy: the <video> only mounts
+  // (and only then streams) while open.
+  const [previewOpen, setPreviewOpen] = useState(false);
   const needsBeep =
     video.role !== "ignored" &&
     video.beep_time == null &&
@@ -954,35 +968,53 @@ function VideoRow({
     });
 
   async function setRole(next: VideoRole) {
-    await onMove(video.path, currentStage, next);
+    setRowBusy(true);
+    try {
+      await onMove(video.path, currentStage, next);
+    } finally {
+      setRowBusy(false);
+    }
   }
 
   async function changeStage(next: string) {
-    if (next === "unassigned") {
-      await onMove(video.path, null, video.role);
-    } else {
-      const n = Number(next);
-      if (!Number.isNaN(n)) await onMove(video.path, n, video.role);
+    setRowBusy(true);
+    try {
+      if (next === "unassigned") {
+        await onMove(video.path, null, video.role);
+      } else {
+        const n = Number(next);
+        if (!Number.isNaN(n)) await onMove(video.path, n, video.role);
+      }
+    } finally {
+      setRowBusy(false);
     }
   }
 
   return (
-    <div
-      className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px] items-center gap-3.5 border-b border-rule px-5 py-2.5 last:border-b-0 hover:bg-surface-2"
-    >
-      <span
-        aria-hidden
-        className="inline-flex size-8 items-center justify-center rounded-md text-ink"
+    <div className="border-b border-rule last:border-b-0">
+      <div
+        className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px] items-center gap-3.5 px-5 py-2.5 hover:bg-surface-2"
+      >
+      <button
+        type="button"
+        onClick={() => setPreviewOpen((o) => !o)}
+        title={previewOpen ? "Hide preview" : "Preview video"}
+        aria-label={previewOpen ? "Hide preview" : "Preview video"}
+        aria-expanded={previewOpen}
+        className="group inline-flex size-8 items-center justify-center rounded-md border border-rule-strong text-ink-2 transition-colors hover:border-led-deep hover:text-led"
         style={{
           background:
             camera && camera.id.includes("|")
               ? "linear-gradient(135deg, var(--color-surface-3), var(--color-surface-4))"
               : "var(--color-surface-3)",
-          border: "1px solid var(--color-rule-strong)",
         }}
       >
-        <Video className="size-3.5" />
-      </span>
+        {previewOpen ? (
+          <ChevronUp className="size-3.5" />
+        ) : (
+          <Play className="size-3.5 transition-transform group-hover:scale-110" />
+        )}
+      </button>
       <div className="min-w-0">
         <div className="truncate font-mono text-[0.75rem] font-semibold text-ink">
           {filename}
@@ -995,20 +1027,41 @@ function VideoRow({
       <div className="font-mono text-[0.6875rem] tabular-nums text-muted">
         {recordedAt ?? "no timestamp"}
       </div>
-      <select
-        value={currentStage === null ? "unassigned" : String(currentStage)}
-        onChange={(e) => void changeStage(e.target.value)}
-        disabled={busy}
-        className="min-h-9 rounded-md border border-rule bg-surface-3 px-3 py-1.5 font-mono text-[0.6875rem] text-ink outline-none focus:border-led focus:shadow-[0_0_0_2px_var(--color-led-tint)]"
-      >
-        <option value="unassigned">-- Unassigned --</option>
-        {allStages.map((s) => (
-          <option key={s.stage_number} value={s.stage_number}>
-            Stage {pad2(s.stage_number)} -- {s.stage_name}
-          </option>
-        ))}
-      </select>
-      <RoleToggles value={video.role} onChange={(r) => void setRole(r)} disabled={busy} />
+      <div className="relative">
+        <select
+          value={currentStage === null ? "unassigned" : String(currentStage)}
+          onChange={(e) => void changeStage(e.target.value)}
+          disabled={busy}
+          className="min-h-9 w-full rounded-md border border-rule bg-surface-3 px-3 py-1.5 pr-8 font-mono text-[0.6875rem] text-ink outline-none focus:border-led focus:shadow-[0_0_0_2px_var(--color-led-tint)]"
+        >
+          <option value="unassigned">-- Unassigned --</option>
+          {allStages.map((s) => (
+            <option key={s.stage_number} value={s.stage_number}>
+              Stage {pad2(s.stage_number)} -- {s.stage_name}
+            </option>
+          ))}
+        </select>
+        {rowBusy && (
+          <Loader2
+            aria-label="Saving assignment"
+            className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-led"
+          />
+        )}
+      </div>
+      {currentStage === null ? (
+        <span
+          className="font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-muted"
+          title="A video needs a stage before it can have a role. The first video assigned to a stage becomes its primary automatically."
+        >
+          pick a stage &rarr; auto-primary
+        </span>
+      ) : (
+        <RoleToggles
+          value={video.role}
+          onChange={(r) => void setRole(r)}
+          disabled={busy || rowBusy}
+        />
+      )}
       {/* Beep status + manual retry. Auto-queue fires at scan / move /
        *  swap-primary time; if a job never ran or failed silently, the
        *  user needs an explicit affordance to kick detection. Clicking
@@ -1047,6 +1100,22 @@ function VideoRow({
       >
         <XCircle className="size-4" />
       </button>
+      </div>
+      {previewOpen && (
+        <div className="border-t border-rule/60 bg-bg px-5 py-3">
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption --
+              source footage has no caption track */}
+          <video
+            controls
+            preload="metadata"
+            src={api.shooterVideoStreamUrl(slug, video.path)}
+            className="max-h-[420px] w-full rounded-md border border-rule bg-black"
+          />
+          <p className="mt-1.5 font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
+            Streaming source &middot; scrub to identify the stage
+          </p>
+        </div>
+      )}
     </div>
   );
 }
