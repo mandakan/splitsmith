@@ -1157,6 +1157,34 @@ export interface RecentProject {
   kind?: "match" | "legacy" | null;
 }
 
+/** What a project delete actually removed (mirrors the server's
+ *  DeletionSummary). Returned even on partial failure, with ``errors``
+ *  populated, so the UI can report "removed X, N errors". */
+export interface DeletionSummary {
+  match_id: string | null;
+  recent_project_removed: boolean;
+  match_row_removed: boolean;
+  state_docs_removed: number;
+  storage_objects_deleted: number;
+  raw_uploads_deleted: string[];
+  raw_uploads_skipped_shared: string[];
+  jobs_cancelled: number;
+  local_dir_removed: boolean;
+  errors: string[];
+}
+
+export interface DeleteProjectResponse {
+  summary: DeletionSummary;
+  projects: RecentProject[];
+}
+
+export interface DeleteProjectOptions {
+  /** Desktop only: also delete the project folder on disk. */
+  deleteLocalFiles?: boolean;
+  /** Hosted only: also delete raw uploads that fed only this match. */
+  deleteRawUploads?: boolean;
+}
+
 /** Detailed RecentProject with on-disk metadata (`?detail=true`, #322). */
 export interface RecentProjectDetail {
   path: string;
@@ -2457,13 +2485,19 @@ export const api = {
       json: body,
     }),
 
-  /** Drop one entry from the recent list (forget). Returns the updated
+  /** Delete a project/match and clean up every resource it owns (DB rows,
+   *  object storage, in-flight jobs, and -- when opted in -- raw uploads or
+   *  the on-disk folder). Returns the deletion summary plus the refreshed
    *  list so the picker can re-render without a follow-up GET. */
-  forgetRecentProject: (path: string) =>
-    request<{ removed: boolean; projects: RecentProject[] }>(
-      "/api/me/recent-projects/forget",
-      { method: "POST", json: { path } },
-    ),
+  deleteProject: (path: string, opts?: DeleteProjectOptions) =>
+    request<DeleteProjectResponse>("/api/me/recent-projects/delete", {
+      method: "POST",
+      json: {
+        path,
+        delete_local_files: opts?.deleteLocalFiles ?? false,
+        delete_raw_uploads: opts?.deleteRawUploads ?? false,
+      },
+    }),
 
   /** Switch the in-memory project. The picker calls this when the user
    *  selects an entry; the server updates ``last_opened_at`` and binds.

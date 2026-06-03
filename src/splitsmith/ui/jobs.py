@@ -393,6 +393,8 @@ class JobBackend(Protocol):
 
     async def cancel(self, job_id: str) -> Job | None: ...
 
+    async def cancel_active_for_user(self) -> int: ...
+
     async def acknowledge(self, job_id: str) -> Job | None: ...
 
     async def acknowledge_all_failures(self) -> list[Job]: ...
@@ -604,6 +606,25 @@ class JobRegistry:
             except OSError:
                 logger.warning("cancel: terminate() failed for job %s", job_id, exc_info=True)
         return snapshot
+
+    async def cancel_active_for_user(self) -> int:
+        """Cancel every PENDING/RUNNING job; return the count cancelled.
+
+        The local registry is already single-user (one process == one
+        operator), so "for user" is the whole registry. Used by the
+        project-delete cascade to stop in-flight compute before teardown.
+        Snapshots the active ids under the lock, then cancels each outside
+        it so :meth:`cancel`'s subprocess ``terminate()`` doesn't stall.
+        """
+        with self._lock:
+            active_ids = [
+                jid for jid, j in self._jobs.items() if j.status in (JobStatus.PENDING, JobStatus.RUNNING)
+            ]
+        cancelled = 0
+        for job_id in active_ids:
+            if await self.cancel(job_id) is not None:
+                cancelled += 1
+        return cancelled
 
     async def acknowledge(self, job_id: str) -> Job | None:
         """Mark a failed job as seen by the user (issue #73).

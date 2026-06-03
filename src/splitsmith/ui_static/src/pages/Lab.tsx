@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 
 import { SweepsCard } from "@/components/SweepsCard";
+import { useConfirm } from "@/components/useConfirm";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -776,6 +777,7 @@ function FixtureRow({
   onSelect: (slug: string | null) => void;
   onDeleted: (slug: string) => void;
 }) {
+  const confirm = useConfirm();
   return (
     <tr
       className={cn(
@@ -858,12 +860,11 @@ function FixtureRow({
               type="button"
               onClick={async (e) => {
                 e.stopPropagation();
-                if (
-                  !window.confirm(
-                    `Delete derived fixture "${rec.slug}"? This removes the JSON, WAV, peaks and promotion-report.`,
-                  )
-                )
-                  return;
+                const ok = await confirm({
+                  title: `Delete derived fixture "${rec.slug}"?`,
+                  body: "This removes the JSON, WAV, peaks and promotion-report.",
+                });
+                if (!ok.confirmed) return;
                 try {
                   await api.deleteFixture(rec.slug);
                   onDeleted(rec.slug);

@@ -69,6 +69,7 @@ import {
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
 import { HelpOverlay } from "@/components/HelpOverlay";
+import { useConfirm } from "@/components/useConfirm";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
@@ -2189,6 +2190,7 @@ function DetectShotsBadge({
   hasCandidates,
   onComplete,
 }: DetectShotsBadgeProps) {
+  const confirm = useConfirm();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const blocked = !hasBeep || !hasStageTime;
@@ -2260,18 +2262,15 @@ function DetectShotsBadge({
   );
 
   const onClick = useCallback(() => void runDetect(false), [runDetect]);
-  const onResetClick = useCallback(() => {
-    if (
-      !window.confirm(
-        "Reset & re-detect shots for this stage?\n\n" +
-          "This wipes your kept / rejected decisions and runs detection from " +
-          "scratch. Use this when the previous detection went badly (bad beep, " +
-          "wrong stage time, etc.) and you want to start over.",
-      )
-    )
-      return;
+  const onResetClick = useCallback(async () => {
+    const ok = await confirm({
+      title: "Reset & re-detect shots for this stage?",
+      body: "This wipes your kept / rejected decisions and runs detection from scratch. Use this when the previous detection went badly (bad beep, wrong stage time, etc.) and you want to start over.",
+      confirmLabel: "Reset & re-detect",
+    });
+    if (!ok.confirmed) return;
     void runDetect(true);
-  }, [runDetect]);
+  }, [runDetect, confirm]);
 
   // CSV-only re-run. Reuses the existing exportStage job (the server
   // supports write_csv with everything else off, see ui/exports.py). The

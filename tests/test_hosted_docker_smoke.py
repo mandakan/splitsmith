@@ -113,20 +113,21 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
     # public surface is /api/me/recent-projects/bind, but that also
     # validates the path is a real Match folder. For a smoke test
     # against an empty container that has no on-disk projects, we
-    # exercise the forget endpoint instead (which is the only
+    # exercise the delete endpoint instead (the only
     # /api/me/recent-projects/* mutator that doesn't require a real
-    # match.json on disk) -- it should return ``removed: false`` and
-    # the list stays empty. This proves the round-trip hits the
-    # Postgres store without needing to mount a fixture volume.
+    # match.json on disk) -- with no picker row and no match_id it
+    # cleanly reports ``recent_project_removed: false`` and the list
+    # stays empty. This proves the round-trip hits the Postgres store
+    # without needing to mount a fixture volume.
     resp = httpx.post(
-        f"{API_BASE}/api/me/recent-projects/forget",
+        f"{API_BASE}/api/me/recent-projects/delete",
         json={"path": "/nonexistent/project"},
         cookies=cookies,
         timeout=5.0,
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["removed"] is False
+    assert body["summary"]["recent_project_removed"] is False
     assert body["projects"] == []
 
     # Restart the API container and verify the empty-but-responsive

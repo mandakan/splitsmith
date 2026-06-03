@@ -95,3 +95,34 @@ def test_get_does_not_leak_across_users() -> None:
 
     # Bob has no such match -> clean None, not Alice's row.
     assert asyncio.run(PostgresMatchStore(sf, user_id=bob).get("a-only")) is None
+
+
+def test_delete_removes_row() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = PostgresMatchStore(sf, user_id=uid)
+    asyncio.run(store.upsert("brm-abc", "Bromma", "matches/brm-abc"))
+
+    assert asyncio.run(store.delete("brm-abc")) is True
+    assert asyncio.run(store.get("brm-abc")) is None
+
+
+def test_delete_absent_returns_false() -> None:
+    """Idempotent: deleting an already-gone match is a clean no-op."""
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = PostgresMatchStore(sf, user_id=uid)
+    assert asyncio.run(store.delete("never-existed")) is False
+
+
+def test_delete_tenant_isolation_same_match_id() -> None:
+    """Deleting one user's row for a shared ``match_id`` leaves the other's."""
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a_store = PostgresMatchStore(sf, user_id=alice)
+    b_store = PostgresMatchStore(sf, user_id=bob)
+    asyncio.run(a_store.upsert("shared-id", "Alice Match", "matches/shared-id"))
+    asyncio.run(b_store.upsert("shared-id", "Bob Match", "matches/shared-id"))
+
+    assert asyncio.run(a_store.delete("shared-id")) is True
+
+    assert asyncio.run(a_store.get("shared-id")) is None
+    bob_row = asyncio.run(b_store.get("shared-id"))
+    assert bob_row is not None and bob_row.name == "Bob Match"

@@ -272,6 +272,61 @@ def test_cancel_pending_short_circuits_to_cancelled(tmp_path) -> None:
     assert not ran.is_set()
 
 
+def test_cancel_active_for_user_cancels_pending_jobs(tmp_path) -> None:
+    """The delete cascade's pre-teardown stop cancels every queued job."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    _register(backend, "victim", lambda _h: None)
+    a = asyncio.run(backend.submit(kind="victim"))
+    b = asyncio.run(backend.submit(kind="victim"))
+
+    cancelled = asyncio.run(backend.cancel_active_for_user())
+    assert cancelled == 2
+    assert asyncio.run(backend.get(a.id)).status == JobStatus.CANCELLED
+    assert asyncio.run(backend.get(b.id)).status == JobStatus.CANCELLED
+
+
+def test_cancel_active_for_user_ignores_terminal_jobs(tmp_path) -> None:
+    """Already-finished jobs aren't re-cancelled (nothing active to stop)."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=True)
+    _register(backend, "quick", lambda _h: None)
+    done = asyncio.run(backend.submit(kind="quick"))  # inline -> SUCCEEDED
+    assert asyncio.run(backend.get(done.id)).status == JobStatus.SUCCEEDED
+
+    assert asyncio.run(backend.cancel_active_for_user()) == 0
+    assert asyncio.run(backend.get(done.id)).status == JobStatus.SUCCEEDED
+
+
+def test_cancel_active_for_user_isolation(tmp_path) -> None:
+    """One user's bulk cancel never touches another user's active jobs."""
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/cancel-iso.sqlite")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> tuple[str, str]:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            alice = User(email="alice-cancel@thias.se")
+            bob = User(email="bob-cancel@thias.se")
+            s.add_all([alice, bob])
+            await s.commit()
+            await s.refresh(alice)
+            await s.refresh(bob)
+            return alice.id, bob.id
+
+    alice_id, bob_id = asyncio.run(_setup())
+    alice = PostgresJobBackend(session_factory, user_id=alice_id, deferrer=_noop_deferrer())
+    bob = PostgresJobBackend(session_factory, user_id=bob_id, deferrer=_noop_deferrer())
+    _register(alice, "probe", lambda _h: None)
+    _register(bob, "probe", lambda _h: None)
+    a_job = asyncio.run(alice.submit(kind="probe"))
+    b_job = asyncio.run(bob.submit(kind="probe"))
+
+    assert asyncio.run(alice.cancel_active_for_user()) == 1
+    assert asyncio.run(alice.get(a_job.id)).status == JobStatus.CANCELLED
+    # Bob's job is untouched.
+    assert asyncio.run(bob.get(b_job.id)).status == JobStatus.PENDING
+
+
 def test_run_job_skips_a_cancelled_row(tmp_path) -> None:
     """If a worker pops a job that was cancelled while PENDING, the body
     must not run and the row stays CANCELLED."""

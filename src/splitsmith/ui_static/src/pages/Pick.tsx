@@ -2,12 +2,13 @@
  * MatchPicker route (/pick) -- redesigned in the Shot Timer aesthetic (#322).
  *
  * Carries the same plumbing as the legacy picker (recent-projects list,
- * bind, forget, import-backup) but renders in the polished "Match Archive"
+ * bind, delete, import-backup) but renders in the polished "Match Archive"
  * style: telemetry readout, search + status chips, match rows with shooter
  * stack + tick progress + status pill.
  *
  * Keyboard model: ArrowUp/Down moves selection, Enter opens,
- * Cmd/Ctrl+Backspace forgets the selected entry, `/` focuses search.
+ * Cmd/Ctrl+Backspace opens the delete confirm for the selected entry,
+ * `/` focuses search.
  */
 
 import {
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui";
 import { AccountChip } from "@/components/AccountChip";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
@@ -42,6 +44,7 @@ import {
   type ScoreboardIdentity,
   type ServerHealth,
 } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "awaiting_footage" | "in_progress" | "exported" | "archived";
@@ -58,6 +61,8 @@ function matchHome(health: ServerHealth): string {
 
 export function Pick() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const mode = useDeploymentMode();
   const [recents, setRecents] = useState<RecentProjectDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -175,13 +180,52 @@ export function Pick() {
     }
   }
 
-  async function forget(target: RecentProjectDetail) {
+  async function deleteProject(target: RecentProjectDetail) {
+    // Mode-specific opt-in extras. Desktop can wipe the folder on disk;
+    // hosted can additionally drop raw uploads that fed only this match.
+    const checkboxes =
+      mode === "local"
+        ? [
+            {
+              key: "deleteLocalFiles",
+              label: "Also delete the project folder on disk",
+              help: "Permanently removes the footage, audit work, and exports under this match's folder. This cannot be undone.",
+            },
+          ]
+        : [
+            {
+              key: "deleteRawUploads",
+              label: "Also delete raw uploads that fed only this match",
+              help: "Uploaded videos still attached to another match are kept.",
+            },
+          ];
+
+    const result = await confirm({
+      title: `Delete ${target.name}?`,
+      body: "This removes the match and every resource it owns -- detection state, trims, exports, and any running jobs. This cannot be undone.",
+      confirmLabel: "Delete project",
+      checkboxes,
+    });
+    if (!result.confirmed) return;
+
     try {
-      const resp = await api.forgetRecentProject(target.path);
-      // Re-fetch the enriched list (the forget endpoint only returns the
-      // base shape so we'd lose `kind` etc. if we trusted its response).
+      const resp = await api.deleteProject(target.path, {
+        deleteLocalFiles: Boolean(result.checked.deleteLocalFiles),
+        deleteRawUploads: Boolean(result.checked.deleteRawUploads),
+      });
+      // Re-fetch the enriched list (the delete endpoint returns the base
+      // shape so we'd lose `kind` etc. if we trusted its response).
       const full = await api.getRecentProjectsDetail();
       setRecents(full);
+      // Best-effort teardown: surface any partial-failure detail so a
+      // half-cleaned match isn't silently reported as fully gone.
+      if (resp.summary.errors.length > 0) {
+        setError(
+          `Deleted with ${resp.summary.errors.length} issue${
+            resp.summary.errors.length === 1 ? "" : "s"
+          }: ${resp.summary.errors.join("; ")}`,
+        );
+      }
       return resp;
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -234,7 +278,9 @@ export function Pick() {
       void open(filtered[selectedIdx]);
     } else if ((e.metaKey || e.ctrlKey) && e.key === "Backspace") {
       e.preventDefault();
-      void forget(filtered[selectedIdx]);
+      // Opens the confirm dialog rather than deleting on the keystroke --
+      // this is destructive and irreversible.
+      void deleteProject(filtered[selectedIdx]);
     }
   }
 
@@ -508,7 +554,7 @@ export function Pick() {
                     }
                     busy={opening === r.path}
                     onOpen={() => open(r)}
-                    onForget={() => forget(r)}
+                    onDelete={() => deleteProject(r)}
                     onHover={() => setSelectedIdx(filtered.indexOf(r))}
                   />
                 ))}
@@ -546,7 +592,7 @@ export function Pick() {
                       }
                       busy={opening === r.path}
                       onOpen={() => open(r)}
-                      onForget={() => forget(r)}
+                      onDelete={() => deleteProject(r)}
                       onHover={() => setSelectedIdx(filtered.indexOf(r))}
                       archived
                     />
@@ -644,7 +690,7 @@ export function Pick() {
           <span className="inline-flex items-center gap-2 font-mono">
             <Kbd>Up</Kbd>/<Kbd>Down</Kbd> to select
             <Kbd>Enter</Kbd> to open
-            <Kbd>&#8984;</Kbd>+<Kbd>Backspace</Kbd> to forget
+            <Kbd>&#8984;</Kbd>+<Kbd>Backspace</Kbd> to delete
           </span>
           <span className="font-mono">
             Splitsmith <Heartbeat /> Local Worker
@@ -710,7 +756,7 @@ interface MatchRowProps {
   busy: boolean;
   archived?: boolean;
   onOpen: () => void;
-  onForget: () => void;
+  onDelete: () => void;
   onHover: () => void;
 }
 
@@ -721,7 +767,7 @@ function MatchRow({
   busy,
   archived,
   onOpen,
-  onForget,
+  onDelete,
   onHover,
 }: MatchRowProps) {
   // Build a TickStrip from stage_count + stages_audited. Missing details
@@ -908,13 +954,13 @@ function MatchRow({
         </button>
         <button
           type="button"
-          title="Forget this project"
+          title="Delete this project"
           className="inline-flex size-9 items-center justify-center rounded-md border border-transparent text-subtle transition-all hover:border-rule hover:bg-surface-3 hover:text-led"
           onClick={(e) => {
             e.stopPropagation();
-            onForget();
+            onDelete();
           }}
-          aria-label="Forget this project"
+          aria-label={`Delete ${project.name}`}
         >
           <Trash2 className="size-4" />
         </button>

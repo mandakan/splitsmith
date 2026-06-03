@@ -202,3 +202,73 @@ def test_load_does_not_leak_across_users() -> None:
     asyncio.run(ProjectStateStore(sf, user_id=alice).save_match("a-only", {"x": 1}, expected_version=0))
 
     assert asyncio.run(ProjectStateStore(sf, user_id=bob).load_match("a-only")) == (None, 0)
+
+
+# -- cascade cleanup ----------------------------------------------------
+
+
+def _seed_full_match(store: ProjectStateStore, match_id: str) -> None:
+    """A match doc + two shooters' project docs + one audit doc."""
+    asyncio.run(store.save_match(match_id, {"name": match_id}, expected_version=0))
+    asyncio.run(
+        store.save_project(
+            match_id,
+            "ada",
+            {"raw_videos": [{"storage_path": "raw/ada.mp4"}]},
+            expected_version=0,
+        )
+    )
+    asyncio.run(
+        store.save_project(
+            match_id,
+            "bo",
+            {"raw_videos": [{"storage_path": "raw/bo.mp4"}]},
+            expected_version=0,
+        )
+    )
+    asyncio.run(store.save_audit(match_id, "ada", 1, {"shots": []}, expected_version=0))
+
+
+def test_list_project_docs_returns_slug_and_doc() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    _seed_full_match(store, "brm-abc")
+
+    docs = dict(asyncio.run(store.list_project_docs("brm-abc")))
+    assert set(docs) == {"ada", "bo"}
+    assert docs["ada"]["raw_videos"][0]["storage_path"] == "raw/ada.mp4"
+
+
+def test_delete_match_removes_all_kinds() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    _seed_full_match(store, "brm-abc")
+
+    # match + 2 project + 1 audit = 4 docs.
+    assert asyncio.run(store.delete_match("brm-abc")) == 4
+
+    assert asyncio.run(store.load_match("brm-abc")) == (None, 0)
+    assert asyncio.run(store.load_project("brm-abc", "ada")) == (None, 0)
+    assert asyncio.run(store.load_audit("brm-abc", "ada", 1)) == (None, 0)
+    assert asyncio.run(store.list_project_docs("brm-abc")) == []
+
+
+def test_delete_match_absent_returns_zero() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    assert asyncio.run(store.delete_match("never-existed")) == 0
+
+
+def test_delete_match_tenant_isolation() -> None:
+    """Deleting one user's match docs leaves another user's same-id docs."""
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a = ProjectStateStore(sf, user_id=alice)
+    b = ProjectStateStore(sf, user_id=bob)
+    _seed_full_match(a, "shared")
+    _seed_full_match(b, "shared")
+
+    assert asyncio.run(a.delete_match("shared")) == 4
+
+    assert asyncio.run(a.load_match("shared")) == (None, 0)
+    assert asyncio.run(b.load_match("shared")) == ({"name": "shared"}, 1)
+    assert len(asyncio.run(b.list_project_docs("shared"))) == 2

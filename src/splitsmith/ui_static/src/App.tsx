@@ -13,6 +13,7 @@ import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
 import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
 import { ModeProvider } from "@/lib/mode";
+import { ConfirmProvider } from "@/components/useConfirm";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
@@ -117,8 +118,9 @@ export function App() {
   return (
     <ModeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AuthGate>
+        <ConfirmProvider>
+          <BrowserRouter>
+            <AuthGate>
             <Routes>
               <Route path="login" element={<Login />} />
           {/* Picker lives outside any shell -- it has its own header and
@@ -204,7 +206,8 @@ export function App() {
           <Route path="*" element={<LegacyMatchRedirect />} />
             </Routes>
           </AuthGate>
-        </BrowserRouter>
+          </BrowserRouter>
+        </ConfirmProvider>
       </AuthProvider>
     </ModeProvider>
   );

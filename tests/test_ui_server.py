@@ -5557,19 +5557,40 @@ def test_recent_projects_endpoint(tmp_path: Path, _user_config_home: Path) -> No
     assert "Alpha" in names
 
 
-def test_forget_recent_project_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
+def test_delete_recent_project_endpoint(tmp_path: Path, _user_config_home: Path) -> None:
     _match_create_app(project_root=tmp_path / "alpha", project_name="Alpha")
     app = _match_create_app(project_root=tmp_path / "beta", project_name="Beta")
     client = _MatchClient(app)
 
+    alpha_root = tmp_path / "alpha"
     resp = client.post(
-        "/api/me/recent-projects/forget",
-        json={"path": str((tmp_path / "alpha").resolve())},
+        "/api/me/recent-projects/delete",
+        json={"path": str(alpha_root.resolve())},
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["removed"] is True
+    assert body["summary"]["recent_project_removed"] is True
     assert [p["name"] for p in body["projects"]] == ["Beta"]
+    # Default delete_local_files=False -> the folder stays on disk; only the
+    # picker entry is dropped.
+    assert body["summary"]["local_dir_removed"] is False
+    assert alpha_root.exists()
+
+
+def test_delete_recent_project_optin_removes_local_dir(tmp_path: Path, _user_config_home: Path) -> None:
+    app = _match_create_app(project_root=tmp_path / "gamma", project_name="Gamma")
+    client = _MatchClient(app)
+
+    gamma_root = tmp_path / "gamma"
+    assert gamma_root.exists()
+    resp = client.post(
+        "/api/me/recent-projects/delete",
+        json={"path": str(gamma_root.resolve()), "delete_local_files": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary"]["local_dir_removed"] is True
+    assert not gamma_root.exists()
 
 
 def test_unbound_create_app_health_reports_unbound() -> None:
