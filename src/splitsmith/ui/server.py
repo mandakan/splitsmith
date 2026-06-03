@@ -50,7 +50,7 @@ Endpoints (locked v1 surface):
   GET  /api/fixture/video?path=...  -- serve a fixture-bound video file (Range)
   GET  /api/me                      -- current operator (LoopbackAuth user in local mode)
   GET  /api/user/recent-projects    -- recently-opened MatchProject roots (#75)
-  POST /api/user/recent-projects/forget -- drop one entry from the list
+  POST /api/me/recent-projects/delete   -- delete a project/match + all its resources
   POST /api/user/recent-projects/bind   -- switch the in-memory project
   POST /api/user/recent-projects/unbind -- drop the bound project (back to picker)
   GET  /api/user/scoreboard-identity -- saved SSI identity (404 if none)
@@ -160,6 +160,7 @@ from .jobs import (
     JobRegistry,
     ShutdownInProgressError,
 )
+from .match_delete import DeletionSummary, delete_match_cascade
 from .project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -2879,10 +2880,42 @@ class ScoreboardImportRequest(BaseModel):
     overwrite: bool = False
 
 
-class ForgetRecentProjectRequest(BaseModel):
-    """Body for POST /api/user/recent-projects/forget (#75)."""
+class DeleteProjectRequest(BaseModel):
+    """Body for POST /api/me/recent-projects/delete.
+
+    Replaces the old soft "forget" (which only dropped the picker row and
+    orphaned everything else). This is a real teardown of the match and the
+    resources it owns. The two opt-in flags are mode-specific and the
+    server ignores the one that doesn't apply:
+
+    - ``delete_local_files`` (desktop only): also ``rmtree`` the project
+      folder on disk. Ignored in hosted mode (ephemeral container fs).
+    - ``delete_raw_uploads`` (hosted only): also delete raw uploads that
+      fed this match and no other. Ignored in local mode (no object store).
+    """
 
     path: str
+    delete_local_files: bool = False
+    delete_raw_uploads: bool = False
+
+
+class DeletionSummaryModel(BaseModel):
+    """Serialisable view of :class:`~splitsmith.ui.match_delete.DeletionSummary`."""
+
+    match_id: str | None
+    recent_project_removed: bool
+    match_row_removed: bool
+    state_docs_removed: int
+    storage_objects_deleted: int
+    raw_uploads_deleted: list[str]
+    raw_uploads_skipped_shared: list[str]
+    jobs_cancelled: int
+    local_dir_removed: bool
+    errors: list[str]
+
+    @classmethod
+    def from_summary(cls, summary: DeletionSummary) -> DeletionSummaryModel:
+        return cls(**summary.__dict__)
 
 
 class AttachRawVideoRequest(BaseModel):
@@ -8408,16 +8441,44 @@ def create_app(
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
-    @app.post("/api/me/recent-projects/forget")
-    async def forget_recent_project(
-        req: ForgetRecentProjectRequest,
+    @app.post("/api/me/recent-projects/delete")
+    async def delete_recent_project(
+        req: DeleteProjectRequest,
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
-        removed = await state.recent_projects.remove(Path(req.path))
+        """Delete a project/match and clean up every resource it owns.
+
+        Resolves ``match_id`` (and, hosted, the storage prefix) from the
+        picker row, then runs the cascade in :mod:`splitsmith.ui.match_delete`.
+        Returns the deletion summary plus the refreshed picker list. Always
+        200 -- partial failures are reported in ``summary.errors`` so the SPA
+        can show "removed X, N errors" rather than a bare 500. (POST, not a
+        body-carrying DELETE, so proxies that strip DELETE payloads don't eat
+        the opt-in flags.)
+        """
+        resolved = str(Path(req.path).expanduser().resolve())
+        entry = next(
+            (p for p in await state.recent_projects.list() if p.path == resolved),
+            None,
+        )
+        match_id = entry.match_id if entry is not None else None
+        storage_prefix: str | None = None
+        if match_id and state.matches_store is not None:
+            row = await state.matches_store.get(match_id)
+            storage_prefix = row.storage_prefix if row is not None else f"matches/{match_id}"
+
+        summary = await delete_match_cascade(
+            state,
+            path=req.path,
+            match_id=match_id,
+            storage_prefix=storage_prefix,
+            delete_local_files=req.delete_local_files,
+            delete_raw_uploads=req.delete_raw_uploads,
+        )
         projects = await state.recent_projects.list()
         return JSONResponse(
             {
-                "removed": removed,
+                "summary": DeletionSummaryModel.from_summary(summary).model_dump(mode="json"),
                 "projects": [p.model_dump(mode="json") for p in projects],
             }
         )

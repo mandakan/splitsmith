@@ -49,6 +49,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/useConfirm";
 import { Waveform } from "@/components/Waveform";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { modKeyGlyph } from "@/lib/platform";
@@ -98,6 +99,7 @@ export function BeepSection({
   setError,
   bare = false,
 }: Props) {
+  const confirm = useConfirm();
   // Section-local busy. Each video's beep section runs its own
   // independent jobs (auto-queued on assignment, or user-initiated via
   // Detect / Save / Clear), so disabling controls page-wide while one
@@ -207,10 +209,12 @@ export function BeepSection({
       }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        const ok = window.confirm(
-          "This video has a manual beep override. Replace it with the auto-detected value?",
-        );
-        if (ok) await detect(true);
+        const ok = await confirm({
+          title: "Replace manual beep override?",
+          body: "This video has a manual beep override. Replace it with the auto-detected value?",
+          confirmLabel: "Replace",
+        });
+        if (ok.confirmed) await detect(true);
       } else {
         const unreachable = asSourceUnreachable(e);
         if (unreachable) {

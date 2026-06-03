@@ -31,6 +31,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
@@ -110,6 +111,7 @@ const PICK_SECTION_LABELS: Record<string, string> = {
 
 export function Shooters() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const href = useMatchHref();
   const [searchParams] = useSearchParams();
   const pickSection = PICK_SECTION_LABELS[searchParams.get("pick") ?? ""] ?? null;
@@ -134,12 +136,12 @@ export function Shooters() {
   }, [reload]);
 
   async function remove(slug: string, name: string) {
-    if (
-      !window.confirm(
-        `Remove ${name} from this match? Their footage, audit, and exports inside the match folder will be deleted.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Remove ${name}?`,
+      body: "Their footage, audit, and exports inside the match folder will be deleted. This cannot be undone.",
+      confirmLabel: "Remove shooter",
+    });
+    if (!ok.confirmed) return;
     setBusy(slug);
     try {
       const next = await api.removeMatchShooter(slug);

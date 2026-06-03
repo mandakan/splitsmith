@@ -430,6 +430,39 @@ class PostgresJobBackend:
             row = (await session.execute(stmt)).scalars().first()
         return _row_to_job(row) if row is not None else None
 
+    async def cancel_active_for_user(self) -> int:
+        """Cancel every PENDING/RUNNING job this user owns; return the count.
+
+        Used by the project-delete cascade to stop in-flight compute
+        before tearing a match's storage/state down, so a worker can't
+        re-write objects we're about to delete. ``compute_jobs`` carries
+        no ``match_id`` (the match link lives only in the Procrastinate
+        queue payload, not the row), so this is deliberately *coarse* --
+        it cancels the user's other in-flight jobs too. That is acceptable
+        when a user is tearing a match down; per-match scoping would need a
+        schema column we chose not to add for ephemeral, boot-swept rows.
+        Reuses :meth:`cancel` so subprocess teardown + PENDING->CANCELLED
+        semantics stay in one place.
+        """
+        async with self._session_factory() as session:
+            ids = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow.id).where(
+                            ComputeJobRow.user_id == self._user_id,
+                            ComputeJobRow.status.in_([JobStatus.PENDING.value, JobStatus.RUNNING.value]),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        cancelled = 0
+        for job_id in ids:
+            if await self.cancel(job_id) is not None:
+                cancelled += 1
+        return cancelled
+
     # ------------------------------------------------------------------
     # Internal worker glue
     # ------------------------------------------------------------------

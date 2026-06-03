@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -124,6 +124,23 @@ class PostgresMatchStore:
                     )
                 )
             ).scalar_one_or_none()
+
+    async def delete(self, match_id: str) -> bool:
+        """Drop the user's row for ``match_id``; return ``True`` if one went.
+
+        Used by the project-delete cascade. Idempotent: deleting an
+        already-gone match returns ``False`` without error. Mirrors
+        :meth:`PostgresRecentProjectsStore.remove`.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(MatchRow).where(
+                    MatchRow.user_id == self._user_id,
+                    MatchRow.match_id == match_id,
+                )
+            )
+            await session.commit()
+            return (result.rowcount or 0) > 0
 
     async def list(self) -> list[MatchRow]:
         """Return all of the user's matches, newest first."""

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -132,6 +132,52 @@ class ProjectStateStore:
             slug=slug,
             stage_number=stage_number,
         )
+
+    # -- cascade cleanup ----------------------------------------------
+
+    async def list_project_docs(self, match_id: str) -> list[tuple[str, dict]]:
+        """Return ``(slug, doc)`` for every per-shooter project doc.
+
+        Used by the delete cascade to harvest each shooter's attached
+        ``raw_videos[].storage_path`` (for the storage cleanup loop and
+        the cross-match raw-upload refcount). ``slug`` is non-NULL for
+        project docs, so it is always a real string here.
+        """
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(StateDocRow).where(
+                            StateDocRow.user_id == self._user_id,
+                            StateDocRow.match_id == match_id,
+                            StateDocRow.doc_kind == _KIND_PROJECT,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [(row.slug, row.doc) for row in rows]
+
+    async def delete_match(self, match_id: str) -> int:
+        """Delete every doc for ``match_id``; return the row count.
+
+        Sweeps the match doc, every per-shooter project doc, and every
+        per-stage audit doc in one statement -- they all share
+        ``match_id``, so the WHERE deliberately omits
+        ``doc_kind``/``slug``/``stage_number``. This closes the
+        long-standing orphaned-``state_docs`` gap left by shooter/match
+        removal (see ``remove_match_shooter`` in the UI server). Idempotent.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(StateDocRow).where(
+                    StateDocRow.user_id == self._user_id,
+                    StateDocRow.match_id == match_id,
+                )
+            )
+            await session.commit()
+            return result.rowcount or 0
 
     # -- shared lifecycle ---------------------------------------------
 

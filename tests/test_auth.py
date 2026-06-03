@@ -82,7 +82,7 @@ _ME_ROUTES_REQUIRING_AUTH: list[tuple[str, str, str]] = [
     ("POST", "/api/me/jobs/{job_id}/acknowledge", "/api/me/jobs/does-not-exist/acknowledge"),
     ("POST", "/api/me/jobs/{job_id}/cancel", "/api/me/jobs/does-not-exist/cancel"),
     ("GET", "/api/me/recent-projects", "/api/me/recent-projects"),
-    ("POST", "/api/me/recent-projects/forget", "/api/me/recent-projects/forget"),
+    ("POST", "/api/me/recent-projects/delete", "/api/me/recent-projects/delete"),
     ("POST", "/api/me/recent-projects/bind", "/api/me/recent-projects/bind"),
     ("POST", "/api/me/recent-projects/unbind", "/api/me/recent-projects/unbind"),
     ("GET", "/api/me/scoreboard-identity", "/api/me/scoreboard-identity"),
