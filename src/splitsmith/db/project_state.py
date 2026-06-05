@@ -159,6 +159,25 @@ class ProjectStateStore:
             )
         return [(row.slug, row.doc) for row in rows]
 
+    async def delete_shooter(self, match_id: str, slug: str) -> int:
+        """Delete one shooter's docs within a match; return the row count.
+
+        Sweeps that shooter's project doc and every per-stage audit doc
+        (both carry ``slug``); the match doc has ``slug IS NULL`` so it is
+        untouched. Called when a single shooter is removed from a match,
+        the per-shooter analogue of :meth:`delete_match`. Idempotent.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(StateDocRow).where(
+                    StateDocRow.user_id == self._user_id,
+                    StateDocRow.match_id == match_id,
+                    StateDocRow.slug == slug,
+                )
+            )
+            await session.commit()
+            return result.rowcount or 0
+
     async def delete_match(self, match_id: str) -> int:
         """Delete every doc for ``match_id``; return the row count.
 

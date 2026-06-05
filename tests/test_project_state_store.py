@@ -272,3 +272,46 @@ def test_delete_match_tenant_isolation() -> None:
     assert asyncio.run(a.load_match("shared")) == (None, 0)
     assert asyncio.run(b.load_match("shared")) == ({"name": "shared"}, 1)
     assert len(asyncio.run(b.list_project_docs("shared"))) == 2
+
+
+def test_delete_shooter_removes_project_and_audit_only() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    _seed_full_match(store, "brm-abc")
+
+    # ada's project doc + ada's stage-1 audit doc = 2.
+    assert asyncio.run(store.delete_shooter("brm-abc", "ada")) == 2
+
+    assert asyncio.run(store.load_project("brm-abc", "ada")) == (None, 0)
+    assert asyncio.run(store.load_audit("brm-abc", "ada", 1)) == (None, 0)
+    # The match doc (slug NULL) and the other shooter are untouched.
+    assert asyncio.run(store.load_match("brm-abc")) == ({"name": "brm-abc"}, 1)
+    assert asyncio.run(store.load_project("brm-abc", "bo")) == (
+        {"raw_videos": [{"storage_path": "raw/bo.mp4"}]},
+        1,
+    )
+
+
+def test_delete_shooter_absent_returns_zero() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    _seed_full_match(store, "brm-abc")
+    assert asyncio.run(store.delete_shooter("brm-abc", "ghost")) == 0
+
+
+def test_delete_shooter_tenant_isolation() -> None:
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a = ProjectStateStore(sf, user_id=alice)
+    b = ProjectStateStore(sf, user_id=bob)
+    _seed_full_match(a, "shared")
+    _seed_full_match(b, "shared")
+
+    assert asyncio.run(a.delete_shooter("shared", "ada")) == 2
+
+    assert asyncio.run(a.load_project("shared", "ada")) == (None, 0)
+    # Bob's same-slug docs survive.
+    assert asyncio.run(b.load_project("shared", "ada")) == (
+        {"raw_videos": [{"storage_path": "raw/ada.mp4"}]},
+        1,
+    )
+    assert asyncio.run(b.load_audit("shared", "ada", 1)) == ({"shots": []}, 1)
