@@ -9053,11 +9053,13 @@ def create_app(
         return list_match_shooters()
 
     @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
-    def remove_match_shooter(slug: str) -> ShooterListResponse:
+    async def remove_match_shooter(slug: str) -> ShooterListResponse:
         """Remove a shooter from the bound match.
 
-        Drops the slug from ``match.json`` and deletes
-        ``<match>/shooters/<slug>/`` from disk.
+        Drops the slug from ``match.json``, deletes
+        ``<match>/shooters/<slug>/`` from disk, and (hosted) sweeps that
+        shooter's project + audit ``state_docs`` so no orphaned rows are
+        left behind.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -9068,9 +9070,11 @@ def create_app(
         match.shooters = [s for s in match.shooters if s != slug]
         match.save(match_root)
         # The store-bound match.save above persists the dropped roster.
-        # (The shooter's now-orphaned project/audit state_docs rows are
-        # unreachable -- shooter_root rejects the slug -- and are left for a
-        # future cascade-delete; harmless meanwhile.)
+        # Hosted: also delete the shooter's project + per-stage audit docs
+        # from state_docs -- the on-disk rmtree doesn't touch Postgres, and
+        # the rows are otherwise unreachable (shooter_root rejects the slug).
+        if state.project_state is not None and match.match_id:
+            await state.project_state.delete_shooter(match.match_id, slug)
         return list_match_shooters()
 
     @app.post("/api/match/shooters/{slug}/build-trim-caches")
