@@ -608,13 +608,29 @@ def serve(
 @app.command()
 def worker(
     concurrency: int = typer.Option(1, "--concurrency", "-c", help="Max jobs this worker runs in parallel."),
+    one_shot: bool = typer.Option(
+        False,
+        "--one-shot",
+        help="Drain the jobs already queued, then exit (Railway cron mode). "
+        "Default is a long-lived worker that blocks for new jobs.",
+    ),
 ) -> None:
-    """Run a long-lived hosted-mode worker that drains the job queue.
+    """Run a hosted-mode worker that drains the job queue.
 
     The other half of the worker fleet (doc 04): ``splitsmith serve``
     enqueues jobs onto per-tenant ``user-<id>`` queues; this process
     pops and runs them. Loads the ensemble models once and stays warm
     across many jobs -- the reason the fleet isn't serverless.
+
+    Two run modes:
+
+    - default (long-lived) -- blocks on LISTEN/NOTIFY and drains forever.
+    - ``--one-shot`` -- processes the currently-queued jobs and exits.
+      Run it on a schedule (Railway cron) so nothing holds a Postgres
+      connection between runs and the Neon compute can scale to zero. An
+      always-on worker polls often enough to keep the DB awake 24/7; the
+      one-shot drain trades up-to-interval pickup latency for a DB that
+      actually suspends when idle.
 
     Subscribes to **all** queues (Procrastinate has no queue-glob), so
     a single worker covers every tenant. Run several for more
@@ -642,11 +658,17 @@ def worker(
         )
         raise typer.Exit(2)
 
-    console.print(
-        f"[green]splitsmith worker[/]: draining all queues (concurrency={concurrency})   (Ctrl+C to stop)"
-    )
+    if one_shot:
+        console.print(
+            f"[green]splitsmith worker[/]: one-shot drain of all queues (concurrency={concurrency}), "
+            "exiting when empty"
+        )
+    else:
+        console.print(
+            f"[green]splitsmith worker[/]: draining all queues (concurrency={concurrency})   (Ctrl+C to stop)"
+        )
     try:
-        _asyncio.run(_run_worker(db_url, concurrency=concurrency))
+        _asyncio.run(_run_worker(db_url, concurrency=concurrency, wait=not one_shot))
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
 

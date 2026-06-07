@@ -291,8 +291,18 @@ async def run_worker(
     *,
     concurrency: int = 1,
     queues: list[str] | None = None,
+    wait: bool = True,
 ) -> None:
-    """Run a long-lived worker that drains the job queue until killed.
+    """Run a worker that drains the job queue.
+
+    ``wait=True`` (the default) is the long-lived fleet worker: it blocks
+    on LISTEN/NOTIFY and keeps draining new jobs until killed. ``wait=False``
+    is the one-shot/cron drain: it processes the jobs already queued and then
+    returns. The one-shot mode is what lets the Postgres compute scale to
+    zero between runs -- an always-connected worker polls the queue often
+    enough that Neon's idle-suspend window never opens, so a periodic
+    ``wait=False`` drain (Railway cron) trades a little pickup latency for an
+    idle DB that actually suspends. See ``splitsmith worker --one-shot``.
 
     ``queues=None`` (the default) subscribes to **every** queue --
     Procrastinate has no queue-glob, so one worker covers all
@@ -342,7 +352,7 @@ async def run_worker(
     app = build_app(database_url)
     register_compute_task(app, state)
     async with app.open_async():
-        await app.run_worker_async(queues=queues, concurrency=concurrency)
+        await app.run_worker_async(queues=queues, concurrency=concurrency, wait=wait)
 
 
 def queue_name_for_user(user_id: str) -> str:

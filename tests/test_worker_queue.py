@@ -166,6 +166,116 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
     assert calls == ["drain"]  # warmup raised but the worker still reached drain
 
 
+def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default long-lived worker must pass ``wait=True`` to
+    ``run_worker_async`` so it blocks on LISTEN/NOTIFY and keeps draining new
+    jobs forever -- the always-on fleet behaviour."""
+    import asyncio
+    import sys
+    import types
+
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+
+    captured: dict[str, object] = {}
+
+    class _FakeApp:
+        def open_async(self) -> object:
+            outer = self
+
+            class _Ctx:
+                async def __aenter__(self) -> object:
+                    return outer
+
+                async def __aexit__(self, *exc: object) -> bool:
+                    return False
+
+            return _Ctx()
+
+        async def run_worker_async(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+
+    asyncio.run(run_worker(_FAKE_PG_URL))
+
+    assert captured["wait"] is True
+
+
+def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``run_worker(wait=False)`` must forward ``wait=False`` to
+    ``run_worker_async`` -- the cron/one-shot drain that processes the jobs
+    already queued and then returns, so nothing holds a connection open and
+    the Neon compute can scale to zero between runs."""
+    import asyncio
+    import sys
+    import types
+
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+
+    captured: dict[str, object] = {}
+
+    class _FakeApp:
+        def open_async(self) -> object:
+            outer = self
+
+            class _Ctx:
+                async def __aenter__(self) -> object:
+                    return outer
+
+                async def __aexit__(self, *exc: object) -> bool:
+                    return False
+
+            return _Ctx()
+
+        async def run_worker_async(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+
+    asyncio.run(run_worker(_FAKE_PG_URL, wait=False))
+
+    assert captured["wait"] is False
+
+
+def test_worker_command_one_shot_passes_wait_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``splitsmith worker --one-shot`` runs the drain with ``wait=False`` so a
+    Railway cron run exits once the queue is empty instead of blocking."""
+    captured: dict[str, object] = {}
+
+    async def _fake_run_worker(_db_url: str, *, concurrency: int = 1, wait: bool = True) -> None:
+        captured["concurrency"] = concurrency
+        captured["wait"] = wait
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "run_worker", _fake_run_worker)
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
+    monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://u:p@h/db")
+
+    result = CliRunner().invoke(app, ["worker", "--one-shot"])
+
+    assert result.exit_code == 0, result.stdout
+    assert captured["wait"] is False
+
+
 def test_worker_command_requires_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Missing ``SPLITSMITH_DATABASE_URL`` exits 2 with a clear message,
     before any attempt to connect."""
