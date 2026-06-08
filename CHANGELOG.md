@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/mandakan/splitsmith/compare/v0.5.0...v0.5.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **worker:** size Procrastinate pool min_size=1 so cron drain survives Neon cold start ([#489](https://github.com/mandakan/splitsmith/issues/489)) ([4e8736b](https://github.com/mandakan/splitsmith/commit/4e8736b84f63ff7f498273ee277c81f55c047b31))
+
 ## [0.5.0](https://github.com/mandakan/splitsmith/compare/v0.4.0...v0.5.0) (2026-06-07)
 
 
