@@ -52,6 +52,17 @@ def test_build_app_registers_ping_task() -> None:
     assert "ping" in queue_app.tasks
 
 
+def test_build_app_pool_min_size_one_for_cold_start() -> None:
+    """The connector pool must open with ``min_size=1`` so the one-shot cron
+    worker's first connection lands inside Procrastinate's 30s ``open(wait=True)``
+    window while a scale-to-zero Neon compute resumes. The psycopg_pool default
+    of 4 forced four cold SSL connections at open and timed out (PoolTimeout)."""
+    queue_app = build_app(_FAKE_PG_URL)
+    pool_args = queue_app.connector._pool_args  # type: ignore[attr-defined]
+    assert pool_args["min_size"] == 1
+    assert pool_args["max_size"] == 4
+
+
 def test_build_app_rejects_sqlite() -> None:
     """Procrastinate is Postgres-only; a SQLite URL must fail loudly at
     build time rather than dying deep in the connector."""
