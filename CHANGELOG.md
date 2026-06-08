@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0](https://github.com/mandakan/splitsmith/compare/v0.4.0...v0.5.0) (2026-06-07)
+
+
+### Features
+
+* **saas:** hard-delete projects with full resource cleanup + confirm dialogs ([#486](https://github.com/mandakan/splitsmith/issues/486)) ([171f50f](https://github.com/mandakan/splitsmith/commit/171f50f356060fcea7d8835809eaa8e34edc6aea))
+* **saas:** Tier-1 job observability -- per-phase timings, JSON logs, Sentry ([#485](https://github.com/mandakan/splitsmith/issues/485)) ([c1d19e2](https://github.com/mandakan/splitsmith/commit/c1d19e2b219bb5d6fdb6bfd964f7255bb20cbba1))
+* **ui:** Ingest scan rows -- inline preview, assign feedback, role signposting ([#482](https://github.com/mandakan/splitsmith/issues/482)) ([760b574](https://github.com/mandakan/splitsmith/commit/760b5748751fdcdc2dbf2375324f40db6918c7bf))
+* **ui:** resolve slug-less per-shooter URLs to the default shooter ([#479](https://github.com/mandakan/splitsmith/issues/479)) ([ff711f4](https://github.com/mandakan/splitsmith/commit/ff711f4a11c5f534c0955d3d56c45173b8b80d82))
+* **worker:** add --one-shot drain mode so the DB compute can scale to zero ([#488](https://github.com/mandakan/splitsmith/issues/488)) ([1f59003](https://github.com/mandakan/splitsmith/commit/1f59003d0da63e82d798383e85297a702e19fca6))
+
+
+### Bug Fixes
+
+* **saas:** clean up shooter state_docs on removal ([#487](https://github.com/mandakan/splitsmith/issues/487)) ([fb5d80b](https://github.com/mandakan/splitsmith/commit/fb5d80bf236814c16c672689cde1f1dbbf7346c4))
+* **saas:** populate match.stages on scoreboard-created matches ([#484](https://github.com/mandakan/splitsmith/issues/484)) ([fe5eb59](https://github.com/mandakan/splitsmith/commit/fe5eb59cc71f8fe3880e0ed3468c7c45ca845bbb))
+* **ui:** keep the match prefix when Audit redirects to a stage ([#481](https://github.com/mandakan/splitsmith/issues/481)) ([7cf39e5](https://github.com/mandakan/splitsmith/commit/7cf39e5c53840e013a3bf42e9f9b8ca0b3e047ef))
+* **ui:** make stage counts consistent across the overview ([#483](https://github.com/mandakan/splitsmith/issues/483)) ([c426909](https://github.com/mandakan/splitsmith/commit/c426909e7d00f3ad335b8d43ecb97fda8cb55938))
+
 ## [0.4.0](https://github.com/mandakan/splitsmith/compare/v0.3.0...v0.4.0) (2026-06-01)
 
 
