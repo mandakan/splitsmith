@@ -134,7 +134,20 @@ def build_app(database_url: str) -> procrastinate.App:
     # dsn}`` instead lands in the pool's *per-connection* ``kwargs`` and
     # collides with the pool's own ``conninfo`` ("got multiple values for
     # argument 'conninfo'") -- a runtime-only failure the unit tests miss.
-    connector = procrastinate.PsycopgConnector(conninfo=dsn)
+    #
+    # ``min_size=1``: Procrastinate opens the pool with ``open(wait=True)``,
+    # which blocks until ``min_size`` connections are established or its 30s
+    # default elapses. psycopg_pool defaults ``min_size`` to 4. When the
+    # worker runs as a short-lived cron drain (``worker --one-shot``) it
+    # cold-connects to a scale-to-zero Neon compute -- its OWN first query is
+    # this pool open (the worker-state wiring issues none). Filling four SSL
+    # connections through Neon's pooler while the compute resumes overruns the
+    # 30s budget and the run dies with ``PoolTimeout: pool initialization
+    # incomplete after 30.0 sec``. Requiring a single connection at open lets
+    # one land inside the window while the compute wakes; ``max_size`` keeps
+    # the same runtime capacity for the drain. The always-on worker never hit
+    # this because it kept the compute warm.
+    connector = procrastinate.PsycopgConnector(conninfo=dsn, min_size=1, max_size=4)
     app = procrastinate.App(connector=connector)
     _register_smoke_tasks(app)
     return app
