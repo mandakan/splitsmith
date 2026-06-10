@@ -41,6 +41,7 @@ today is zero.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -48,6 +49,8 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import procrastinate
+import psycopg
+import psycopg_pool
 
 from .observability import init_sentry
 
@@ -362,10 +365,57 @@ async def run_worker(
         await asyncio.to_thread(warm_ensemble_runtime)
     except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
         logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
-    app = build_app(database_url)
-    register_compute_task(app, state)
-    async with app.open_async():
+    app = await _open_app_with_retry(database_url, state)
+    try:
         await app.run_worker_async(queues=queues, concurrency=concurrency, wait=wait)
+    finally:
+        await app.connector.close_async()
+
+
+# Connection failures worth retrying when the worker opens its pool against a
+# serverless Postgres (Neon). ``PoolTimeout`` is the observed crash: the
+# short-lived ``--one-shot`` cron drain reconnects every tick and
+# ``psycopg_pool.open(wait=True)`` intermittently can't fill within its 30s
+# window -- seen even against an already-awake compute, so it's a transient
+# pooler stall, not just cold start. ``OperationalError`` / ``OSError`` cover
+# transient network or pooler refusals in the same window.
+_RETRYABLE_OPEN_ERRORS = (psycopg_pool.PoolTimeout, psycopg.OperationalError, OSError)
+
+
+async def _open_app_with_retry(
+    database_url: str,
+    state: Any,
+    *,
+    attempts: int = 5,
+    base_delay: float = 3.0,
+) -> procrastinate.App:
+    """Build and open a Procrastinate :class:`~procrastinate.App`, retrying the
+    connection on transient failures.
+
+    Procrastinate hard-codes its pool open at ``open(wait=True)`` with a 30s
+    timeout we can't widen, and a timed-out pool is left closed (it will not
+    re-open), so each attempt builds a **fresh** App. ``build_app`` issues no
+    query, so rebuilding per attempt is cheap. Linear backoff between attempts:
+    the first attempt tends to warm the path (waking the compute / priming
+    Neon's pooler) and a later one connects. The caller owns
+    ``connector.close_async`` once this returns an opened App.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        app = build_app(database_url)
+        register_compute_task(app, state)
+        try:
+            await app.connector.open_async()
+            return app
+        except _RETRYABLE_OPEN_ERRORS as exc:
+            last_exc = exc
+            with contextlib.suppress(Exception):
+                await app.connector.close_async()
+            logger.warning("worker DB connect failed (attempt %d/%d): %s", attempt, attempts, exc)
+            if attempt < attempts:
+                await asyncio.sleep(base_delay * attempt)
+    assert last_exc is not None  # loop runs >=1 time; only reached after a failure
+    raise last_exc
 
 
 def queue_name_for_user(user_id: str) -> str:

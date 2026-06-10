@@ -106,18 +106,15 @@ def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: calls.append("sentry"))
 
+    class _FakeConnector:
+        async def open_async(self) -> None:
+            return None
+
+        async def close_async(self) -> None:
+            return None
+
     class _FakeApp:
-        def open_async(self) -> object:
-            outer = self
-
-            class _Ctx:
-                async def __aenter__(self) -> object:
-                    return outer
-
-                async def __aexit__(self, *exc: object) -> bool:
-                    return False
-
-            return _Ctx()
+        connector = _FakeConnector()
 
         async def run_worker_async(self, **_kwargs: object) -> None:
             calls.append("drain")
@@ -153,18 +150,15 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
 
+    class _FakeConnector:
+        async def open_async(self) -> None:
+            return None
+
+        async def close_async(self) -> None:
+            return None
+
     class _FakeApp:
-        def open_async(self) -> object:
-            outer = self
-
-            class _Ctx:
-                async def __aenter__(self) -> object:
-                    return outer
-
-                async def __aexit__(self, *exc: object) -> bool:
-                    return False
-
-            return _Ctx()
+        connector = _FakeConnector()
 
         async def run_worker_async(self, **_kwargs: object) -> None:
             calls.append("drain")
@@ -197,18 +191,15 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
 
     captured: dict[str, object] = {}
 
+    class _FakeConnector:
+        async def open_async(self) -> None:
+            return None
+
+        async def close_async(self) -> None:
+            return None
+
     class _FakeApp:
-        def open_async(self) -> object:
-            outer = self
-
-            class _Ctx:
-                async def __aenter__(self) -> object:
-                    return outer
-
-                async def __aexit__(self, *exc: object) -> bool:
-                    return False
-
-            return _Ctx()
+        connector = _FakeConnector()
 
         async def run_worker_async(self, **kwargs: object) -> None:
             captured.update(kwargs)
@@ -242,18 +233,15 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
 
     captured: dict[str, object] = {}
 
+    class _FakeConnector:
+        async def open_async(self) -> None:
+            return None
+
+        async def close_async(self) -> None:
+            return None
+
     class _FakeApp:
-        def open_async(self) -> object:
-            outer = self
-
-            class _Ctx:
-                async def __aenter__(self) -> object:
-                    return outer
-
-                async def __aexit__(self, *exc: object) -> bool:
-                    return False
-
-            return _Ctx()
+        connector = _FakeConnector()
 
         async def run_worker_async(self, **kwargs: object) -> None:
             captured.update(kwargs)
@@ -264,6 +252,62 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
     asyncio.run(run_worker(_FAKE_PG_URL, wait=False))
 
     assert captured["wait"] is False
+
+
+def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient ``PoolTimeout`` on connect must be retried, not crash the run.
+    The short-lived cron drain reconnects to a serverless Neon pool every tick and
+    ``open(wait=True)`` intermittently times out; after a couple of failures the
+    worker connects and drains."""
+    import asyncio
+    import sys
+    import types
+
+    import psycopg_pool
+
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+
+    seen: dict[str, object] = {"opens": 0, "drained": False, "sleeps": []}
+
+    class _FakeConnector:
+        async def open_async(self) -> None:
+            seen["opens"] = int(seen["opens"]) + 1  # type: ignore[call-overload]
+            if int(seen["opens"]) <= 2:  # type: ignore[call-overload]
+                raise psycopg_pool.PoolTimeout("pool initialization incomplete after 30.0 sec")
+
+        async def close_async(self) -> None:
+            return None
+
+    class _FakeApp:
+        def __init__(self) -> None:
+            self.connector = _FakeConnector()
+
+        async def run_worker_async(self, **_kwargs: object) -> None:
+            seen["drained"] = True
+
+    # A fresh App per attempt: _open_app_with_retry rebuilds because a
+    # timed-out pool is left closed and will not re-open.
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+
+    async def _fast_sleep(delay: float) -> None:
+        seen["sleeps"].append(delay)  # type: ignore[union-attr]
+
+    monkeypatch.setattr(queue_mod.asyncio, "sleep", _fast_sleep)
+
+    asyncio.run(run_worker(_FAKE_PG_URL, wait=False))
+
+    assert seen["opens"] == 3  # two PoolTimeouts, then a successful connect
+    assert seen["drained"] is True
+    assert seen["sleeps"] == [3.0, 6.0]  # linear backoff between the two retries
 
 
 def test_worker_command_one_shot_passes_wait_false(monkeypatch: pytest.MonkeyPatch) -> None:
