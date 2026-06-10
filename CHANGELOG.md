@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/mandakan/splitsmith/compare/v0.5.1...v0.5.2) (2026-06-10)
+
+
+### Bug Fixes
+
+* **worker:** retry DB connect so a transient Neon PoolTimeout doesn't crash the drain ([#491](https://github.com/mandakan/splitsmith/issues/491)) ([22c1727](https://github.com/mandakan/splitsmith/commit/22c1727b28a704be22a6c977a615b66be0113d96))
+
 ## [0.5.1](https://github.com/mandakan/splitsmith/compare/v0.5.0...v0.5.1) (2026-06-08)
 
 
