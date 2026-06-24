@@ -53,16 +53,19 @@ ARG NODE_IMAGE=node:22-bookworm-slim
 # SPA build (Node)
 # --------------------------------------------------------------------------
 # Builds the React SPA into dist/ so the runtime image is self-contained
-# from a clean checkout. node_modules is regenerated here via ``npm ci``
-# (the repo's node_modules + the alternate pnpm lockfile are kept out of the
-# build context by .dockerignore).
+# from a clean checkout. node_modules is regenerated here via pnpm -- the
+# same package manager CI and the wheel-publish job use, so the image and
+# the wheel build the SPA identically. The repo's node_modules is kept out
+# of the build context by .dockerignore.
 FROM ${NODE_IMAGE} AS spa
 WORKDIR /spa
-# Lockfile-first so ``npm ci`` caches across SPA source-only edits.
-COPY src/splitsmith/ui_static/package.json src/splitsmith/ui_static/package-lock.json ./
-RUN npm ci
+# pnpm is pinned to match the rest of the repo (root packageManager).
+RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+# Lockfile-first so ``pnpm install`` caches across SPA source-only edits.
+COPY src/splitsmith/ui_static/package.json src/splitsmith/ui_static/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY src/splitsmith/ui_static/ ./
-RUN npm run build
+RUN pnpm run build
 
 # --------------------------------------------------------------------------
 # Builder
