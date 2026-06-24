@@ -16,11 +16,11 @@
 
 # SPA build inputs ARE needed: the ``spa`` Docker stage builds dist/ from
 # them. Keep only the regenerable / redundant bits out of the context --
-# node_modules (~280 MB, rebuilt by ``npm ci``), any host-built dist (the
-# image rebuilds it), and the alternate pnpm lockfile (we install with npm).
+# node_modules (~280 MB, rebuilt by ``pnpm install``) and any host-built
+# dist (the image rebuilds it). pnpm-lock.yaml IS needed for the frozen
+# install.
 src/splitsmith/ui_static/node_modules
 src/splitsmith/ui_static/dist
-src/splitsmith/ui_static/pnpm-lock.yaml
 **/*.map
 
 # Dev-only trees nothing in the image reads.
