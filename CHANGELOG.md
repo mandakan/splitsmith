@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.3](https://github.com/mandakan/splitsmith/compare/v0.5.2...v0.5.3) (2026-06-24)
+
+
+### Build / CI
+
+* **deps:** Bump idna from 3.13 to 3.15 ([#504](https://github.com/mandakan/splitsmith/issues/504)) ([767dbe3](https://github.com/mandakan/splitsmith/commit/767dbe3928a0b4fbe3a8a603cff574c45cd7a430))
+* **deps:** Bump react-router and react-router-dom ([#495](https://github.com/mandakan/splitsmith/issues/495)) ([2ffe9b5](https://github.com/mandakan/splitsmith/commit/2ffe9b563ecef887759517331d39f5615446a76a))
+* **deps:** Bump urllib3 from 2.6.3 to 2.7.0 ([#505](https://github.com/mandakan/splitsmith/issues/505)) ([e8bd1ed](https://github.com/mandakan/splitsmith/commit/e8bd1edc8662fda21ab75de5bead6465005672c6))
+* **deps:** clear Dependabot security alerts (Python + npm) ([#502](https://github.com/mandakan/splitsmith/issues/502)) ([8811417](https://github.com/mandakan/splitsmith/commit/881141741ad2f55a2d009c7c52cdba35b5220bb7))
+* disable Railway auto-deploy on push/release ([#507](https://github.com/mandakan/splitsmith/issues/507)) ([a488383](https://github.com/mandakan/splitsmith/commit/a48838376711a0ab37407f1d19112ae259a782fa))
+
 ## [0.5.2](https://github.com/mandakan/splitsmith/compare/v0.5.1...v0.5.2) (2026-06-10)
 
 
