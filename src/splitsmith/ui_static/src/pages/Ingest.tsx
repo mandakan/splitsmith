@@ -35,6 +35,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { AddFootageModal } from "@/components/AddFootageModal";
+import { StageReference } from "@/components/ingest/StageReference";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -534,7 +535,24 @@ function ReviewState({
       ),
     [project],
   );
-  const unassignedVideos = project.unassigned_videos ?? [];
+  // Capture-time order so videos line up with shooting/stage sequence next
+  // to the stage reference. Stable: timestamp-less videos keep their order
+  // and sink below timestamped ones. (#ingest-stage-reference)
+  const unassignedVideos = useMemo(() => {
+    const list = (project.unassigned_videos ?? []).map((v, i) => ({ v, i }));
+    list.sort((a, b) => {
+      const ta = a.v.match_timestamp;
+      const tb = b.v.match_timestamp;
+      if (ta && tb) {
+        const cmp = ta.localeCompare(tb);
+        return cmp !== 0 ? cmp : a.i - b.i;
+      }
+      if (ta) return -1;
+      if (tb) return 1;
+      return a.i - b.i;
+    });
+    return list.map((x) => x.v);
+  }, [project]);
 
   // Camera grouping: by camera_model+camera_mount. Label A/B/C in order.
   const cameras = useMemo(() => groupByCamera(assignedVideos), [assignedVideos]);
@@ -551,6 +569,7 @@ function ReviewState({
 
   return (
     <>
+      <StageReference stages={project.stages} />
       <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
         {/* Drop summary */}
         <div className="relative flex items-center gap-4 border-b border-rule bg-gradient-to-r from-led/10 to-transparent px-6 py-4">
