@@ -3128,6 +3128,19 @@ export const api = {
       manifest: Record<string, unknown> | null;
     }>("/api/me/projects/import", { method: "POST", body: form });
   },
+
+  /** Move one or more videos from one shooter to another in the same match
+   *  (#509). The server carries all per-video state (StageVideo record,
+   *  audit JSON, raw symlink) across the relocation atomically. */
+  moveShooter: (sourceSlug: string, targetSlug: string, videoPaths: string[]) =>
+    request<MoveShooterResponse>("/api/match/videos/move-shooter", {
+      method: "POST",
+      json: {
+        source_slug: sourceSlug,
+        target_slug: targetSlug,
+        video_paths: videoPaths,
+      },
+    }),
 };
 
 export interface PromoteSnapResult {
@@ -3366,6 +3379,35 @@ export interface SweepRunDetail {
   summary: SweepRunSummary;
   combos: SweepComboRow[];
   available_plots: string[];
+}
+
+/** One successfully moved video in a moveShooter call. Mirrors the backend
+ *  ``MoveShooterResultItem`` Pydantic model. */
+export interface MoveShooterResultItem {
+  video_path: string;
+  stage_number: number | null;
+  demoted_to_secondary: boolean;
+}
+
+/** One video that could not be moved (occupied-stage rule). Mirrors
+ *  ``MoveShooterBlocked`` on the backend. */
+export interface MoveShooterBlocked {
+  video_path: string;
+  stage_number: number | null;
+  reason: string;
+  code: "occupied_stage";
+}
+
+/** Outcome of a moveShooter call (backend ``MoveShooterOutcome``). */
+export interface MoveShooterOutcome {
+  moved: MoveShooterResultItem[];
+  blocked: MoveShooterBlocked[];
+}
+
+/** Full response from POST /api/match/videos/move-shooter. */
+export interface MoveShooterResponse {
+  outcome: MoveShooterOutcome;
+  source_project: MatchProject;
 }
 
 export { ApiError };
