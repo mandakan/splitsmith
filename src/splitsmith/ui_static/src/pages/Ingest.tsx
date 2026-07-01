@@ -25,18 +25,22 @@ import {
   Folder,
   Info,
   Loader2,
+  MoreVertical,
   Package,
   Play,
   Plus,
   Video,
+  X,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { AddFootageModal } from "@/components/AddFootageModal";
+import { ShooterPickerPopover } from "@/components/ingest/ShooterPickerPopover";
 import { StageReference } from "@/components/ingest/StageReference";
 import { RelinkDialog } from "@/components/RelinkDialog";
+import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,7 +48,9 @@ import {
   api,
   type CameraMount,
   type MatchProject,
+  type MoveShooterBlocked,
   type ServerHealth,
+  type ShooterListEntry,
   type StageEntry,
   type StageVideo,
   type VideoRole,
@@ -84,6 +90,13 @@ function IngestInner({ slug }: { slug: string }) {
   // review state header so the operator has a clear next step from the
   // videos page (no more digging for /beep-review by URL).
   const [beepPending, setBeepPending] = useState<number>(0);
+  // A1: Shooter list for the ShooterChipStrip + move UI.
+  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // B1: Paths from the most recent import batch. Cleared on banner dismiss
+  // or after a successful move. Not persisted across reloads.
+  const [lastImportedPaths, setLastImportedPaths] = useState<string[] | null>(null);
+  // B1: Blocked stages surfaced after a move attempt.
+  const [moveBlocked, setMoveBlocked] = useState<MoveShooterBlocked[]>([]);
 
   async function reload() {
     setError(null);
@@ -97,6 +110,13 @@ function IngestInner({ slug }: { slug: string }) {
       if (p.last_scanned_dir) setLastScannedDir(p.last_scanned_dir);
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
+    }
+    // A1: Shooter list. Errors here are silent -- the strip just hides.
+    try {
+      const r = await api.listMatchShooters();
+      setShooters(r.shooters);
+    } catch {
+      // non-fatal; leave existing list
     }
     // Refresh the beep-queue summary in parallel; errors here are silent
     // (the CTA just hides when the count is zero or unknown).
@@ -126,14 +146,37 @@ function IngestInner({ slug }: { slug: string }) {
     (project?.stages.length ?? 0) === 0 ||
     assignedCount + unassignedCount === 0;
 
-  async function afterImport(_imported: number) {
+  // Active shooter name for A2 modal header echo.
+  const activeShooterName = shooters.find((s) => s.slug === slug)?.name;
+
+  async function afterImport(_imported: number, paths: string[]) {
     // Reload regardless of count -- partial successes also need a refresh
     // for the user's stage tray to reflect the new videos.
     setError(null);
+    // B1: capture the batch for the post-import banner.
+    if (paths.length > 0) {
+      setLastImportedPaths(paths);
+      setMoveBlocked([]);
+    }
     try {
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  async function moveShooterBatch(targetSlug: string, videoPaths: string[]) {
+    setBusy(true);
+    setError(null);
+    try {
+      const resp = await api.moveShooter(slug, targetSlug, videoPaths);
+      setMoveBlocked(resp.outcome.blocked);
+      setLastImportedPaths(null);
+      await reload();
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -207,7 +250,10 @@ function IngestInner({ slug }: { slug: string }) {
               Matches
             </button>
             <span className="text-whisper">/</span>
-            <Link to="/" className="text-subtle hover:text-ink-2">
+            {/* The match crumb returns to THIS match's overview -- not "/"
+             *  (app root), which ejected the user out of the match they were
+             *  viewing back toward the global picker. */}
+            <Link to={href("")} className="text-subtle hover:text-ink-2">
               {health?.project_name ?? "..."}
             </Link>
             <span className="text-whisper">/</span>
@@ -224,6 +270,14 @@ function IngestInner({ slug }: { slug: string }) {
           <h1 className="mb-2.5 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
             Add footage
           </h1>
+          {/* A1: shooter identity strip -- hides itself for single-shooter */}
+          <ShooterChipStrip
+            shooters={shooters}
+            activeSlug={slug}
+            urlBase="ingest"
+            label="Adding to"
+            count={(s) => String(s.video_count)}
+          />
           <p className="max-w-[40rem] text-[0.875rem] text-muted">
             {isEmpty
               ? "Drop a folder of videos. Splitsmith auto-matches each video to a stage by recording timestamp."
@@ -278,6 +332,14 @@ function IngestInner({ slug }: { slug: string }) {
           <ReviewState
             slug={slug}
             project={project}
+            shooters={shooters}
+            lastImportedPaths={lastImportedPaths}
+            moveBlocked={moveBlocked}
+            onDismissBanner={() => {
+              setLastImportedPaths(null);
+              setMoveBlocked([]);
+            }}
+            onMoveShooter={moveShooterBatch}
             onAddMore={() => setShowAddFootage(true)}
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
@@ -295,10 +357,11 @@ function IngestInner({ slug }: { slug: string }) {
             initialStorage={storage}
             initialPath={lastScannedDir}
             onClose={() => setShowAddFootage(false)}
-            onImported={(imported) => {
-              void afterImport(imported);
+            onImported={(imported, paths) => {
+              void afterImport(imported, paths);
             }}
             onStorageChange={setStorage}
+            shooterName={activeShooterName}
           />
         )}
       </main>
@@ -504,6 +567,11 @@ function TipCard({
 function ReviewState({
   slug,
   project,
+  shooters,
+  lastImportedPaths,
+  moveBlocked,
+  onDismissBanner,
+  onMoveShooter,
   onAddMore,
   onMoveAssignment,
   onRemoveVideo,
@@ -515,6 +583,11 @@ function ReviewState({
 }: {
   slug: string;
   project: MatchProject;
+  shooters: ShooterListEntry[];
+  lastImportedPaths: string[] | null;
+  moveBlocked: MoveShooterBlocked[];
+  onDismissBanner: () => void;
+  onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   onAddMore: () => void;
   onMoveAssignment: (
     videoPath: string,
@@ -567,9 +640,51 @@ function ReviewState({
   ).length + unassignedVideos.filter((v) => v.role === "ignored").length;
   const href = useMatchHref();
 
+  // Name of the current (source) shooter for the banner label.
+  const activeShooterName = shooters.find((s) => s.slug === slug)?.name ?? slug;
+  // B1: show the banner when there are other shooters and we have a batch.
+  const showBanner = lastImportedPaths != null && lastImportedPaths.length > 0 && shooters.length > 1;
+
   return (
     <>
       <StageReference stages={project.stages} />
+
+      {/* B1: Post-import batch move banner */}
+      {showBanner && (
+        <IngestMoveBanner
+          shooterName={activeShooterName}
+          videoPaths={lastImportedPaths}
+          shooters={shooters}
+          excludeSlug={slug}
+          blocked={moveBlocked}
+          busy={busy}
+          onMove={onMoveShooter}
+          onDismiss={onDismissBanner}
+        />
+      )}
+      {/* B1: Blocked-stage notice after a batch move (persists until dismissed) */}
+      {moveBlocked.length > 0 && !showBanner && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-live/40 bg-live/10 px-4 py-3 text-[0.8125rem]">
+          <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-live font-mono text-xs font-bold text-bg">
+            !
+          </span>
+          <div className="flex-1 font-mono text-[0.6875rem] leading-relaxed text-ink-2">
+            <b className="font-display font-bold uppercase tracking-[0.06em] text-live">
+              {moveBlocked.length} stage{moveBlocked.length === 1 ? "" : "s"} not moved
+            </b>{" "}
+            -- the destination already had reviewed footage. Resolve manually.
+          </div>
+          <button
+            type="button"
+            onClick={() => onDismissBanner()}
+            aria-label="Dismiss"
+            className="rounded p-0.5 text-subtle hover:text-ink"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
         {/* Drop summary */}
         <div className="relative flex items-center gap-4 border-b border-rule bg-gradient-to-r from-led/10 to-transparent px-6 py-4">
@@ -673,8 +788,10 @@ function ReviewState({
                 allStages={project.stages}
                 videos={videos}
                 cameras={cameras}
+                shooters={shooters}
                 onMove={onMoveAssignment}
                 onRemove={onRemoveVideo}
+                onMoveShooter={onMoveShooter}
                 busy={busy}
                 onError={onError}
               />
@@ -687,8 +804,10 @@ function ReviewState({
               videos={unassignedVideos}
               allStages={project.stages}
               cameras={cameras}
+              shooters={shooters}
               onMove={onMoveAssignment}
               onRemove={onRemoveVideo}
+              onMoveShooter={onMoveShooter}
               busy={busy}
               onError={onError}
             />
@@ -727,8 +846,8 @@ function ReviewState({
         </b>
         Background jobs queue immediately (audio extract + beep detect per
         video). Stages with confirmed beeps become available for audit.
-        Continue to <Link to="/" className="text-led hover:text-led-soft">match overview</Link>{" "}
-        or open the <Link to={`/audit/${slug}`} className="text-led hover:text-led-soft">audit</Link>{" "}
+        Continue to <Link to={href("")} className="text-led hover:text-led-soft">match overview</Link>{" "}
+        or open the <Link to={href("audit", slug)} className="text-led hover:text-led-soft">audit</Link>{" "}
         page to start reviewing.
       </div>
     </>
@@ -784,8 +903,10 @@ function StageBlock({
   allStages,
   videos,
   cameras,
+  shooters,
   onMove,
   onRemove,
+  onMoveShooter,
   busy,
   onError,
 }: {
@@ -794,12 +915,14 @@ function StageBlock({
   allStages: StageEntry[];
   videos: StageVideo[];
   cameras: CameraGroup[];
+  shooters: ShooterListEntry[];
   onMove: (
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
+  onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   busy: boolean;
   onError: (msg: string | null) => void;
 }) {
@@ -846,8 +969,10 @@ function StageBlock({
           camera={cameras.find((c) => c.videoPaths.has(v.path))}
           currentStage={stage.stage_number}
           allStages={allStages}
+          shooters={shooters}
           onMove={onMove}
           onRemove={onRemove}
+          onMoveShooter={onMoveShooter}
           busy={busy}
           onError={onError}
         />
@@ -861,8 +986,10 @@ function UnassignedBlock({
   videos,
   allStages,
   cameras,
+  shooters,
   onMove,
   onRemove,
+  onMoveShooter,
   busy,
   onError,
 }: {
@@ -870,12 +997,14 @@ function UnassignedBlock({
   videos: StageVideo[];
   allStages: StageEntry[];
   cameras: CameraGroup[];
+  shooters: ShooterListEntry[];
   onMove: (
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
+  onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   busy: boolean;
   onError: (msg: string | null) => void;
 }) {
@@ -903,8 +1032,10 @@ function UnassignedBlock({
           camera={cameras.find((c) => c.videoPaths.has(v.path))}
           currentStage={null}
           allStages={allStages}
+          shooters={shooters}
           onMove={onMove}
           onRemove={onRemove}
+          onMoveShooter={onMoveShooter}
           busy={busy}
           onError={onError}
         />
@@ -919,8 +1050,10 @@ function VideoRow({
   camera,
   currentStage,
   allStages,
+  shooters,
   onMove,
   onRemove,
+  onMoveShooter,
   busy,
   onError,
 }: {
@@ -929,12 +1062,14 @@ function VideoRow({
   camera?: CameraGroup;
   currentStage: number | null;
   allStages: StageEntry[];
+  shooters: ShooterListEntry[];
   onMove: (
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
   ) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
+  onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   busy: boolean;
   onError: (msg: string | null) => void;
 }) {
@@ -950,6 +1085,22 @@ function VideoRow({
   // so watch-and-assign stays one motion. Lazy: the <video> only mounts
   // (and only then streams) while open.
   const [previewOpen, setPreviewOpen] = useState(false);
+  // B2: kebab overflow menu state.
+  const [kebabOpen, setKebabOpen] = useState(false);
+  const kebabRef = useRef<HTMLDivElement>(null);
+  const hasOtherShooters = shooters.length > 1;
+
+  // Close kebab on outside click.
+  useEffect(() => {
+    if (!kebabOpen) return;
+    function onOutside(e: MouseEvent) {
+      if (kebabRef.current && !kebabRef.current.contains(e.target as Node)) {
+        setKebabOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, [kebabOpen]);
   const needsBeep =
     video.role !== "ignored" &&
     video.beep_time == null &&
@@ -1012,7 +1163,12 @@ function VideoRow({
   return (
     <div className="border-b border-rule last:border-b-0">
       <div
-        className="grid grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px] items-center gap-3.5 px-5 py-2.5 hover:bg-surface-2"
+        className={cn(
+          "grid items-center gap-3.5 px-5 py-2.5 hover:bg-surface-2",
+          hasOtherShooters
+            ? "grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px_36px]"
+            : "grid-cols-[36px_minmax(0,1.6fr)_120px_180px_220px_minmax(160px,auto)_36px]",
+        )}
       >
       <button
         type="button"
@@ -1119,11 +1275,50 @@ function VideoRow({
       >
         <XCircle className="size-4" />
       </button>
+      {/* B2: kebab overflow menu -- only shown for multi-shooter matches */}
+      {hasOtherShooters && (
+        <div ref={kebabRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setKebabOpen((o) => !o)}
+            disabled={busy || rowBusy}
+            title="More actions"
+            aria-label="More actions"
+            aria-expanded={kebabOpen}
+            className="inline-flex size-8 items-center justify-center rounded-md text-subtle transition-colors hover:bg-surface-2 hover:text-ink-2 disabled:opacity-50"
+          >
+            <MoreVertical className="size-4" />
+          </button>
+          {kebabOpen && (
+            <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-rule-strong bg-surface shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)]">
+              <div className="border-b border-rule px-3 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-subtle">
+                Move to shooter
+              </div>
+              <div className="p-2">
+                <ShooterPickerPopover
+                  shooters={shooters}
+                  excludeSlug={slug}
+                  busy={busy || rowBusy}
+                  onPick={async (targetSlug) => {
+                    setKebabOpen(false);
+                    setRowBusy(true);
+                    onError(null);
+                    try {
+                      await onMoveShooter(targetSlug, [video.path]);
+                    } finally {
+                      setRowBusy(false);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       </div>
       {previewOpen && (
         <div className="border-t border-rule/60 bg-bg px-5 py-3">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption --
-              source footage has no caption track */}
+          {/* source footage has no caption track */}
           <video
             controls
             preload="metadata"
@@ -1206,6 +1401,72 @@ function CameraCard({ camera }: { camera: CameraGroup }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* B1 -- Post-import batch move banner                                        */
+/* -------------------------------------------------------------------------- */
+
+function IngestMoveBanner({
+  shooterName,
+  videoPaths,
+  shooters,
+  excludeSlug,
+  blocked,
+  busy,
+  onMove,
+  onDismiss,
+}: {
+  shooterName: string;
+  videoPaths: string[];
+  shooters: ShooterListEntry[];
+  excludeSlug: string;
+  blocked: MoveShooterBlocked[];
+  busy: boolean;
+  onMove: (targetSlug: string, paths: string[]) => Promise<void>;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="mb-4 overflow-hidden rounded-xl border border-beep/40 bg-beep-tint">
+      <div className="relative flex flex-wrap items-center gap-3 px-4 py-3">
+        <span
+          aria-hidden
+          className="absolute inset-y-0 left-0 w-0.5 bg-beep shadow-[0_0_8px_var(--color-beep-glow)]"
+        />
+        <span className="font-mono text-[0.75rem] text-ink-2">
+          <b className="font-bold text-beep">{videoPaths.length}</b>{" "}
+          video{videoPaths.length === 1 ? "" : "s"} added to{" "}
+          <b className="text-ink">{shooterName}</b>.{" "}
+          <span className="text-muted">Wrong shooter?</span>
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
+            Move all to
+          </span>
+          <ShooterPickerPopover
+            shooters={shooters}
+            excludeSlug={excludeSlug}
+            busy={busy}
+            onPick={(targetSlug) => void onMove(targetSlug, videoPaths)}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss banner"
+          className="ml-auto rounded p-0.5 text-subtle hover:text-ink"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      {blocked.length > 0 && (
+        <div className="border-t border-beep/20 bg-live/10 px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-live">
+          {blocked.length} stage{blocked.length === 1 ? "" : "s"} already had reviewed footage
+          -- not moved. Resolve manually.
+        </div>
+      )}
     </div>
   );
 }

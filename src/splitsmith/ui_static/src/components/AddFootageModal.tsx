@@ -29,6 +29,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FolderPicker } from "@/components/FolderPicker";
+import { Avatar } from "@/components/ui";
 import {
   ApiError,
   api,
@@ -67,11 +68,15 @@ interface AddFootageModalProps {
   onClose: () => void;
   /** Fires after the import finishes (even if empty), so the parent
    *  can reload its project state. ``imported`` is the total videos
-   *  registered across all sources. */
-  onImported: (imported: number) => void;
+   *  registered across all sources; ``paths`` is the flat list of all
+   *  registered paths (for the post-import batch banner B1). */
+  onImported: (imported: number, paths: string[]) => void;
   /** Fires when the user changes the storage mode in the modal, so the
    *  parent can remember their pick across ingests. Optional. */
   onStorageChange?: (mode: StorageMode) => void;
+  /** Name of the active shooter displayed in the modal header as a
+   *  visibility cue (A2). Omit for single-shooter or when unknown. */
+  shooterName?: string;
 }
 
 export function AddFootageModal({
@@ -81,6 +86,7 @@ export function AddFootageModal({
   onClose,
   onImported,
   onStorageChange,
+  shooterName,
 }: AddFootageModalProps) {
   // Hosted mode: the SPA upload UX hasn't shipped yet (deferred to the
   // tus migration in doc 05). Render a placeholder explaining the
@@ -181,6 +187,7 @@ export function AddFootageModal({
     setScanStates(states);
 
     let totalImported = 0;
+    const allRegistered: string[] = [];
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i];
       // Mark running.
@@ -195,6 +202,7 @@ export function AddFootageModal({
         }
         states[i] = { status: "ok", result };
         totalImported += result.registered.length;
+        allRegistered.push(...result.registered);
       } catch (e) {
         states[i] = {
           status: "error",
@@ -205,7 +213,7 @@ export function AddFootageModal({
     }
 
     setPhase("result");
-    onImported(totalImported);
+    onImported(totalImported, allRegistered);
   }
 
   if (hostedMode) {
@@ -244,6 +252,20 @@ export function AddFootageModal({
               {phase === "result" &&
                 "All sources processed. Empty rows mean no videos were found."}
             </p>
+            {/* A2: shooter identity echo -- visibility cue, not a confirm gate */}
+            {shooterName && (
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-led-deep bg-led-tint px-2 py-0.5">
+                <Avatar
+                  size="xs"
+                  initials={shooterInitials(shooterName)}
+                  seed={slug}
+                  name={shooterName}
+                />
+                <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text">
+                  Adding to {shooterName}
+                </span>
+              </div>
+            )}
           </div>
           {phase !== "running" && (
             <button
@@ -745,7 +767,7 @@ function HostedUploadSurface({
 }: {
   slug: string;
   onClose: () => void;
-  onImported: (imported: number) => void;
+  onImported: (imported: number, paths: string[]) => void;
 }) {
   return (
     <HostedUploadBody slug={slug} onClose={onClose} onImported={onImported} />
@@ -771,7 +793,7 @@ function HostedUploadBody({
 }: {
   slug: string;
   onClose: () => void;
-  onImported: (imported: number) => void;
+  onImported: (imported: number, paths: string[]) => void;
 }) {
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
@@ -946,8 +968,10 @@ function HostedUploadBody({
         }));
         // The video now lives in unassigned_videos on the project; tell
         // the parent so the ingest page refreshes and the operator sees
-        // the new row in the tray when they close the modal.
-        onImported(1);
+        // the new row in the tray when they close the modal. The hosted
+        // upload path uses the storage key as the path placeholder; the
+        // caller uses this for the batch-move banner (B1) if needed.
+        onImported(1, [entry.filename]);
       } catch (err) {
         const msg = err instanceof ApiError ? err.detail : String(err);
         setAttachState((prev) => ({
@@ -1221,6 +1245,13 @@ function ExistingRow({
       </button>
     </li>
   );
+}
+
+function shooterInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function formatBytes(n: number): string {

@@ -178,6 +178,21 @@ class ProjectStateStore:
             await session.commit()
             return result.rowcount or 0
 
+    async def delete_audit(self, match_id: str, slug: str, stage_number: int) -> int:
+        """Delete one stage's audit doc for ``slug``; return the row count.
+
+        Removes the single ``doc_kind="audit"`` row identified by
+        ``(match_id, slug, stage_number)``. Called during a cross-shooter
+        move to clear the source audit after the target write succeeds.
+        Idempotent -- a missing row returns 0 without raising.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(StateDocRow).where(*self._identity_where(match_id, _KIND_AUDIT, slug, stage_number))
+            )
+            await session.commit()
+            return result.rowcount or 0
+
     async def delete_match(self, match_id: str) -> int:
         """Delete every doc for ``match_id``; return the row count.
 
