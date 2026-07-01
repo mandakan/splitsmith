@@ -175,6 +175,15 @@ export type StageStatus =
   | "audited"
   | "skipped";
 
+/** Round count + target breakdown for a stage, mirrored from the backend
+ *  ``config.StageRounds``. Sourced from SSI Scoreboard on import; any field
+ *  may be null for manually-created stages or older imports. */
+export interface StageRounds {
+  expected: number | null;
+  paper_targets: number | null;
+  steel_targets: number | null;
+}
+
 export interface StageEntry {
   stage_number: number;
   stage_name: string;
@@ -191,6 +200,9 @@ export interface StageEntry {
    *  Optional in the type because legacy responses may omit it; callers
    *  should fall back via :func:`deriveStageStatus` when missing. */
   status?: StageStatus;
+  /** Round/target metadata already sent by the project API; surfaced in the
+   *  Ingest stage reference panel. Null when the match carries no round data. */
+  stage_rounds: StageRounds | null;
 }
 
 export interface MatchProject {
