@@ -1456,6 +1456,25 @@ export interface DevReviewQueueResponse {
   done: DevReviewQueueItem[];
 }
 
+/** One (stage_number, video_id) pair in a bulk camera-set call.
+ *  Mirrors ``BulkCameraSetItem`` in server.py. */
+export interface BulkCameraSetItem {
+  stage_number: number;
+  video_id: string;
+}
+
+/** Request body for POST /api/shooters/{slug}/stages/camera/bulk-set.
+ *  ``set_mount`` / ``set_model`` flags distinguish "set to null" from
+ *  "leave unchanged". Mirrors ``BulkCameraSetRequest`` in server.py. */
+export interface BulkCameraSetRequest {
+  items: BulkCameraSetItem[];
+  set_mount?: boolean;
+  mount?: CameraMount | null;
+  set_model?: boolean;
+  make?: string | null;
+  model?: string | null;
+}
+
 class ApiError extends Error {
   constructor(
     public status: number,
@@ -2017,6 +2036,20 @@ export const api = {
   getCalibratedCameraModels: () =>
     request<{ models: CalibratedCameraModel[] }>(
       "/api/calibrated-camera-models",
+    ),
+
+  /** Apply a camera mount and/or model override to every listed
+   *  (stage_number, video_id) pair in a single round-trip.
+   *  ``set_mount`` / ``set_model`` flags distinguish "set to null"
+   *  from "leave unchanged". Returns the updated MatchProject, matching
+   *  the shape of setCameraMount / setCameraModel. */
+  bulkSetCamera: (
+    slug: string,
+    body: BulkCameraSetRequest,
+  ) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/camera/bulk-set`,
+      { method: "POST", json: body },
     ),
 
   swapPrimary: (
