@@ -3245,6 +3245,33 @@ class CameraModelRequest(BaseModel):
     model: str | None
 
 
+class BulkCameraSetItem(BaseModel):
+    """One video targeted by POST /api/shooters/{slug}/stages/camera/bulk-set."""
+
+    stage_number: int
+    video_id: str
+
+
+class BulkCameraSetRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/stages/camera/bulk-set.
+
+    Applies ``camera_mount`` / ``camera_make`` / ``camera_model`` overrides
+    to every listed (stage_number, video_id) pair in a single project save.
+    The ``set_*`` flags distinguish "leave unchanged" from "set to null / (auto)",
+    so clearing an override is different from a no-op.
+
+    At least one of ``set_mount`` or ``set_model`` must be True; an all-false
+    body is rejected with 400.
+    """
+
+    items: list[BulkCameraSetItem]
+    set_mount: bool = False
+    mount: str | None = None  # CameraMount value or None; honoured only when set_mount is True
+    set_model: bool = False
+    make: str | None = None  # must be supplied together with model, or both None
+    model: str | None = None
+
+
 class CalibratedCameraModel(BaseModel):
     """One row in the dropdown the SPA presents on the Ingest screen."""
 
@@ -6841,6 +6868,79 @@ def create_app(
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         video.camera_make = req.make
         video.camera_model = req.model
+        project.save(state.shooter_root(slug))
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/stages/camera/bulk-set")
+    def bulk_set_camera(slug: str, req: BulkCameraSetRequest) -> JSONResponse:
+        """Apply camera mount and/or model overrides to a batch of videos in one save.
+
+        Designed for the CameraCard per-group edit UX: every video belonging to
+        one physical camera has the same new value applied atomically. The
+        ``set_mount`` / ``set_model`` flags let the caller update only one
+        dimension (e.g. correct the model without touching the mount), and
+        passing ``null`` with the flag set clears the override back to the
+        heuristic / ffprobe default.
+
+        Unknown ``(stage_number, video_id)`` pairs are skipped with a warning
+        and do not abort the batch. The full updated project is returned so the
+        SPA can replace its local copy without a follow-up GET.
+        """
+        if not req.set_mount and not req.set_model:
+            raise HTTPException(
+                status_code=400,
+                detail="bulk-set: at least one of 'set_mount' or 'set_model' must be true",
+            )
+
+        from ..fixture_schema import CameraMount
+
+        if req.set_mount and req.mount is not None:
+            try:
+                CameraMount(req.mount)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"unknown camera mount {req.mount!r}; expected one of "
+                        + ", ".join(m.value for m in CameraMount)
+                    ),
+                ) from exc
+
+        if req.set_model and (req.make is None) != (req.model is None):
+            raise HTTPException(
+                status_code=400,
+                detail="camera-model: 'make' and 'model' must be supplied together or both null",
+            )
+
+        project = state.shooter_project(slug)
+        skipped: list[dict[str, object]] = []
+        for item in req.items:
+            try:
+                stage = project.stage(item.stage_number)
+            except KeyError:
+                logger.warning(
+                    "bulk_set_camera: stage %d not found for slug %r; skipping",
+                    item.stage_number,
+                    slug,
+                )
+                skipped.append({"stage_number": item.stage_number, "video_id": item.video_id})
+                continue
+            video = stage.find_video_by_id(item.video_id)
+            if video is None:
+                logger.warning(
+                    "bulk_set_camera: video %r not found on stage %d for slug %r; skipping",
+                    item.video_id,
+                    item.stage_number,
+                    slug,
+                )
+                skipped.append({"stage_number": item.stage_number, "video_id": item.video_id})
+                continue
+            if req.set_mount:
+                video.camera_mount = req.mount
+            if req.set_model:
+                video.camera_make = req.make
+                video.camera_model = req.model
+
         project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 

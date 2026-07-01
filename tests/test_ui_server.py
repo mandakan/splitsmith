@@ -3302,6 +3302,372 @@ def test_camera_model_patch_rejects_half_filled_pair(tmp_path: Path) -> None:
     assert resp.status_code == 400, resp.text
 
 
+# ---------------------------------------------------------------------------
+# Bulk camera set endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def _seed_second_video(tmp_path: Path, project_root: Path) -> str:
+    """Register a second raw video on stage 1 of the 'me' shooter project.
+
+    Returns the new video's ``video_id`` so callers can target it in
+    bulk-set requests.  The video file is created as an empty dummy so
+    the project round-trip path validation doesn't complain.
+    """
+    shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    raw_dir = project.raw_path(shooter_root)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    second = raw_dir / "CAM2.mp4"
+    second.write_bytes(b"")
+    second_video = StageVideo(path=Path("raw/CAM2.mp4"), role="secondary")
+    project.stages[0].videos.append(second_video)
+    project.save(shooter_root)
+    return second_video.video_id
+
+
+def test_bulk_camera_set_applies_mount_and_model_across_videos(tmp_path: Path) -> None:
+    """bulk-set with set_mount + set_model true writes both fields on every listed video."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+    sec_id = _seed_second_video(tmp_path, project_root)
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [
+                {"stage_number": 1, "video_id": primary_id},
+                {"stage_number": 1, "video_id": sec_id},
+            ],
+            "set_mount": True,
+            "mount": "head",
+            "set_model": True,
+            "make": "Insta360",
+            "model": "GO 3S",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    refreshed = MatchProject.load(shooter_root)
+    for video in refreshed.stages[0].videos:
+        if video.video_id in (primary_id, sec_id):
+            assert video.camera_mount == "head", f"video {video.video_id} mount wrong"
+            assert video.camera_make == "Insta360", f"video {video.video_id} make wrong"
+            assert video.camera_model == "GO 3S", f"video {video.video_id} model wrong"
+
+
+def test_bulk_camera_set_mount_only_leaves_model(tmp_path: Path) -> None:
+    """set_mount=True, set_model=False leaves an existing model intact."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    # Pre-set a model on the primary.
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    primary.camera_make = "Meta"
+    primary.camera_model = "Vanguard"
+    project.save(shooter_root)
+    primary_id = primary.video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_mount": True,
+            "mount": "chest",
+            "set_model": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    refreshed = MatchProject.load(shooter_root)
+    vid = refreshed.stages[0].primary()
+    assert vid.camera_mount == "chest"
+    assert vid.camera_make == "Meta"  # untouched
+    assert vid.camera_model == "Vanguard"  # untouched
+
+
+def test_bulk_camera_set_model_only_leaves_mount(tmp_path: Path) -> None:
+    """set_model=True, set_mount=False leaves an existing mount intact."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    primary.camera_mount = "hand"
+    project.save(shooter_root)
+    primary_id = primary.video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_mount": False,
+            "set_model": True,
+            "make": "Meta",
+            "model": "Vanguard",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    refreshed = MatchProject.load(shooter_root)
+    vid = refreshed.stages[0].primary()
+    assert vid.camera_mount == "hand"  # untouched
+    assert vid.camera_make == "Meta"
+    assert vid.camera_model == "Vanguard"
+
+
+def test_bulk_camera_set_auto_clears_override(tmp_path: Path) -> None:
+    """Passing null mount + null make/model with the set flags clears overrides."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    primary.camera_mount = "head"
+    primary.camera_make = "Meta"
+    primary.camera_model = "Vanguard"
+    project.save(shooter_root)
+    primary_id = primary.video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_mount": True,
+            "mount": None,
+            "set_model": True,
+            "make": None,
+            "model": None,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    refreshed = MatchProject.load(shooter_root)
+    vid = refreshed.stages[0].primary()
+    assert vid.camera_mount is None
+    assert vid.camera_make is None
+    assert vid.camera_model is None
+
+
+def test_bulk_camera_set_skips_unknown_video_id(tmp_path: Path) -> None:
+    """An unknown video_id in the batch is skipped; the batch is not aborted."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [
+                {"stage_number": 1, "video_id": primary_id},
+                {"stage_number": 1, "video_id": "nonexistent-id-xyz"},
+            ],
+            "set_mount": True,
+            "mount": "head",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    refreshed = MatchProject.load(shooter_root)
+    # The real video was updated.
+    assert refreshed.stages[0].primary().camera_mount == "head"
+
+
+def test_bulk_camera_set_skips_unknown_stage(tmp_path: Path) -> None:
+    """An unknown stage_number is skipped without aborting the batch."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [
+                {"stage_number": 99, "video_id": primary_id},  # stage 99 doesn't exist
+                {"stage_number": 1, "video_id": primary_id},
+            ],
+            "set_mount": True,
+            "mount": "belt",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    refreshed = MatchProject.load(shooter_root)
+    assert refreshed.stages[0].primary().camera_mount == "belt"
+
+
+def test_bulk_camera_set_rejects_bad_mount(tmp_path: Path) -> None:
+    """An unrecognised mount value returns 400 before touching any video."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_mount": True,
+            "mount": "shoulder",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "shoulder" in resp.json()["detail"]
+
+
+def test_bulk_camera_set_rejects_half_filled_model(tmp_path: Path) -> None:
+    """set_model=True with only one of make/model supplied returns 400."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_model": True,
+            "make": "Meta",
+            "model": None,
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "supplied together" in resp.json()["detail"]
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_model": True,
+            "make": None,
+            "model": "Vanguard",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_bulk_camera_set_noop_batch_rejected(tmp_path: Path) -> None:
+    """set_mount=False and set_model=False is rejected as a client bug."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+
+    resp = client.post(
+        "/api/shooters/me/stages/camera/bulk-set",
+        json={
+            "items": [{"stage_number": 1, "video_id": primary_id}],
+            "set_mount": False,
+            "set_model": False,
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_bulk_camera_set_hosted_state_docs_parity(tmp_path: Path) -> None:
+    """Hosted mode: bulk-set persists via state_docs and bumps version exactly once.
+
+    Drives the endpoint through a real ProjectStateStore backed by an
+    in-memory SQLite database, injected into the singleton state object so
+    the alias middleware's ``current_match_id`` wiring works normally. Asserts
+    that version increments exactly once (a per-video save loop would bump it
+    N times or raise a 409 on the second bump).
+    """
+    import asyncio as _asyncio
+
+    from splitsmith import match_model as _match_model
+    from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionmaker
+
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    sf = sessionmaker(engine)
+
+    async def _setup_db() -> str:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with sf() as s:
+            user = User(email="hosted-cam@test.se")
+            s.add(user)
+            await s.commit()
+            await s.refresh(user)
+            return user.id
+
+    uid = _asyncio.run(_setup_db())
+    store = ProjectStateStore(sf, user_id=uid)
+
+    # Build the local project and grab its match_id so we can seed the store
+    # under the same id the alias middleware will set on the request.
+    project_root = tmp_path / "match"
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = project_root / "shooters" / "me"
+    local_match = _match_model.Match.load(project_root)
+    match_id = local_match.match_id
+
+    local_match_doc = local_match.model_dump(mode="json")
+    _asyncio.run(store.save_match(match_id, local_match_doc, expected_version=0))
+
+    project = MatchProject.load(shooter_root)
+    primary_id = project.stages[0].primary().video_id
+
+    _asyncio.run(store.save_project(match_id, "me", project.model_dump(mode="json"), expected_version=0))
+    # Version is now 1 in the store.
+
+    # Inject the store into the singleton state.  project_state checks
+    # current_tenant first; in a test that has no tenant pinned it falls
+    # back to _project_state.  The setter writes that backing field.
+    _state = client.app.state.splitsmith_state
+
+    old_project_state = _state._project_state
+    _state._project_state = store
+    try:
+        resp = client.post(
+            "/api/shooters/me/stages/camera/bulk-set",
+            json={
+                "items": [{"stage_number": 1, "video_id": primary_id}],
+                "set_mount": True,
+                "mount": "head",
+                "set_model": True,
+                "make": "Meta",
+                "model": "Vanguard",
+            },
+        )
+    finally:
+        _state._project_state = old_project_state
+
+    assert resp.status_code == 200, resp.text
+
+    # Version must have incremented exactly once (1 -> 2).
+    doc, version = _asyncio.run(store.load_project(match_id, "me"))
+    assert doc is not None
+    assert version == 2, f"expected version 2 after one save, got {version}"
+
+    # The primary video in the stored doc has the new values.
+    stage_doc = next(s for s in doc["stages"] if s["stage_number"] == 1)
+    vid_doc = next(v for v in stage_doc["videos"] if v["video_id"] == primary_id)
+    assert vid_doc["camera_mount"] == "head"
+    assert vid_doc["camera_make"] == "Meta"
+    assert vid_doc["camera_model"] == "Vanguard"
+
+
 def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) -> None:
     """GET /api/calibrated-camera-models reflects the shipped calibration.
 
