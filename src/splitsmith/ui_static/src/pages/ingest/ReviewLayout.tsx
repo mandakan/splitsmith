@@ -299,8 +299,10 @@ export function ReviewLayout({
           disabled={busy || model.willProcess === 0}
           className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
         >
+          {/* Processing already auto-queued at scan/assign time; this
+           *  button only leaves the review. Don't claim it starts work. */}
           <span className="font-display uppercase tracking-[0.08em]">
-            Confirm &amp; start processing
+            Done - match overview
           </span>
           <ArrowRight className="size-3.5" />
         </Button>

@@ -18,6 +18,9 @@ export interface SessionSummaryProps {
   nextShooterLabel?: string | null;
   onJumpToOverview?: () => void;
   onAuditNextShooter?: () => void;
+  /** Jump to the Export page - the copy above promises "ready for
+   *  FCPXML export", so the card has to offer the door it names. */
+  onExport?: () => void;
 }
 
 /**
@@ -32,7 +35,12 @@ export function SessionSummary({
   nextShooterLabel,
   onJumpToOverview,
   onAuditNextShooter,
+  onExport,
 }: SessionSummaryProps) {
+  // With shooters left to audit, "Audit next" keeps the primary (green)
+  // slot and Export renders as a secondary link; once the whole match is
+  // signed off, Export is the natural next step and takes the primary.
+  const hasNext = Boolean(onAuditNextShooter && nextShooterLabel);
   return (
     <div
       role="region"
@@ -78,7 +86,21 @@ export function SessionSummary({
               Match overview
             </button>
           ) : null}
-          {onAuditNextShooter && nextShooterLabel ? (
+          {onExport ? (
+            <button
+              type="button"
+              onClick={onExport}
+              className={cn(
+                "inline-flex items-center rounded-md px-3.5 py-2 font-display text-[0.75rem] font-bold uppercase tracking-[0.08em]",
+                hasNext
+                  ? "border border-rule bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink"
+                  : "border-0 bg-done text-bg shadow-[0_0_0_1px_var(--color-done),0_0_22px_var(--color-done-glow)] hover:brightness-110",
+              )}
+            >
+              Export
+            </button>
+          ) : null}
+          {hasNext ? (
             <button
               type="button"
               onClick={onAuditNextShooter}
