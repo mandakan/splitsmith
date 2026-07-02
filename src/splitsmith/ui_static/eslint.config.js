@@ -14,14 +14,13 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // Downgrade to warn so pre-existing violations don't block builds;
-      // tighten to error once the backlog is cleared.
-      "react-hooks/rules-of-hooks": "warn",
+      // rules-of-hooks catches real bugs (conditional/looped hook calls) --
+      // keep it at error. exhaustive-deps and react-refresh are advisory.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      // Pre-existing violations -- demote to warn until addressed
-      "prefer-const": "warn",
-      "no-useless-assignment": "warn",
-      "@typescript-eslint/no-unused-vars": "warn",
+      // Unused vars stays an error so dead imports from the refactor surface.
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
 );
