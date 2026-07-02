@@ -8935,7 +8935,11 @@ def create_app(
         # ``audited`` requires the operator to have hit Save & next on
         # the stage (see :func:`stage_audit_status`). Set-up-but-not-
         # touched stages used to count here; they no longer do.
-        stages_audited = legacy.audited_count(shooter_root)
+        # One pass: derive both the per-stage status list and the audited
+        # count from a single ``stage_statuses`` walk rather than also
+        # calling ``audited_count`` (which repeats the same audit-dir read).
+        stage_status_map = legacy.stage_statuses(shooter_root)
+        stages_audited = sum(1 for st in stage_status_map.values() if st == StageStatus.audited)
         stages_missing_trim = 0
         for s in legacy.stages:
             prim = next((v for v in s.videos if v.role == "primary"), None)
@@ -8986,7 +8990,6 @@ def create_app(
             )
             for k, g in groups.items()
         ]
-        stage_status_map = legacy.stage_statuses(shooter_root)
         return ShooterListEntry(
             slug=shooter_root.name,
             name=legacy.competitor_name or shooter_root.name,

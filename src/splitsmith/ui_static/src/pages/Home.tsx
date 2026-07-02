@@ -783,8 +783,22 @@ function AggregateStageTile({
     todo: "border-rule bg-surface-2 text-whisper",
     skipped: "border-rule bg-surface-2 text-muted",
   };
+  // Whole-tile border accent by the rolled-up stage tone, so the grid is
+  // scannable at a glance. rollupTone() only yields done/in_progress/todo;
+  // the rest fall back to the neutral border. Colour is a redundant cue --
+  // the chips and the "K of N audited" line carry the state in text too.
+  const shellBorder: Record<string, string> = {
+    done: "border-led-deep",
+    in_progress: "border-live/40",
+    todo: "border-rule-strong",
+    ready: "border-rule-strong",
+    partial: "border-rule-strong",
+    skipped: "border-rule-strong",
+  };
   return (
-    <div className="rounded-xl border border-rule-strong bg-surface-2 p-4">
+    <div
+      className={`rounded-xl border bg-surface-2 p-4 ${shellBorder[row.rollupTone] ?? "border-rule-strong"}`}
+    >
       <div className="mb-3 flex items-center gap-2.5">
         <span className="font-mono text-xs font-bold text-muted">
           {pad2(row.stageNumber)}
