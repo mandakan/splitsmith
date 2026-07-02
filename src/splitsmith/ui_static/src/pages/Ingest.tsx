@@ -171,14 +171,16 @@ function IngestInner({ slug }: { slug: string }) {
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
-  ) {
+  ): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
       await api.moveAssignment(slug, videoPath, toStage, role);
       await reload();
+      return true;
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
+      return false;
     } finally {
       setBusy(false);
     }

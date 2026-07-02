@@ -143,8 +143,12 @@ export function StageReferenceDrawer({
                 <span className="shrink-0 tabular-nums text-muted">
                   {roundsLabel(s)} {targetsLabel(s)}
                 </span>
-                <span className="w-6 shrink-0 text-right tabular-nums text-muted">
-                  {count === 0 ? "0" : count}
+                <span className="w-6 shrink-0 text-right tabular-nums">
+                  {count === 0 ? (
+                    <span className="text-muted">0</span>
+                  ) : (
+                    <span className="text-ink">{count}</span>
+                  )}
                 </span>
                 <StageDot status={status} />
                 <span className="sr-only">{STATUS_LABEL[status]}</span>
