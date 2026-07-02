@@ -37,6 +37,9 @@ interface WaveformProps {
    *  `shiftKey` lets the parent bypass peak-snapping (#28). */
   onDoubleClick?: (timeSeconds: number, shiftKey: boolean) => void;
   beepTime?: number | null;
+  /** Shaded region indicating the section that repeats while loop mode is
+   *  on (#29). Null/undefined = no shading. */
+  loopRegion?: { start: number; end: number } | null;
   /** Pixels-per-second of the rendered content. Null/undefined => fit
    *  the visible container width (no horizontal scroll). */
   pixelsPerSecond?: number | null;
@@ -54,6 +57,7 @@ export function Waveform({
   onScrubEnd,
   onDoubleClick,
   beepTime,
+  loopRegion,
   pixelsPerSecond,
   height = 128,
   className,
@@ -131,6 +135,17 @@ export function Waveform({
     const playheadColor = cssVar("--color-waveform-playhead", "#FF2D2D");
     const beepColor = cssVar("--color-waveform-beep", "#06B6D4");
 
+    // Loop region shading - drawn behind the bars so the waveform stays
+    // legible. Only visible when loop mode is on and a marker is focused.
+    if (loopRegion && duration > 0) {
+      const x1 = (Math.min(Math.max(loopRegion.start, 0), duration) / duration) * cssWidth;
+      const x2 = (Math.min(Math.max(loopRegion.end, 0), duration) / duration) * cssWidth;
+      if (x2 > x1) {
+        ctx.fillStyle = cssVar("--color-waveform-loop", "rgba(6, 182, 212, 0.12)");
+        ctx.fillRect(x1, 0, x2 - x1, cssHeight);
+      }
+    }
+
     // Bars: one per peak, scaled to content width.
     const n = peaks.length;
     if (n > 0) {
@@ -174,7 +189,7 @@ export function Waveform({
       ctx.stroke();
       ctx.restore();
     }
-  }, [peaks, duration, currentTime, beepTime, contentWidth, height, dpr, cssVar]);
+  }, [peaks, duration, currentTime, beepTime, loopRegion, contentWidth, height, dpr, cssVar]);
 
   // Auto-scroll the playhead into view during playback. Edge-trigger:
   // only adjust scroll when the playhead leaves a center band, otherwise

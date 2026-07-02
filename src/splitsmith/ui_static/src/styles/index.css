@@ -201,6 +201,7 @@
   --color-waveform-bar:             rgba(255, 45, 45, 0.35);
   --color-waveform-playhead:        #FF2D2D;
   --color-waveform-beep:            #06B6D4;
+  --color-waveform-loop:            rgba(6, 182, 212, 0.12);
 
   /* === Typography ======================================================= */
 

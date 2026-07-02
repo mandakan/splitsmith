@@ -68,6 +68,11 @@ import { useReleaseMediaOnUnmount } from "@/lib/utils";
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
 
+/** Region-loop window around the focused marker (#29): 0.5 s of pre-roll
+ *  to hear the shot coming, 0.7 s of tail to catch echo/AGC behavior. */
+const LOOP_PRE_S = 0.5;
+const LOOP_POST_S = 0.7;
+
 type SaveStatus =
   | { kind: "idle" }
   | { kind: "saving" }
@@ -123,6 +128,21 @@ export function Review() {
   // started (or where the user last scrubbed). On pause / end-of-clip
   // while loopMode is on, the playhead snaps back here.
   const loopAnchorRef = useRef<number | null>(null);
+
+  // Loop region around the focused marker (#29). Loop on + a focused
+  // marker = repeat a tight window around it; loop on + no focus keeps
+  // the old loop-to-anchor behavior.
+  const loopRegion = useMemo(() => {
+    if (!loopMode || !focusedMarkerId) return null;
+    const m = markers.find((x) => x.id === focusedMarkerId);
+    const dur = peaks?.duration;
+    if (!m || dur == null) return null;
+    return {
+      start: Math.max(0, m.time - LOOP_PRE_S),
+      end: Math.min(dur, m.time + LOOP_POST_S),
+    };
+  }, [loopMode, focusedMarkerId, markers, peaks]);
+
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
   const [zoom, setZoom] = useState<number | null>(null);
   // Callback ref attaches the ResizeObserver exactly when the wrapper
@@ -401,13 +421,25 @@ export function Review() {
     } else {
       el.pause();
       setIsPlaying(false);
-      if (loopMode && loopAnchorRef.current != null) {
-        const target = loopAnchorRef.current;
+      // Loop semantics: pause snaps back to region start (or play anchor if
+      // no region is active).
+      if (loopMode && (loopRegion != null || loopAnchorRef.current != null)) {
+        const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
         el.currentTime = mediaFromElapsed(target, el);
         setCurrentTime(target);
       }
     }
-  }, [loopMode, elapsedFromMedia, mediaFromElapsed]);
+  }, [loopMode, loopRegion, elapsedFromMedia, mediaFromElapsed]);
+
+  // Stepping focus to another marker while region-looping seeks to the
+  // new region's pre-roll so the "step -> loop -> K -> step" review flow
+  // needs no extra scrubbing. Keyed on focusedMarkerId only: marker drags
+  // recompute loopRegion each frame and must not re-trigger the seek.
+  useEffect(() => {
+    if (!loopMode || !isPlaying || !loopRegion) return;
+    handleScrub(loopRegion.start);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedMarkerId]);
 
   // rAF loop -- pulls currentTime out of whichever element is playing
   // and translates it back into the trimmed coordinate space.
@@ -418,8 +450,10 @@ export function Review() {
       if (el) {
         const t = elapsedFromMedia(el.currentTime, el);
         const dur = peaks?.duration ?? null;
-        if (loopMode && dur != null && t >= dur - 0.05) {
-          const target = loopAnchorRef.current ?? 0;
+        // Loop wrap: region end when a marker is focused, clip end otherwise.
+        const regionEnd = loopRegion?.end ?? (dur != null ? dur - 0.05 : null);
+        if (loopMode && regionEnd != null && t >= regionEnd) {
+          const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
           el.currentTime = mediaFromElapsed(target, el);
           setCurrentTime(target);
         } else {
@@ -432,7 +466,7 @@ export function Review() {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, loopMode, peaks, elapsedFromMedia, mediaFromElapsed]);
+  }, [isPlaying, loopMode, peaks, loopRegion, elapsedFromMedia, mediaFromElapsed]);
 
   const stepShot = useCallback(
     (delta: number) => {
@@ -783,6 +817,7 @@ export function Review() {
                   duration={peaks.duration}
                   currentTime={currentTime}
                   beepTime={filters.beep ? peaks.beep_time : null}
+                  loopRegion={loopRegion}
                   pixelsPerSecond={zoomToPixelsPerSecond(
                     zoom,
                     waveformViewport,
@@ -823,7 +858,7 @@ export function Review() {
                   size="sm"
                   onClick={() => setLoopMode((v) => !v)}
                   aria-pressed={loopMode}
-                  title="Loop the fixture (R)"
+                  title="Loop (R) - repeats around the focused shot when one is selected"
                   aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
                 >
                   <Repeat className="size-4" />
