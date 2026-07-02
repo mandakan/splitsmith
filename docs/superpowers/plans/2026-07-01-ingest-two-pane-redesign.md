@@ -11,8 +11,14 @@
 ## Global Constraints
 
 - Work only in `src/splitsmith/ui_static/`. All commands below run from that directory.
-- No new runtime or dev dependencies. No test runner is added.
-- Verification per task: `pnpm typecheck` (tsc), `pnpm lint` (eslint), `pnpm build` (tsc -b && vite build) must all pass. Interactive tasks additionally get a Playwright smoke driven via the Playwright MCP against the running dev app.
+- No new runtime dependencies. No test runner is added. (Eslint dev tooling was already installed but undeclared; it is now committed — see the eslint note below.)
+- Verification per task, run from `src/splitsmith/ui_static/`:
+  - `pnpm typecheck` (tsc -b --noEmit) must pass.
+  - `pnpm build` (tsc -b && vite build) must pass.
+  - Scoped lint must show **0 errors** on the redesign's files: `pnpm exec eslint src/pages/Ingest.tsx src/pages/ingest src/components/ingest` (drop any path that does not exist yet for the current task). New files must be error-free AND warning-free; a pre-existing `exhaustive-deps` warning at `Ingest.tsx:136` (the `reload` effect) is out of scope and may remain.
+  - Do NOT gate on whole-repo `pnpm lint` / `eslint .`: it is red from 45 `react-hooks/rules-of-hooks` errors in 4 files this redesign does not touch (`BeepSection.tsx`, `MarkerLayer.tsx`, `StageTimeSection.tsx`, `Coach.tsx`) — real pre-existing conditional-hook bugs, surfaced separately, not fixed here.
+  - Interactive tasks additionally get a Playwright smoke driven via the Playwright MCP against the running dev app (run by the controller, since it needs the live app + a match with unassigned footage).
+- `react-hooks/rules-of-hooks` is set to **error** in `eslint.config.js` — never demote it to make a gate pass. If new code trips it, fix the code (hooks before any early return).
 - Reuse existing design tokens (`bg-surface-*`, `border-rule*`, `text-ink*`, `text-led`, `text-muted`, `text-subtle`, `text-live`, `text-done`, `text-beep`, `--color-*`). Verify token names against `src/styles/index.css` before using them — bare `var(--foo)` refs fall back silently.
 - No visual reskin: keep the LED-red "Shot Timer" aesthetic. This is a layout restructure.
 - Imports use the `@/` alias (e.g. `@/lib/api`, `@/components/ui/button`).
