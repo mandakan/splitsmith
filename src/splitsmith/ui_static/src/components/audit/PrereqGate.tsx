@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { ApiError, api, type Job, type MatchProject } from "@/lib/api";
+import { StageTimeSection } from "@/components/StageTimeSection";
+import {
+  ApiError,
+  api,
+  type Job,
+  type MatchProject,
+  type StageEntry,
+  type StageVideo,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export type PrereqKind = "trim" | "detect";
@@ -49,6 +57,12 @@ export interface PrereqGateProps {
   onPingBeepChip?: () => void;
   /** True when the audit clip has been trimmed. */
   hasTrim: boolean;
+  /** Full stage entry + primary video, needed to mount the manual
+   *  stage-time editor inside the trim gate. Without them a manual
+   *  match dead-ends here: the checklist says the time is missing but
+   *  offers no way to enter one (scoreboard import is not required). */
+  stageEntry?: StageEntry;
+  primaryVideo?: StageVideo;
   /** Refresh the project after a trim completes. Wired only when kind === 'trim'. */
   onProjectUpdate?: (project: MatchProject) => void;
   /** Refresh the audit after detection completes. Wired only when kind === 'detect'. */
@@ -100,6 +114,8 @@ export function PrereqGate({
   beepReviewed = false,
   onPingBeepChip,
   hasTrim,
+  stageEntry,
+  primaryVideo,
   onProjectUpdate,
   onAuditRefresh,
 }: PrereqGateProps) {
@@ -264,7 +280,11 @@ export function PrereqGate({
           {
             label: "Stage time",
             done: hasStageTime,
-            sub: hasStageTime ? "from scoreboard" : "not imported",
+            sub: hasStageTime
+              ? stageEntry?.time_seconds_manual
+                ? "set manually"
+                : "from scoreboard"
+              : "not set",
           },
         ]
       : [
@@ -461,6 +481,24 @@ export function PrereqGate({
             );
           })}
         </ul>
+
+        {/* Manual stage-time entry, mounted inside the trim gate so a
+         *  match without scoreboard data can unblock itself right here.
+         *  The section self-gates: null until the primary has a beep,
+         *  a "Set stage time" affordance while the time is missing, a
+         *  pencil once a manual value exists. */}
+        {kind === "trim" && stageEntry && primaryVideo && onProjectUpdate ? (
+          <div className="mb-5">
+            <StageTimeSection
+              slug={slug}
+              stageNumber={stageNumber}
+              stage={stageEntry}
+              primary={primaryVideo}
+              onProjectUpdate={onProjectUpdate}
+              setError={setError}
+            />
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button

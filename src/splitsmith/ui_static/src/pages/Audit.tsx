@@ -1750,11 +1750,13 @@ export function Audit() {
                 primary.beep_time == null
                   ? "Detect or set the beep first."
                   : stage.time_seconds <= 0
-                    ? "Import a scoreboard so the stage time is known."
+                    ? "Set the stage time above, or import a scoreboard."
                     : null
               }
               hasSource
               hasStageTime={stage.time_seconds > 0}
+              stageEntry={stage}
+              primaryVideo={primary}
               hasBeep={primary.beep_time != null}
               beepConfidence={primary.beep_confidence ?? null}
               beepDiagnostic={beepDiagnostic?.reason ?? null}
@@ -2218,7 +2220,7 @@ function DetectShotsBadge({
   const reason = !hasBeep
     ? "Detect or set the beep first."
     : !hasStageTime
-      ? "Import a scoreboard so the stage time is known."
+      ? "Set the stage time in the stage prerequisites, or import a scoreboard."
       : null;
 
   // Auto-adopt an in-flight shot-detect job after reload. Auto-trim
@@ -2520,7 +2522,7 @@ function TrimNowBadge({
   const reason = !hasBeep
     ? "Detect or set the beep first."
     : !hasStageTime
-      ? "Import a scoreboard so the stage time is known."
+      ? "Set the stage time in the stage prerequisites, or import a scoreboard."
       : null;
   const running = job != null && (job.status === "pending" || job.status === "running");
 
