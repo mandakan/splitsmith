@@ -236,6 +236,7 @@ export function Shooters() {
               busy={busy === shooter.slug}
               onRemove={() => void remove(shooter.slug, shooter.name)}
               onOpenAudit={() => navigate(href("audit", shooter.slug))}
+              onOpenIngest={() => navigate(href("ingest", shooter.slug))}
               onRebuildTrims={() =>
                 void rebuildTrims(
                   shooter.slug,
@@ -321,6 +322,7 @@ function ShooterCard({
   busy,
   onRemove,
   onOpenAudit,
+  onOpenIngest,
   onRebuildTrims,
 }: {
   shooter: ShooterListEntry;
@@ -328,6 +330,7 @@ function ShooterCard({
   busy: boolean;
   onRemove: () => void;
   onOpenAudit: () => void;
+  onOpenIngest: () => void;
   onRebuildTrims: () => void;
 }) {
   const palette = pickPalette(shooter.slug, false);
@@ -415,9 +418,14 @@ function ShooterCard({
           <button
             type="button"
             onClick={onOpenAudit}
-            title={`Open ${shooter.name}'s audit`}
+            disabled={shooter.video_count === 0}
+            title={
+              shooter.video_count === 0
+                ? `Attach footage first - ${shooter.name} has no videos to audit`
+                : `Open ${shooter.name}'s audit`
+            }
             aria-label={`Open ${shooter.name}'s audit`}
-            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led disabled:opacity-30 disabled:hover:border-rule disabled:hover:bg-surface-2 disabled:hover:text-ink-2"
           >
             <ArrowRight className="size-4" />
           </button>
@@ -437,9 +445,13 @@ function ShooterCard({
         {labeledCameras.length === 0 ? (
           <p className="px-2 py-3 text-center font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted">
             No cameras attached yet. Go to{" "}
-            <a href="/ingest" className="text-led hover:text-led-soft">
+            <button
+              type="button"
+              onClick={onOpenIngest}
+              className="text-led hover:text-led-soft"
+            >
               Ingest
-            </a>{" "}
+            </button>{" "}
             to drop footage for this shooter.
           </p>
         ) : (

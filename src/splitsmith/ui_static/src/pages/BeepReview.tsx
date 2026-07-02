@@ -46,7 +46,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { BeepWaveformPicker } from "@/components/BeepSection";
 import { Kicker } from "@/components/ui";
@@ -58,10 +58,13 @@ import {
   type BeepQueueItem,
   type BeepQueueResponse,
 } from "@/lib/api";
+import { useMatchHref } from "@/lib/matchHref";
 import { modKeyGlyph } from "@/lib/platform";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 
 export function BeepReview() {
+  const navigate = useNavigate();
+  const href = useMatchHref();
   const [searchParams, setSearchParams] = useSearchParams();
   const confirmDialog = useConfirm();
   const [data, setData] = useState<BeepQueueResponse | null>(null);
@@ -339,7 +342,8 @@ export function BeepReview() {
         </div>
         {data.stages.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-muted">
-            All beeps confirmed. Shot detection can run on every stage.
+            All beeps confirmed. Shot detection runs automatically on
+            every confirmed stage.
           </div>
         ) : (
           data.stages.map((g) => (
@@ -373,8 +377,19 @@ export function BeepReview() {
             <div>
               <CheckCircle />
               <p className="mt-3">
-                Nothing pending. Shot detection can run on every stage.
+                Nothing pending. Shot detection runs automatically on
+                every confirmed stage.
               </p>
+              <Button
+                type="button"
+                className="mt-4"
+                onClick={() => navigate(href("audit"))}
+              >
+                <span className="font-display uppercase tracking-[0.08em]">
+                  Continue to Audit
+                </span>
+                <ChevronRight className="size-3.5" />
+              </Button>
             </div>
           </div>
         )}

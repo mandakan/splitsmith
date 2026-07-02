@@ -375,18 +375,20 @@ export function Compare() {
             onClick={() => setLayout("stack")}
           />
         </div>
+        {/* Grid export ships with #328; disabled + badged like the
+         *  Export page's compare ModeOption so the two surfaces agree. */}
         <Button
           type="button"
           variant="outline"
-          onClick={() =>
-            window.alert(
-              "Export from the Compare view runs the same pipeline as 'splitsmith compare export <match>'. Kick it off from the Export page (#330) -- the compare grid mode arrives with the rest of the multi-shooter export plumbing.",
-            )
-          }
+          disabled
+          title="Multi-shooter grid export arrives with #328. Single-shooter export lives on the Export page."
         >
           <ArrowDownToLine className="size-3.5" />
           <span className="font-display uppercase tracking-[0.08em]">
             Export FCPXML
+          </span>
+          <span className="rounded border border-rule px-1.5 font-mono text-[0.625rem] font-semibold text-muted">
+            #328
           </span>
         </Button>
       </div>

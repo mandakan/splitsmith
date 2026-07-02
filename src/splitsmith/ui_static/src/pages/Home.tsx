@@ -21,9 +21,8 @@
 import {
   ArrowDownToLine,
   ArrowRight,
-  Layers,
   Plus,
-  Settings as SettingsIcon,
+  Timer,
   UploadCloud,
   Users,
 } from "lucide-react";
@@ -222,12 +221,6 @@ export function Home() {
               Export Match
             </span>
           </Button>
-          <Button variant="ghost">
-            <SettingsIcon className="size-3.5" />
-            <span className="font-display uppercase tracking-[0.08em]">
-              Match Settings
-            </span>
-          </Button>
         </div>
       </div>
 
@@ -269,8 +262,47 @@ function ActiveVariant({
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
+  // Shooter-stages stalled on a missing stage time: footage is attached
+  // but time_seconds <= 0, so trim and shot detection silently wait
+  // (the backend's ``partial`` status). Legacy single-shooter projects
+  // (empty roster -> zero-cell rows) don't feed this banner.
+  const partialCells = rows.flatMap((row) =>
+    row.cells
+      .filter((cell) => cell.status === "partial")
+      .map((cell) => ({ slug: cell.shooter.slug, stage: row.stageNumber })),
+  );
   return (
     <>
+      {partialCells.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-3.5 rounded-xl border border-beep/40 bg-beep-tint px-5 py-3">
+          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-beep/40 bg-surface-2 text-beep">
+            <Timer className="size-3.5" />
+          </span>
+          <span className="flex-1 font-mono text-[0.75rem] uppercase tracking-[0.06em] text-ink-2">
+            <b className="font-bold text-beep">{partialCells.length}</b>{" "}
+            shooter-stage{partialCells.length === 1 ? "" : "s"} missing a
+            stage time &middot;{" "}
+            <span className="text-muted">
+              trim and shot detection wait until a time is entered
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              navigate(
+                href(
+                  "audit",
+                  partialCells[0].slug,
+                  String(partialCells[0].stage),
+                ),
+              )
+            }
+            className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-beep hover:text-ink"
+          >
+            Enter stage time <ArrowRight className="size-3" />
+          </button>
+        </div>
+      )}
       {/* Match-progress summary */}
       <section
         className="relative mb-6 overflow-hidden rounded-2xl border border-rule-strong p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_48px_-24px_rgba(0,0,0,0.6)]"
@@ -385,7 +417,7 @@ function ActiveVariant({
             }
           />
         )}
-        <AddShooterCard />
+        <AddShooterCard onClick={() => navigate(href("shooters"))} />
       </div>
 
       <SectionHead
@@ -476,12 +508,6 @@ function EmptyVariant({
               Add shooter footage
             </span>
           </Button>
-          <Button variant="outline">
-            <Layers className="size-3.5" />
-            <span className="font-display uppercase tracking-[0.1em]">
-              Edit stage list
-            </span>
-          </Button>
         </div>
       </section>
 
@@ -535,7 +561,7 @@ function EmptyVariant({
           className="flex items-center gap-3.5 rounded-xl border border-dashed border-rule-strong bg-transparent px-4 py-4 text-led"
           role="button"
           aria-label="Add a squadmate"
-          onClick={() => navigate("/shooters")}
+          onClick={() => navigate(href("shooters"))}
         >
           <span className="inline-flex size-11 items-center justify-center rounded-full border border-dashed border-rule-strong bg-surface-3 text-led">
             <Plus className="size-5" />
@@ -562,7 +588,7 @@ function EmptyVariant({
       </div>
 
       <SectionHead title="Get going" />
-      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
         <HelpCard
           icon={<UploadCloud className="size-4" />}
           title="Drop your SD card"
@@ -575,12 +601,7 @@ function EmptyVariant({
           title="Bring squadmates"
           desc="Add up to 4 shooters' footage for multi-shooter compare grids and side-by-side exports."
           cta="Add shooter"
-        />
-        <HelpCard
-          icon={<Layers className="size-4" />}
-          title="Adjust the stage list"
-          desc="Reality differs from scoreboard? Add, remove, or rename stages without losing audit progress."
-          cta="Edit stages"
+          onClick={() => navigate(href("shooters"))}
         />
       </div>
     </>
@@ -720,10 +741,11 @@ function ShooterCard({
   );
 }
 
-function AddShooterCard() {
+function AddShooterCard({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className="flex items-center justify-center gap-2.5 rounded-xl border border-dashed border-rule-strong bg-transparent p-4 font-display text-[0.8125rem] font-semibold uppercase tracking-[0.1em] text-muted transition-all hover:border-led-deep hover:bg-led/10 hover:text-led"
     >
       <span className="inline-flex size-6 items-center justify-center rounded-full border-[1.5px] border-dashed border-current">
@@ -779,7 +801,10 @@ function AggregateStageTile({
     done: "border-led-deep bg-led/15 text-led",
     in_progress: "border-live/50 bg-live/10 text-live",
     ready: "border-rule-strong bg-surface-3 text-ink-2",
-    partial: "border-rule-strong bg-surface-3 text-ink-2",
+    // Distinct from "ready": the pipeline is stalled on a missing stage
+    // time, not waiting its turn. The chip title carries the words
+    // ("Stage time missing"); the tone is the redundant cue.
+    partial: "border-beep/40 bg-beep-tint text-beep",
     todo: "border-rule bg-surface-2 text-whisper",
     skipped: "border-rule bg-surface-2 text-muted",
   };

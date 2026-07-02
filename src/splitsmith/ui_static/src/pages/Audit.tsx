@@ -2054,7 +2054,12 @@ export function Audit() {
                 shooters.find((s) => s.slug === slugParam)?.name ?? null
               }
               stats={summaryStats}
-              onJumpToOverview={() => navigate(href("shooters"))}
+              onJumpToOverview={() => navigate(href(""))}
+              onExport={
+                slugParam
+                  ? () => navigate(href("export", slugParam))
+                  : undefined
+              }
               nextShooterLabel={
                 nextShooterParam
                   ? (shooters.find((s) => s.slug === nextShooterParam)?.name ??
