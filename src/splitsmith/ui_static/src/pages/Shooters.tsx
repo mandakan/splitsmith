@@ -42,8 +42,7 @@ import {
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
-const RACING_PALETTES = ["ma", "jl", "pe", "rj", "manual"] as const;
-type Palette = (typeof RACING_PALETTES)[number];
+type Palette = "ma" | "jl" | "pe" | "rj" | "manual";
 
 function pickPalette(slug: string, isYou: boolean): Palette {
   if (isYou) return "ma";

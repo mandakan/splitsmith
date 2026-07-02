@@ -518,7 +518,7 @@ export function PromoteReview() {
       .filter((s) => s.time !== null)
       .map((s) => {
         let color = "var(--color-split-ok)"; // yellow; pending
-        let glyph = "";
+        let glyph: string;
         let dashed = false;
         let thick = false;
         if (s.status === "confirmed") {
