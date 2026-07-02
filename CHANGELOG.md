@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/mandakan/splitsmith/compare/v0.5.3...v0.6.0) (2026-07-02)
+
+
+### Features
+
+* **ingest:** two-pane master-detail redesign of Add Footage ([#513](https://github.com/mandakan/splitsmith/issues/513)) ([56e09ad](https://github.com/mandakan/splitsmith/commit/56e09ad90e8fa8838282a379be75445d1769cc13))
+* **ui:** edit + verify camera mount/model on the ingest CameraCard ([#511](https://github.com/mandakan/splitsmith/issues/511)) ([4af81d5](https://github.com/mandakan/splitsmith/commit/4af81d51c165a7089a1a841c2f6327f5a2c7992c))
+* **ui:** in-app stage reference on the ingest page ([#508](https://github.com/mandakan/splitsmith/issues/508)) ([f1a0437](https://github.com/mandakan/splitsmith/commit/f1a0437e730a781243a929f1c9b64ab643637002))
+* **ui:** surface target shooter on ingest + move footage between shooters ([#510](https://github.com/mandakan/splitsmith/issues/510)) ([1ee0fb5](https://github.com/mandakan/splitsmith/commit/1ee0fb5ac369b9c4c30fba5cd784e5adb46a7ddb))
+
+
+### Build / CI
+
+* **deps:** re-lock with uv 0.11.25 ([#512](https://github.com/mandakan/splitsmith/issues/512)) ([3f2a726](https://github.com/mandakan/splitsmith/commit/3f2a7261d823fb332f96a257c7b8454b41c507d1))
+
 ## [0.5.3](https://github.com/mandakan/splitsmith/compare/v0.5.2...v0.5.3) (2026-06-24)
 
 
