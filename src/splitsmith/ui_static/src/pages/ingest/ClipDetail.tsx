@@ -132,7 +132,7 @@ export function ClipDetail({
           <div className="truncate font-mono text-[0.8125rem] font-semibold text-ink">
             {filename}
           </div>
-          {(clip.camera || cameraDetail) && (
+          {clip.camera && (
             <div className="mt-0.5 truncate font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-muted">
               {clip.camera?.label}
               {cameraDetail && <> &middot; {cameraDetail}</>}
