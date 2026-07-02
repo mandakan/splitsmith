@@ -6428,9 +6428,7 @@ def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_con
     assert slugs == ["ma", "jl"]
 
 
-def test_list_match_shooters_includes_per_stage_statuses(
-    tmp_path: Path, _user_config_home: Path
-) -> None:
+def test_list_match_shooters_includes_per_stage_statuses(tmp_path: Path, _user_config_home: Path) -> None:
     """The shooters payload carries a per-stage status list so the match
     Overview can render an aggregate grid without fetching each project."""
     from splitsmith import match_model
