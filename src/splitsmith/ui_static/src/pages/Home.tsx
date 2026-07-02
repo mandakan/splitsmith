@@ -28,7 +28,7 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext } from "react-router-dom";
 
 import { Avatar, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ import {
 import {
   deriveStageStatus,
   isNextUpCandidate,
+  statusLabel,
 } from "@/lib/stageStatus";
 import {
   buildStageMatrix,
@@ -401,7 +402,13 @@ function ActiveVariant({
         }
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        {/* Per-shooter chip tiles land in Task 6 */}
+        {rows.map((row) => (
+          <AggregateStageTile
+            key={row.stageNumber}
+            row={row}
+            hrefFor={(slug, stage) => href("audit", slug, String(stage))}
+          />
+        ))}
       </div>
     </>
   );
@@ -754,6 +761,52 @@ function EmptyStageTile({ view }: { view: StageView }) {
         ) : (
           <span className="text-subtle">ready to record</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AggregateStageTile({
+  row,
+  hrefFor,
+}: {
+  row: StageMatrixRow;
+  hrefFor: (slug: string, stage: number) => string;
+}) {
+  // Per-shooter chip color by status tone. Mirrors the tile tones used
+  // elsewhere; kept local so the chip palette is obvious at a glance.
+  const chipTone: Record<string, string> = {
+    done: "border-led-deep bg-led/15 text-led",
+    in_progress: "border-live/50 bg-live/10 text-live",
+    ready: "border-rule-strong bg-surface-3 text-ink-2",
+    partial: "border-rule-strong bg-surface-3 text-ink-2",
+    todo: "border-rule bg-surface-2 text-whisper",
+    skipped: "border-rule bg-surface-2 text-muted",
+  };
+  return (
+    <div className="rounded-xl border border-rule-strong bg-surface-2 p-4">
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="font-mono text-xs font-bold text-muted">
+          {pad2(row.stageNumber)}
+        </span>
+        <span className="truncate font-display text-sm font-semibold uppercase tracking-[0.04em] text-ink">
+          {row.stageName}
+        </span>
+      </div>
+      <div className="mb-2.5 flex flex-wrap gap-1.5">
+        {row.cells.map((cell) => (
+          <Link
+            key={cell.shooter.slug}
+            to={hrefFor(cell.shooter.slug, row.stageNumber)}
+            title={`${cell.shooter.name} -- ${statusLabel(cell.status)}`}
+            className={`inline-flex size-7 items-center justify-center rounded-full border font-mono text-[0.625rem] font-bold uppercase transition-transform hover:-translate-y-0.5 ${chipTone[cell.tone] ?? chipTone.todo}`}
+          >
+            {initials(cell.shooter.name)}
+          </Link>
+        ))}
+      </div>
+      <div className="font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
+        {row.auditedCount} of {row.cells.length} audited
       </div>
     </div>
   );
