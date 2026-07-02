@@ -14,6 +14,13 @@ export interface BeepStatusChipProps {
    *  ALSO drives a banner sibling (BeepAnomalyBanner) with the
    *  "Review this beep" deep-link; this chip itself is read-only. */
   diagnostic: string | null;
+  /** Whether the operator has reviewed and confirmed this beep
+   *  (``primary.beep_reviewed``). This is the single source of truth for
+   *  "confirmed" -- the same field the backend's beep-queue status checks
+   *  before it ever looks at confidence. When true, the chip reads
+   *  "confirmed": low confidence and heuristic diagnostics no longer
+   *  override the operator's explicit confirmation. */
+  reviewed: boolean;
 }
 
 /** Imperative API on the chip. Surfaces a single ``flash()`` that other
@@ -45,7 +52,7 @@ export interface BeepStatusChipHandle {
  * diagnostic banner and deep-link into the queue for the fix.
  */
 export const BeepStatusChip = forwardRef<BeepStatusChipHandle, BeepStatusChipProps>(
-  function BeepStatusChip({ beepTime, confidence, diagnostic }, ref) {
+  function BeepStatusChip({ beepTime, confidence, diagnostic, reviewed }, ref) {
     type Tone = "done" | "warn" | "no_beep";
     let tone: Tone;
     let glyph: string;
@@ -56,17 +63,21 @@ export const BeepStatusChip = forwardRef<BeepStatusChipHandle, BeepStatusChipPro
       tone = "no_beep";
       glyph = "×";
       suffix = " · review";
-    } else if (lowConfidence || diagnostic != null) {
+    } else if (!reviewed && (lowConfidence || diagnostic != null)) {
       // Either the detector is uncertain *or* the post-audit heuristic
       // ("first shot lands 5.10s after the beep ...") thinks the beep is
-      // on the wrong sound. Either way the operator needs to know.
+      // on the wrong sound. Either way the operator needs to know -- but
+      // only until they confirm. A reviewed beep is confirmed; the
+      // operator's explicit sign-off outranks both the confidence score
+      // and the heuristic, matching the backend's ``beep_reviewed``-first
+      // status classification.
       tone = "warn";
       glyph = "!";
       suffix = " · likely wrong";
     } else {
       tone = "done";
       glyph = "●";
-      suffix = "";
+      suffix = reviewed ? " · confirmed" : "";
     }
 
     // Flash state. PrereqGate's beep row (and any future surface that

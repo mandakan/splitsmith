@@ -32,8 +32,10 @@
 import {
   Check,
   ChevronLeft,
+  ChevronRight,
   Crosshair,
   Loader2,
+  RefreshCw,
   Undo2,
   Volume2,
 } from "lucide-react";
@@ -49,6 +51,7 @@ import { useSearchParams } from "react-router-dom";
 import { BeepWaveformPicker } from "@/components/BeepSection";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
@@ -60,10 +63,15 @@ import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 
 export function BeepReview() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const confirmDialog = useConfirm();
   const [data, setData] = useState<BeepQueueResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Re-detect runs an async job; surface its progress inline on the
+  // Re-detect button. Null pct = running with no reported progress yet.
+  const [redetecting, setRedetecting] = useState(false);
+  const [redetectPct, setRedetectPct] = useState<number | null>(null);
   // Deep-link from Audit's anomaly banner: ?focus=slug::stage::video.
   // Honored once on first queue load; cleared from the URL afterwards so
   // the focus doesn't keep snapping back as the user works the queue.
@@ -86,7 +94,11 @@ export function BeepReview() {
 
   const reload = useCallback(async () => {
     try {
-      const q = await api.getBeepQueue();
+      // Include confirmed items so the operator can reopen an
+      // already-confirmed beep to edit or re-detect it (not just work
+      // the pending backlog). Confirmed items render collapsed under
+      // each stage; the pending workflow below filters them back out.
+      const q = await api.getBeepQueue(true);
       setData(q);
       setError(null);
     } catch (e) {
@@ -98,37 +110,47 @@ export function BeepReview() {
     void reload();
   }, [reload]);
 
+  // Every item, pending + confirmed, in stage/shooter order. ``active``
+  // resolves against this so a reopened confirmed item can be selected.
   const flatItems: BeepQueueItem[] = useMemo(
     () => (data?.stages ?? []).flatMap((g) => g.items),
     [data],
   );
+  // The pending backlog drives the confirm workflow: auto-select,
+  // keyboard next/prev/skip, and "save & continue" advance. Confirmed
+  // items are reachable only by clicking them in the collapsed section.
+  const pendingItems: BeepQueueItem[] = useMemo(
+    () => flatItems.filter((it) => it.status !== "confirmed"),
+    [flatItems],
+  );
 
   // Pick the first pending if nothing's selected -- or the deep-link
-  // target if ?focus=slug::stage::video matches a pending item.
+  // target if ?focus=slug::stage::video matches any item (now that
+  // confirmed items are in the queue, a link may land on one).
   useEffect(() => {
-    if (activeKey || flatItems.length === 0) return;
+    if (activeKey) return;
     if (focusParam && !focusConsumedRef.current) {
       focusConsumedRef.current = true;
       const match = flatItems.find((it) => keyOf(it) === focusParam);
-      if (match) {
-        setActiveKey(focusParam);
-        const next = new URLSearchParams(searchParams);
-        next.delete("focus");
-        setSearchParams(next, { replace: true });
-        return;
-      }
-      // Item not in the queue (already confirmed, missing, or wrong
-      // slug). Fall through to the first-pending default and surface a
-      // note so the user knows their link didn't land where they aimed.
-      setError(
-        `Beep ${focusParam} isn't in the queue right now -- it may already be confirmed or have been removed.`,
-      );
       const next = new URLSearchParams(searchParams);
       next.delete("focus");
       setSearchParams(next, { replace: true });
+      if (match) {
+        setActiveKey(focusParam);
+        return;
+      }
+      // Item not in the queue (missing or wrong slug). Fall through to
+      // the first-pending default and surface a note so the user knows
+      // their link didn't land where they aimed.
+      setError(
+        `Beep ${focusParam} isn't in the queue right now -- it may have been removed.`,
+      );
     }
-    setActiveKey(keyOf(flatItems[0]));
-  }, [flatItems, activeKey, focusParam, searchParams, setSearchParams]);
+    // Default selection is the first *pending* item. When everything is
+    // confirmed we leave nothing selected so the right pane shows the
+    // "nothing pending" state instead of a confirmed item.
+    if (pendingItems.length > 0) setActiveKey(keyOf(pendingItems[0]));
+  }, [flatItems, pendingItems, activeKey, focusParam, searchParams, setSearchParams]);
 
   const active = activeKey
     ? flatItems.find((it) => keyOf(it) === activeKey) ?? null
@@ -159,10 +181,11 @@ export function BeepReview() {
           source: draftTime != null ? "manual" : "detected",
         });
         setData(next);
-        // Move to next pending item in the same stage if any, else next overall.
-        const updatedFlat = next.stages.flatMap((g) => g.items);
-        const nextItem = updatedFlat[0];
-        setActiveKey(nextItem ? keyOf(nextItem) : null);
+        // Advance to the next *pending* item after the one just
+        // confirmed, in stage/shooter order -- not the global first
+        // pending. The old code selected ``updatedFlat[0]`` every time,
+        // which yanked the operator back to stage 1 on every save.
+        setActiveKey(nextPendingKey(next, keyOf(item)));
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : String(e));
       } finally {
@@ -172,12 +195,65 @@ export function BeepReview() {
     [],
   );
 
+  // Re-detect a beep from scratch. Destructive: it discards the current
+  // (possibly confirmed) beep, this stage's trim cache, and any
+  // shot-detection audit, then re-runs auto-detection. Gated behind a
+  // confirm dialog because the operator may be reaching back into an
+  // already-confirmed stage.
+  const redetect = useCallback(
+    async (item: BeepQueueItem) => {
+      const res = await confirmDialog({
+        title: "Re-detect this beep?",
+        body: (
+          <>
+            Re-running detection on{" "}
+            <b>
+              {item.shooter_name} · stage {item.stage_number}
+            </b>{" "}
+            discards the current beep, this stage&apos;s trim cache, and
+            any shot-detection audit, then searches the audio again. You
+            will need to review and confirm the new beep.
+          </>
+        ),
+        confirmLabel: "Re-detect",
+      });
+      if (!res.confirmed) return;
+      setBusy(true);
+      setRedetecting(true);
+      setRedetectPct(null);
+      setError(null);
+      try {
+        const job = await api.detectBeepForVideo(
+          item.slug,
+          item.stage_number,
+          item.video_id,
+          true,
+        );
+        await api.pollJob(job.id, (j) => {
+          setRedetectPct(j.progress != null ? Math.round(j.progress * 100) : null);
+        });
+        const next = await api.getBeepQueue(true);
+        setData(next);
+        // Keep this item selected so the operator lands on the fresh
+        // beep to review it.
+        setActiveKey(keyOf(item));
+      } catch (e) {
+        setError(e instanceof ApiError ? e.detail : String(e));
+      } finally {
+        setBusy(false);
+        setRedetecting(false);
+        setRedetectPct(null);
+      }
+    },
+    [confirmDialog],
+  );
+
   const skip = useCallback(() => {
-    if (!active) return;
-    const idx = flatItems.findIndex((it) => keyOf(it) === keyOf(active));
-    const next = flatItems[idx + 1] ?? flatItems[0] ?? null;
-    setActiveKey(next ? keyOf(next) : null);
-  }, [active, flatItems]);
+    if (!active || !data) return;
+    // Skip = defer this one and move to the next pending in order (same
+    // advance rule as save & continue), not the global first item.
+    setActiveKey(nextPendingKey(data, keyOf(active)));
+  }, [active, data]);
 
   const prevItem = useCallback(() => {
     if (!active) return;
@@ -202,10 +278,10 @@ export function BeepReview() {
       ) {
         return;
       }
-      if (e.key === "Enter" && active && !busy) {
-        e.preventDefault();
-        void confirm(active);
-      } else if (e.key === "s" || e.key === "S") {
+      // Enter (confirm) is owned by ActiveDetail's own handler, which
+      // knows about the picked draft + confirmed state. Handling it here
+      // too would fire a second, draft-less confirm on the same press.
+      if (e.key === "s" || e.key === "S") {
         e.preventDefault();
         skip();
       } else if (e.key === "ArrowDown" || e.key === "j" || e.key === "J") {
@@ -286,6 +362,9 @@ export function BeepReview() {
             onConfirm={(draftTime) =>
               void confirm(active, draftTime ?? undefined)
             }
+            onRedetect={() => void redetect(active)}
+            redetecting={redetecting}
+            redetectPct={redetectPct}
             onSkip={skip}
             onError={setError}
           />
@@ -322,6 +401,26 @@ function CheckCircle() {
 
 function keyOf(item: BeepQueueItem): string {
   return `${item.slug}::${item.stage_number}::${item.video_id}`;
+}
+
+/** Next item still needing review after ``afterKey``, in stage/shooter
+ *  order. Prefers the first pending item *after* the current position;
+ *  failing that, wraps to the first pending anywhere (to mop up items
+ *  skipped earlier); returns null only when the whole queue is clean.
+ *  This is the "save & continue" advance -- it must not snap back to the
+ *  first stage while later stages are still pending. */
+function nextPendingKey(
+  resp: BeepQueueResponse,
+  afterKey: string,
+): string | null {
+  const all = resp.stages.flatMap((g) => g.items);
+  const isPending = (it: BeepQueueItem) => it.status !== "confirmed";
+  const idx = all.findIndex((it) => keyOf(it) === afterKey);
+  for (let i = idx + 1; i < all.length; i++) {
+    if (isPending(all[i])) return keyOf(all[i]);
+  }
+  const firstPending = all.find(isPending);
+  return firstPending ? keyOf(firstPending) : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -382,13 +481,24 @@ function StageGroup({
   activeKey: string | null;
   onPick: (k: string) => void;
 }) {
-  if (group.items.length === 0 && group.total_primaries === group.confirmed) {
+  const pending = group.items.filter((it) => it.status !== "confirmed");
+  const confirmed = group.items.filter((it) => it.status === "confirmed");
+  // Keep the confirmed section open whenever the selected item lives in
+  // it (e.g. the operator just clicked one to edit, or advanced onto it)
+  // so it never collapses out from under them.
+  const activeIsConfirmedHere = confirmed.some((it) => keyOf(it) === activeKey);
+  const [expanded, setExpanded] = useState(false);
+  const showConfirmed = expanded || activeIsConfirmedHere;
+
+  // Edge case: a stage with no primary cameras yet -- nothing to review.
+  if (group.items.length === 0) {
     return (
       <div className="border-t border-rule px-5 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-        Stage {pad2(group.stage_number)} &middot; {group.stage_name} -- {group.confirmed} of {group.total_primaries} confirmed
+        Stage {pad2(group.stage_number)} &middot; {group.stage_name} -- no primary cameras
       </div>
     );
   }
+
   return (
     <div className="border-t border-rule">
       <div className="flex items-center gap-2 bg-surface-2 px-5 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
@@ -400,49 +510,88 @@ function StageGroup({
           {group.confirmed} of {group.total_primaries} confirmed
         </span>
       </div>
-      {group.items.map((item) => {
-        const k = keyOf(item);
-        return (
+      {pending.map((item) => (
+        <ItemRow
+          key={keyOf(item)}
+          item={item}
+          active={activeKey === keyOf(item)}
+          onPick={onPick}
+        />
+      ))}
+      {confirmed.length > 0 ? (
+        <>
           <button
-            key={k}
             type="button"
-            onClick={() => onPick(k)}
-            className={cn(
-              "grid w-full grid-cols-[28px_1fr_50px_24px] items-center gap-2.5 border-b border-rule px-5 py-2 text-left hover:bg-surface-2",
-              activeKey === k && "border-l-2 border-l-led bg-led/[0.06]",
-            )}
+            onClick={() => setExpanded((e) => !e)}
+            aria-expanded={showConfirmed}
+            className="flex w-full items-center gap-1.5 border-b border-rule bg-surface px-5 py-1.5 text-left font-mono text-[0.5625rem] font-semibold uppercase tracking-[0.08em] text-subtle hover:bg-surface-2 hover:text-muted"
           >
-            <ShooterDot initials={initials(item.shooter_name)} slug={item.slug} />
-            <div className="min-w-0">
-              <div className="truncate font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
-                {item.shooter_name}
-              </div>
-              <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
-                {item.beep_time != null
-                  ? `t ${item.beep_time.toFixed(3)}s`
-                  : "no beep"}
-              </div>
-            </div>
-            <span
+            <ChevronRight
               className={cn(
-                "text-right font-mono text-[0.6875rem] font-semibold tabular-nums",
-                item.beep_confidence != null && item.beep_confidence < 0.6
-                  ? "text-live"
-                  : "text-ink-2",
+                "size-3 transition-transform",
+                showConfirmed && "rotate-90",
               )}
-            >
-              {item.beep_confidence != null
-                ? item.beep_confidence.toFixed(2)
-                : "--"}
-            </span>
-            <StatusGlyph
-              status={item.status}
-              active={activeKey === k}
+              aria-hidden
             />
+            {showConfirmed ? "Hide" : "Show"} {confirmed.length} confirmed
           </button>
-        );
-      })}
+          {showConfirmed
+            ? confirmed.map((item) => (
+                <ItemRow
+                  key={keyOf(item)}
+                  item={item}
+                  active={activeKey === keyOf(item)}
+                  onPick={onPick}
+                />
+              ))
+            : null}
+        </>
+      ) : null}
     </div>
+  );
+}
+
+function ItemRow({
+  item,
+  active,
+  onPick,
+}: {
+  item: BeepQueueItem;
+  active: boolean;
+  onPick: (k: string) => void;
+}) {
+  const k = keyOf(item);
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(k)}
+      className={cn(
+        "grid w-full grid-cols-[28px_1fr_50px_24px] items-center gap-2.5 border-b border-rule px-5 py-2 text-left hover:bg-surface-2",
+        active && "border-l-2 border-l-led bg-led/[0.06]",
+        item.status === "confirmed" && !active && "opacity-80",
+      )}
+    >
+      <ShooterDot initials={initials(item.shooter_name)} slug={item.slug} />
+      <div className="min-w-0">
+        <div className="truncate font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
+          {item.shooter_name}
+        </div>
+        <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
+          {item.beep_time != null ? `t ${item.beep_time.toFixed(3)}s` : "no beep"}
+        </div>
+      </div>
+      <span
+        className={cn(
+          "text-right font-mono text-[0.6875rem] font-semibold tabular-nums",
+          item.beep_confidence != null && item.beep_confidence < 0.6
+            ? "text-live"
+            : "text-ink-2",
+        )}
+      >
+        {item.beep_confidence != null ? item.beep_confidence.toFixed(2) : "--"}
+      </span>
+      <StatusGlyph status={item.status} active={active} />
+    </button>
   );
 }
 
@@ -486,6 +635,16 @@ function StatusGlyph({
       />
     );
   }
+  if (status === "confirmed") {
+    return (
+      <span
+        aria-label="Confirmed"
+        className="inline-flex size-3.5 items-center justify-center rounded-full bg-done text-bg"
+      >
+        <Check className="size-2.5" strokeWidth={3.5} aria-hidden />
+      </span>
+    );
+  }
   if (status === "missing") {
     return (
       <span
@@ -512,6 +671,9 @@ function ActiveDetail({
   item,
   busy,
   onConfirm,
+  onRedetect,
+  redetecting,
+  redetectPct,
   onSkip,
   onError,
 }: {
@@ -521,6 +683,13 @@ function ActiveDetail({
    *  when confirming the detector's candidate as-is). When set, the
    *  parent fires the override + re-trim chain before marking reviewed. */
   onConfirm: (draftTime: number | null) => void;
+  /** Re-run auto-detection from scratch (destructive; gated by a confirm
+   *  dialog in the parent). Discards the current beep + trim + shots. */
+  onRedetect: () => void;
+  /** True while this item's re-detect job is in flight. */
+  redetecting: boolean;
+  /** Re-detect job progress percent, or null when unknown/idle. */
+  redetectPct: number | null;
   onSkip: () => void;
   onError: (msg: string | null) => void;
 }) {
@@ -540,6 +709,11 @@ function ActiveDetail({
 
   const mode: DetailMode =
     draftTime != null ? "picking" : item.beep_time == null ? "empty" : "idle";
+  // Already-confirmed item reopened for editing. In this state there's
+  // nothing to "confirm" -- the operator either edits (pick a new point
+  // -> mode flips to "picking") or re-detects. Drives the confirmed
+  // heading/chip/note and hides the redundant "Confirm beep" button.
+  const confirmedIdle = mode === "idle" && item.beep_reviewed;
 
   // The preview MP4 centres on whichever time is "live": the draft when
   // the operator has picked one, otherwise the detector's candidate.
@@ -554,8 +728,12 @@ function ActiveDetail({
 
   const handleConfirm = useCallback(() => {
     if (mode === "empty") return;
+    // A reopened confirmed beep with no fresh pick has nothing to
+    // confirm -- editing means picking a new point (mode -> "picking"),
+    // otherwise the operator re-detects or leaves it as-is.
+    if (confirmedIdle) return;
     onConfirm(draftTime);
-  }, [mode, draftTime, onConfirm]);
+  }, [mode, confirmedIdle, draftTime, onConfirm]);
 
   // Keyboard:
   //   Enter -> confirm (with or without draft, gated by mode)
@@ -572,7 +750,7 @@ function ActiveDetail({
       ) {
         return;
       }
-      if (e.key === "Enter" && !busy && mode !== "empty") {
+      if (e.key === "Enter" && !busy && mode !== "empty" && !confirmedIdle) {
         e.preventDefault();
         handleConfirm();
       } else if ((e.key === "u" || e.key === "U") && draftTime != null) {
@@ -582,7 +760,7 @@ function ActiveDetail({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, mode, draftTime, handleConfirm]);
+  }, [busy, mode, confirmedIdle, draftTime, handleConfirm]);
 
   const pickerInstructions =
     mode === "empty"
@@ -608,14 +786,18 @@ function ActiveDetail({
               ? "border-led/60 bg-led/[0.08] text-led"
               : mode === "empty"
                 ? "border-live/50 bg-live/[0.08] text-live"
-                : "border-rule-strong bg-surface-2 text-muted",
+                : confirmedIdle
+                  ? "border-done/50 bg-done/[0.08] text-done"
+                  : "border-rule-strong bg-surface-2 text-muted",
           )}
         >
           {mode === "picking"
             ? "• unsaved draft"
             : mode === "empty"
               ? "• awaiting input"
-              : "· clean"}
+              : confirmedIdle
+                ? "· confirmed"
+                : "· clean"}
         </span>
       </div>
 
@@ -627,7 +809,9 @@ function ActiveDetail({
               ? "Pick the new beep"
               : mode === "empty"
                 ? "No beep detected"
-                : "Confirm the beep"}
+                : confirmedIdle
+                  ? "Beep confirmed"
+                  : "Confirm the beep"}
           </h1>
           <p className="max-w-2xl text-sm text-muted">
             {mode === "picking" && draftTime != null ? (
@@ -645,6 +829,16 @@ function ActiveDetail({
                 the waveform where the beep should be -- trim and shot
                 detection won&apos;t run on this video until a beep is
                 set.
+              </>
+            ) : confirmedIdle ? (
+              <>
+                Confirmed beep at{" "}
+                <b className="font-mono text-done tabular-nums">
+                  {detectedSeconds!.toFixed(3)}s
+                </b>
+                . Click the waveform to move it, or re-detect to search
+                the audio again -- either one discards this stage&apos;s
+                trim + shot audit and re-runs the chain.
               </>
             ) : (
               <>
@@ -800,6 +994,19 @@ function ActiveDetail({
                 the chain completes.
               </span>
             </div>
+          ) : confirmedIdle ? (
+            <div className="mb-3 flex items-start gap-2.5 rounded-md border border-done/40 bg-done/[0.08] px-3 py-2 text-[0.8125rem] text-ink-2">
+              <Check
+                className="mt-px size-4 shrink-0 text-done"
+                strokeWidth={3}
+                aria-hidden
+              />
+              <span>
+                This beep is confirmed. Editing (pick a new point) or
+                re-detecting discards this stage&apos;s trim cache and any
+                shot-detection audit, then re-runs the chain.
+              </span>
+            </div>
           ) : null}
 
           <div className="flex flex-wrap items-center gap-2">
@@ -815,7 +1022,7 @@ function ActiveDetail({
                   Pick a beep to continue
                 </span>
               </Button>
-            ) : (
+            ) : confirmedIdle ? null : (
               <Button
                 type="button"
                 onClick={handleConfirm}
@@ -845,6 +1052,26 @@ function ActiveDetail({
                 <kbd className="ml-1.5 rounded border border-current/40 px-1 font-mono text-[0.625rem]">
                   U
                 </kbd>
+              </Button>
+            ) : null}
+            {item.beep_time != null ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onRedetect}
+                disabled={busy}
+                title="Discard this beep and re-run auto-detection from scratch"
+              >
+                {redetecting ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+                <span className="font-display uppercase tracking-[0.08em] tabular-nums">
+                  {redetecting
+                    ? `Re-detecting${redetectPct != null ? ` ${redetectPct}%` : "..."}`
+                    : "Re-detect"}
+                </span>
               </Button>
             ) : null}
             <Button type="button" variant="ghost" onClick={onSkip}>

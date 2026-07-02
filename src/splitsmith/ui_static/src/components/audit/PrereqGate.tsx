@@ -35,6 +35,13 @@ export interface PrereqGateProps {
    *  the chip's hardcoded 0.85 default; pass the project's automation
    *  override to keep them in sync. */
   beepLowConfThreshold?: number;
+  /** Whether the operator has reviewed and confirmed the primary beep
+   *  (``primary.beep_reviewed``) -- the single source of truth for
+   *  "confirmed", same field the backend's beep-queue status checks
+   *  before confidence. When true, the beep row reads "confirmed" and
+   *  neither low confidence nor the heuristic diagnostic can flip it back
+   *  to "likely wrong". */
+  beepReviewed?: boolean;
   /** Ping the toolbar's :class:`BeepStatusChip` -- the chip owns beep
    *  state, so the gate's beep row no longer renders its own Re-pick.
    *  Clicking the row instead calls this callback, which scrolls the
@@ -90,6 +97,7 @@ export function PrereqGate({
   beepConfidence = null,
   beepDiagnostic = null,
   beepLowConfThreshold = 0.85,
+  beepReviewed = false,
   onPingBeepChip,
   hasTrim,
   onProjectUpdate,
@@ -208,8 +216,14 @@ export function PrereqGate({
   // attention the row becomes clickable -- clicking it pings the
   // toolbar chip (which owns the affordance) instead of duplicating
   // a Re-pick button inside this card.
+  // A reviewed beep is confirmed: the operator's explicit sign-off is the
+  // single source of truth and outranks both low confidence and the
+  // heuristic diagnostic, exactly as the backend's beep-queue status
+  // treats ``beep_reviewed`` before it ever looks at confidence. Only an
+  // un-reviewed beep can read "likely wrong".
   const beepLikelyWrong =
     hasBeep &&
+    !beepReviewed &&
     ((beepConfidence != null && beepConfidence < beepLowConfThreshold) ||
       beepDiagnostic != null);
   const beepRow: ChecklistItem = !hasBeep
@@ -235,7 +249,7 @@ export function PrereqGate({
           label: "Beep position",
           done: true,
           tone: "done",
-          sub: "picked",
+          sub: beepReviewed ? "confirmed" : "picked",
         };
 
   const checklist: ChecklistItem[] =
