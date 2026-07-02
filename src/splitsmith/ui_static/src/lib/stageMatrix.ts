@@ -12,7 +12,6 @@
 import type { ShooterListEntry, StageEntry, StageStatus } from "@/lib/api";
 import {
   isTerminal,
-  isNextUpCandidate,
   statusTone,
   type StageStatusTone,
 } from "@/lib/stageStatus";
@@ -50,7 +49,11 @@ export type MatchTotals = {
 function rollupTone(cells: StageMatrixCell[]): StageStatusTone {
   if (cells.length === 0) return "todo";
   if (cells.every((c) => isTerminal(c.status))) return "done";
-  if (cells.some((c) => c.status !== "todo" && isNextUpCandidate(c.status))) {
+  // "active" = has footage-driven progress but is not yet terminal, i.e.
+  // ready / partial / in_progress. Spelled out as (not-todo, not-terminal)
+  // rather than borrowing isNextUpCandidate, whose name-vs-semantics don't
+  // quite line up here (it also returns true for todo).
+  if (cells.some((c) => c.status !== "todo" && !isTerminal(c.status))) {
     return "in_progress";
   }
   return "todo";
@@ -87,13 +90,21 @@ export function matchTotals(
 ): MatchTotals {
   const totalShooterStages = rows.length * shooters.length;
   const auditedShooterStages = rows.reduce((n, r) => n + r.auditedCount, 0);
-  const stagesFullyDone = rows.filter(
-    (r) => r.cells.length > 0 && r.cells.every((c) => isTerminal(c.status)),
+  // Every non-empty row is exactly one of: fully done (all cells terminal),
+  // untouched (all cells todo), or in progress (mixed). Computed explicitly
+  // -- not by subtraction -- so the three buckets stay mutually consistent
+  // with rollupTone and can never go negative. A zero-cell row (only
+  // possible with no shooters, which the Overview never renders as this
+  // variant) counts as untouched, matching rollupTone's empty -> "todo".
+  const allTerminal = (r: StageMatrixRow) =>
+    r.cells.length > 0 && r.cells.every((c) => isTerminal(c.status));
+  const allTodo = (r: StageMatrixRow) =>
+    r.cells.every((c) => c.status === "todo");
+  const stagesFullyDone = rows.filter(allTerminal).length;
+  const stagesUntouched = rows.filter(allTodo).length;
+  const stagesInProgress = rows.filter(
+    (r) => !allTerminal(r) && !allTodo(r),
   ).length;
-  const stagesUntouched = rows.filter(
-    (r) => r.cells.length > 0 && r.cells.every((c) => c.status === "todo"),
-  ).length;
-  const stagesInProgress = rows.length - stagesFullyDone - stagesUntouched;
   return {
     totalShooterStages,
     auditedShooterStages,
