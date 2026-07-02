@@ -43,8 +43,13 @@ import {
 import {
   deriveStageStatus,
   isNextUpCandidate,
-  isTerminal,
 } from "@/lib/stageStatus";
+import {
+  buildStageMatrix,
+  matchTotals,
+  type MatchTotals,
+  type StageMatrixRow,
+} from "@/lib/stageMatrix";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
@@ -102,6 +107,15 @@ export function Home() {
     };
   }, [project?.name]);
 
+  const stageRows = useMemo<StageMatrixRow[]>(
+    () => (project ? buildStageMatrix(project.stages, shooters) : []),
+    [project, shooters],
+  );
+  const totals = useMemo<MatchTotals>(
+    () => matchTotals(stageRows, shooters),
+    [stageRows, shooters],
+  );
+
   const stageViews = useMemo<StageView[]>(() => {
     if (!project) return [];
     const views = project.stages.map<StageView>((s) => {
@@ -126,41 +140,16 @@ export function Home() {
     return views;
   }, [project]);
 
-  // Per-tone counts for the headline stats + progress bar. Initialised
-  // with every key so consumers can index without optional chaining.
-  const totalsByTone = useMemo<Record<StagePillTone, number>>(() => {
-    const counts: Record<StagePillTone, number> = {
-      done: 0,
-      in_progress: 0,
-      ready: 0,
-      partial: 0,
-      flagged: 0,
-      todo: 0,
-      skipped: 0,
-    };
-    for (const v of stageViews) counts[v.tone] += 1;
-    return counts;
-  }, [stageViews]);
-
-  const terminalCount = useMemo(
-    () => stageViews.filter((v) => isTerminal(v.status)).length,
-    [stageViews],
-  );
-
-  // Audited percentage = terminal stages (audited + skipped) / total.
-  // Skipped stages count as closed-out work because the operator made
-  // a deliberate decision to skip them. Stages still in `in_progress`
-  // / `ready` / `partial` / `todo` are pending.
-  const auditedPct =
-    stageViews.length > 0
-      ? Math.round((terminalCount / stageViews.length) * 100)
-      : 0;
-
-  const nextUp = stageViews.find((v) => v.isNextUp);
+  // Aggregate gate: the Overview is "empty" only when NO shooter in the
+  // match has footage. A single footage-less shooter no longer blanks the
+  // whole page (the pre-aggregate bug). Legacy single-shooter projects
+  // (empty roster) fall back to the per-project stage check.
   const isEmpty =
     !project ||
     stageViews.length === 0 ||
-    stageViews.every((v) => v.status === "todo");
+    (shooters.length > 0
+      ? !totals.hasAnyFootage
+      : stageViews.every((v) => v.status === "todo"));
 
   if (!project) {
     return (
@@ -191,7 +180,6 @@ export function Home() {
               {formatDate(project.match_date)}
             </time>
           ) : null}
-          {project.competitor_name && <span>{project.competitor_name}</span>}
           {project.scoreboard_match_id && (
             <>
               <span className="text-whisper">&middot;</span>
@@ -253,12 +241,9 @@ export function Home() {
         ) : (
           <ActiveVariant
             project={project}
-            stageViews={stageViews}
+            rows={stageRows}
+            totals={totals}
             shooters={shooters}
-            nextUp={nextUp ?? null}
-            totalsByTone={totalsByTone}
-            auditedPct={auditedPct}
-            navSlug={navSlug}
           />
         )}
       </div>
@@ -272,30 +257,22 @@ export function Home() {
 
 function ActiveVariant({
   project,
-  stageViews,
+  rows,
+  totals,
   shooters,
-  nextUp,
-  totalsByTone,
-  auditedPct,
-  navSlug,
 }: {
   project: MatchProject;
-  stageViews: StageView[];
+  rows: StageMatrixRow[];
+  totals: MatchTotals;
   shooters: ShooterListEntry[];
-  nextUp: StageView | null;
-  totalsByTone: Record<StagePillTone, number>;
-  auditedPct: number;
-  navSlug: string | null;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
-  const stageHref = (n: number) =>
-    navSlug ? href("audit", navSlug, String(n)) : href("shooters");
   return (
     <>
-      {/* Resume hero */}
+      {/* Match-progress summary */}
       <section
-        className="relative mb-6 grid grid-cols-1 items-center gap-6 overflow-hidden rounded-2xl border border-rule-strong p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_48px_-24px_rgba(0,0,0,0.6)] lg:grid-cols-[1fr_auto]"
+        className="relative mb-6 overflow-hidden rounded-2xl border border-rule-strong p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_48px_-24px_rgba(0,0,0,0.6)]"
         style={{
           backgroundImage:
             "radial-gradient(900px 220px at 20% 30%, rgba(255,45,45,0.10), transparent 65%), linear-gradient(135deg, var(--color-surface) 0%, var(--color-surface-2) 100%)",
@@ -309,69 +286,46 @@ function ActiveVariant({
           <div className="mb-2.5 inline-flex items-center gap-2.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.2em] text-led">
             <span
               aria-hidden
-              className="inline-block size-1.5 animate-pulse rounded-full bg-led shadow-[0_0_8px_var(--color-led-glow)]"
+              className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_8px_var(--color-led-glow)]"
             />
-            {nextUp ? "Pick up where you left off" : "All stages audited"}
+            Match Overview
           </div>
           <h2 className="mb-3 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
-            {nextUp ? (
-              <>
-                Stage <span className="text-led">{pad2(nextUp.stage.stage_number)}</span>{" "}
-                <span className="text-ink">&middot;</span>{" "}
-                {nextUp.stage.stage_name}
-              </>
-            ) : (
-              <>Match complete</>
-            )}
+            {totals.auditedShooterStages} of {totals.totalShooterStages}{" "}
+            <span className="text-led">shooter-stages</span> audited
           </h2>
-          <p className="mb-5 max-w-xl text-sm text-ink-2">
-            {nextUp ? (
-              <>
-                <b className="font-bold text-ink">{totalsByTone.done}</b> of{" "}
-                <b className="font-bold text-ink">{stageViews.length}</b>{" "}
-                stages audited. Resume the next stage to keep moving, or jump
-                to any tile below.
-              </>
-            ) : (
-              <>
-                All stages closed out. Run an export from match settings, or
-                revisit a stage for a recheck.
-              </>
-            )}
-          </p>
+          <div
+            className="mb-4 h-2 w-full max-w-xl overflow-hidden rounded-full bg-surface-3"
+            role="progressbar"
+            aria-valuenow={totals.auditedPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Match audited percentage"
+          >
+            <span
+              className="block h-full rounded-full bg-led shadow-[0_0_12px_var(--color-led-glow)]"
+              style={{ width: `${totals.auditedPct}%` }}
+            />
+          </div>
           <div className="inline-flex overflow-hidden rounded-[10px] border border-rule bg-surface-3">
-            <HeroStat label="Match audited" value={`${auditedPct}%`} tone="led" />
             <HeroStat
-              label="Stages flagged"
-              value={pad2(totalsByTone.flagged)}
-              tone={totalsByTone.flagged > 0 ? "led" : undefined}
+              label="Match audited"
+              value={`${totals.auditedPct}%`}
+              tone="led"
+            />
+            <HeroStat
+              label="Fully done"
+              value={pad2(totals.stagesFullyDone)}
+              tone={totals.stagesFullyDone > 0 ? "led" : undefined}
             />
             <HeroStat
               label="In progress"
-              value={pad2(totalsByTone.partial)}
-              tone={totalsByTone.partial > 0 ? "live" : undefined}
+              value={pad2(totals.stagesInProgress)}
+              tone={totals.stagesInProgress > 0 ? "live" : undefined}
             />
+            <HeroStat label="Untouched" value={pad2(totals.stagesUntouched)} />
           </div>
         </div>
-        {nextUp && (
-          <div className="relative z-10">
-            <button
-              type="button"
-              onClick={() => navigate(stageHref(nextUp.stage.stage_number))}
-              className="inline-flex min-h-[60px] items-center gap-3.5 rounded-[11px] border border-led-deep bg-led-fill px-6 py-4 font-display text-base font-bold uppercase tracking-[0.06em] text-ink shadow-[0_0_0_1px_var(--color-led),0_0_32px_var(--color-led-glow),inset_0_1px_0_rgba(255,255,255,0.2)] transition-all hover:bg-led hover:-translate-y-0.5"
-            >
-              <div className="flex flex-col items-start gap-1">
-                <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] opacity-70">
-                  Continue auditing
-                </span>
-                <span className="text-[1.0625rem] font-bold">
-                  Resume Stage {pad2(nextUp.stage.stage_number)}
-                </span>
-              </div>
-              <ArrowRight className="size-5" />
-            </button>
-          </div>
-        )}
       </section>
 
       <SectionHead
@@ -422,9 +376,11 @@ function ActiveVariant({
           // fall back to the bound MatchProject's competitor.
           <ShooterCard
             name={project.competitor_name ?? "You"}
-            stats={`${stageViews.length} stages`}
+            stats={`${rows.length} stages`}
             progress={
-              stageViews.length > 0 ? totalsByTone.done / stageViews.length : 0
+              totals.totalShooterStages > 0
+                ? totals.auditedShooterStages / totals.totalShooterStages
+                : 0
             }
           />
         )}
@@ -435,34 +391,17 @@ function ActiveVariant({
         title="Stages"
         count={
           <>
-            <b className="font-bold text-ink-2">
-              {pad2(totalsByTone.done + totalsByTone.skipped)}
-            </b>{" "}
-            audited <span className="text-whisper">&middot;</span>{" "}
-            <b className="font-bold text-ink-2">
-              {pad2(totalsByTone.in_progress)}
-            </b>{" "}
+            <b className="font-bold text-ink-2">{pad2(totals.stagesFullyDone)}</b>{" "}
+            fully done <span className="text-whisper">&middot;</span>{" "}
+            <b className="font-bold text-ink-2">{pad2(totals.stagesInProgress)}</b>{" "}
             in progress <span className="text-whisper">&middot;</span>{" "}
-            <b className="font-bold text-ink-2">
-              {pad2(
-                totalsByTone.todo +
-                  totalsByTone.ready +
-                  totalsByTone.partial +
-                  totalsByTone.flagged,
-              )}
-            </b>{" "}
-            pending
+            <b className="font-bold text-ink-2">{pad2(totals.stagesUntouched)}</b>{" "}
+            untouched
           </>
         }
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        {stageViews.map((v) => (
-          <StageTile
-            key={v.stage.stage_number}
-            view={v}
-            onClick={() => navigate(stageHref(v.stage.stage_number))}
-          />
-        ))}
+        {/* Per-shooter chip tiles land in Task 6 */}
       </div>
     </>
   );
@@ -788,107 +727,6 @@ function AddShooterCard() {
   );
 }
 
-function StageTile({
-  view,
-  onClick,
-}: {
-  view: StageView;
-  onClick: () => void;
-}) {
-  const { stage, tone, isNextUp } = view;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "group relative flex min-h-[110px] flex-col justify-between overflow-hidden rounded-xl border bg-surface p-4 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-2",
-        isNextUp
-          ? "border-led shadow-[0_0_0_1px_var(--color-led),0_0_28px_var(--color-led-glow)]"
-          : "border-rule hover:border-rule-strong",
-        tone === "flagged" && !isNextUp && "border-led/30",
-      )}
-      style={
-        isNextUp
-          ? {
-              backgroundImage:
-                "radial-gradient(circle at 0% 0%, var(--color-led-tint), transparent 65%), var(--color-surface)",
-            }
-          : undefined
-      }
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-y-0 left-0 w-[2px] transition-all",
-          isNextUp
-            ? "bg-led shadow-[0_0_8px_var(--color-led-glow)]"
-            : "bg-transparent group-hover:bg-led group-hover:shadow-[0_0_8px_var(--color-led-glow)]",
-        )}
-      />
-      <div className="flex items-center justify-between">
-        <div className="inline-flex items-center gap-2.5">
-          <span
-            className={cn(
-              "inline-flex size-7 items-center justify-center rounded-md font-mono text-xs font-bold tabular-nums",
-              isNextUp
-                ? "bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_8px_var(--color-led-glow)]"
-                : "bg-surface-3 text-ink-2",
-            )}
-          >
-            {pad2(stage.stage_number)}
-          </span>
-          <span className="font-display text-base font-bold uppercase tracking-tight text-ink">
-            {stage.stage_name}
-          </span>
-        </div>
-        {isNextUp ? (
-          <span className="inline-flex items-center gap-1.5 rounded border border-led-deep bg-led/10 px-2 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-led">
-            <span
-              aria-hidden
-              className="inline-block size-1 animate-pulse rounded-full bg-led shadow-[0_0_5px_var(--color-led-glow)]"
-            />
-            Next up
-          </span>
-        ) : (
-          <StagePill tone={tone} />
-        )}
-      </div>
-      <div className="flex items-center justify-between font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-        <span>
-          {view.expectedShots ? (
-            <>
-              <b className="font-bold text-ink">{pad2(view.expectedShots)}</b>{" "}
-              expected
-            </>
-          ) : stage.time_seconds > 0 ? (
-            <>
-              <b className="font-bold text-ink">{stage.time_seconds.toFixed(2)}s</b>{" "}
-              stage time
-            </>
-          ) : (
-            <span className="text-subtle">No video yet</span>
-          )}
-        </span>
-        <span
-          className={cn(
-            tone === "flagged" ? "text-led" : "text-subtle",
-            tone === "in_progress" && "text-live",
-            tone === "ready" && "text-led",
-          )}
-        >
-          {tone === "todo" && "awaiting"}
-          {tone === "partial" && "stage time missing"}
-          {tone === "ready" && "ready"}
-          {tone === "in_progress" && "in progress"}
-          {tone === "done" && "audited"}
-          {tone === "skipped" && "skipped"}
-          {tone === "flagged" && "flagged"}
-        </span>
-      </div>
-    </button>
-  );
-}
-
 function EmptyStageTile({ view }: { view: StageView }) {
   return (
     <div className="rounded-xl border border-rule-strong bg-surface p-4 opacity-85">
@@ -918,52 +756,6 @@ function EmptyStageTile({ view }: { view: StageView }) {
         )}
       </div>
     </div>
-  );
-}
-
-function StagePill({ tone }: { tone: StagePillTone }) {
-  const label =
-    tone === "done"
-      ? "Audited"
-      : tone === "skipped"
-        ? "Skipped"
-        : tone === "in_progress"
-          ? "In progress"
-          : tone === "ready"
-            ? "Ready"
-            : tone === "partial"
-              ? "Stage time missing"
-              : tone === "flagged"
-                ? "Flagged"
-                : "Not started";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em]",
-        tone === "done" && "bg-done/10 text-done",
-        tone === "skipped" && "border border-rule bg-surface-3 text-subtle",
-        tone === "in_progress" && "bg-live/10 text-live",
-        tone === "ready" && "border border-led/40 bg-led-tint text-led",
-        tone === "partial" && "border border-dashed border-live bg-live/10 text-live",
-        tone === "flagged" && "bg-led/10 text-led",
-        tone === "todo" && "border border-rule bg-surface-2 text-subtle",
-      )}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "inline-block size-1 rounded-full",
-          tone === "done" && "bg-done shadow-[0_0_4px_var(--color-done-glow)]",
-          tone === "skipped" && "bg-subtle",
-          tone === "in_progress" && "bg-live shadow-[0_0_4px_var(--color-live-glow)]",
-          tone === "ready" && "bg-led shadow-[0_0_4px_var(--color-led-glow)]",
-          tone === "partial" && "bg-live shadow-[0_0_4px_var(--color-live-glow)]",
-          tone === "flagged" && "bg-led shadow-[0_0_4px_var(--color-led-glow)]",
-          tone === "todo" && "border border-subtle bg-transparent",
-        )}
-      />
-      {label}
-    </span>
   );
 }
 
