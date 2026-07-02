@@ -6428,6 +6428,52 @@ def test_list_match_shooters_returns_active_and_others(tmp_path: Path, _user_con
     assert slugs == ["ma", "jl"]
 
 
+def test_list_match_shooters_includes_per_stage_statuses(tmp_path: Path, _user_config_home: Path) -> None:
+    """The shooters payload carries a per-stage status list so the match
+    Overview can render an aggregate grid without fetching each project."""
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Multi-shooter")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(target)
+
+    # Shooter "ma": stage 1 has a primary video + time but no audit JSON
+    # (-> ready); stage 2 has nothing (-> todo).
+    sroot = match_model.Match.shooter_root(target, "ma")
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    legacy = MatchProject.init(sroot, name="Multi-shooter")
+    legacy.competitor_name = "Mathias"
+    legacy.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=12.0,
+            videos=[StageVideo(path="s1.mp4", role="primary")],
+        ),
+        StageEntry(stage_number=2, stage_name="Two", time_seconds=0.0),
+    ]
+    legacy.save(sroot)
+
+    app = create_app()
+    client = _MatchClient(app)
+    resp = client.post(
+        "/api/me/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    assert resp.status_code == 200
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+
+    listing = client.get(f"/api/matches/{match_id}/match/shooters")
+    assert listing.status_code == 200, listing.text
+    ma = next(s for s in listing.json()["shooters"] if s["slug"] == "ma")
+    by_stage = {e["stage_number"]: e["status"] for e in ma["stage_statuses"]}
+    assert by_stage == {1: "ready", 2: "todo"}
+
+
 def test_list_match_shooters_stages_total_from_project_not_match(
     tmp_path: Path, _user_config_home: Path
 ) -> None:

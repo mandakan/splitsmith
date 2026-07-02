@@ -214,11 +214,14 @@ export function MatchShell() {
         if (!alive) return;
         setShooters(r.shooters);
         setMatchValid(true);
-        // No URL slug -> fall back to the alphabetically-first shooter
-        // so the sidebar has stage status to show.
-        if (!slug && r.shooters.length > 0) {
+        // No URL slug -> fall back to the footage-bearing default shooter
+        // (same rule the nav links use) so the sidebar + Overview base
+        // project show a shooter that actually has work, not the
+        // alphabetically-first footage-less one.
+        const fallbackSlug = pickDefaultShooterSlug(r.shooters);
+        if (!slug && fallbackSlug) {
           api
-            .getProject(r.shooters[0].slug)
+            .getProject(fallbackSlug)
             .then((p) => {
               if (alive) setProject(p);
             })

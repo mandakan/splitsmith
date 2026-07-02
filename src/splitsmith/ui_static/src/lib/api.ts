@@ -1275,6 +1275,14 @@ export interface ShooterCameraInfo {
   stage_numbers: number[];
 }
 
+/** One stage's lifecycle status for a single shooter, mirrored from the
+ *  backend ``StageStatusEntry``. The match Overview pivots these across
+ *  shooters into an aggregate per-stage grid. */
+export interface StageStatusEntry {
+  stage_number: number;
+  status: StageStatus;
+}
+
 /** One shooter row in the /shooters page (#324). */
 export interface ShooterListEntry {
   slug: string;
@@ -1289,6 +1297,9 @@ export interface ShooterListEntry {
    *  (primary + beep + stage_time + reachable source). Drives the
    *  "Rebuild trim caches (N)" CTA on /shooters (#351). */
   stages_missing_trim: number;
+  /** Per-stage status for this shooter (one entry per stage in the
+   *  shooter's own project). Drives the aggregate Overview grid. */
+  stage_statuses: StageStatusEntry[];
 }
 
 /** Response payload for POST /api/match/shooters/{slug}/build-trim-caches (#351). */
