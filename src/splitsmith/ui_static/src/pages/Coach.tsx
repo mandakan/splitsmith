@@ -122,7 +122,6 @@ interface PerStageAggregate {
 }
 
 function CoachMatch({ slug }: { slug?: string }) {
-  const navigate = useNavigate();
   const href = useMatchHref();
   if (!slug) {
     // ShooterScopedRoute should keep this from rendering, but the
@@ -130,6 +129,12 @@ function CoachMatch({ slug }: { slug?: string }) {
     // bounce back to the picker rather than 500ing on the API call.
     return <Navigate to={href("shooters")} replace />;
   }
+  return <CoachMatchInner slug={slug} />;
+}
+
+function CoachMatchInner({ slug }: { slug: string }) {
+  const navigate = useNavigate();
+  const href = useMatchHref();
   const stagePrefix = href("coach", slug);
   const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);
@@ -956,11 +961,16 @@ function AnnotationsCard({
 /* -------------------------------------------------------------------------- */
 
 function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
-  const navigate = useNavigate();
   const href = useMatchHref();
   if (!slug) {
     return <Navigate to={href("shooters")} replace />;
   }
+  return <CoachStageInner stage={stage} slug={slug} />;
+}
+
+function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
+  const navigate = useNavigate();
+  const href = useMatchHref();
   const coachPrefix = href("coach", slug);
   const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);

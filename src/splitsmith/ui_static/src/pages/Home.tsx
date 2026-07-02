@@ -95,6 +95,11 @@ export function Home() {
         // and the variants will fall back to the legacy single-card view.
         if (alive) setShooters([]);
       });
+    // Cancel on unmount / dep change so a late response can't setState on a
+    // stale render (this cleanup was missing).
+    return () => {
+      alive = false;
+    };
   }, [project?.name]);
 
   const stageViews = useMemo<StageView[]>(() => {

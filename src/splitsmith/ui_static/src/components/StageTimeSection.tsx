@@ -64,13 +64,8 @@ export function StageTimeSection({
   const hasManualValue = stage.time_seconds_manual && stage.time_seconds > 0;
   const hasNoValue = stage.time_seconds <= 0;
 
-  // Gate on having a beep: without it we can't translate the picker's
-  // source-time into a duration. The user must run beep detection first.
-  if (beepTime == null) return null;
-
-  const draftDuration =
-    endSourceTime != null ? Math.max(0, endSourceTime - beepTime) : null;
-
+  // Defined before the beep gate below so the hook runs unconditionally
+  // (rules-of-hooks); its body already tolerates a null beepTime.
   const reset = useCallback(() => {
     setEditing(false);
     setEndSourceTime(
@@ -79,6 +74,13 @@ export function StageTimeSection({
         : null,
     );
   }, [stage.time_seconds, beepTime]);
+
+  // Gate on having a beep: without it we can't translate the picker's
+  // source-time into a duration. The user must run beep detection first.
+  if (beepTime == null) return null;
+
+  const draftDuration =
+    endSourceTime != null ? Math.max(0, endSourceTime - beepTime) : null;
 
   const apply = async () => {
     if (draftDuration == null || draftDuration <= 0) {

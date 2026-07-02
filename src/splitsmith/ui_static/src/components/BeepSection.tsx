@@ -1269,7 +1269,6 @@ function BeepCandidates({
 }) {
   const hasAlternatives = candidates.length > 1;
   const [open, setOpen] = useState(false);
-  if (!hasAlternatives) return null;
 
   const activeIndex = (() => {
     if (currentTime == null) return -1;
@@ -1295,6 +1294,10 @@ function BeepCandidates({
       setPreviewIndex(null);
     }
   }, [candidates.length, previewIndex]);
+
+  // Guarded here (not above) so every hook runs unconditionally: with a
+  // single candidate there are no alternatives to browse.
+  if (!hasAlternatives) return null;
 
   return (
     <div className="rounded-md border border-border/40 bg-background/40">

@@ -83,7 +83,12 @@ export interface MarkerLayerProps {
   visibleKinds?: Set<MarkerKind>;
 }
 
-export function MarkerLayer({
+export function MarkerLayer(props: MarkerLayerProps) {
+  if (props.duration <= 0) return null;
+  return <MarkerLayerInner {...props} />;
+}
+
+function MarkerLayerInner({
   markers,
   duration,
   focusedId,
@@ -95,8 +100,6 @@ export function MarkerLayer({
   onTimeChangeCommit,
   visibleKinds,
 }: MarkerLayerProps) {
-  if (duration <= 0) return null;
-
   // Drag state lives in a ref so re-renders driven by external time
   // updates don't reset the active drag. ``moved`` only flips once the
   // cursor crosses DRAG_THRESHOLD_PX -- before that, the gesture is
