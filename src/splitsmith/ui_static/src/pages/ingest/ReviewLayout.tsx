@@ -19,7 +19,12 @@ import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 import { ClipDetail } from "@/pages/ingest/ClipDetail";
 import { ClipList } from "@/pages/ingest/ClipList";
-import { buildClipModel, firstUnassignedPath } from "@/pages/ingest/model";
+import {
+  buildClipModel,
+  firstUnassignedPath,
+  nextUnassignedAfter,
+  selectDelta,
+} from "@/pages/ingest/model";
 
 export function ReviewLayout({
   slug,
@@ -79,6 +84,30 @@ export function ReviewLayout({
   const selectedClip =
     model.order.find((c) => c.video.path === selectedPath) ?? null;
 
+  // Up/Down (and j/k) move the selection through the flat clip order. Skip
+  // when focus is in a form control so typing / native <select> keys still
+  // work. preventDefault stops the page from scrolling under the list.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (t instanceof HTMLElement) {
+        if (t.isContentEditable) return;
+        if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT") {
+          return;
+        }
+      }
+      let delta = 0;
+      if (e.key === "ArrowDown" || e.key === "j") delta = 1;
+      else if (e.key === "ArrowUp" || e.key === "k") delta = -1;
+      else return;
+      e.preventDefault();
+      setSelectedPath((cur) => selectDelta(model.order, cur, delta));
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [model.order]);
+
   const [drawerCollapsed, toggleDrawer] = useStageDrawerCollapsed(
     model.remaining === 0,
   );
@@ -89,8 +118,27 @@ export function ReviewLayout({
     lastImportedPaths.length > 0 &&
     shooters.length > 1;
 
+  // After assigning a queued clip to a stage, jump to the next unassigned one
+  // so the operator keeps clearing the pile without the mouse. Compute the
+  // target from the CURRENT model (before the move); its path is unchanged by
+  // the reassignment, so selecting it by path survives the project reload.
+  async function handleMove(
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+  ) {
+    const wasUnassigned =
+      model.order.find((c) => c.video.path === videoPath)?.stageNumber == null;
+    const nextPath =
+      wasUnassigned && toStage != null
+        ? nextUnassignedAfter(model, videoPath)
+        : null;
+    await onMoveAssignment(videoPath, toStage, role);
+    if (nextPath != null) setSelectedPath(nextPath);
+  }
+
   const assignStage = (stageNumber: number) => {
-    if (selectedClip) void onMoveAssignment(selectedClip.video.path, stageNumber, selectedClip.video.role);
+    if (selectedClip) void handleMove(selectedClip.video.path, stageNumber, selectedClip.video.role);
   };
 
   return (
@@ -207,7 +255,7 @@ export function ReviewLayout({
           allStages={project.stages}
           shooters={shooters}
           busy={busy}
-          onMove={onMoveAssignment}
+          onMove={handleMove}
           onRemove={onRemoveVideo}
           onMoveShooter={onMoveShooter}
           onError={onError}
