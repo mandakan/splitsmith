@@ -47,7 +47,6 @@ import {
   ApiError,
   CAMERA_MOUNTS,
   api,
-  type BulkCameraSetItem,
   type CalibratedCameraModel,
   type CameraMount,
   type MatchProject,
@@ -60,6 +59,7 @@ import {
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
+import { groupByCamera, pad2, type CameraGroup } from "@/pages/ingest/model";
 
 type StorageMode = "symlink" | "copy";
 
@@ -864,48 +864,6 @@ function ReviewState({
 /* Stage block                                                                */
 /* -------------------------------------------------------------------------- */
 
-interface CameraGroup {
-  id: string;
-  label: string;
-  make: string | null;
-  model: string | null;
-  mount: CameraMount | null;
-  videoCount: number;
-  videoPaths: Set<string>;
-  members: BulkCameraSetItem[];
-}
-
-function groupByCamera(
-  assigned: { video: StageVideo; stage: StageEntry }[],
-): CameraGroup[] {
-  const map = new Map<string, CameraGroup>();
-  for (const { video, stage } of assigned) {
-    const key = `${video.camera_make ?? ""}|${video.camera_model ?? ""}|${video.camera_mount ?? ""}`;
-    let g = map.get(key);
-    if (!g) {
-      g = {
-        id: key,
-        label: "",
-        make: video.camera_make,
-        model: video.camera_model,
-        mount: video.camera_mount,
-        videoCount: 0,
-        videoPaths: new Set(),
-        members: [],
-      };
-      map.set(key, g);
-    }
-    g.videoCount += 1;
-    g.videoPaths.add(video.path);
-    g.members.push({ stage_number: stage.stage_number, video_id: video.video_id });
-  }
-  const groups = Array.from(map.values());
-  groups.forEach((g, i) => {
-    g.label = `Camera ${String.fromCharCode(65 + i)}`;
-  });
-  return groups;
-}
-
 function StageBlock({
   slug,
   stage,
@@ -1615,10 +1573,3 @@ function IngestMoveBanner({
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
-}
