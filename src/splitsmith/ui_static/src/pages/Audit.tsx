@@ -79,6 +79,7 @@ import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
+import { Portal } from "@/components/ui/Portal";
 import {
   Card,
   CardContent,
@@ -512,7 +513,10 @@ export function Audit() {
       v.pause();
       v.currentTime = 0;
     }
-  }, [stageNumber]);
+    // slugParam is a dependency too: shooter B's stage 3 is a different
+    // recording than shooter A's stage 3, so switching shooters on the
+    // same stage number must reset playback + cam layout as well.
+  }, [stageNumber, slugParam]);
 
   // Load peaks.
   useEffect(() => {
@@ -2044,7 +2048,7 @@ export function Audit() {
       />
       {stagesWithPrimary.length > 0 && !prereqActive ? (
         sessionDone ? (
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-rule-strong bg-bg/95 px-5 py-3 backdrop-blur">
+          <div className="fixed bottom-0 left-[var(--shell-sidebar-w,0px)] right-0 z-chrome border-t border-rule-strong bg-bg/95 px-5 py-3 backdrop-blur">
             <SessionSummary
               shooterName={
                 shooters.find((s) => s.slug === slugParam)?.name ?? null
@@ -2111,19 +2115,21 @@ function SaveToast({ status }: { status: SaveStatus }) {
     tone = "bg-destructive/10 text-destructive border-destructive/40";
   }
   return (
-    <div
-      role="status"
-      aria-live={status.kind === "error" ? "assertive" : "polite"}
-      className="pointer-events-none fixed bottom-4 right-4 z-50"
-    >
-      {label ? (
-        <div
-          className={`pointer-events-auto rounded-md border px-3 py-2 text-sm shadow-md ${tone}`}
-        >
-          {label}
-        </div>
-      ) : null}
-    </div>
+    <Portal>
+      <div
+        role="status"
+        aria-live={status.kind === "error" ? "assertive" : "polite"}
+        className="pointer-events-none fixed bottom-4 right-4 z-toast"
+      >
+        {label ? (
+          <div
+            className={`pointer-events-auto rounded-md border px-3 py-2 text-sm shadow-md ${tone}`}
+          >
+            {label}
+          </div>
+        ) : null}
+      </div>
+    </Portal>
   );
 }
 
@@ -2411,7 +2417,10 @@ function DetectShotsMenu({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 top-[calc(100%+6px)] z-40 w-64 overflow-hidden rounded-md border border-rule-strong bg-surface-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.7)]"
+          // Page-local band (below z-chrome): the menu drops downward
+          // from the toolbar and should scroll UNDER the sticky header,
+          // not over it.
+          className="absolute right-0 top-[calc(100%+6px)] z-30 w-64 overflow-hidden rounded-md border border-rule-strong bg-surface-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.7)]"
         >
           <button
             role="menuitem"

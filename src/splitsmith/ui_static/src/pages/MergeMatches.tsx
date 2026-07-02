@@ -141,7 +141,7 @@ export function MergeMatches() {
         backgroundAttachment: "fixed",
       }}
     >
-      <header className="sticky top-0 z-50 border-b border-rule bg-gradient-to-b from-surface to-bg">
+      <header className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg">
         <div className="mx-auto flex max-w-[1100px] items-center gap-6 px-8 py-3.5">
           <Brand variant="compact" />
           <div className="ml-auto" />

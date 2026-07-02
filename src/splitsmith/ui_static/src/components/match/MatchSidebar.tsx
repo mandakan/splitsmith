@@ -92,15 +92,15 @@ interface MatchSidebarProps {
    *  legacy bind contexts (no match id) -- in that case the bare paths
    *  are used and React Router's legacy routes pick them up. */
   matchId?: string;
-  /** Collapsed state -- when true the sidebar renders at COLLAPSED_WIDTH
+  /** Collapsed state -- when true the sidebar renders at SIDEBAR_COLLAPSED_WIDTH
    *  with icon-only nav and the match card / stages list hidden. */
   collapsed?: boolean;
   onCollapseToggle?: () => void;
   className?: string;
 }
 
-const EXPANDED_WIDTH = 240;
-const COLLAPSED_WIDTH = 56;
+export const SIDEBAR_EXPANDED_WIDTH = 240;
+export const SIDEBAR_COLLAPSED_WIDTH = 56;
 
 export function MatchSidebar({
   matchName,
@@ -137,9 +137,12 @@ export function MatchSidebar({
   return (
     <aside
       data-collapsed={collapsed || undefined}
-      style={{ width: collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH }}
+      style={{ width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH }}
       className={cn(
-        "sticky top-0 flex h-[calc(100vh-86px)] shrink-0 flex-col overflow-y-auto border-r border-rule bg-surface py-2 transition-[width] duration-150",
+        // Pin below the measured sticky header and fill the rest of the
+        // viewport -- the old hard-coded 86px guess broke as soon as the
+        // header wrapped, pushing the Jobs rail off-screen.
+        "sticky top-[var(--shell-header-h,86px)] flex h-[calc(100dvh-var(--shell-header-h,86px))] shrink-0 flex-col overflow-y-auto border-r border-rule bg-surface py-2 transition-[width] duration-150",
         className,
       )}
     >
@@ -361,8 +364,8 @@ export function MatchSidebar({
 
       <JobsSurface
         collapsed={collapsed}
-        sidebarExpandedWidth={EXPANDED_WIDTH}
-        sidebarCollapsedWidth={COLLAPSED_WIDTH}
+        sidebarExpandedWidth={SIDEBAR_EXPANDED_WIDTH}
+        sidebarCollapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
       />
     </aside>
   );

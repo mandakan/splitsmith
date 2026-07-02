@@ -260,6 +260,25 @@
   --ease-default:  cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in:       cubic-bezier(0.32, 0, 0.68, 0);
+
+  /* === Elevation (z-index) ============================================= */
+  /* The ONLY global layers. Page-local composition (badge over waveform,
+   * label over thumbnail) stays below z-30 and never uses these names.
+   * Floating surfaces must render through <Portal> so these values resolve
+   * in the root stacking context -- a z token inside a sticky/transformed
+   * ancestor is a trapped z token (the JobsSheet bug).
+   *
+   *   chrome    sticky headers + fixed action bars (page furniture)
+   *   takeover  full-screen mode surfaces (camera grid)
+   *   drawer    non-modal side sheets + anchored popouts (marker list, jobs)
+   *   modal     blocking dialogs; ConfirmDialog wins ties by portal order
+   *   toast     pointer-events-none status; above everything          */
+
+  --z-index-chrome:   40;
+  --z-index-takeover: 50;
+  --z-index-drawer:   60;
+  --z-index-modal:    70;
+  --z-index-toast:    80;
 }
 
 /* ============================================================================

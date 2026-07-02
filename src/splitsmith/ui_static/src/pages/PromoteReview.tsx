@@ -33,6 +33,8 @@ import {
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import {
   api,
   type AuditShot,
@@ -78,10 +80,26 @@ function EscalationModal({
   onClose: () => void;
   onSelect: (action: "missed-detector" | "missed-anchor-wrong" | "missed-dropped") => void;
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(true, panelRef, onClose);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-popover border border-border rounded-lg shadow-xl p-5 w-80 flex flex-col gap-3">
-        <div className="font-semibold text-sm">Shot {shotNumber} -- no candidate found</div>
+    <Portal>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="escalation-modal-title"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        ref={panelRef}
+        className="bg-popover border border-border rounded-lg shadow-xl p-5 w-80 flex flex-col gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div id="escalation-modal-title" className="font-semibold text-sm">
+          Shot {shotNumber} -- no candidate found
+        </div>
         <div className="text-xs text-muted-foreground">
           Choose how to record this shot in the derived fixture.
         </div>
@@ -118,6 +136,7 @@ function EscalationModal({
         </Button>
       </div>
     </div>
+    </Portal>
   );
 }
 

@@ -26,6 +26,8 @@ import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, IconButton } from "@/components/ui";
 import {
   MatchSidebar,
+  SIDEBAR_COLLAPSED_WIDTH,
+  SIDEBAR_EXPANDED_WIDTH,
   type MatchSidebarStage,
 } from "@/components/match/MatchSidebar";
 import {
@@ -37,6 +39,7 @@ import {
 } from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
+import { useShellHeaderHeight } from "@/lib/shellChrome";
 import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
@@ -110,6 +113,18 @@ export function MatchShell() {
       return next;
     });
   }, []);
+
+  // Shell geometry as CSS vars: measured header height (the header
+  // wraps, so no constant is safe) + current sidebar width. The sidebar
+  // and the fixed bottom bars (StageActionBar, session summary) read
+  // these instead of hard-coding guesses.
+  const { headerRef, headerStyle } = useShellHeaderHeight();
+  const shellStyle = {
+    ...headerStyle,
+    "--shell-sidebar-w": `${
+      sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH
+    }px`,
+  } as React.CSSProperties;
 
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
@@ -318,9 +333,13 @@ export function MatchShell() {
         backgroundImage:
           "radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
         backgroundAttachment: "fixed",
+        ...shellStyle,
       }}
     >
-      <header className="sticky top-0 z-50 border-b border-rule bg-gradient-to-b from-surface to-bg">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg"
+      >
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
@@ -407,7 +426,7 @@ export function MatchShell() {
         </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-64px)]">
+      <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))]">
         <MatchSidebar
           matchName={project?.name ?? health?.project_name ?? "..."}
           matchSubtitle={renderMatchSubtitle(project)}

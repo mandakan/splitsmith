@@ -29,6 +29,7 @@ import { JobsSurface } from "@/components/Jobs";
 import { Brand, IconButton, ModeSwitch } from "@/components/ui";
 import { api, type DeveloperModelInfo } from "@/lib/api";
 import { useMode } from "@/lib/mode";
+import { useShellHeaderHeight } from "@/lib/shellChrome";
 import { cn } from "@/lib/utils";
 
 export interface DeveloperShellOutletContext {
@@ -94,6 +95,10 @@ export function DeveloperShell() {
     return STEPS.findIndex((s) => pathname.startsWith(s.to));
   }, [pathname]);
 
+  // Measured header height as --shell-header-h; sidebar layout reads it
+  // instead of hard-coding a guess (see lib/shellChrome.ts).
+  const { headerRef, headerStyle } = useShellHeaderHeight();
+
   return (
     <div
       className="min-h-screen text-ink"
@@ -101,9 +106,13 @@ export function DeveloperShell() {
         backgroundImage:
           "radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
         backgroundAttachment: "fixed",
+        ...headerStyle,
       }}
     >
-      <header className="sticky top-0 z-50 border-b border-rule bg-gradient-to-b from-surface to-bg">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg"
+      >
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
@@ -161,7 +170,7 @@ export function DeveloperShell() {
         </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-86px)]">
+      <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))]">
         <DeveloperSidebar model={model} activeIdx={activeIdx} />
         <div className="min-w-0 flex-1">
           <Outlet
@@ -207,7 +216,7 @@ function DeveloperSidebar({
   activeIdx: number;
 }) {
   return (
-    <aside className="sticky top-0 flex h-[calc(100vh-86px)] w-[248px] shrink-0 flex-col overflow-y-auto border-r border-rule bg-surface px-3 py-4">
+    <aside className="sticky top-[var(--shell-header-h,86px)] flex h-[calc(100dvh-var(--shell-header-h,86px))] w-[248px] shrink-0 flex-col overflow-y-auto border-r border-rule bg-surface px-3 py-4">
       <div className="relative mb-3.5 border-b border-rule px-3 pb-4">
         <span
           aria-hidden

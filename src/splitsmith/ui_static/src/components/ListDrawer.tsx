@@ -12,11 +12,13 @@
  * translate-x animation is enough for a localhost-only single-pane SPA.
  */
 
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Trash2, X } from "lucide-react";
 
 import { MarkerGlyph } from "@/components/MarkerGlyph";
 import { Button } from "@/components/ui/button";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { cn } from "@/lib/utils";
 import type { AuditMarker } from "@/components/MarkerLayer";
 
@@ -42,16 +44,12 @@ export function ListDrawer({
 }: ListDrawerProps) {
   const [sortKey, setSortKey] = useState<SortKey>("time");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // Close on Escape -- a global L toggle still works via the parent.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // Escape + focus entry/restore. Deliberately NON-modal (trap: false):
+  // the drawer is a companion surface -- clicking rows scrubs the
+  // waveform behind it, so the page must stay interactive.
+  useDialogFocus(open, panelRef, onClose, { trap: false });
 
   const sorted = [...markers].sort((a, b) => {
     const dir = sortDir === "asc" ? 1 : -1;
@@ -74,12 +72,17 @@ export function ListDrawer({
   };
 
   return (
+    <Portal>
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="Marker list"
       aria-hidden={!open}
+      // inert while closed: aria-hidden alone leaves the off-screen rows
+      // in the Tab order.
+      inert={!open}
       className={cn(
-        "fixed right-0 top-0 z-40 flex h-full w-full max-w-md flex-col",
+        "fixed right-0 top-0 z-drawer flex h-full w-full max-w-md flex-col",
         "border-l border-border bg-card shadow-xl",
         "transition-transform duration-200 ease-out",
         open ? "translate-x-0" : "translate-x-full",
@@ -217,6 +220,7 @@ export function ListDrawer({
         Press L to toggle - Esc to close
       </div>
     </div>
+    </Portal>
   );
 }
 

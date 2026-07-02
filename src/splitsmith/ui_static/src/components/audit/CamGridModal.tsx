@@ -17,9 +17,11 @@
  */
 
 import { Pause, Play } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
+import { Portal } from "@/components/ui/Portal";
 import type { StageVideo } from "@/lib/api";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { cn } from "@/lib/utils";
 
 export interface CamGridModalProps {
@@ -48,13 +50,8 @@ export function CamGridModal({
   onPickFocus,
   renderTile,
 }: CamGridModalProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(true, panelRef, onClose);
 
   const count = videos.length;
   const cols = count <= 2 ? count : 2;
@@ -65,11 +62,13 @@ export function CamGridModal({
   const pct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
+    <Portal>
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="Camera grid"
       aria-modal="true"
-      className="fixed inset-0 z-[100] flex flex-col"
+      className="fixed inset-0 z-takeover flex flex-col"
       style={{
         background: "rgba(10,11,13,0.78)",
         backdropFilter: "blur(10px)",
@@ -163,6 +162,7 @@ export function CamGridModal({
         </span>
       </div>
     </div>
+    </Portal>
   );
 }
 

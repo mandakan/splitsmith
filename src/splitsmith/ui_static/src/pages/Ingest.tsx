@@ -208,7 +208,7 @@ function IngestInner({ slug }: { slug: string }) {
         backgroundAttachment: "fixed",
       }}
     >
-      <header className="sticky top-0 z-40 border-b border-rule bg-gradient-to-b from-surface to-bg">
+      <header className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -bottom-px h-px"

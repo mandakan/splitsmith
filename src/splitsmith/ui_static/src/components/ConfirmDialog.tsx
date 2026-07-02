@@ -13,11 +13,13 @@
  * also carries an icon and explicit button copy.
  */
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
 
 export interface ConfirmCheckbox {
   key: string;
@@ -39,9 +41,6 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export function ConfirmDialog({
   title,
   body,
@@ -56,54 +55,17 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
-    const node = cardRef.current;
-    const first = node?.querySelector<HTMLElement>(FOCUSABLE);
-    // Focus the first control (Cancel, the least destructive) so a stray
-    // Enter doesn't fire the delete.
-    (first ?? node)?.focus();
-    return () => {
-      previouslyFocused.current?.focus?.();
-    };
-  }, []);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      onCancel();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const node = cardRef.current;
-    if (!node) return;
-    const focusables = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE));
-    if (focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    const active = document.activeElement as HTMLElement | null;
-    if (e.shiftKey) {
-      if (active === first || !node.contains(active)) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else if (active === last || !node.contains(active)) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
+  useDialogFocus(true, cardRef, onCancel);
 
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
       aria-describedby={body ? "confirm-dialog-body" : undefined}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4"
       onClick={onCancel}
-      onKeyDown={onKeyDown}
     >
       <Card
         ref={cardRef}
@@ -166,5 +128,6 @@ export function ConfirmDialog({
         </CardContent>
       </Card>
     </div>
+    </Portal>
   );
 }

@@ -3,6 +3,7 @@ import { Loader2, MoreVertical, XCircle } from "lucide-react";
 
 import { RoleToggles } from "@/components/ingest/RoleToggles";
 import { ShooterPickerPopover } from "@/components/ingest/ShooterPickerPopover";
+import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
@@ -46,7 +47,28 @@ export function ClipDetail({
   const [detecting, setDetecting] = useState(false);
   const [kebabOpen, setKebabOpen] = useState(false);
   const kebabRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Anchor for the portaled kebab menu: fixed coordinates captured when
+  // the menu opens. The menu can't render inline -- the clip card is
+  // overflow-hidden, which clipped the dropdown on short cards.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(
+    null,
+  );
   const hasOtherShooters = shooters.length > 1;
+
+  const toggleKebab = useCallback(() => {
+    setKebabOpen((o) => {
+      if (!o) {
+        const rect = kebabRef.current?.getBoundingClientRect();
+        setMenuPos(
+          rect
+            ? { top: rect.bottom + 4, right: window.innerWidth - rect.right }
+            : null,
+        );
+      }
+      return !o;
+    });
+  }, []);
 
   const togglePlay = useCallback(() => {
     const el = videoRef.current;
@@ -59,12 +81,23 @@ export function ClipDetail({
   useEffect(() => {
     if (!kebabOpen) return;
     function onOutside(e: MouseEvent) {
-      if (kebabRef.current && !kebabRef.current.contains(e.target as Node)) {
-        setKebabOpen(false);
+      const t = e.target as Node;
+      // The menu is portaled to <body>, so check both the trigger
+      // wrapper and the menu itself before treating a press as outside.
+      if (kebabRef.current?.contains(t) || menuRef.current?.contains(t)) {
+        return;
       }
+      setKebabOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setKebabOpen(false);
     }
     document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [kebabOpen]);
 
   if (!clip) {
@@ -153,7 +186,7 @@ export function ClipDetail({
           <div ref={kebabRef} className="relative">
             <button
               type="button"
-              onClick={() => setKebabOpen((o) => !o)}
+              onClick={toggleKebab}
               disabled={busy || rowBusy}
               title="More actions"
               aria-label="More actions"
@@ -162,8 +195,15 @@ export function ClipDetail({
             >
               <MoreVertical className="size-4" />
             </button>
-            {kebabOpen && (
-              <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-rule-strong bg-surface shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)]">
+            {kebabOpen && menuPos && (
+              <Portal>
+              <div
+                ref={menuRef}
+                role="menu"
+                aria-label="Clip actions"
+                style={{ top: menuPos.top, right: menuPos.right }}
+                className="fixed z-drawer w-48 overflow-hidden rounded-lg border border-rule-strong bg-surface shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)]"
+              >
                 <div className="border-b border-rule px-3 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-subtle">
                   Move to shooter
                 </div>
@@ -185,6 +225,7 @@ export function ClipDetail({
                   />
                 </div>
               </div>
+              </Portal>
             )}
           </div>
         )}
