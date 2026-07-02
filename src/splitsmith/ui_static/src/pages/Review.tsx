@@ -238,6 +238,9 @@ export function Review() {
       setSnapPeaks({ peaks: peaks.peaks, duration: peaks.duration });
       return;
     }
+    // Clear before fetching: drops during the refetch window fall back to
+    // grid snapping instead of snapping against the previous clip's array.
+    setSnapPeaks(null);
     let alive = true;
     api
       .getFixturePeaks(fixturePath, bins)
