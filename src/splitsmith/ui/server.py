@@ -109,7 +109,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .. import __version__ as splitsmith_version
@@ -168,6 +168,7 @@ from .project import (
     RawVideo,
     ScoreboardImportConflictError,
     StageEntry,
+    StageStatus,
     StageVideo,
     VideoRole,
 )
@@ -2634,6 +2635,15 @@ class ShooterCameraInfo(BaseModel):
     stage_numbers: list[int]
 
 
+class StageStatusEntry(BaseModel):
+    """One stage's lifecycle status for a single shooter, surfaced on the
+    shooters listing so the match Overview can render an aggregate grid
+    without fetching every shooter's full project."""
+
+    stage_number: int
+    status: StageStatus
+
+
 class ShooterListEntry(BaseModel):
     """One row of GET /api/match/shooters (#324)."""
 
@@ -2651,6 +2661,10 @@ class ShooterListEntry(BaseModel):
     # (primary + beep + stage_time + reachable source); stages missing those
     # prerequisites are excluded from the count.
     stages_missing_trim: int = 0
+    # Per-stage status for this shooter, one entry per stage in the
+    # shooter's own project (same source as ``stages_audited``). The match
+    # Overview pivots these across shooters into a per-stage grid.
+    stage_statuses: list[StageStatusEntry] = Field(default_factory=list)
 
 
 class ShooterListResponse(BaseModel):
@@ -8972,6 +8986,7 @@ def create_app(
             )
             for k, g in groups.items()
         ]
+        stage_status_map = legacy.stage_statuses(shooter_root)
         return ShooterListEntry(
             slug=shooter_root.name,
             name=legacy.competitor_name or shooter_root.name,
@@ -8989,6 +9004,9 @@ def create_app(
             video_count=total_videos,
             cameras=cameras,
             stages_missing_trim=stages_missing_trim,
+            stage_statuses=[
+                StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())
+            ],
         )
 
     # ----------------------------------------------------------------------
