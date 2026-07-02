@@ -33,8 +33,9 @@ interface WaveformProps {
   onScrub: (timeSeconds: number) => void;
   onScrubEnd?: () => void;
   /** Fires on a double-click on the waveform background. The parent can
-   *  use this to add a manual marker at the clicked time (issue #15). */
-  onDoubleClick?: (timeSeconds: number) => void;
+   *  use this to add a manual marker at the clicked time (issue #15).
+   *  `shiftKey` lets the parent bypass peak-snapping (#28). */
+  onDoubleClick?: (timeSeconds: number, shiftKey: boolean) => void;
   beepTime?: number | null;
   /** Pixels-per-second of the rendered content. Null/undefined => fit
    *  the visible container width (no horizontal scroll). */
@@ -310,7 +311,7 @@ export function Waveform({
           onDoubleClick={(e) => {
             if (!onDoubleClick) return;
             if ((e.target as HTMLElement).closest("[data-audit-marker]")) return;
-            onDoubleClick(timeFromEvent(e.clientX));
+            onDoubleClick(timeFromEvent(e.clientX), e.shiftKey);
           }}
         >
           <canvas ref={canvasRef} className="block" />

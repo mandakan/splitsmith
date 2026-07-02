@@ -102,6 +102,7 @@ import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
+import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { deriveStageStatus } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
@@ -140,6 +141,7 @@ export function Audit() {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
+  const [snapPeaks, setSnapPeaks] = useState<SnapPeaks | null>(null);
 
   const [audit, setAudit] = useState<StageAudit | null>(null);
 
@@ -546,6 +548,34 @@ export function Audit() {
     };
   }, [slug, stageNumber, primary]);
 
+  // High-resolution peaks for drop/add peak-snapping (#28). The render
+  // fetch stays at PEAK_BINS so visuals do not change; snapping wants
+  // ~10 ms bins, which PEAK_BINS only delivers on clips under ~15 s.
+  // Until this resolves, drops fall back to grid snapping - never blocks.
+  useEffect(() => {
+    if (!peaks || stageNumber == null) {
+      setSnapPeaks(null);
+      return;
+    }
+    const bins = Math.min(8192, Math.max(PEAK_BINS, Math.ceil(peaks.duration / 0.01)));
+    if (bins <= PEAK_BINS) {
+      setSnapPeaks({ peaks: peaks.peaks, duration: peaks.duration });
+      return;
+    }
+    let alive = true;
+    api
+      .getStagePeaks(slug, stageNumber, bins)
+      .then((p) => {
+        if (alive) setSnapPeaks({ peaks: p.peaks, duration: p.duration });
+      })
+      .catch(() => {
+        if (alive) setSnapPeaks(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [peaks, slug, stageNumber]);
+
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
     if (stageNumber == null) {
@@ -874,15 +904,17 @@ export function Audit() {
   }, [handleMarkerTimeChangeCommit]);
 
   const handleAddManual = useCallback(
-    (time: number) => {
+    (time: number, shiftKey = false) => {
+      const snapped = !shiftKey && snapPeaks ? snapToPeak(time, snapPeaks) : null;
+      const t = snapped ?? time;
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      recordEvent("marker_added_manual", { id, time });
+      recordEvent("marker_added_manual", { id, time: t });
       mutate([
         ...markers,
         {
           id,
           kind: "manual",
-          time,
+          time: t,
           candidateNumber: null,
           confidence: null,
           peakAmplitude: null,
@@ -891,7 +923,7 @@ export function Audit() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate, recordEvent],
+    [markers, mutate, recordEvent, snapPeaks],
   );
 
   const handleNoteChange = useCallback(
@@ -1863,6 +1895,7 @@ export function Audit() {
                       onTimeChangeBegin={handleMarkerTimeChangeBegin}
                       onTimeChangeCommit={handleMarkerTimeChangeCommit}
                       visibleKinds={visibleKinds}
+                      snapPeaks={snapPeaks ?? undefined}
                     />
                   </Waveform>
                   {/* Anomaly pins sit on the seam between the legend

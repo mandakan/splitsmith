@@ -8,6 +8,8 @@
  * Pointer interactions:
  *   - click          -> onClick(marker)         (parent toggles keep/reject)
  *   - drag           -> onTimeChange(id, t)     (snapped, see SNAP_S below)
+ *                       On drop, peak-snaps to nearest audio transient when
+ *                       snapPeaks is provided; Shift at drop bypasses.
  *   - dblclick on bg -> handled by <Waveform>
  *
  * Keyboard interactions (focused marker):
@@ -29,6 +31,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import { MarkerGlyph, type MarkerKind } from "@/components/MarkerGlyph";
+import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { cn } from "@/lib/utils";
 
 /** Detector resolution -- coarse hop length in seconds for the shot detector
@@ -90,6 +93,10 @@ export interface MarkerLayerProps {
    *  rejected markers in the model -- they just don't render. The save
    *  flow still serializes them via the audit JSON. */
   visibleKinds?: Set<MarkerKind>;
+  /** High-resolution peaks used to snap a drag-drop onto the nearest audio
+   *  transient (#28). Absent = no peak snapping (grid snap only). Shift
+   *  held at drop always bypasses. */
+  snapPeaks?: SnapPeaks;
 }
 
 export function MarkerLayer(props: MarkerLayerProps) {
@@ -108,6 +115,7 @@ function MarkerLayerInner({
   onTimeChangeBegin,
   onTimeChangeCommit,
   visibleKinds,
+  snapPeaks,
 }: MarkerLayerProps) {
   // Drag state lives in a ref so re-renders driven by external time
   // updates don't reset the active drag. ``moved`` only flips once the
@@ -237,13 +245,20 @@ function MarkerLayerInner({
         onClick(marker);
         return;
       }
-      // Commit the drag: parent reads the marker's current time from its
-      // own state (it's been updating live during pointermove) and pushes
-      // a single from->to undo entry plus one audit_events row.
       const live = markers.find((m) => m.id === marker.id);
-      onTimeChangeCommit?.(marker.id, live?.time ?? marker.time);
+      let final = live?.time ?? marker.time;
+      // Peak-snap the drop unless Shift is held (Shift = exactly where I put
+      // it). Live drag keeps detector-grid snapping; only the commit snaps.
+      if (!e.shiftKey && snapPeaks) {
+        const snapped = snapToPeak(final, snapPeaks);
+        if (snapped != null && snapped !== final) {
+          final = snapped;
+          onTimeChange(marker.id, snapped);
+        }
+      }
+      onTimeChangeCommit?.(marker.id, final);
     },
-    [onClick, onTimeChangeCommit, markers],
+    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange],
   );
 
   // Esc cancels an in-flight drag: restore the pointerdown-time position
