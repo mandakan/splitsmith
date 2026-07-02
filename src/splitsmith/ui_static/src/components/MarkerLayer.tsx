@@ -3,7 +3,7 @@
  *
  * Renders absolute-positioned markers on top of the waveform. Each marker
  * is a focusable button so keyboard navigation works without a custom
- * roving-tabindex implementation -- Tab visits them in time order.
+ * roving-tabindex implementation - Tab visits them in time order.
  *
  * Pointer interactions:
  *   - click          -> onClick(marker)         (parent toggles keep/reject)
@@ -13,9 +13,13 @@
  * Keyboard interactions (focused marker):
  *   - Arrow Left/Right -> nudge by detector resolution. Shift narrows the
  *     step to ~1 ms so users can land on a single sample edge.
+ *   - Escape           -> cancel in-flight drag, restore pre-drag position
  *   - Enter            -> toggle keep/reject (detected/rejected only)
  *   - Delete/Backspace -> destructive action (parent decides; manual = remove,
  *                         detected kept = reject)
+ *
+ * Hit zone: 10px-wide button (18px glyph may overflow). Drag threshold is 6px
+ * for mouse/trackpad, 10px for touch (fingers wobble more). Esc cancels drag.
  *
  * The container fills the waveform's positioned parent and uses
  * `pointer-events: none` so empty space passes the press-and-drag scrubbing
@@ -39,6 +43,11 @@ const FINE_NUDGE_S = 0.001;
  *  motion; without this threshold those clicks accidentally moved the marker.
  *  6px matches the de-facto threshold in FCP / Logic / most native UIs. */
 const DRAG_THRESHOLD_PX = 6;
+
+/** Touch pointers get a wider threshold - fingers wobble more than mice,
+ *  and the 10px hit zone means most touch presses start slightly off the
+ *  marker center. */
+const TOUCH_DRAG_THRESHOLD_PX = 10;
 
 /** Idle window after the last keyboard nudge before the burst is committed
  *  as a single undo entry. 350 ms is long enough to chord arrow taps without
@@ -107,8 +116,12 @@ function MarkerLayerInner({
   const dragRef = useRef<{
     pointerId: number;
     element: HTMLButtonElement;
+    markerId: string;
     startX: number;
     startY: number;
+    /** Marker time at pointerdown - restored on Esc cancel. */
+    startTime: number;
+    thresholdPx: number;
     moved: boolean;
   } | null>(null);
 
@@ -176,8 +189,12 @@ function MarkerLayerInner({
       dragRef.current = {
         pointerId: e.pointerId,
         element: el,
+        markerId: marker.id,
         startX: e.clientX,
         startY: e.clientY,
+        startTime: marker.time,
+        thresholdPx:
+          e.pointerType === "touch" ? TOUCH_DRAG_THRESHOLD_PX : DRAG_THRESHOLD_PX,
         moved: false,
       };
       onFocusChange(marker.id);
@@ -192,7 +209,7 @@ function MarkerLayerInner({
       if (!drag.moved) {
         const dx = e.clientX - drag.startX;
         const dy = e.clientY - drag.startY;
-        if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
+        if (dx * dx + dy * dy < drag.thresholdPx * drag.thresholdPx) return;
         drag.moved = true;
         // Drag committed past the threshold: tell the parent to snapshot
         // the pre-edit time. Subsequent onTimeChange calls are visual
@@ -228,6 +245,37 @@ function MarkerLayerInner({
     },
     [onClick, onTimeChangeCommit, markers],
   );
+
+  // Esc cancels an in-flight drag: restore the pointerdown-time position
+  // and release capture. Listens on window because pointerdown calls
+  // preventDefault(), so the button cannot be assumed to hold keyboard
+  // focus mid-drag. Committing with the original time is a no-op for
+  // parents that guard on from === to (Audit) and a harmless restore for
+  // parents that log per-change (Review).
+  const cancelDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (drag.element.hasPointerCapture(drag.pointerId)) {
+      drag.element.releasePointerCapture(drag.pointerId);
+    }
+    const { markerId, startTime, moved } = drag;
+    dragRef.current = null;
+    if (moved) {
+      onTimeChange(markerId, startTime);
+      onTimeChangeCommit?.(markerId, startTime);
+    }
+  }, [onTimeChange, onTimeChangeCommit]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dragRef.current) {
+        e.preventDefault();
+        cancelDrag();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cancelDrag]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, marker: AuditMarker) => {
@@ -325,7 +373,7 @@ function MarkerLayerInner({
               "active:cursor-grabbing",
               focused && "ring-2 ring-ring ring-offset-1 ring-offset-background",
             )}
-            style={{ left: `${x}%`, width: "20px" }}
+            style={{ left: `${x}%`, width: "10px" }}
             title={label}
           >
             {/* Vertical guide line full-height behind the glyph for visibility. */}
