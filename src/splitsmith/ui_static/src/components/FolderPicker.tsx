@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import {
   ApiError,
   api,
@@ -273,19 +275,10 @@ export function FolderPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFiles, path, autoCommitFiles]);
 
-  // Esc closes the modal shell. Kept inside the component (not behind
-  // a separate file) so the unified picker owns its modal behaviour.
-  useEffect(() => {
-    if (shell !== "modal" || !onCancel) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [shell, onCancel]);
+  // Modal-shell dialog behavior: Escape, focus entry, Tab trap, focus
+  // restore. Inline shells sit inside a host dialog that owns these.
+  const modalPanelRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(shell === "modal", modalPanelRef, () => onCancel?.());
 
   const body = (
     <div
@@ -513,14 +506,16 @@ export function FolderPicker({
   // through this branch with ``contentMode="directories"`` and
   // ``unbound``.
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-label={modalTitle ?? "Pick a folder"}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
       onClick={onCancel}
     >
       <div
+        ref={modalPanelRef}
         className="relative flex h-[min(640px,88vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -549,6 +544,7 @@ export function FolderPicker({
         <div className="flex min-h-0 flex-1 flex-col px-5 py-4">{body}</div>
       </div>
     </div>
+    </Portal>
   );
 }
 

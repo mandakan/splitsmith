@@ -11,10 +11,12 @@
  * not_a_symlink rows are surfaced read-only with an explanation.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FolderSearch, Link2, Link2Off } from "lucide-react";
 
 import { FolderPicker } from "@/components/FolderPicker";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -81,6 +83,15 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [scannedRoots, setScannedRoots] = useState<string[]>([]);
   const [appliedCount, setAppliedCount] = useState(0);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Escape / focus trap / restore. The folder picker renders INLINE
+  // inside this card (not a nested modal), so the trap covers it too;
+  // Escape peels the picker first, then the dialog.
+  useDialogFocus(true, panelRef, () => {
+    if (pickerOpen) setPickerOpen(false);
+    else onClose();
+  }, { disableEscape: busy });
 
   // Initial load: just the link status, no scan yet.
   useEffect(() => {
@@ -182,14 +193,16 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
   };
 
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="relink-dialog-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4"
       onClick={onClose}
     >
       <Card
+        ref={panelRef}
         className="flex max-h-[90vh] w-full max-w-3xl flex-col shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -320,6 +333,7 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
         </div>
       </Card>
     </div>
+    </Portal>
   );
 }
 

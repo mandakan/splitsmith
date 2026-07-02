@@ -67,7 +67,9 @@ export function StageActionBar({
     <div
       role="region"
       aria-label="Stage actions"
-      className="fixed inset-x-0 bottom-0 z-30 flex items-stretch gap-0 border-t border-rule-strong bg-bg/95 px-5 py-3 shadow-[0_-16px_32px_-16px_rgba(0,0,0,0.6)] backdrop-blur"
+      // Spans the CONTENT column only (left offset = live sidebar width):
+      // covering the sidebar hid its Jobs rail behind the bar.
+      className="fixed bottom-0 left-[var(--shell-sidebar-w,0px)] right-0 z-chrome flex items-stretch gap-0 border-t border-rule-strong bg-bg/95 px-5 py-3 shadow-[0_-16px_32px_-16px_rgba(0,0,0,0.6)] backdrop-blur"
     >
       {/* Left -- progress block */}
       <div className="flex min-w-0 flex-1 items-center gap-4">

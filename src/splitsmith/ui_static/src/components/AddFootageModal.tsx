@@ -30,12 +30,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FolderPicker } from "@/components/FolderPicker";
 import { Avatar } from "@/components/ui";
+import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
   type RawUploadEntry,
   type ScanResponse,
 } from "@/lib/api";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
@@ -124,19 +126,15 @@ export function AddFootageModal({
   const pickerFolderHasFileChecks =
     pickerPath != null && queue.some((q) => q.kind === "files" && q.folder === pickerPath);
 
-  // Esc closes the modal -- but only while in the "queue" phase. Once
-  // a scan starts we don't want a stray keystroke to abandon it.
-  useEffect(() => {
-    if (phase !== "queue") return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, phase]);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Escape / focus trap / restore. Escape is blocked only while a scan
+  // is RUNNING (a stray keystroke must not abandon it); the queue and
+  // result phases both close -- there is nothing in-flight to protect
+  // once results are on screen.
+  useDialogFocus(!hostedMode, panelRef, onClose, {
+    disableEscape: phase === "running",
+  });
 
   const addFolder = useCallback((path: string) => {
     setQueue((prev) => {
@@ -227,14 +225,16 @@ export function AddFootageModal({
   }
 
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Add footage"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
       onClick={phase === "queue" ? onClose : undefined}
     >
       <div
+        ref={panelRef}
         className="relative flex h-[min(720px,90vh)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -400,6 +400,7 @@ export function AddFootageModal({
         </footer>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -799,6 +800,7 @@ function HostedUploadBody({
   const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   // Track which uploaded filenames the operator has attached to the
   // current shooter's project this session, plus any inflight / error
   // state. Persistent attachment lives on match.json (raw_videos[]);
@@ -987,15 +989,20 @@ function HostedUploadBody({
     (u) => u.status === "queued" || u.status === "uploading",
   );
 
+  // Escape / focus trap / restore; Escape locked while uploads run.
+  useDialogFocus(true, panelRef, onClose, { disableEscape: inFlight });
+
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Upload raw footage"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
       onClick={!inFlight ? onClose : undefined}
     >
       <div
+        ref={panelRef}
         className="relative flex h-[min(720px,90vh)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
         onClick={(e) => e.stopPropagation()}
       >
@@ -1117,6 +1124,7 @@ function HostedUploadBody({
         </footer>
       </div>
     </div>
+    </Portal>
   );
 }
 

@@ -40,8 +40,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useLocation } from "react-router-dom";
 
+import { Portal } from "@/components/ui/Portal";
 import { ApiError, api, type Job } from "@/lib/api";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_POLL_MS = 1000;
@@ -359,6 +362,11 @@ export interface JobsSheetProps {
 export function JobsSheet({ state, onClose, leftOffset }: JobsSheetProps) {
   const { running, pending, failed, error, cancel, acknowledge, acknowledgeAll } =
     state;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Non-modal popover contract: Escape closes, focus enters on open and
+  // restores to the jobs rail on close; no Tab trap -- the page behind
+  // stays interactive by design.
+  useDialogFocus(true, panelRef, onClose, { trap: false });
   const groups: Array<{
     id: "attn" | "running" | "queued";
     label: string;
@@ -377,9 +385,10 @@ export function JobsSheet({ state, onClose, leftOffset }: JobsSheetProps) {
 
   return (
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="Jobs"
-      className="fixed bottom-4 z-[60] flex max-h-[480px] w-[360px] flex-col overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[0_24px_60px_-16px_rgba(0,0,0,0.75)]"
+      className="fixed bottom-4 z-drawer flex max-h-[480px] w-[360px] flex-col overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[0_24px_60px_-16px_rgba(0,0,0,0.75)]"
       style={{ left: leftOffset }}
     >
       <div className="flex items-center gap-2 border-b border-rule bg-surface-2 px-3.5 py-2.5">
@@ -619,16 +628,17 @@ export function JobsSurface({
   const state = useJobs();
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((v) => !v), []);
+  const { pathname } = useLocation();
 
-  // Close the sheet on Escape so it behaves like a dismissible drawer.
+  // Escape / focus handling lives in JobsSheet (useDialogFocus).
+
+  // Navigating dismisses the sheet. JobsSurface lives in the persistent
+  // shell sidebar, so without this the sheet survives route changes and
+  // hangs over whatever page loads next (keyboard nav and header links
+  // never touch the click-outside overlay).
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+    setOpen(false);
+  }, [pathname]);
 
   // Click-outside dismiss: a thin transparent overlay underneath the sheet.
   const offset = useMemo(
@@ -640,10 +650,14 @@ export function JobsSurface({
     <>
       <JobsRail state={state} collapsed={collapsed} open={open} onToggle={toggle} />
       {open ? (
-        <>
+        <Portal>
+          {/* z-drawer minus epsilon isn't a thing -- the backdrop shares
+              the drawer layer and relies on DOM order to sit beneath the
+              sheet. Both portal to body so no sidebar stacking context
+              can trap them (the sheet-under-everything bug). */}
           <div
             aria-hidden
-            className="fixed inset-0 z-[55]"
+            className="fixed inset-0 z-drawer"
             onClick={() => setOpen(false)}
           />
           <JobsSheet
@@ -651,7 +665,7 @@ export function JobsSurface({
             onClose={() => setOpen(false)}
             leftOffset={offset}
           />
-        </>
+        </Portal>
       ) : null}
     </>
   );

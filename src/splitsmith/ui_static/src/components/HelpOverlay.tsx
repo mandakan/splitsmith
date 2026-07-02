@@ -14,6 +14,8 @@ import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { modKeyGlyph } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -89,12 +91,16 @@ function sections(mode: HelpMode): Section[] {
 }
 
 export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
-  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
+  // Escape + focus entry / Tab trap / restore come from the shared hook
+  // (aria-modal without a real trap let Tab wander behind the overlay).
+  // ``?`` as a toggle is this dialog's own affordance.
+  useDialogFocus(open, panelRef, onClose);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "?") {
+      if (e.key === "?") {
         e.preventDefault();
         onClose();
       }
@@ -103,22 +109,17 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // Move focus into the dialog so screen readers + Tab nav land here
-  // immediately after open (#21 a11y).
-  useEffect(() => {
-    if (open) closeRef.current?.focus();
-  }, [open]);
-
   if (!open) return null;
 
   const grouped = sections(mode);
 
   return (
+    <Portal>
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Keyboard shortcuts"
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-modal flex items-center justify-center"
     >
       <div
         aria-hidden
@@ -126,6 +127,7 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
         onClick={onClose}
       />
       <div
+        ref={panelRef}
         className={cn(
           "relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-card text-card-foreground shadow-xl",
           "p-6",
@@ -139,7 +141,6 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
             </p>
           </div>
           <Button
-            ref={closeRef}
             size="sm"
             variant="ghost"
             onClick={onClose}
@@ -173,6 +174,7 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
