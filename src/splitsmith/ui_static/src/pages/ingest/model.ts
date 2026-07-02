@@ -89,8 +89,14 @@ export function buildClipModel(project: MatchProject): ClipModel {
     (s) => (s.videos ?? []).map((video) => ({ video, stage: s })),
   );
   const cameras = groupByCamera(assigned);
+  // Path -> camera index so per-clip lookups are O(1) instead of scanning
+  // every camera group for each of N videos.
+  const cameraByPath = new Map<string, CameraGroup>();
+  for (const c of cameras) {
+    for (const p of c.videoPaths) cameraByPath.set(p, c);
+  }
   const cameraFor = (path: string): CameraGroup | undefined =>
-    cameras.find((c) => c.videoPaths.has(path));
+    cameraByPath.get(path);
 
   const unassignedSorted = (project.unassigned_videos ?? [])
     .map((v, i) => ({ v, i }))

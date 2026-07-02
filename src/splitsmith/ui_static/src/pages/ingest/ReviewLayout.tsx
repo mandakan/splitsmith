@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Package, Plus, Video, X } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -52,11 +52,13 @@ export function ReviewLayout({
   onDismissBanner: () => void;
   onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   onAddMore: () => void;
+  // Resolves true when the move landed, false if it failed. Lets the layout
+  // avoid auto-advancing selection off a clip whose assignment did not stick.
   onMoveAssignment: (
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   onRemoveVideo: (videoPath: string) => Promise<void>;
   onConfirm: () => void;
   onSaved: () => Promise<void>;
@@ -108,8 +110,14 @@ export function ReviewLayout({
     return () => window.removeEventListener("keydown", onKey);
   }, [model.order]);
 
+  // Match the prior StageReference default: collapse once every stage has
+  // footage (not merely when the unassigned queue is empty). Only the first
+  // visit is affected -- a persisted toggle wins after that.
+  const allStagesHaveFootage =
+    project.stages.length > 0 &&
+    project.stages.every((s) => (s.videos?.length ?? 0) > 0);
   const [drawerCollapsed, toggleDrawer] = useStageDrawerCollapsed(
-    model.remaining === 0,
+    allStagesHaveFootage,
   );
 
   const activeShooterName = shooters.find((s) => s.slug === slug)?.name ?? slug;
@@ -122,24 +130,29 @@ export function ReviewLayout({
   // so the operator keeps clearing the pile without the mouse. Compute the
   // target from the CURRENT model (before the move); its path is unchanged by
   // the reassignment, so selecting it by path survives the project reload.
-  async function handleMove(
-    videoPath: string,
-    toStage: number | null,
-    role: VideoRole,
-  ) {
-    const wasUnassigned =
-      model.order.find((c) => c.video.path === videoPath)?.stageNumber == null;
-    const nextPath =
-      wasUnassigned && toStage != null
-        ? nextUnassignedAfter(model, videoPath)
-        : null;
-    await onMoveAssignment(videoPath, toStage, role);
-    if (nextPath != null) setSelectedPath(nextPath);
-  }
+  // Only advance when the move actually succeeded -- otherwise the clip stays
+  // in the queue and selection should stay on it.
+  const handleMove = useCallback(
+    async (videoPath: string, toStage: number | null, role: VideoRole) => {
+      const wasUnassigned =
+        model.order.find((c) => c.video.path === videoPath)?.stageNumber == null;
+      const nextPath =
+        wasUnassigned && toStage != null
+          ? nextUnassignedAfter(model, videoPath)
+          : null;
+      const ok = await onMoveAssignment(videoPath, toStage, role);
+      if (ok && nextPath != null) setSelectedPath(nextPath);
+    },
+    [model, onMoveAssignment],
+  );
 
-  const assignStage = (stageNumber: number) => {
-    if (selectedClip) void handleMove(selectedClip.video.path, stageNumber, selectedClip.video.role);
-  };
+  const assignStage = useCallback(
+    (stageNumber: number) => {
+      if (selectedClip)
+        void handleMove(selectedClip.video.path, stageNumber, selectedClip.video.role);
+    },
+    [selectedClip, handleMove],
+  );
 
   return (
     <div className="flex flex-col gap-4">
