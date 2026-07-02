@@ -950,6 +950,13 @@ export function Audit() {
   // Only fires when there are enough shots to draw a conclusion (>= 3).
   const beepDiagnostic = useMemo<{ reason: string } | null>(() => {
     if (!stage || stage.time_seconds <= 0 || auditBeep == null) return null;
+    // A reviewed beep is confirmed -- ``beep_reviewed`` is the single
+    // source of truth (same field the backend's beep-queue status checks
+    // first, before confidence: server.py ``get_beep_queue``). This
+    // heuristic exists only to *prompt* review; once the operator has
+    // listened and confirmed, it must fall silent everywhere it feeds
+    // (the anomaly banner, the toolbar chip, and the pre-audit gate).
+    if (primary?.beep_reviewed) return null;
     if (keptShots.length < 3) return null;
     const sorted = keptShots.slice().sort((a, b) => a.time - b.time);
     const first = sorted[0];
@@ -968,7 +975,7 @@ export function Audit() {
       };
     }
     return null;
-  }, [keptShots, auditBeep, stage]);
+  }, [keptShots, auditBeep, stage, primary?.beep_reviewed]);
 
   // Anomaly chips shown above the waveform. The "beep looks wrong"
   // diagnostic used to ride along as a synthetic warn chip here; it now
@@ -1587,6 +1594,7 @@ export function Audit() {
               beepTime={primary.beep_time}
               confidence={primary.beep_confidence ?? null}
               diagnostic={beepDiagnostic?.reason ?? null}
+              reviewed={primary.beep_reviewed}
             />
             {peaks && !peaks.trimmed && !prereqActive ? (
               <TrimNowBadge
@@ -1747,6 +1755,7 @@ export function Audit() {
               beepConfidence={primary.beep_confidence ?? null}
               beepDiagnostic={beepDiagnostic?.reason ?? null}
               beepLowConfThreshold={beepLowConfThreshold}
+              beepReviewed={primary.beep_reviewed}
               onPingBeepChip={() => beepChipRef.current?.flash()}
               hasTrim={!!peaks?.trimmed}
               onProjectUpdate={(p) => {
