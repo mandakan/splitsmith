@@ -1848,7 +1848,7 @@ def register_job_bodies(state: AppState) -> None:
                     project=proj,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
-                peaks_result = waveform_helpers.ensure_peaks(take_wav, 3000)
+                waveform_helpers.ensure_peaks(take_wav, 3000)
                 # Push the peaks JSON to storage so the API process can serve
                 # it without re-computing. No-op in local mode (no storage).
                 if proj._storage is not None and proj._storage_scope is not None:
@@ -1858,7 +1858,6 @@ def register_job_bodies(state: AppState) -> None:
                         proj._storage.write_bytes(peaks_key, peaks_path.read_bytes())
                     except Exception as push_exc:
                         logger.info("take peaks: storage push failed: %s", push_exc)
-                del peaks_result  # result used only for side-effect (cache write)
             except Exception as peaks_exc:
                 logger.info("take peaks: generation failed for %s: %s", video.path, peaks_exc)
         handle.update(progress=1.0, message="Done")
@@ -5824,26 +5823,35 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"no raw video at {storage_path!r}")
 
         take_wav = audio_helpers.take_audio_path(root, storage_path, project=project)
-        peaks_path = waveform_helpers.cache_path(take_wav, bins)
 
         # Hosted mode: the worker pushed the peaks JSON to storage.
         if state.storage is not None and project._storage_scope is not None:
+            # Hosted peaks are fixed at 3000 bins (worker-emitted); ignore requested bins.
+            hosted_bins = 3000
+            peaks_path = waveform_helpers.cache_path(take_wav, hosted_bins)
             # Serve from local cache when already pulled by a prior request.
-            if peaks_path.exists() and take_wav.exists():
+            # WAV is never present locally in hosted mode so gate on peaks JSON only.
+            if peaks_path.exists():
                 result = waveform_helpers.PeaksResult.model_validate_json(
                     peaks_path.read_text(encoding="utf-8")
                 )
                 return JSONResponse(result.model_dump(mode="json"))
             peaks_key = f"{project._storage_scope}/audio/{peaks_path.name}"
+            pulled = False
             try:
-                if not state.storage.exists(peaks_key):
-                    return JSONResponse({"pending": True}, status_code=202)
-                peaks_path.parent.mkdir(parents=True, exist_ok=True)
-                with state.storage.open_stream(peaks_key) as src, peaks_path.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                if state.storage.exists(peaks_key):
+                    peaks_path.parent.mkdir(parents=True, exist_ok=True)
+                    with state.storage.open_stream(peaks_key) as src, peaks_path.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    pulled = True
             except Exception as exc:
                 logger.info("take peaks: storage pull failed: %s", exc)
-                return JSONResponse({"pending": True}, status_code=202)
+            if not pulled:
+                active_job = any(
+                    asyncio.run(state.jobs.find_active(kind="detect_beep", stage_number=n)) is not None
+                    for n in rv.covers_stages
+                )
+                return JSONResponse({"pending": True, "active_job": active_job}, status_code=202)
             result = waveform_helpers.PeaksResult.model_validate_json(peaks_path.read_text(encoding="utf-8"))
             return JSONResponse(result.model_dump(mode="json"))
 

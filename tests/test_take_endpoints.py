@@ -364,18 +364,28 @@ def test_take_overview_status_found_after_beep(tmp_path: Path) -> None:
 
 
 def test_take_overview_status_none_on_failed_detect(tmp_path: Path) -> None:
-    """Stage status is 'none' when beep_auto_detect_failed is True.
+    """Stage status is 'none' when beep_auto_detect_failed is True and no beep_time."""
+    from splitsmith.match_model import Match
+    from splitsmith.ui.project import MatchProject
 
-    We verify the 'pending' branch (beep_auto_detect_failed=False by default)
-    here. The 'none' branch requires a failed detect job run, which is tested
-    indirectly via the detect job tests.
-    """
     client, filename = _setup_take(tmp_path, n_stages=1)
 
-    # Default state: no beep detected and not failed - status is "pending".
+    # Default state: no beep and not failed - status is "pending".
     resp = client.get(f"/api/shooters/me/raw-videos/overview?filename={filename}")
     assert resp.status_code == 200
     assert resp.json()["stages"][0]["status"] == "pending"
+
+    # Seed beep_auto_detect_failed=True on the stage-video to simulate a
+    # detect job that ran and produced no candidate.
+    shooter_root = Match.shooter_root(tmp_path / "match", "me")
+    project = MatchProject.load(shooter_root)
+    sv = next(v for v in project.stage(1).videos if str(v.path) == f"raw/{filename}")
+    sv.beep_auto_detect_failed = True
+    project.save(shooter_root)
+
+    resp = client.get(f"/api/shooters/me/raw-videos/overview?filename={filename}")
+    assert resp.status_code == 200
+    assert resp.json()["stages"][0]["status"] == "none"
 
 
 def test_take_overview_conflicts_flagged(tmp_path: Path) -> None:
@@ -438,53 +448,116 @@ def test_take_peaks_local_mode_extracts_and_returns(tmp_path: Path, monkeypatch:
     assert "sample_rate" in body
 
 
-def test_take_peaks_hosted_mode_pending_when_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET /raw-videos/peaks returns 202 pending in hosted mode when peaks not in storage.
+def _setup_hosted_peaks(tmp_path: Path, project_subdir: str = "match", filename: str = "VID_HOSTED.mp4"):
+    """Scaffold a hosted-mode peaks test: local coverage registration + fake storage injected.
 
-    Sets state.storage to a fake that always returns exists=False so the endpoint
-    takes the hosted code path and returns 202 when the peaks JSON is absent.
+    Returns (app, client, filename).  state.storage is a MagicMock with
+    exists() returning False so the hosted branch always misses the JSON.
+    All background detect_beep jobs submitted during coverage registration are
+    drained before returning (the empty test MP4 makes them fail almost
+    immediately), so callers start with no active jobs.
     """
+    import asyncio
+    import time
     from unittest.mock import MagicMock
 
     from splitsmith.match_model import Match
     from splitsmith.ui.project import MatchProject, StageEntry
     from tests.test_ui_server import _match_create_app, _MatchClient
 
-    project_root = tmp_path / "match"
+    project_root = tmp_path / project_subdir
     app = _match_create_app(project_root=project_root, project_name="Hosted Peaks Test")
     client = _MatchClient(app)
 
-    # Set up stages directly.
     shooter_root = Match.shooter_root(project_root, "me")
     project = MatchProject.load(shooter_root)
     project.stages.append(StageEntry(stage_number=1, stage_name="Stage One", time_seconds=10.0))
     project.save(shooter_root)
 
     src_dir = tmp_path / "videos"
-    src_dir.mkdir()
-    filename = "VID_HOSTED.mp4"
+    src_dir.mkdir(exist_ok=True)
     (src_dir / filename).write_bytes(b"")
-    # Scan in local mode (storage still None) so scan works normally.
     client.post(
         "/api/shooters/me/videos/scan",
         json={"source_dir": str(src_dir), "auto_assign_primary": False},
     )
-    # Register coverage in local mode.
     resp = client.patch(
         "/api/shooters/me/raw-videos/coverage",
         json={"filename": filename, "covers_stages": [1]},
     )
     assert resp.status_code == 200
 
-    # Inject hosted-mode storage AFTER setup so coverage + scan ran locally.
-    # The storage.exists check always returns False - simulates absent peaks JSON.
+    # Coverage PATCH submits a detect_beep job via _queue_take_detects. Drain it
+    # before injecting fake storage - the empty test MP4 makes ffmpeg fail fast.
+    state_ref = app.state.splitsmith_state
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if asyncio.run(state_ref.jobs.find_active(kind="detect_beep", stage_number=1)) is None:
+            break
+        time.sleep(0.05)
+
     fake_storage = MagicMock()
     fake_storage.exists.return_value = False
     app.state.splitsmith_state.storage = fake_storage
+
+    return app, client, filename
+
+
+def test_take_peaks_hosted_mode_pending_when_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /raw-videos/peaks returns 202 in hosted mode when peaks not in storage.
+
+    With no active detect_beep job, active_job must be False so the SPA can
+    offer a manual re-run rather than spinning indefinitely.
+    """
+    app, client, filename = _setup_hosted_peaks(tmp_path)
 
     # When state.storage is not None and the middleware sets the match_id,
     # shooter_project() binds scope=f"matches/{match_id}/shooters/{slug}".
     # That makes project._storage_scope non-None so the hosted path is taken.
     resp = client.get(f"/api/shooters/me/raw-videos/peaks?filename={filename}&bins=100")
     assert resp.status_code == 202
-    assert resp.json() == {"pending": True}
+    body = resp.json()
+    assert body["pending"] is True
+    # No active detect_beep job - SPA should offer re-run, not spin.
+    assert body["active_job"] is False
+
+
+def test_take_peaks_hosted_mode_active_job_true(tmp_path: Path) -> None:
+    """GET /raw-videos/peaks returns 202 with active_job=True when a detect_beep job is pending.
+
+    Submits a blocking detect_beep job for stage 1 (one of the stages covered
+    by the take) so find_active returns a non-None job while the GET is in flight.
+    """
+    import asyncio
+    import threading
+
+    from tests.conftest import submit_fn
+
+    app, client, filename = _setup_hosted_peaks(tmp_path, project_subdir="match2", filename="VID2.mp4")
+
+    state = app.state.splitsmith_state
+
+    # Submit a detect_beep job for stage 1 that blocks until we release it.
+    gate = threading.Event()
+
+    def _blocking_worker(handle):  # noqa: ANN001
+        gate.wait(timeout=10)
+
+    job_id = asyncio.run(
+        submit_fn(
+            state.jobs,
+            kind="detect_beep",
+            fn=_blocking_worker,
+            stage_number=1,
+        )
+    )
+    assert job_id is not None
+
+    try:
+        resp = client.get(f"/api/shooters/me/raw-videos/peaks?filename={filename}&bins=100")
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["pending"] is True
+        assert body["active_job"] is True
+    finally:
+        gate.set()  # let the worker thread finish so the test teardown is clean
