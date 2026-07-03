@@ -164,8 +164,7 @@ export function ClipDetail({
     video.role !== "ignored" && video.beep_time == null && currentStage != null;
   // True when the draft differs from what's last saved - enables Apply button.
   const coverageDirty =
-    JSON.stringify([...coverageDraft].sort((a, b) => a - b)) !==
-    JSON.stringify([...coverageSaved].sort((a, b) => a - b));
+    JSON.stringify(coverageDraft) !== JSON.stringify(coverageSaved);
 
   async function changeStage(next: string) {
     setRowBusy(true);
