@@ -4245,17 +4245,22 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
     # tenant (only the key prefix is per-user, see ``_tenant_s3_storage``).
     deferrer = make_deferrer(url)
-    # Scale-to-zero worker: this API process is the only enqueuer, so it
-    # fires a one-shot worker run through the configured launcher after
-    # each defer, gated on the procrastinate_workers heartbeat so a live
-    # drain is never redeployed out from under its job, and re-checks for
-    # stranded jobs on every boot (see splitsmith.worker_trigger). No-op
-    # when the launcher env vars are unset - local / docker-compose runs
-    # an always-on worker instead.
-    worker_launcher = build_worker_launcher(worker_active=make_worker_active_checker(session_factory))
-    if worker_launcher is not None:
-        deferrer = wrap_deferrer(deferrer, worker_launcher)
-        state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
+    # Scale-to-zero worker: only the API process is the enqueuer and the only
+    # process that should be able to redeploy the worker. The worker must never
+    # acquire launcher capabilities - redeploying itself would be circular and
+    # today is only prevented by the env vars being absent on the worker service.
+    # The guard below makes that invariant explicit in code.
+    if not worker:
+        # Fires a one-shot worker run through the configured launcher after
+        # each defer, gated on the procrastinate_workers heartbeat so a live
+        # drain is never redeployed out from under its job, and re-checks for
+        # stranded jobs on every boot (see splitsmith.worker_trigger). No-op
+        # when the launcher env vars are unset - local / docker-compose runs
+        # an always-on worker instead.
+        worker_launcher = build_worker_launcher(worker_active=make_worker_active_checker(session_factory))
+        if worker_launcher is not None:
+            deferrer = wrap_deferrer(deferrer, worker_launcher)
+            state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
     s3_client, s3_bucket = _build_hosted_s3_client()
 
     def _build_tenant(user_id: str) -> TenantContext:
@@ -4898,13 +4903,20 @@ def create_app(
         )
 
     @app.get("/api/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
+    async def health() -> HealthResponse:
         """Process-level health. Tier 1 step 4 of doc 10 retired
         the bound-state concept on the server -- match identity is
         per-request via the URL prefix, not per-process. The SPA
         relies on the URL for navigation; ``/api/health`` is now
         purely a "the server is up" check (plus version + status).
         """
+        # The 6-hourly safety-net workflow curls this endpoint. When serve is
+        # already awake (e.g. an open SSE tab) the lifespan does not re-run,
+        # so this is the wake channel's awake-path: fire the boot re-check
+        # without blocking the response. The internal 5-minute cooldown on
+        # make_boot_retrigger prevents health pings from hammering the DB.
+        if state.boot_retrigger is not None:
+            asyncio.create_task(state.boot_retrigger())
         return HealthResponse(bound=False)
 
     @app.get("/api/models/status")

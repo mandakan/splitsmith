@@ -127,10 +127,18 @@ class RailwayWorkerLauncher:
 
         Holding the task in ``self._tasks`` keeps it from being garbage
         collected mid-flight (asyncio only holds weak refs to tasks).
+
+        Never raises. It is called from the enqueue path (a raise would 500 a
+        request whose job already committed) and from the serve-boot lifespan
+        (a raise would abort the entire boot). A failed schedule is safe to
+        lose - the boot re-check and the safety cron are the nets.
         """
-        task = asyncio.get_running_loop().create_task(self.trigger())
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        try:
+            task = asyncio.get_running_loop().create_task(self.trigger())
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        except Exception:
+            logger.warning("worker launcher: schedule failed; nets will recover", exc_info=True)
 
     async def trigger(self) -> bool:
         """Redeploy the worker unless one is draining or we are in cooldown.
@@ -223,20 +231,39 @@ def wrap_deferrer(
 
 
 def make_boot_retrigger(
-    session_factory: Callable[[], Any], launcher: WorkerLauncher
+    session_factory: Callable[[], Any],
+    launcher: WorkerLauncher,
+    *,
+    min_interval_seconds: float = 300.0,
 ) -> Callable[[], Awaitable[None]]:
     """Build the serve-boot pending-jobs re-check.
 
-    Railway app sleeping cold-starts serve on each visit, so this runs
-    on every wake - with the DB already awake from boot migrations. It
-    closes the launcher's accepted races (missed signal, enqueue during
-    worker exit) at the next visit instead of waiting for the safety
-    cron, which can therefore run 6-hourly. Never raises: a failed check
-    must not fail the boot.
+    Railway app sleeping cold-starts serve on each visit, so this runs on
+    every wake - with the DB already awake from boot migrations. It closes
+    the launcher's accepted races (missed signal, enqueue during worker exit)
+    at the next visit instead of waiting for the safety cron, which can
+    therefore run 6-hourly. Never raises: a failed check must not fail the
+    boot.
+
+    The hook is also called from ``/api/health`` so the 6-hourly wake
+    workflow works even when serve never sleeps (an open SSE tab keeps serve
+    awake, preventing the lifespan from re-running). The ``min_interval_seconds``
+    cooldown prevents health pings from hammering the DB: a call within the
+    interval returns immediately. The first call (boot) always runs.
+
+    Note: an external uptime monitor pointed at ``/api/health`` would wake
+    Neon up to once per interval - point monitors at the SPA root or a
+    static asset instead.
     """
+    _last_run: list[float] = []  # single-element list so the closure can mutate it
 
     async def _retrigger_pending_jobs() -> None:
         from sqlalchemy import text
+
+        now = time.monotonic()
+        if _last_run and now - _last_run[0] < min_interval_seconds:
+            return
+        _last_run[:] = [now]
 
         try:
             async with session_factory() as session:

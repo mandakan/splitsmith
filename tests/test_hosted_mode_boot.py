@@ -309,3 +309,70 @@ def test_create_app_skips_hosted_wiring_when_mode_unset(
     # Local mode wires no auth config -- no cookies, no public URL.
     assert state.cookie_secure is False
     assert state.public_base_url is None
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: worker process must not get launcher wiring
+# ---------------------------------------------------------------------------
+
+
+def test_worker_process_gets_no_boot_retrigger(
+    hosted_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worker process must never acquire launcher capabilities.
+
+    Only the API process fires serviceInstanceRedeploy. When
+    _apply_hosted_mode_wiring is called with worker=True, boot_retrigger
+    must remain None even when all launcher env vars are present.
+    """
+    monkeypatch.setenv("SPLITSMITH_WORKER_TRIGGER_TOKEN", "t")
+    monkeypatch.setenv("SPLITSMITH_WORKER_SERVICE_ID", "s")
+    monkeypatch.setenv("SPLITSMITH_WORKER_ENVIRONMENT_ID", "e")
+
+    from splitsmith.ui.server import AppState, _apply_hosted_mode_wiring
+
+    state = AppState()
+    _apply_hosted_mode_wiring(state, worker=True)
+    assert state.boot_retrigger is None
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: launcher wiring regression test - lifespan runs boot_retrigger
+# ---------------------------------------------------------------------------
+
+
+def test_create_app_launcher_wiring_and_boot_retrigger_lifespan(
+    hosted_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When launcher env vars are present in hosted mode, create_app must wire
+    boot_retrigger, and the startup lifespan must fire it. SQLite has no
+    procrastinate_jobs table, so the check fails - the warning must be logged
+    and the boot must NOT crash.
+
+    This test fails on any future regression that deletes the lifespan kwarg
+    or the boot_retrigger wiring assignment.
+    """
+    import logging
+
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import create_app
+
+    monkeypatch.setenv("SPLITSMITH_WORKER_TRIGGER_TOKEN", "t")
+    monkeypatch.setenv("SPLITSMITH_WORKER_SERVICE_ID", "s")
+    monkeypatch.setenv("SPLITSMITH_WORKER_ENVIRONMENT_ID", "e")
+
+    app = create_app()
+    state = app.state.splitsmith_state
+    assert state.boot_retrigger is not None, "boot_retrigger must be wired when launcher env vars are set"
+
+    with caplog.at_level(logging.WARNING, logger="splitsmith"):
+        with TestClient(app):
+            pass  # lifespan fires here
+
+    assert any(
+        "boot re-trigger" in r.message and "failed" in r.message for r in caplog.records
+    ), "boot_retrigger warning not logged - lifespan may not have fired"

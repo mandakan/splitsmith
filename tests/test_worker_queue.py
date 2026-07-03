@@ -269,6 +269,7 @@ def test_attach_procrastinate_logging_shares_stdout_handler() -> None:
     proc_logger = logging.getLogger("procrastinate")
     handler = logging.StreamHandler()
     handler._splitsmith_stdout = True  # type: ignore[attr-defined]
+    prior_level = proc_logger.level
     pkg_logger.addHandler(handler)
     try:
         _attach_procrastinate_logging()
@@ -279,6 +280,7 @@ def test_attach_procrastinate_logging_shares_stdout_handler() -> None:
     finally:
         pkg_logger.removeHandler(handler)
         proc_logger.removeHandler(handler)
+        proc_logger.setLevel(prior_level)
 
 
 def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPatch) -> None:
