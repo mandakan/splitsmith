@@ -16,7 +16,7 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - Pydantic for data validation
 - `pathlib.Path` for paths, never strings
 - f-strings for formatting
-- Black formatting (line length 100)
+- Black formatting (line length 110)
 - Ruff for linting
 - Imports: stdlib, third-party, local — separated by blank lines
 - No relative imports beyond a single dot (`.module`, not `..module`)
