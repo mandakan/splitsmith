@@ -1789,8 +1789,10 @@ class MatchProject(BaseModel):
 
         Merge rules when an entry already exists:
 
-        - ``covers_stages`` -- union of existing + new (stable insertion
-          order; sorted ascending so the SPA renders deterministically).
+        - ``covers_stages`` -- order-preserving union: existing stages
+          come first (first-seen order), then any stages from ``rv`` not
+          already in the list. Declared order is shooting order for
+          sequential-mode takes, so the original first-attach order wins.
         - ``size_bytes`` -- adopt the new value when the existing one is 0
           (legacy backfill placeholder).
         - ``sha256`` -- adopt the new value when the existing one is
@@ -1805,7 +1807,7 @@ class MatchProject(BaseModel):
         if existing is None:
             self.raw_videos.append(rv)
             return rv
-        merged = sorted(set(existing.covers_stages) | set(rv.covers_stages))
+        merged = list(dict.fromkeys([*existing.covers_stages, *rv.covers_stages]))
         existing.covers_stages = merged
         if existing.size_bytes == 0 and rv.size_bytes:
             existing.size_bytes = rv.size_bytes
