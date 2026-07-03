@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, MoreVertical, XCircle } from "lucide-react";
+import { ArrowRight, Loader2, MoreVertical, XCircle } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
 
 import { CoverageSelect } from "@/components/ingest/CoverageSelect";
 import { RoleToggles } from "@/components/ingest/RoleToggles";
@@ -8,11 +9,14 @@ import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
+  type RawVideoManifestEntry,
   type ShooterListEntry,
   type StageEntry,
   type VideoRole,
 } from "@/lib/api";
 import { useSpacePlayPause } from "@/lib/keyboard";
+import { takeHref } from "@/lib/matchHref";
+import { findTakeForPath, takeFilename } from "@/lib/takes";
 import type { ClipItem } from "@/pages/ingest/model";
 import { pad2 } from "@/pages/ingest/model";
 
@@ -27,6 +31,7 @@ export function ClipDetail({
   clip,
   allStages,
   shooters,
+  rawVideos,
   busy,
   onMove,
   onRemove,
@@ -38,6 +43,9 @@ export function ClipDetail({
   clip: ClipItem | null;
   allStages: StageEntry[];
   shooters: ShooterListEntry[];
+  /** Raw-video manifest from the project; drives the "Take overview"
+   *  link when this clip's source recording covers 2+ stages. */
+  rawVideos: RawVideoManifestEntry[];
   busy: boolean;
   onMove: (videoPath: string, toStage: number | null, role: VideoRole) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
@@ -49,6 +57,7 @@ export function ClipDetail({
   onReload?: () => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { matchId } = useParams<{ matchId?: string }>();
   const [rowBusy, setRowBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [kebabOpen, setKebabOpen] = useState(false);
@@ -157,6 +166,10 @@ export function ClipDetail({
   const video = clip.video;
   const currentStage = clip.stageNumber;
   const filename = video.path.split("/").pop() ?? video.path;
+  // Multi-stage take link: shown when the clip's source recording is a
+  // registered raw video covering 2+ stages.
+  const take = findTakeForPath(rawVideos, video.path);
+  const takeName = take != null ? takeFilename(take) : null;
   const cameraDetail = [clip.camera?.model ?? null, clip.camera?.mount ?? null]
     .filter(Boolean)
     .join(" \u00B7 ");
@@ -236,6 +249,15 @@ export function ClipDetail({
             </div>
           )}
         </div>
+        {take != null && takeName != null && (
+          <Link
+            to={takeHref(matchId, slug, takeName)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-beep/40 bg-beep-tint px-2.5 py-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em] text-beep transition-colors hover:bg-beep/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-beep/60"
+          >
+            Take overview &middot; {take.covers_stages.length} stages
+            <ArrowRight aria-hidden className="size-3" />
+          </Link>
+        )}
         <button
           type="button"
           onClick={() => void onRemove(video.path)}

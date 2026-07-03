@@ -39,6 +39,18 @@ export function useMatchHref(): MatchHrefBuilder {
   );
 }
 
+/** Href for the take-overview page of one multi-stage raw recording.
+ *  ``filename`` is the raw video's basename (the take endpoints key on
+ *  ``raw/<filename>``); ``matchId`` comes from ``useParams`` at the
+ *  callsite. */
+export function takeHref(
+  matchId: string | null | undefined,
+  slug: string,
+  filename: string,
+): string {
+  return matchHref(matchId, "take", slug, filename);
+}
+
 /** Standalone helper for places that have ``matchId`` in hand (e.g. the
  *  match shell, the picker after bind) but aren't ready to wire a hook. */
 export function matchHref(

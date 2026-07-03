@@ -239,6 +239,11 @@ export interface MatchProject {
   /** #218 phase 4 -- per-project list of stage numbers whose audit-
    *  pending nudge the user has explicitly dismissed. */
   nudges_dismissed_stages: number[];
+  /** Registered raw source recordings (doc 05). One entry per source
+   *  file; a single take covering stages 1-4 is one entry with
+   *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
+   *  these by ``storage_path``. */
+  raw_videos: RawVideoManifestEntry[];
 }
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
