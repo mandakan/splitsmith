@@ -1,0 +1,29 @@
+name: Worker safety net
+
+# Wake the hosted serve instances every 6 hours. A sleeping serve
+# cold-starts on the request, and its startup lifespan re-checks
+# procrastinate_jobs for stranded work, firing the worker launcher if
+# any exists (heartbeat-gated, cooldown-limited - see
+# splitsmith.worker_trigger). This replaces a Railway cron on the
+# worker service: cronSchedule converts the service to schedule-only
+# starts, which silently breaks the launcher's serviceInstanceRedeploy
+# (deployments are created but never run until the next tick).
+#
+# A failed wake is non-fatal - the next tick or the next real visit
+# covers it.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake staging
+        run: curl -sf -m 60 --retry 3 https://my.staging.splitsmith.app/api/health || echo "staging wake failed (non-fatal)"
+      - name: Wake production
+        run: curl -sf -m 60 --retry 3 https://my.splitsmith.app/api/health || echo "production wake failed (non-fatal)"
