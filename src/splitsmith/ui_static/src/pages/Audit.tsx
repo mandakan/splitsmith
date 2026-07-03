@@ -102,12 +102,18 @@ import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
+import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { deriveStageStatus } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
 const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
+
+/** Region-loop window around the focused marker (#29): 0.5 s of pre-roll
+ *  to hear the shot coming, 0.7 s of tail to catch echo/AGC behavior. */
+const LOOP_PRE_S = 0.5;
+const LOOP_POST_S = 0.7;
 
 export function Audit() {
   // ShooterScopedRoute canonicalises every Audit entry to /audit/:slug/:stage
@@ -140,6 +146,7 @@ export function Audit() {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
+  const [snapPeaks, setSnapPeaks] = useState<SnapPeaks | null>(null);
 
   const [audit, setAudit] = useState<StageAudit | null>(null);
 
@@ -240,6 +247,20 @@ export function Audit() {
   // here. Matches the old review SPA's "Loop: pause snaps the playhead
   // back to where playback started" behavior.
   const loopAnchorRef = useRef<number | null>(null);
+
+  // Loop region around the focused marker (#29). Loop on + a focused
+  // marker = repeat a tight window around it; loop on + no focus keeps
+  // the old loop-to-anchor behavior.
+  const loopRegion = useMemo(() => {
+    if (!loopMode || !focusedMarkerId) return null;
+    const m = markers.find((x) => x.id === focusedMarkerId);
+    const dur = peaks?.duration;
+    if (!m || dur == null) return null;
+    return {
+      start: Math.max(0, m.time - LOOP_PRE_S),
+      end: Math.min(dur, m.time + LOOP_POST_S),
+    };
+  }, [loopMode, focusedMarkerId, markers, peaks]);
 
   // Keep stable refs in sync so callbacks that can't take deps use them.
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -546,6 +567,37 @@ export function Audit() {
     };
   }, [slug, stageNumber, primary]);
 
+  // High-resolution peaks for drop/add peak-snapping (#28). The render
+  // fetch stays at PEAK_BINS so visuals do not change; snapping wants
+  // ~10 ms bins, which PEAK_BINS only delivers on clips under ~15 s.
+  // Until this resolves, drops fall back to grid snapping - never blocks.
+  useEffect(() => {
+    if (!peaks || stageNumber == null) {
+      setSnapPeaks(null);
+      return;
+    }
+    const bins = Math.min(8192, Math.max(PEAK_BINS, Math.ceil(peaks.duration / 0.01)));
+    if (bins <= PEAK_BINS) {
+      setSnapPeaks({ peaks: peaks.peaks, duration: peaks.duration });
+      return;
+    }
+    // Clear before fetching: drops during the refetch window fall back to
+    // grid snapping instead of snapping against the previous clip's array.
+    setSnapPeaks(null);
+    let alive = true;
+    api
+      .getStagePeaks(slug, stageNumber, bins)
+      .then((p) => {
+        if (alive) setSnapPeaks({ peaks: p.peaks, duration: p.duration });
+      })
+      .catch(() => {
+        if (alive) setSnapPeaks(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [peaks, slug, stageNumber]);
+
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
     if (stageNumber == null) {
@@ -597,15 +649,15 @@ export function Audit() {
       if (v) {
         const auditT = v.currentTime - beepOffset;
         const dur = peaks?.duration ?? null;
-        // Loop wrap at end-of-clip -- snap to the anchor (where play
-        // started) so the user can hear a section repeatedly without
-        // re-clicking. Falls back to 0 on the rare case the anchor is
-        // unset (loop toggled mid-playback before any anchor recorded).
-        if (loopMode && dur != null && auditT >= dur - 0.05) {
-          const target = loopAnchorRef.current ?? 0;
+        // Loop wrap: region end when a marker is focused, clip end otherwise.
+        // Falls back to 0 on the rare case the anchor is unset (loop toggled
+        // mid-playback before any anchor recorded).
+        const regionEnd = loopRegion?.end ?? (dur != null ? dur - 0.05 : null);
+        if (loopMode && regionEnd != null && auditT >= regionEnd) {
+          const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
           v.currentTime = target + beepOffset;
           setCurrentTime(target);
-          // Snap secondaries to the loop anchor too.
+          // Snap secondaries to the loop target too.
           for (const [path, sv] of secondaryRefsMap.current) {
             const off = secondaryOffsetsRef.current.get(path);
             if (off != null) sv.currentTime = target + off;
@@ -631,7 +683,7 @@ export function Audit() {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, beepOffset, loopMode, peaks]);
+  }, [isPlaying, beepOffset, loopMode, peaks, loopRegion]);
 
   // Master/slave sync: invoked from the primary's <video onTimeUpdate>.
   // Browser-throttled to ~4 Hz, which is the right rate for reconciliation.
@@ -700,9 +752,10 @@ export function Audit() {
         sv.pause();
       }
       setIsPlaying(false);
-      // Loop semantics: pause snaps back to where play started.
-      if (loopMode && loopAnchorRef.current != null) {
-        const target = loopAnchorRef.current;
+      // Loop semantics: pause snaps back to region start (or play anchor if
+      // no region is active).
+      if (loopMode && (loopRegion != null || loopAnchorRef.current != null)) {
+        const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
         v.currentTime = target + beepOffset;
         setCurrentTime(target);
         for (const [path, sv] of secondaryRefsMap.current) {
@@ -711,7 +764,17 @@ export function Audit() {
         }
       }
     }
-  }, [beepOffset, loopMode]);
+  }, [beepOffset, loopMode, loopRegion]);
+
+  // Stepping focus to another marker while region-looping seeks to the
+  // new region's pre-roll so the "step -> loop -> K -> step" review flow
+  // needs no extra scrubbing. Keyed on focusedMarkerId only: marker drags
+  // recompute loopRegion each frame and must not re-trigger the seek.
+  useEffect(() => {
+    if (!loopMode || !isPlaying || !loopRegion) return;
+    handleScrub(loopRegion.start);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedMarkerId]);
 
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
@@ -874,15 +937,17 @@ export function Audit() {
   }, [handleMarkerTimeChangeCommit]);
 
   const handleAddManual = useCallback(
-    (time: number) => {
+    (time: number, shiftKey = false) => {
+      const snapped = !shiftKey && snapPeaks ? snapToPeak(time, snapPeaks) : null;
+      const t = snapped ?? time;
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      recordEvent("marker_added_manual", { id, time });
+      recordEvent("marker_added_manual", { id, time: t });
       mutate([
         ...markers,
         {
           id,
           kind: "manual",
-          time,
+          time: t,
           candidateNumber: null,
           confidence: null,
           peakAmplitude: null,
@@ -891,7 +956,7 @@ export function Audit() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate, recordEvent],
+    [markers, mutate, recordEvent, snapPeaks],
   );
 
   const handleNoteChange = useCallback(
@@ -1847,6 +1912,7 @@ export function Audit() {
                     duration={displayPeaks.duration}
                     currentTime={currentTime}
                     beepTime={filters.beep ? auditBeep : null}
+                    loopRegion={loopRegion}
                     pixelsPerSecond={pixelsPerSecond}
                     onScrub={handleScrub}
                     onDoubleClick={handleAddManual}
@@ -1863,6 +1929,7 @@ export function Audit() {
                       onTimeChangeBegin={handleMarkerTimeChangeBegin}
                       onTimeChangeCommit={handleMarkerTimeChangeCommit}
                       visibleKinds={visibleKinds}
+                      snapPeaks={snapPeaks ?? undefined}
                     />
                   </Waveform>
                   {/* Anomaly pins sit on the seam between the legend
