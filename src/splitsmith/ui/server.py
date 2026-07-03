@@ -5412,65 +5412,77 @@ def create_app(
             _stage_has_scorecard(n) for n in raw.covers_stages
         )
 
-        try:
-            if is_scoreboard or len(raw.covers_stages) < 2:
-                # One detect_beep per created video.
-                for sv in created:
-                    if sv.processed.get("beep") or sv.beep_source == "manual":
-                        continue
-                    existing = asyncio.run(
-                        state.jobs.find_active(
-                            kind="detect_beep",
-                            stage_number=sv.stage_number,
-                            video_id=sv.video_id,
-                        )
+        # Skip enqueue when the database URL is not Postgres. This covers two
+        # cases: (a) SQLite-backed hosted mode in smoke/CI tests, where
+        # Procrastinate's DSN converter would raise ValueError on the first
+        # submit call; (b) local-mode (no SPLITSMITH_DATABASE_URL), which has
+        # no Procrastinate wiring at all.
+        #
+        # We gate explicitly on the URL rather than catching ValueError because
+        # the submit path writes a compute_jobs row before calling the deferrer;
+        # a bare except ValueError would swallow a real deferrer error in
+        # Postgres mode after that row is committed, leaving a PENDING job that
+        # never runs. The predicate matches _hosted_mode_active() + Postgres so
+        # that Postgres-mode errors propagate like _submit_detect_beep does.
+        if _hosted_mode_active():
+            db_url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV, "")
+            if not db_url.startswith("postgresql"):
+                logger.debug("_queue_take_detects: skipping enqueue (SQLite URL)")
+                return
+
+        if is_scoreboard or len(raw.covers_stages) < 2:
+            # One detect_beep per created video.
+            for sv in created:
+                if sv.processed.get("beep") or sv.beep_source == "manual":
+                    continue
+                existing = asyncio.run(
+                    state.jobs.find_active(
+                        kind="detect_beep",
+                        stage_number=sv.stage_number,
+                        video_id=sv.video_id,
                     )
-                    if existing is None:
-                        asyncio.run(
-                            state.jobs.submit(
-                                kind="detect_beep",
-                                stage_number=sv.stage_number,
-                                video_id=sv.video_id,
-                                args={
-                                    "slug": slug,
-                                    "stage_number": sv.stage_number,
-                                    "video_id": sv.video_id,
-                                },
-                            )
-                        )
-            else:
-                # Sequential-mode: submit only the first unprocessed covered stage.
-                for n in raw.covers_stages:
-                    try:
-                        stg = project.stage(n)
-                    except KeyError:
-                        continue
-                    primary = stg.primary()
-                    if primary is None:
-                        continue
-                    if primary.processed.get("beep") or primary.beep_source == "manual":
-                        continue
-                    if primary.beep_time is not None:
-                        continue
-                    existing = asyncio.run(
-                        state.jobs.find_active(kind="detect_beep", stage_number=n, video_id=primary.video_id)
-                    )
-                    if existing is not None:
-                        break  # chain already started
+                )
+                if existing is None:
                     asyncio.run(
                         state.jobs.submit(
                             kind="detect_beep",
-                            stage_number=n,
-                            video_id=primary.video_id,
-                            args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                            stage_number=sv.stage_number,
+                            video_id=sv.video_id,
+                            args={
+                                "slug": slug,
+                                "stage_number": sv.stage_number,
+                                "video_id": sv.video_id,
+                            },
                         )
                     )
-                    break
-        except ValueError:
-            # Raised by Procrastinate when the queue backend can't be
-            # initialised (e.g. SQLite URL in smoke / CI test environments).
-            # Production Postgres never hits this path.
-            logger.debug("_queue_take_detects: skipping enqueue (backend unavailable)")
+        else:
+            # Sequential-mode: submit only the first unprocessed covered stage.
+            for n in raw.covers_stages:
+                try:
+                    stg = project.stage(n)
+                except KeyError:
+                    continue
+                primary = stg.primary()
+                if primary is None:
+                    continue
+                if primary.processed.get("beep") or primary.beep_source == "manual":
+                    continue
+                if primary.beep_time is not None:
+                    continue
+                existing = asyncio.run(
+                    state.jobs.find_active(kind="detect_beep", stage_number=n, video_id=primary.video_id)
+                )
+                if existing is not None:
+                    break  # chain already started
+                asyncio.run(
+                    state.jobs.submit(
+                        kind="detect_beep",
+                        stage_number=n,
+                        video_id=primary.video_id,
+                        args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                    )
+                )
+                break
 
     @app.post("/api/shooters/{slug}/raw-videos/attach")
     def attach_raw_video(
@@ -5611,9 +5623,9 @@ def create_app(
 
         Error contract:
 
-        - 400 -- filename failed ``_sanitize_raw_filename``.
-        - 404 -- no RawVideo or registered video matches ``raw/<filename>``.
-        - 422 -- ``covers_stages`` references a stage not in the project.
+        - 400 - filename failed ``_sanitize_raw_filename``.
+        - 404 - no RawVideo or registered video matches ``raw/<filename>``.
+        - 422 - ``covers_stages`` references a stage not in the project.
         """
         name = _sanitize_raw_filename(body.filename)
         storage_path = f"raw/{name}"

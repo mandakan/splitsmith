@@ -1789,15 +1789,15 @@ class MatchProject(BaseModel):
 
         Merge rules when an entry already exists:
 
-        - ``covers_stages`` -- order-preserving union: existing stages
+        - ``covers_stages`` - order-preserving union: existing stages
           come first (first-seen order), then any stages from ``rv`` not
           already in the list. Declared order is shooting order for
           sequential-mode takes, so the original first-attach order wins.
-        - ``size_bytes`` -- adopt the new value when the existing one is 0
+        - ``size_bytes`` - adopt the new value when the existing one is 0
           (legacy backfill placeholder).
-        - ``sha256`` -- adopt the new value when the existing one is
+        - ``sha256`` - adopt the new value when the existing one is
           ``None`` (legacy backfill).
-        - ``original_filename`` / ``uploaded_at`` -- existing wins (we don't
+        - ``original_filename`` / ``uploaded_at`` - existing wins (we don't
           rewrite the historical record once it's set).
 
         Returns the canonical entry on the project (either the merged
