@@ -205,6 +205,55 @@ def make_worker_active_checker(
     return _worker_active
 
 
+def wrap_deferrer(
+    deferrer: Callable[..., Awaitable[None]], launcher: WorkerLauncher
+) -> Callable[..., Awaitable[None]]:
+    """After each successful defer, schedule a worker launch.
+
+    The launch is fire-and-forget so enqueue latency stays flat; the
+    defer's own exceptions propagate untouched (a failed enqueue must
+    not fire a worker, and the caller needs the original error).
+    """
+
+    async def _defer_and_trigger(**kwargs: Any) -> None:
+        await deferrer(**kwargs)
+        launcher.schedule()
+
+    return _defer_and_trigger
+
+
+def make_boot_retrigger(
+    session_factory: Callable[[], Any], launcher: WorkerLauncher
+) -> Callable[[], Awaitable[None]]:
+    """Build the serve-boot pending-jobs re-check.
+
+    Railway app sleeping cold-starts serve on each visit, so this runs
+    on every wake - with the DB already awake from boot migrations. It
+    closes the launcher's accepted races (missed signal, enqueue during
+    worker exit) at the next visit instead of waiting for the safety
+    cron, which can therefore run 6-hourly. Never raises: a failed check
+    must not fail the boot.
+    """
+
+    async def _retrigger_pending_jobs() -> None:
+        from sqlalchemy import text
+
+        try:
+            async with session_factory() as session:
+                result = await session.execute(
+                    text("SELECT count(*) FROM procrastinate_jobs WHERE status = 'todo'")
+                )
+                pending = result.scalar_one()
+        except Exception:
+            logger.warning("boot re-trigger: pending-job check failed", exc_info=True)
+            return
+        if pending:
+            logger.info("boot re-trigger: %s pending job(s) - firing worker launcher", pending)
+            launcher.schedule()
+
+    return _retrigger_pending_jobs
+
+
 def build_worker_launcher(
     worker_active: WorkerActiveCheck | None = None,
     transport: httpx.AsyncBaseTransport | None = None,

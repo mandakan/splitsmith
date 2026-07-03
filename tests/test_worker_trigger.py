@@ -19,7 +19,9 @@ from splitsmith.worker_trigger import (
     RailwayWorkerLauncher,
     build_worker_launcher,
     load_railway_config,
+    make_boot_retrigger,
     make_worker_active_checker,
+    wrap_deferrer,
 )
 
 _ALL_ENV_VARS = (
@@ -240,3 +242,76 @@ def test_build_worker_launcher_unknown_kind_raises(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv(ENV_WORKER_LAUNCHER, "sqs")
     with pytest.raises(ValueError, match="unknown worker launcher"):
         build_worker_launcher()
+
+
+class _StubLauncher:
+    """Minimal WorkerLauncher for wiring tests (the Protocol is structural)."""
+
+    def __init__(self) -> None:
+        self.scheduled = 0
+
+    def schedule(self) -> None:
+        self.scheduled += 1
+
+    async def trigger(self) -> bool:
+        self.schedule()
+        return True
+
+
+def test_wrap_deferrer_defers_then_schedules() -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def deferrer(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    stub = _StubLauncher()
+    wrapped = wrap_deferrer(deferrer, stub)
+    asyncio.run(wrapped(job_id="j1", user_id="u1", kind="detect_beep", args={}, match_id=None))
+    assert calls == [{"job_id": "j1", "user_id": "u1", "kind": "detect_beep", "args": {}, "match_id": None}]
+    assert stub.scheduled == 1
+
+
+def test_wrap_deferrer_failed_defer_does_not_schedule() -> None:
+    """If the enqueue itself failed there is no job to run - and the caller
+    must see the original exception, not a swallowed one."""
+
+    async def deferrer(**kwargs: Any) -> None:
+        raise RuntimeError("boom")
+
+    stub = _StubLauncher()
+    wrapped = wrap_deferrer(deferrer, stub)
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(wrapped(job_id="j1", user_id="u1", kind="detect_beep", args={}, match_id=None))
+    assert stub.scheduled == 0
+
+
+def test_boot_retrigger_fires_when_jobs_pending() -> None:
+    stub = _StubLauncher()
+    session = _StubSession(2)
+    hook = make_boot_retrigger(lambda: _StubSessionCtx(session), stub)
+    asyncio.run(hook())
+    assert stub.scheduled == 1
+    assert "procrastinate_jobs" in session.queries[0]
+
+
+def test_boot_retrigger_quiet_when_queue_empty() -> None:
+    stub = _StubLauncher()
+    hook = make_boot_retrigger(lambda: _StubSessionCtx(_StubSession(0)), stub)
+    asyncio.run(hook())
+    assert stub.scheduled == 0
+
+
+def test_boot_retrigger_swallows_db_errors() -> None:
+    """A failed pending-check must not fail the serve boot."""
+
+    class _BrokenCtx:
+        async def __aenter__(self) -> Any:
+            raise RuntimeError("db down")
+
+        async def __aexit__(self, *exc: Any) -> None:
+            return None
+
+    stub = _StubLauncher()
+    hook = make_boot_retrigger(lambda: _BrokenCtx(), stub)
+    asyncio.run(hook())  # must not raise
+    assert stub.scheduled == 0

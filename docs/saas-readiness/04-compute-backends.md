@@ -319,3 +319,33 @@ Both are nullable; null means "use the picker default".
   ONNX and local's runs through PyTorch, do their per-prompt
   similarities match within a tolerance? Should be yes if we export
   with `opset=17` and disable dropout, but verify before launch.
+
+## Scale-to-zero worker launcher (2026-07)
+
+The hosted worker runs `splitsmith worker --one-shot` (restart policy
+NEVER) and is started on demand, not by polling. The queue of record
+stays in Postgres (Procrastinate - transactional enqueue with the job
+row); the *wake channel* is a `WorkerLauncher` (`splitsmith.worker_trigger`),
+selected by `SPLITSMITH_WORKER_LAUNCHER` (default `railway`): after each
+successful defer the API fires `serviceInstanceRedeploy` for the worker
+service via Railway's GraphQL API. The "already draining" gate is
+`procrastinate_workers.last_heartbeat` (fresh within 20s = live drain,
+skip) - NOT Railway deployment status, which stays SUCCESS after a
+one-shot container exits. One-shot drains run with `listen_notify=False`:
+the LISTEN/NOTIFY listener is for long-lived workers, and cancelling it
+at shutdown intermittently hung the exit (zombie container). Railway
+config: `SPLITSMITH_WORKER_TRIGGER_TOKEN` (project token),
+`SPLITSMITH_WORKER_SERVICE_ID`, and the Railway-injected
+`RAILWAY_ENVIRONMENT_ID`. With the env unset the launcher is disabled
+(local / docker-compose keeps its always-on worker).
+
+Lost wake signals are harmless by design, with two nets: serve re-checks
+`procrastinate_jobs` for pending work on every boot (app sleeping
+cold-starts serve per visit, DB already awake from migrations) and
+re-fires the launcher; a 6-hourly safety cron on the worker service is
+the final net (~2% of the Neon free tier). This keeps both Railway
+containers and the Neon compute asleep whenever no one is using the
+app. Non-Railway launchers (webhook/ntfy to a home machine, GitHub
+Actions dispatch) implement the same protocol; the worker itself is
+portable - any machine with the DATABASE_URL, R2 credentials, and
+models can run `splitsmith worker --one-shot`.

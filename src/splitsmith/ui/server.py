@@ -82,7 +82,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -852,6 +852,10 @@ class AppState:
     # their defaults in local mode (no auth, no cookies).
     public_base_url: str | None = None
     cookie_secure: bool = False
+    # Hosted + launcher only: serve-boot pending-jobs re-check, registered
+    # as a FastAPI startup handler by create_app. Runs on every cold start
+    # (incl. each wake from Railway app sleeping).
+    boot_retrigger: Callable[[], Awaitable[None]] | None = None
 
     def __post_init__(self) -> None:
         # Point the backing local backend's body map at the shared
@@ -4186,6 +4190,12 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         tenant_session_factory,
     )
     from ..queue import make_deferrer
+    from ..worker_trigger import (
+        build_worker_launcher,
+        make_boot_retrigger,
+        make_worker_active_checker,
+        wrap_deferrer,
+    )
 
     url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV)
     if not url:
@@ -4234,6 +4244,17 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
     # tenant (only the key prefix is per-user, see ``_tenant_s3_storage``).
     deferrer = make_deferrer(url)
+    # Scale-to-zero worker: this API process is the only enqueuer, so it
+    # fires a one-shot worker run through the configured launcher after
+    # each defer, gated on the procrastinate_workers heartbeat so a live
+    # drain is never redeployed out from under its job, and re-checks for
+    # stranded jobs on every boot (see splitsmith.worker_trigger). No-op
+    # when the launcher env vars are unset - local / docker-compose runs
+    # an always-on worker instead.
+    worker_launcher = build_worker_launcher(worker_active=make_worker_active_checker(session_factory))
+    if worker_launcher is not None:
+        deferrer = wrap_deferrer(deferrer, worker_launcher)
+        state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
     s3_client, s3_bucket = _build_hosted_s3_client()
 
     def _build_tenant(user_id: str) -> TenantContext:
@@ -4459,6 +4480,11 @@ def create_app(
         description="Production UI backend (issue #11/#12).",
         version="0.1.0",
     )
+    if state.boot_retrigger is not None:
+        # Cold starts include every wake from Railway app sleeping, so a
+        # stranded queue job recovers on the next visit instead of waiting
+        # for the 6-hourly safety cron.
+        app.add_event_handler("startup", state.boot_retrigger)
     # Stash on app.state so the uvicorn server wrapper in :func:`serve`
     # can read live job state when handling Ctrl-C: the signal handler
     # needs to enumerate pending / running jobs to tell the user what's
