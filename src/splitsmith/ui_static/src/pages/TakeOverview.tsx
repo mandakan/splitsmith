@@ -54,8 +54,10 @@ import { useDialogFocus } from "@/lib/dialogFocus";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
-/** Poll cadence while worker-side detection / peaks generation runs. */
+/** Poll cadence while a worker job is actively running. */
 const POLL_INTERVAL_MS = 3000;
+/** Slow-poll cadence when stages are queued but no active job is running (between cron ticks). */
+const SLOW_POLL_INTERVAL_MS = 30_000;
 /** Narrowest permitted beep-search window while dragging an edge. */
 const MIN_WINDOW_S = 2;
 /** Coarse drag grid - beep windows are search bounds, not beep times. */
@@ -141,21 +143,37 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
     };
   }, [slug]);
 
-  // Poll while detection runs (any stage still "pending") or while the
-  // worker is generating peaks. When peaks are pending WITHOUT an active
-  // job, do NOT poll - the notice offers a manual re-run instead.
   const detectionPending =
     overview?.stages.some((s) => s.status === "pending") ?? false;
   const peaksGenerating = peaksState.kind === "pending" && peaksState.activeJob;
   const peaksReady = peaksState.kind === "ready";
+
+  // True when the peaks 202 confirms an active worker job; false when
+  // queued but idle; null when peaks are already ready (no live signal).
+  const workerActive = peaksState.kind === "pending" ? peaksState.activeJob : null;
+  // Fast poll: a worker job is actively processing peaks or detection.
+  const fastPollActive = (detectionPending && workerActive === true) || peaksGenerating;
+  // Slow poll: stages are queued but no active job - check every 30s
+  // so the page updates after the next cron drain without polling forever.
+  const slowPollActive = detectionPending && !fastPollActive;
+
   useEffect(() => {
-    if (!detectionPending && !peaksGenerating) return;
+    if (!fastPollActive) return;
     const t = window.setInterval(() => {
       void loadOverview();
       if (!peaksReady) void loadPeaks();
     }, POLL_INTERVAL_MS);
     return () => window.clearInterval(t);
-  }, [detectionPending, peaksGenerating, peaksReady, loadOverview, loadPeaks]);
+  }, [fastPollActive, peaksReady, loadOverview, loadPeaks]);
+
+  useEffect(() => {
+    if (!slowPollActive) return;
+    const t = window.setInterval(() => {
+      void loadOverview();
+      void loadPeaks(); // Re-check active_job each tick.
+    }, SLOW_POLL_INTERVAL_MS);
+    return () => window.clearInterval(t);
+  }, [slowPollActive, loadOverview, loadPeaks]);
 
   const stages = useMemo(() => overview?.stages ?? [], [overview]);
   const conflictSet = useMemo(
@@ -333,12 +351,22 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       <section className="mb-5 rounded-xl border border-rule-strong bg-surface p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <Kicker>Whole-file envelope</Kicker>
-          {detectionPending && (
-            <span className="inline-flex items-center gap-1.5 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-live">
-              <Loader2 aria-hidden className="size-3 animate-spin" />
+          {detectionPending && workerActive === true ? (
+            <span
+              role="status"
+              className="inline-flex items-center gap-1.5 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-live"
+            >
+              <Loader2 aria-hidden className="size-3 motion-safe:animate-spin" />
               Detection running
             </span>
-          )}
+          ) : detectionPending ? (
+            <span
+              role="status"
+              className="inline-flex items-center gap-1.5 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted"
+            >
+              Waiting for worker - detection queued
+            </span>
+          ) : null}
         </div>
         {peaksState.kind === "ready" && duration > 0 ? (
           <Waveform
@@ -427,6 +455,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
                 : []
             }
             applying={applyingStage === s.stage_number}
+            anyApplyInFlight={applyingStage != null}
             onDiscard={() => discardDraft(s.stage_number)}
             onApply={() => void applyWindow(s)}
             reviewHref={`${href("beep-review")}?focus=${encodeURIComponent(
@@ -661,7 +690,7 @@ function WindowLayer({
             role="img"
             aria-label={label}
             title={label}
-            className="pointer-events-auto absolute bottom-0 top-6 w-px bg-done shadow-[0_0_6px_var(--color-done-glow)]"
+            className="pointer-events-none absolute bottom-0 top-6 w-px bg-done shadow-[0_0_6px_var(--color-done-glow)]"
             style={{ left: `${(s.beep_time / duration) * 100}%` }}
           />
         );
@@ -724,6 +753,7 @@ function StageRow({
   dirty,
   conflictsWith,
   applying,
+  anyApplyInFlight,
   onDiscard,
   onApply,
   reviewHref,
@@ -733,6 +763,8 @@ function StageRow({
   dirty: boolean;
   conflictsWith: number[];
   applying: boolean;
+  /** True while ANY stage's apply is in-flight - disables all dirty-row buttons. */
+  anyApplyInFlight: boolean;
   onDiscard: () => void;
   onApply: () => void;
   reviewHref: string;
@@ -809,7 +841,7 @@ function StageRow({
             <button
               type="button"
               onClick={onDiscard}
-              disabled={applying}
+              disabled={anyApplyInFlight}
               className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-ink-2 transition-colors hover:bg-surface-3 disabled:opacity-50"
             >
               <Undo2 aria-hidden className="size-3" /> Discard
@@ -817,7 +849,7 @@ function StageRow({
             <button
               type="button"
               onClick={onApply}
-              disabled={applying}
+              disabled={anyApplyInFlight}
               className="inline-flex items-center gap-1.5 rounded-md border border-led/60 bg-led/10 px-2.5 py-1.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-led transition-colors hover:bg-led/20 disabled:opacity-50"
             >
               {applying ? (
