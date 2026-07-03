@@ -7724,3 +7724,46 @@ def test_download_export_file_serves_local_and_guards_traversal(tmp_path: Path) 
 
     resp = client.get("/api/shooters/me/exports/file/%2e%2e%2f%2e%2e%2fmatch.json")
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Regression: boot_retrigger lifespan registration
+# ---------------------------------------------------------------------------
+
+
+def test_boot_retrigger_lifespan_runs_on_app_startup() -> None:
+    """create_app registers boot_retrigger so it actually runs at startup.
+
+    Regression: app.add_event_handler was removed in starlette 1.3; the
+    hosted serve boot crashed with AttributeError the first time the
+    launcher env was configured. Exercise the registration mechanism
+    against a real FastAPI app instead of trusting the method name.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import _boot_retrigger_lifespan
+
+    calls: list[str] = []
+
+    async def fake_retrigger() -> None:
+        calls.append("ran")
+
+    class _FakeState:
+        boot_retrigger = staticmethod(fake_retrigger)
+
+    class _FakeStateNone:
+        boot_retrigger = None
+
+    # Helper must return None when no hook is wired.
+    assert _boot_retrigger_lifespan(_FakeStateNone()) is None
+
+    # Helper must return a lifespan that calls the hook on startup.
+    lifespan = _boot_retrigger_lifespan(_FakeState())
+    assert lifespan is not None
+
+    app = FastAPI(lifespan=lifespan)
+    with TestClient(app):
+        pass
+
+    assert calls == ["ran"]
