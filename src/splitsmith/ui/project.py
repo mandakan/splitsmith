@@ -381,6 +381,13 @@ class StageVideo(BaseModel):
     # video_id so N StageVideos sharing one source file (a multi-stage
     # single take) get distinct ids; see the take spec (2026-07-03).
     stage_number: int | None = None
+    # Search window (seconds into the source) the last beep detection ran
+    # inside, and who chose it. None = whole file (single-stage behavior).
+    # Persisted for the audit trail and so the take overview can render
+    # exactly what detection looked at. "manual" windows survive re-detect;
+    # derived windows are recomputed by each detect job.
+    beep_window: tuple[float, float] | None = None
+    beep_window_source: Literal["scoreboard", "sequential", "manual"] | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -3322,6 +3322,13 @@ class BeepSnapResponse(BaseModel):
     duration_ms: float
 
 
+class BeepWindowRequest(BaseModel):
+    """Body for PUT /api/shooters/{slug}/stages/{n}/videos/{vid}/beep-window."""
+
+    start_s: float
+    end_s: float
+
+
 class ExportStageRequest(BaseModel):
     """Body for POST /api/stages/{n}/export.
 
@@ -6187,6 +6194,37 @@ def create_app(
             return False
         await _submit_detect_beep(slug, stage_number, video)
         return True
+
+    @app.put("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window")
+    async def set_beep_window(
+        slug: str, stage_number: int, video_id: str, body: BeepWindowRequest
+    ) -> JSONResponse:
+        """Persist a manual beep search window and re-run detection.
+
+        The take overview's drag-to-adjust lands here. Setting a window
+        wipes the current beep (a new window is a new claim about where
+        the beep lives) and invalidates the trim cache, mirroring the
+        manual beep-time endpoint's semantics.
+        """
+        if body.start_s < 0 or body.end_s <= body.start_s:
+            raise HTTPException(status_code=422, detail="end_s must be greater than start_s >= 0")
+        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        root = state.shooter_root(slug)
+        video.beep_window = (body.start_s, body.end_s)
+        video.beep_window_source = "manual"
+        video.beep_time = None
+        video.beep_source = None
+        video.beep_confidence = None
+        video.beep_peak_amplitude = None
+        video.beep_duration_ms = None
+        video.beep_candidates = []
+        video.beep_reviewed = False
+        video.beep_auto_detect_failed = False
+        video.processed["beep"] = False
+        video.processed["trim"] = False
+        audio_helpers.invalidate_video_audit_trim(root, stage_number, video, project=project)
+        project.save(root)
+        return await _submit_detect_beep(slug, stage_number, video)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/detect-beep")
     async def detect_beep_for_video(

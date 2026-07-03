@@ -5,6 +5,14 @@ from pathlib import Path
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
+def test_beep_window_round_trips() -> None:
+    v = StageVideo(path=Path("raw/take.mp4"), beep_window=(30.0, 210.0), beep_window_source="scoreboard")
+    dumped = v.model_dump(mode="json")
+    back = StageVideo.model_validate(dumped)
+    assert back.beep_window == (30.0, 210.0)
+    assert back.beep_window_source == "scoreboard"
+
+
 def _project_with_two_stages() -> MatchProject:
     return MatchProject(
         name="take-test",
