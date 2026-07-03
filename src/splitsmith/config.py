@@ -404,6 +404,24 @@ class CoachAutoClassifyConfig(BaseModel):
     reload_hint_min_s: float = Field(default=2.50, gt=0.0)
 
 
+class BeepWindowConfig(BaseModel):
+    """Search-window derivation for multi-stage single-take videos.
+
+    scorecard_updated_at is typed 1-3 min after the run ends and the run
+    ends stage_time after the beep, so the expected beep offset inside
+    the file is (scorecard - video_start) - stage_time - scorecard_lead_s.
+    The window pads that estimate; clamping and a minimum length keep it
+    inside the file and useful even when the estimate is rough.
+    """
+
+    scorecard_lead_s: float = 120.0
+    pre_pad_s: float = 180.0
+    post_pad_s: float = 180.0
+    reset_margin_s: float = 45.0
+    min_window_s: float = 20.0
+    conflict_threshold_s: float = 2.0
+
+
 class Config(BaseModel):
     beep_detect: BeepDetectConfig = Field(default_factory=BeepDetectConfig)
     shot_detect: ShotDetectConfig = Field(default_factory=ShotDetectConfig)
@@ -411,6 +429,7 @@ class Config(BaseModel):
     video_match: VideoMatchConfig = Field(default_factory=VideoMatchConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
+    beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
 
     @classmethod
     def load(cls, path: Path | None) -> Config:
