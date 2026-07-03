@@ -162,7 +162,7 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
     worker_root.mkdir()
     with _BoundMatch(worker_root, match_id):
         wproj = state.shooter_project("alpha")
-        video = StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=3.5)
+        video = StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=3.5, stage_number=1)
         wproj.stages = [StageEntry(stage_number=1, stage_name="One", time_seconds=10.0, videos=[video])]
         wshooter = state.shooter_root("alpha")
         wproj.save(wshooter)

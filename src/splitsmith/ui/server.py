@@ -5205,7 +5205,7 @@ def create_app(
                 if any(str(v.path) == storage_path for v in stage.videos):
                     continue
                 role: VideoRole = "secondary" if stage.primary() is not None else "primary"
-                stage.videos.append(StageVideo(path=video_path, role=role))
+                stage.videos.append(StageVideo(path=video_path, role=role, stage_number=stage_number))
         elif not already_registered:
             project.unassigned_videos.append(StageVideo(path=video_path))
 

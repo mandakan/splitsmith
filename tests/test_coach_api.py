@@ -150,7 +150,10 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
 
     trimmed_dir = project.trimmed_path(shooter_root)
     trimmed_dir.mkdir(parents=True, exist_ok=True)
-    primary_id = project.stages[0].videos[0].video_id
+    # Reload so the model validator stamps stage_number on the video; the
+    # server does the same on load, so video_id must match what it computes.
+    stamped = MatchProject.load(shooter_root)
+    primary_id = stamped.stages[0].videos[0].video_id
     (trimmed_dir / f"stage1_cam_{primary_id}_trimmed.mp4").write_bytes(b"not really a video, but non-empty")
 
     app = create_app(project_root=root, project_name="Trimmed Match")

@@ -34,7 +34,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 from .. import video_match
 from ..async_bridge import run_sync
@@ -376,22 +376,26 @@ class StageVideo(BaseModel):
     # ``camera_mount``.
     camera_make: str | None = None
     camera_model: str | None = None
+    # Owning stage number, stamped by MatchProject on load and by
+    # assign_video / attach on every move. None while unassigned. Feeds
+    # video_id so N StageVideos sharing one source file (a multi-stage
+    # single take) get distinct ids; see the take spec (2026-07-03).
+    stage_number: int | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def video_id(self) -> str:
-        """Stable URL-safe identifier derived from ``path``.
+        """Stable URL-safe identifier derived from path + owning stage.
 
-        Used by per-video API endpoints (``/api/stages/{n}/videos/{video_id}/...``)
-        and by per-video cache filenames (audio WAV, trimmed MP4) so each video
-        on a stage gets its own cache slot. Hash is a 12-char blake2s digest of
-        the stored path string -- stable across restarts, project reloads, and
-        re-registration of the same source.
-
-        Surfaced as a computed field on the wire so the SPA can route
-        per-video requests without re-implementing the hash client-side.
+        Assigned videos hash "<path>#<stage_number>" so one source file
+        covering N stages yields N distinct ids (per-video API routes and
+        cache filenames stay collision-free). Unassigned videos keep the
+        legacy path-only hash so tray identity is stable across assigns.
         """
-        return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
+        seed = str(self.path)
+        if self.stage_number is not None:
+            seed = f"{seed}#{self.stage_number}"
+        return hashlib.blake2s(seed.encode("utf-8"), digest_size=6).hexdigest()
 
 
 class StageStatus(StrEnum):
@@ -863,6 +867,22 @@ class MatchProject(BaseModel):
         from ..lab.core import shooter_token as _token
 
         return _token(self.selected_shooter_id)
+
+    @model_validator(mode="after")
+    def _stamp_stage_numbers(self) -> MatchProject:
+        """Keep every StageVideo.stage_number consistent with its container.
+
+        Derived data: the owning list is the truth, the field is a cached
+        back-reference so video_id can see the stage. Stamping on every
+        validate covers legacy projects (no migration needed) and any
+        code path that moved a video without restamping.
+        """
+        for stage in self.stages:
+            for v in stage.videos:
+                v.stage_number = stage.stage_number
+        for v in self.unassigned_videos:
+            v.stage_number = None
+        return self
 
     @classmethod
     def init(cls, root: Path, *, name: str) -> MatchProject:
@@ -1817,6 +1837,7 @@ class MatchProject(BaseModel):
         # Reattach.
         if to_stage_number is None:
             video.role = "secondary"  # role is meaningless when unassigned
+            video.stage_number = None
             self.unassigned_videos.append(video)
             return video
 
@@ -1832,6 +1853,7 @@ class MatchProject(BaseModel):
                 if v.role == "primary":
                     v.role = "secondary"
         video.role = effective_role
+        video.stage_number = target.stage_number
         target.videos.append(video)
         return video
 

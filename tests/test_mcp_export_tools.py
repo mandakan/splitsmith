@@ -185,12 +185,14 @@ def test_export_stage_includes_secondaries_with_beep(tmp_path: Path) -> None:
         role="primary",
         beep_time=5.0,
         beep_source="manual",
+        stage_number=1,
     )
     secondary = StageVideo(
         path=Path("raw/s.mp4"),
         role="secondary",
         beep_time=4.5,
         beep_source="aligned",
+        stage_number=1,
     )
     project = MatchProject.init(root, name="Multi-Cam")
     project.stages = [
