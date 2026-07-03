@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0](https://github.com/mandakan/splitsmith/compare/v0.5.3...v0.6.0) (2026-07-03)
+
+
+### Features
+
+* **ingest:** two-pane master-detail redesign of Add Footage ([#513](https://github.com/mandakan/splitsmith/issues/513)) ([56e09ad](https://github.com/mandakan/splitsmith/commit/56e09ad90e8fa8838282a379be75445d1769cc13))
+* **take:** multi-stage single-take videos - windowed beep detection + take overview ([#527](https://github.com/mandakan/splitsmith/issues/527)) ([bfa3be8](https://github.com/mandakan/splitsmith/commit/bfa3be80619897e4ed121477413a9995f81cb96f))
+* **ui:** edit + verify camera mount/model on the ingest CameraCard ([#511](https://github.com/mandakan/splitsmith/issues/511)) ([4af81d5](https://github.com/mandakan/splitsmith/commit/4af81d51c165a7089a1a841c2f6327f5a2c7992c))
+* **ui:** in-app stage reference on the ingest page ([#508](https://github.com/mandakan/splitsmith/issues/508)) ([f1a0437](https://github.com/mandakan/splitsmith/commit/f1a0437e730a781243a929f1c9b64ab643637002))
+* **ui:** surface target shooter on ingest + move footage between shooters ([#510](https://github.com/mandakan/splitsmith/issues/510)) ([1ee0fb5](https://github.com/mandakan/splitsmith/commit/1ee0fb5ac369b9c4c30fba5cd784e5adb46a7ddb))
+
+
+### Bug Fixes
+
+* **audit:** waveform interaction batch - hit zones, peak-snap, region loop ([#526](https://github.com/mandakan/splitsmith/issues/526)) ([e9ccca4](https://github.com/mandakan/splitsmith/commit/e9ccca447b9a341edfc57f3be10e722cae9d9226))
+* **beep:** make beep_reviewed the single source of truth + reopen confirmed beeps ([#518](https://github.com/mandakan/splitsmith/issues/518)) ([a0ac8b4](https://github.com/mandakan/splitsmith/commit/a0ac8b41969641bf9d1d72fbade672f07b9b32ff))
+* **ingest:** address redesign review follow-ups ([#515](https://github.com/mandakan/splitsmith/issues/515)) ([a2de17b](https://github.com/mandakan/splitsmith/commit/a2de17b2e07a8b19bb90bc677dbc37144af223ab))
+* **overview:** aggregate match dashboard instead of wrong-shooter scoping ([#517](https://github.com/mandakan/splitsmith/issues/517)) ([369a040](https://github.com/mandakan/splitsmith/commit/369a0405f721a5a45a73ac2c8e7d3a7f2994bf72))
+* **ui:** clear all eslint errors, incl. pre-existing react-hooks violations ([#516](https://github.com/mandakan/splitsmith/issues/516)) ([0107a00](https://github.com/mandakan/splitsmith/commit/0107a00b1dc1d4400249a6a6ecf24b26aeebf489))
+* **ui:** overlay layering architecture -- z tokens, body portals, dialog focus contract ([#519](https://github.com/mandakan/splitsmith/issues/519)) ([10d651e](https://github.com/mandakan/splitsmith/commit/10d651e0ded48eb8d36f27fa94343478c875706b))
+* **ui:** remove dead first-run buttons, add phase-boundary CTAs, surface stage-time stall ([#520](https://github.com/mandakan/splitsmith/issues/520)) ([83a4de2](https://github.com/mandakan/splitsmith/commit/83a4de2728170ad31990a80dbdaf13c0f82d4188))
+
+
+### Build / CI
+
+* **deps:** re-lock with uv 0.11.25 ([#512](https://github.com/mandakan/splitsmith/issues/512)) ([3f2a726](https://github.com/mandakan/splitsmith/commit/3f2a7261d823fb332f96a257c7b8454b41c507d1))
+
 ## [0.5.3](https://github.com/mandakan/splitsmith/compare/v0.5.2...v0.5.3) (2026-06-24)
 
 
