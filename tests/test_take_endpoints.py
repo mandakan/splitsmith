@@ -143,3 +143,80 @@ def test_set_beep_window_422_when_start_negative(tmp_path: Path) -> None:
         json={"start_s": -1.0, "end_s": 60.0},
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Coverage suggestion endpoint (Task 7)
+# ---------------------------------------------------------------------------
+
+
+def _setup_with_scorecard(tmp_path: Path, scorecard_iso: str = "2026-06-01T10:20:00+00:00"):
+    """Like _setup but returns a client whose stage 1 has scorecard_updated_at set."""
+    from tests.test_ui_server import _match_create_app, _MatchClient
+
+    project_root = tmp_path / "match"
+    app = _match_create_app(project_root=project_root, project_name="Suggest Test")
+    client = _MatchClient(app)
+
+    sb = {
+        "match": {"id": "1", "name": "Suggest Test"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "Tester",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "Stage One",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": scorecard_iso,
+                    },
+                    {
+                        "stage_number": 2,
+                        "stage_name": "Stage Two",
+                        "time_seconds": 12.0,
+                        "scorecard_updated_at": "2026-06-01T10:45:00+00:00",
+                    },
+                ],
+            }
+        ],
+    }
+    client.post("/api/shooters/me/scoreboard/import", json={"data": sb})
+    return client
+
+
+def test_suggest_coverage_explicit_span_returns_stages(tmp_path: Path) -> None:
+    """POST suggest-coverage with explicit recorded_start + duration_s returns covered stages."""
+    client = _setup_with_scorecard(tmp_path)
+
+    # Stage 1 scorecard = 10:20 UTC -> window [10:05, 10:20].
+    # Stage 2 scorecard = 10:45 UTC -> window [10:30, 10:45].
+    # Span: 10:06 -> 10:32 covers both windows.
+    resp = client.post(
+        "/api/shooters/me/videos/suggest-coverage",
+        json={
+            "recorded_start": "2026-06-01T10:06:00+00:00",
+            "duration_s": 1560.0,  # 26 minutes -> ends at 10:32
+            "path": None,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["covers_stages"] == [1, 2]
+    assert body["span"] is not None
+    assert body["span"]["start"] is not None
+    assert body["span"]["end"] is not None
+
+
+def test_suggest_coverage_all_null_returns_empty(tmp_path: Path) -> None:
+    """POST suggest-coverage with all-null fields returns covers_stages=[] and span=null."""
+    client = _setup_with_scorecard(tmp_path)
+
+    resp = client.post(
+        "/api/shooters/me/videos/suggest-coverage",
+        json={"recorded_start": None, "duration_s": None, "path": None},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["covers_stages"] == []
+    assert body["span"] is None

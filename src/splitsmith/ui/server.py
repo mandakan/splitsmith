@@ -3124,6 +3124,20 @@ class DeletionSummaryModel(BaseModel):
         return cls(**summary.__dict__)
 
 
+class SuggestCoverageRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/videos/suggest-coverage.
+
+    The SPA probes the file duration client-side (to avoid server-side ffprobe
+    of remote R2 objects) and passes the wall-clock span here. When all fields
+    are null the endpoint returns an empty suggestion so the caller falls back
+    to manual selection.
+    """
+
+    recorded_start: datetime | None = None
+    duration_s: float | None = None
+    path: str | None = None
+
+
 class CoverageEditRequest(BaseModel):
     """Body for PATCH /api/shooters/{slug}/raw-videos/coverage.
 
@@ -5661,6 +5675,88 @@ def create_app(
         if canonical is None:
             raise HTTPException(status_code=500, detail="coverage applied but raw video entry missing")
         return JSONResponse(canonical.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/videos/suggest-coverage")
+    def suggest_coverage(
+        slug: str,
+        body: SuggestCoverageRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Propose which stages a file's wall-clock span covers.
+
+        The SPA probes the file duration client-side (avoiding server-side
+        ffprobe of remote R2 objects) and sends the span here. Returns a
+        list of stage numbers whose match windows overlap the span, ordered
+        by scorecard time, plus the resolved span in ISO format.
+
+        Body: ``{"recorded_start": iso | null, "duration_s": float | null,
+        "path": str | null}``.
+
+        Returns ``{"covers_stages": [ints], "span": {"start": iso, "end": iso}
+        | null}``; empty list and null span when no span is resolvable.
+
+        Local mode only: when ``recorded_start`` is null but ``path`` is
+        provided, the server attempts to resolve the span from the file's
+        birthtime/mtime and ffprobe duration.
+        """
+        from .. import video_match as vm
+        from ..config import StageData as EngineStageData
+        from ..config import VideoMatchConfig
+
+        project = state.shooter_project(slug)
+        cfg = VideoMatchConfig()
+
+        # Build the span.
+        start_dt: datetime | None = body.recorded_start
+        end_dt: datetime | None = None
+
+        if start_dt is not None and body.duration_s is not None:
+            end_dt = start_dt + timedelta(seconds=body.duration_s)
+        elif body.path is not None and state.storage is None:
+            # Local mode: resolve from file timestamps + ffprobe.
+            root = state.shooter_root(slug)
+            video_path = project.resolve_video_path(root, Path(body.path))
+            duration: float | None = None
+            try:
+                duration = video_probe.probe(video_path, cache_dir=project.probes_path(root)).duration
+            except video_probe.ProbeError:
+                pass
+            if duration is not None:
+                st = video_path.stat()
+                birth = getattr(st, "st_birthtime", None)
+                end_dt = (
+                    datetime.fromtimestamp(birth, tz=UTC)
+                    if birth is not None
+                    else datetime.fromtimestamp(st.st_mtime, tz=UTC)
+                )
+                start_dt = end_dt - timedelta(seconds=duration)
+
+        if start_dt is None or end_dt is None:
+            return JSONResponse({"covers_stages": [], "span": None})
+
+        # Gather stages that have a scorecard timestamp.
+        engine_stages: list[EngineStageData] = []
+        for stg in project.stages:
+            if stg.scorecard_updated_at is not None:
+                engine_stages.append(
+                    EngineStageData(
+                        stage_number=stg.stage_number,
+                        stage_name=stg.stage_name,
+                        time_seconds=stg.time_seconds,
+                        scorecard_updated_at=stg.scorecard_updated_at,
+                    )
+                )
+
+        covers = vm.stages_in_span(start_dt, end_dt, engine_stages, cfg.tolerance_minutes)
+        return JSONResponse(
+            {
+                "covers_stages": covers,
+                "span": {
+                    "start": start_dt.isoformat(),
+                    "end": end_dt.isoformat(),
+                },
+            }
+        )
 
     @app.get("/api/shooters/{slug}/automation")
     def get_automation(slug: str) -> JSONResponse:

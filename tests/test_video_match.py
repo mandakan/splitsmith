@@ -244,3 +244,68 @@ def test_classify_video_against_stages_no_timestamp() -> None:
     cls, hits = classify_video_against_stages(None, [], tolerance_minutes=15)
     assert cls == "no_timestamp"
     assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# stages_in_span (coverage suggestion helper - Task 7)
+# ---------------------------------------------------------------------------
+
+
+def _stage_data(stage_number: int, scorecard_at: datetime, time_seconds: float = 15.0) -> StageData:
+    from splitsmith.config import StageData
+
+    return StageData(
+        stage_number=stage_number,
+        stage_name=f"Stage {stage_number}",
+        time_seconds=time_seconds,
+        scorecard_updated_at=scorecard_at,
+    )
+
+
+def test_stages_in_span_covers_middle_two() -> None:
+    """Span covering stages 2+3 of 4 returns [2, 3] in scorecard order even
+    when stage numbers are shuffled in the input list."""
+    from splitsmith.video_match import stages_in_span
+
+    base = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+    # Four stages spaced 25 minutes apart.
+    s1 = _stage_data(1, base + timedelta(minutes=25))
+    s2 = _stage_data(2, base + timedelta(minutes=50))
+    s3 = _stage_data(3, base + timedelta(minutes=75))
+    s4 = _stage_data(4, base + timedelta(minutes=100))
+
+    # Span starts 5 min before s2's window lower bound (base+35) and ends
+    # after s3's scorecard (base+75) but before s4's window (base+85).
+    span_start = base + timedelta(minutes=36)
+    span_end = base + timedelta(minutes=76)
+
+    # Pass stages in shuffled order to verify the result is still scorecard-sorted.
+    result = stages_in_span(span_start, span_end, [s4, s2, s1, s3], tolerance_minutes=15)
+    assert result == [2, 3]
+
+
+def test_stages_in_span_zero_length_inside_one_window() -> None:
+    """A zero-length span (start == end) inside a single window returns that stage."""
+    from splitsmith.video_match import stages_in_span
+
+    base = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+    sc = base + timedelta(minutes=20)
+    stage = _stage_data(5, sc)
+
+    # Point inside [sc-15, sc].
+    point = sc - timedelta(minutes=7)
+    result = stages_in_span(point, point, [stage], tolerance_minutes=15)
+    assert result == [5]
+
+
+def test_stages_in_span_before_all_windows_returns_empty() -> None:
+    """Span entirely before all windows returns an empty list."""
+    from splitsmith.video_match import stages_in_span
+
+    base = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
+    stages = [_stage_data(i, base + timedelta(minutes=30 * i)) for i in range(1, 5)]
+
+    # Span ends 5 minutes before the earliest window lower bound (base+15).
+    span_end = base + timedelta(minutes=10)
+    result = stages_in_span(base, span_end, stages, tolerance_minutes=15)
+    assert result == []
