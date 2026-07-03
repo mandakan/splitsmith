@@ -187,16 +187,20 @@ def _setup_with_scorecard(tmp_path: Path, scorecard_iso: str = "2026-06-01T10:20
 
 def test_suggest_coverage_explicit_span_returns_stages(tmp_path: Path) -> None:
     """POST suggest-coverage with explicit recorded_start + duration_s returns covered stages."""
+    from datetime import datetime, timedelta
+
     client = _setup_with_scorecard(tmp_path)
 
     # Stage 1 scorecard = 10:20 UTC -> window [10:05, 10:20].
     # Stage 2 scorecard = 10:45 UTC -> window [10:30, 10:45].
     # Span: 10:06 -> 10:32 covers both windows.
+    recorded_start_iso = "2026-06-01T10:06:00+00:00"
+    duration_s = 1560.0  # 26 minutes -> ends at 10:32
     resp = client.post(
         "/api/shooters/me/videos/suggest-coverage",
         json={
-            "recorded_start": "2026-06-01T10:06:00+00:00",
-            "duration_s": 1560.0,  # 26 minutes -> ends at 10:32
+            "recorded_start": recorded_start_iso,
+            "duration_s": duration_s,
             "path": None,
         },
     )
@@ -204,8 +208,14 @@ def test_suggest_coverage_explicit_span_returns_stages(tmp_path: Path) -> None:
     body = resp.json()
     assert body["covers_stages"] == [1, 2]
     assert body["span"] is not None
-    assert body["span"]["start"] is not None
-    assert body["span"]["end"] is not None
+
+    # Verify the span values round-trip correctly.
+    expected_start = datetime.fromisoformat(recorded_start_iso)
+    expected_end = expected_start + timedelta(seconds=duration_s)
+    actual_start = datetime.fromisoformat(body["span"]["start"])
+    actual_end = datetime.fromisoformat(body["span"]["end"])
+    assert actual_start == expected_start
+    assert actual_end == expected_end
 
 
 def test_suggest_coverage_all_null_returns_empty(tmp_path: Path) -> None:
@@ -220,3 +230,19 @@ def test_suggest_coverage_all_null_returns_empty(tmp_path: Path) -> None:
     body = resp.json()
     assert body["covers_stages"] == []
     assert body["span"] is None
+
+
+def test_suggest_coverage_naive_datetime_returns_422(tmp_path: Path) -> None:
+    """POST suggest-coverage with naive recorded_start returns 422."""
+    client = _setup_with_scorecard(tmp_path)
+
+    # Naive datetime (no timezone offset) should fail validation.
+    resp = client.post(
+        "/api/shooters/me/videos/suggest-coverage",
+        json={
+            "recorded_start": "2026-06-01T10:06:00",
+            "duration_s": 1560.0,
+            "path": None,
+        },
+    )
+    assert resp.status_code == 422

@@ -109,7 +109,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .. import __version__ as splitsmith_version
@@ -3133,7 +3133,7 @@ class SuggestCoverageRequest(BaseModel):
     to manual selection.
     """
 
-    recorded_start: datetime | None = None
+    recorded_start: AwareDatetime | None = None
     duration_s: float | None = None
     path: str | None = None
 
