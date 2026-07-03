@@ -52,9 +52,25 @@ function probeFile(
   return new Promise((resolve) => {
     const el = document.createElement("video");
     el.preload = "metadata";
+    const url = URL.createObjectURL(file);
+    // Guard: revoke exactly once across all three exit paths.
+    let revoked = false;
+    function revoke() {
+      if (revoked) return;
+      revoked = true;
+      URL.revokeObjectURL(url);
+    }
+    // Timeout guard: if neither onloadedmetadata nor onerror fires (e.g.
+    // the codec is unsupported and the browser stalls silently), revoke
+    // the URL and resolve nulls after 5 seconds.
+    const timer = setTimeout(() => {
+      revoke();
+      resolve({ duration_s: null, recorded_start: null });
+    }, 5000);
     el.onloadedmetadata = () => {
+      clearTimeout(timer);
       const duration = Number.isFinite(el.duration) ? el.duration : null;
-      URL.revokeObjectURL(el.src);
+      revoke();
       resolve({
         duration_s: duration,
         recorded_start:
@@ -64,10 +80,11 @@ function probeFile(
       });
     };
     el.onerror = () => {
-      URL.revokeObjectURL(el.src);
+      clearTimeout(timer);
+      revoke();
       resolve({ duration_s: null, recorded_start: null });
     };
-    el.src = URL.createObjectURL(file);
+    el.src = url;
   });
 }
 

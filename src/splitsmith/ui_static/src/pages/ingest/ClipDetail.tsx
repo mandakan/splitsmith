@@ -53,7 +53,10 @@ export function ClipDetail({
   const [detecting, setDetecting] = useState(false);
   const [kebabOpen, setKebabOpen] = useState(false);
   // Coverage section state.
-  const [coverageValue, setCoverageValue] = useState<number[]>([]);
+  // coverageSaved: last value persisted to the server.
+  // coverageDraft: local chip selection - updates instantly, no network until Apply.
+  const [coverageSaved, setCoverageSaved] = useState<number[]>([]);
+  const [coverageDraft, setCoverageDraft] = useState<number[]>([]);
   const [coverageSuggested, setCoverageSuggested] = useState<
     number[] | undefined
   >();
@@ -117,7 +120,8 @@ export function ClipDetail({
   // in local mode. Resets on every clip change so stale suggestions from the
   // previous clip don't flash in the new one.
   useEffect(() => {
-    setCoverageValue([]);
+    setCoverageSaved([]);
+    setCoverageDraft([]);
     setCoverageSuggested(undefined);
     if (!clip || allStages.length === 0) return;
     let alive = true;
@@ -126,7 +130,8 @@ export function ClipDetail({
       .then((s) => {
         if (!alive || s.covers_stages.length === 0) return;
         setCoverageSuggested(s.covers_stages);
-        setCoverageValue(s.covers_stages);
+        // Pre-fill draft from suggestion; saved stays [] until the user applies.
+        setCoverageDraft(s.covers_stages);
       })
       .catch(() => {
         /* non-fatal: coverage starts empty */
@@ -157,6 +162,10 @@ export function ClipDetail({
     .join(" \u00B7 ");
   const needsBeep =
     video.role !== "ignored" && video.beep_time == null && currentStage != null;
+  // True when the draft differs from what's last saved - enables Apply button.
+  const coverageDirty =
+    JSON.stringify([...coverageDraft].sort((a, b) => a - b)) !==
+    JSON.stringify([...coverageSaved].sort((a, b) => a - b));
 
   async function changeStage(next: string) {
     setRowBusy(true);
@@ -193,18 +202,18 @@ export function ClipDetail({
     }
   }
 
-  async function applyCoverage(stages: number[]) {
+  async function applyCoverage() {
     if (coverageBusy) return;
     setCoverageBusy(true);
     onError(null);
     try {
       // Extract the filename from the path (raw/filename.mp4 -> filename.mp4).
-      const filename = video.path.split("/").pop() ?? video.path;
+      const fn = video.path.split("/").pop() ?? video.path;
       await api.setRawVideoCoverage(slug, {
-        filename,
-        covers_stages: stages,
+        filename: fn,
+        covers_stages: coverageDraft,
       });
-      setCoverageValue(stages);
+      setCoverageSaved(coverageDraft);
       await onReload?.();
     } catch (e) {
       onError(e instanceof ApiError ? e.detail : String(e));
@@ -370,21 +379,31 @@ export function ClipDetail({
       {/* Coverage section - declare which stages this take covers */}
       {allStages.length > 0 && (
         <div className="border-t border-rule bg-surface-2 px-4 py-3">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
-              Covers stages
-            </span>
-            {coverageBusy && (
-              <Loader2
-                aria-label="Saving coverage"
-                className="size-3 animate-spin text-led"
-              />
-            )}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
+                Covers stages
+              </span>
+              {coverageBusy && (
+                <Loader2
+                  aria-label="Saving coverage"
+                  className="size-3 animate-spin text-led"
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => void applyCoverage()}
+              disabled={coverageBusy || !coverageDirty}
+              className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2.5 py-1 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+            >
+              {coverageBusy ? "Saving..." : "Apply coverage"}
+            </button>
           </div>
           <CoverageSelect
             stages={allStages}
-            value={coverageValue}
-            onChange={(v) => void applyCoverage(v)}
+            value={coverageDraft}
+            onChange={setCoverageDraft}
             suggested={coverageSuggested}
           />
         </div>
