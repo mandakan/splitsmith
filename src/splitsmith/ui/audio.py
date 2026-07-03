@@ -191,6 +191,84 @@ def ensure_video_audio(
     return audio_path
 
 
+def video_window_audio_path(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    start_s: float,
+    end_s: float,
+    *,
+    project: MatchProject | None = None,
+) -> Path:
+    """Cache path for a window-sliced WAV. The window rides in the name
+    (milliseconds) so a changed window is a new cache slot, and the
+    basename carries the video_id so the storage-cache key helpers work
+    unchanged."""
+    audio_dir = project.audio_path(project_root) if project else project_root / "audio"
+    return audio_dir / (
+        f"stage{stage_number}_cam_{video.video_id}"
+        f"_win_{int(round(start_s * 1000))}_{int(round(end_s * 1000))}.wav"
+    )
+
+
+def ensure_video_window_audio(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    source_video: Path,
+    start_s: float,
+    end_s: float,
+    *,
+    sample_rate: int = 48000,
+    ffmpeg_binary: str = "ffmpeg",
+    project: MatchProject | None = None,
+) -> Path:
+    """Extract the [start_s, end_s) mono slice of source_video if not cached.
+
+    -ss before -i seeks on the demuxer (fast on long files); detection
+    adds start_s back onto every returned timestamp so results stay in
+    source-absolute seconds.
+    """
+    audio_path = video_window_audio_path(project_root, stage_number, video, start_s, end_s, project=project)
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+    src_resolved = source_video.resolve()
+    if not src_resolved.exists():
+        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+    if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
+        return audio_path
+    if _try_pull_audio_from_storage(project, audio_path):
+        return audio_path
+    if not shutil.which(ffmpeg_binary):
+        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
+    cmd = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        str(start_s),
+        "-t",
+        str(end_s - start_s),
+        "-i",
+        str(src_resolved),
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-vn",
+        str(audio_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise AudioExtractionError(
+            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc
+    _try_push_audio_to_storage(project, audio_path)
+    return audio_path
+
+
 def trimmed_video_path(
     project_root: Path,
     stage_number: int,
@@ -708,6 +786,17 @@ def ensure_audit_trim(
     )
 
 
+def _offset_detection(result: BeepDetection, offset_s: float) -> BeepDetection:
+    """Shift a slice-relative detection back into source-absolute time."""
+    if offset_s == 0.0:
+        return result
+    shifted = result.model_copy(deep=True)
+    shifted.time += offset_s
+    for c in shifted.candidates:
+        c.time += offset_s
+    return shifted
+
+
 def detect_primary_beep(
     project_root: Path,
     stage_number: int,
@@ -716,13 +805,38 @@ def detect_primary_beep(
     config: BeepDetectConfig | None = None,
     ffmpeg_binary: str = "ffmpeg",
     project: MatchProject | None = None,
+    window: tuple[float, float] | None = None,
 ) -> BeepDetection:
     """Run ``beep_detect.detect_beep`` against the primary's cached audio.
 
     Audio extraction happens transparently if not yet cached. Returns the
     ``BeepDetection`` result; the caller is responsible for persisting the
     relevant fields to the ``StageVideo``.
+
+    When ``window`` is set the search is restricted to the [start_s, end_s)
+    slice; the window replaces the leading-window heuristic (search_window_s
+    is neutralised so it cannot re-cap the slice). Every returned timestamp
+    is offset back into source-absolute time.
     """
+    if window is not None:
+        if project is None:
+            raise ValueError("detect_primary_beep: project is required when window is set")
+        primary = project.stage(stage_number).primary()
+        if primary is None:
+            raise KeyError(f"stage {stage_number} has no primary video")
+        audio_path = ensure_video_window_audio(
+            project_root,
+            stage_number,
+            primary,
+            source_video,
+            window[0],
+            window[1],
+            ffmpeg_binary=ffmpeg_binary,
+            project=project,
+        )
+        audio, sr = beep_detect.load_audio(audio_path)
+        cfg = (config or BeepDetectConfig()).model_copy(update={"search_window_s": 0.0})
+        return _offset_detection(beep_detect.detect_beep(audio, sr, cfg), window[0])
     audio_path = ensure_primary_audio(
         project_root,
         stage_number,
@@ -744,6 +858,7 @@ def detect_video_beep(
     config: BeepDetectConfig | None = None,
     ffmpeg_binary: str = "ffmpeg",
     project: MatchProject | None = None,
+    window: tuple[float, float] | None = None,
 ) -> BeepDetection:
     """Run ``beep_detect.detect_beep`` against ``video``'s cached audio.
 
@@ -752,7 +867,27 @@ def detect_video_beep(
     non-primary cameras run the same detector against the per-video
     audio cache (``stage<N>_cam_<video_id>.wav``). Caller persists the
     fields onto ``video``.
+
+    When ``window`` is set the search is restricted to the [start_s, end_s)
+    slice regardless of role; the window replaces the leading-window
+    heuristic (search_window_s is neutralised so it cannot re-cap the
+    slice). Every returned timestamp is offset back into source-absolute
+    time.
     """
+    if window is not None:
+        audio_path = ensure_video_window_audio(
+            project_root,
+            stage_number,
+            video,
+            source,
+            window[0],
+            window[1],
+            ffmpeg_binary=ffmpeg_binary,
+            project=project,
+        )
+        audio, sr = beep_detect.load_audio(audio_path)
+        cfg = (config or BeepDetectConfig()).model_copy(update={"search_window_s": 0.0})
+        return _offset_detection(beep_detect.detect_beep(audio, sr, cfg), window[0])
     if video.role == "primary":
         return detect_primary_beep(
             project_root,
