@@ -21,9 +21,14 @@ as before, so local / docker-compose deployments never talk to Railway.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
 
+import httpx
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -62,3 +67,158 @@ def load_railway_config() -> RailwayLauncherConfig | None:
     if not (token and service_id and environment_id):
         return None
     return RailwayLauncherConfig(token=token, service_id=service_id, environment_id=environment_id)
+
+
+class WorkerLauncher(Protocol):
+    """Wake channel for the scale-to-zero worker.
+
+    The queue of record stays in Postgres; a launcher only signals
+    "work exists" and must be safe to lose a signal - the serve-boot
+    pending re-check and the safety cron are the nets. Implementations
+    must make ``trigger`` never raise.
+    """
+
+    def schedule(self) -> None: ...
+
+    async def trigger(self) -> bool: ...
+
+
+WorkerActiveCheck = Callable[[], Awaitable[bool]]
+
+_REDEPLOY_MUTATION = """\
+mutation TriggerWorkerRun($serviceId: String!, $environmentId: String!) {
+  serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
+}
+"""
+
+
+class RailwayWorkerLauncher:
+    """Fires ``serviceInstanceRedeploy`` for the worker service, at most
+    once per cooldown window, and only when no live worker heartbeat exists.
+
+    Railway's deployment status cannot gate "is a drain running": a
+    one-shot deployment keeps status SUCCESS after its container exits
+    (observed live on staging, 2026-07-03). The authoritative signal is
+    Procrastinate's own worker registry - ``worker_active`` (built by
+    :func:`make_worker_active_checker`) reads it. With no checker
+    configured the launcher redeploys unconditionally, subject to the
+    cooldown.
+    """
+
+    def __init__(
+        self,
+        config: RailwayLauncherConfig,
+        worker_active: WorkerActiveCheck | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._config = config
+        self._worker_active = worker_active
+        self._client = httpx.AsyncClient(
+            headers={"Project-Access-Token": config.token},
+            timeout=10.0,
+            transport=transport,
+        )
+        self._lock = asyncio.Lock()
+        self._last_attempt: float | None = None
+        self._tasks: set[asyncio.Task[Any]] = set()
+
+    def schedule(self) -> None:
+        """Run :meth:`trigger` as a background task; never blocks the caller.
+
+        Holding the task in ``self._tasks`` keeps it from being garbage
+        collected mid-flight (asyncio only holds weak refs to tasks).
+        """
+        task = asyncio.get_running_loop().create_task(self.trigger())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def trigger(self) -> bool:
+        """Redeploy the worker unless one is draining or we are in cooldown.
+
+        Returns True when a redeploy was fired. Never raises: a Railway or
+        DB hiccup must not break enqueue - a missed signal is repaired by
+        the boot re-check or the safety cron. A failing heartbeat check
+        counts as "worker may be active": redeploying on bad information
+        could kill a live drain, and the nets cover the missed launch.
+        """
+        async with self._lock:
+            now = time.monotonic()
+            if self._last_attempt is not None and now - self._last_attempt < self._config.cooldown_seconds:
+                return False
+            # Stamp before the checks so a slow/failing backend is not
+            # hammered by every enqueue in a burst.
+            self._last_attempt = now
+            try:
+                if self._worker_active is not None and await self._worker_active():
+                    logger.info("worker launcher: skipped, a live worker heartbeat exists")
+                    return False
+                await self._redeploy()
+                logger.info("worker launcher: redeploy fired")
+                return True
+            except Exception:
+                logger.warning(
+                    "worker launcher: failed; boot re-check or safety cron will drain the queue",
+                    exc_info=True,
+                )
+                return False
+
+    async def _redeploy(self) -> None:
+        variables = {
+            "serviceId": self._config.service_id,
+            "environmentId": self._config.environment_id,
+        }
+        response = await self._client.post(
+            self._config.api_url, json={"query": _REDEPLOY_MUTATION, "variables": variables}
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("errors"):
+            raise RuntimeError(f"Railway GraphQL error: {payload['errors']}")
+
+
+def make_worker_active_checker(
+    session_factory: Callable[[], Any], max_age_seconds: float = 20.0
+) -> WorkerActiveCheck:
+    """True while any Procrastinate worker heartbeat is fresher than
+    ``max_age_seconds``.
+
+    A live worker refreshes ``procrastinate_workers.last_heartbeat`` every
+    ~10s and removes its row on clean exit; 20s tolerates one missed beat
+    while letting a crashed worker's stale row unblock the launcher within
+    seconds. Runs on the API's session factory - the launcher only fires
+    during an enqueue, when the DB is already awake, so this adds no wake.
+    """
+
+    async def _worker_active() -> bool:
+        from sqlalchemy import text
+
+        async with session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM procrastinate_workers "
+                    "WHERE last_heartbeat > now() - make_interval(secs => :age))"
+                ),
+                {"age": max_age_seconds},
+            )
+            return bool(result.scalar_one())
+
+    return _worker_active
+
+
+def build_worker_launcher(
+    worker_active: WorkerActiveCheck | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> WorkerLauncher | None:
+    """Select and build the launcher from ``SPLITSMITH_WORKER_LAUNCHER``
+    (default ``railway``). ``None`` (launcher disabled) when the selected
+    implementation's env config is absent; unknown names raise so a
+    misconfigured hosted boot fails loudly instead of stranding jobs."""
+    kind = os.environ.get(ENV_WORKER_LAUNCHER, "").strip().lower() or "railway"
+    if kind == "railway":
+        config = load_railway_config()
+        return (
+            RailwayWorkerLauncher(config, worker_active=worker_active, transport=transport)
+            if config
+            else None
+        )
+    raise ValueError(f"{ENV_WORKER_LAUNCHER}={kind!r}: unknown worker launcher")
