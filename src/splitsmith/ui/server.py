@@ -85,7 +85,7 @@ import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 
@@ -115,7 +115,7 @@ from starlette.background import BackgroundTask
 from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import beep_detect, cross_align, match_model, report, user_config, video_probe
+from .. import beep_detect, beep_windows, cross_align, match_model, report, user_config, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -129,6 +129,7 @@ from ..auth import AuthBackend, LoopbackAuth, User
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
+    BeepWindowConfig,
     CoachAutoClassifyConfig,
     Config,
     IntervalClass,
@@ -1421,6 +1422,66 @@ def register_job_bodies(state: AppState) -> None:
             return None
         return result
 
+    def _derive_take_window(
+        root: Path,
+        proj: MatchProject,
+        stage: StageEntry,
+        video: StageVideo,
+    ) -> tuple[tuple[float, float], str] | None:
+        """Resolve the beep search window for a take-covered video.
+
+        Returns (window, source) or None when the video is not part of a
+        multi-stage take (raw is None or covers only one stage). Resolution
+        order: manual > scoreboard > sequential.
+        """
+        raw = proj.find_raw_video(str(video.path))
+        if raw is None or len(raw.covers_stages) < 2:
+            return None
+        if video.beep_window_source == "manual" and video.beep_window is not None:
+            return video.beep_window, "manual"
+        cfg = BeepWindowConfig()
+        source_path = proj.resolve_video_path(root, video.path)
+        duration = raw.duration_seconds
+        if duration is None:
+            try:
+                duration = video_probe.probe(source_path, cache_dir=proj.probes_path(root)).duration
+            except video_probe.ProbeError:
+                duration = None
+            if duration:
+                raw.duration_seconds = float(duration)
+        start_dt = raw.recorded_start
+        if start_dt is None and duration:
+            st = source_path.stat()
+            birth = getattr(st, "st_birthtime", None)
+            start_dt = (
+                datetime.fromtimestamp(birth, tz=UTC)
+                if birth is not None
+                else datetime.fromtimestamp(st.st_mtime, tz=UTC) - timedelta(seconds=duration)
+            )
+            raw.recorded_start = start_dt
+        if duration is None:
+            return None
+        if stage.scorecard_updated_at is not None and start_dt is not None:
+            prior = beep_windows.StagePrior(
+                stage_number=stage.stage_number,
+                scorecard_updated_at=stage.scorecard_updated_at,
+                time_seconds=stage.time_seconds,
+            )
+            windows = beep_windows.derive_scoreboard_windows(start_dt, duration, [prior], cfg)
+            if windows:
+                w = windows[0]
+                return (w.start_s, w.end_s), "scoreboard"
+        anchor: float | None = None
+        for n in raw.covers_stages:
+            if n == stage.stage_number:
+                break
+            sibling = proj.stage(n)
+            sib_primary = next((v for v in sibling.videos if str(v.path) == str(video.path)), None)
+            if sib_primary is not None and sib_primary.beep_time is not None:
+                cand = sib_primary.beep_time + sibling.time_seconds + cfg.reset_margin_s
+                anchor = cand if anchor is None else max(anchor, cand)
+        return beep_windows.sequential_window(anchor, duration, cfg), "sequential"
+
     def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker: detect ``video``'s beep, then auto-chain trim.
 
@@ -1440,6 +1501,9 @@ def register_job_bodies(state: AppState) -> None:
             if video is None:
                 raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
             source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+        # Derive a per-stage search window for multi-stage single-take videos.
+        # None for single-stage videos - behavior identical to before this change.
+        take_window = _derive_take_window(state.shooter_root(slug), proj, stg, video)
         handle.timer.set_meta(role=video.role)
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(
@@ -1455,70 +1519,98 @@ def register_job_bodies(state: AppState) -> None:
                     source,
                     project=proj,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    window=take_window[0] if take_window is not None else None,
                 )
         except beep_detect.BeepNotFoundError as exc:
-            # Primary failure is fatal -- the entire downstream pipeline
-            # (trim window, shot timeline) hangs off the primary beep.
-            # Surfacing as a job error gets the user looking at the audio
-            # right away rather than silently falling through to a wrong
-            # alignment. Secondary failure is soft-handled below: many
-            # non-headcam cameras (iPhone tripod, RO position, AGC'd) just
-            # don't capture a sustained 2-5 kHz tone, and aborting the
-            # import on every one of them is the worse UX.
-            if video.role == "primary":
+            # Primary failure: fatal when no window was applied (whole-file search
+            # failed - the downstream pipeline has nothing to anchor on). Windowed
+            # primary failure is soft - the take overview surfaces "none" and the
+            # user picks the beep on the waveform.
+            if video.role == "primary" and take_window is None:
                 raise
-            logger.info(
-                "no beep on secondary stage %d video %s: %s",
-                stage_number,
-                video.video_id,
-                exc,
-            )
-            # Cross-correlation fallback: when the primary already has a
-            # beep, try aligning the secondary's audio against the
-            # primary's landmark window. Same buzzer + first shots in the
-            # same room means the loudness envelopes line up modulo a
-            # constant time offset, even when the secondary's mic missed
-            # the sustained 2-5 kHz tone the in-stream detector wants.
-            with handle.timer.phase("cross_align"):
-                aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
-            video.beep_peak_amplitude = None
-            video.beep_duration_ms = None
-            video.beep_candidates = []
-            video.beep_reviewed = False
-            video.processed["beep"] = True
-            # Surface the cross-correlation confidence whenever we got one,
-            # even if we don't promote the suggestion. Lets the UI tell the
-            # difference between "never tried" and "tried, sub-floor result".
-            video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
-            # Delta is only meaningful when both in-stream AND cross-align
-            # produced timestamps. In-stream failed here, so wipe it.
-            video.beep_alignment_delta_ms = None
-            if aligned is not None and aligned.confidence >= _align_confidence_floor:
-                handle.update(
-                    progress=0.55,
-                    message=(f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"),
+            if video.role == "primary":
+                # Windowed primary soft-fail: mirror secondary field-wipes but skip
+                # cross-align (no sibling audio to align against).
+                logger.info(
+                    "no beep in window on primary stage %d video %s: %s",
+                    stage_number,
+                    video.video_id,
+                    exc,
                 )
-                video.beep_time = aligned.secondary_beep_time
-                video.beep_source = "aligned"
-                video.beep_auto_detect_failed = False
-                # Treat as "we have a usable beep_time": fall through to
-                # the trim block below.
-                beep = aligned
-            else:
-                if aligned is not None:
-                    logger.info(
-                        "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
-                        stage_number,
-                        video.video_id,
-                        aligned.confidence,
-                        _align_confidence_floor,
-                    )
-                handle.update(progress=0.55, message="No beep detected; pick on waveform")
+                video.beep_peak_amplitude = None
+                video.beep_duration_ms = None
+                video.beep_candidates = []
+                video.beep_reviewed = False
+                video.processed["beep"] = True
+                video.beep_alignment_confidence = None
+                video.beep_alignment_delta_ms = None
+                handle.update(progress=0.55, message="No beep in window; pick on waveform")
                 video.beep_time = None
                 video.beep_source = "auto"
                 video.beep_auto_detect_failed = True
                 video.processed["trim"] = False
                 beep = None
+            else:
+                # Secondary failure is soft: many non-headcam cameras (iPhone
+                # tripod, RO position, AGC'd) don't capture the sustained
+                # 2-5 kHz tone. Aborting the import on every one would be
+                # worse UX than falling back to cross-correlation.
+                logger.info(
+                    "no beep on secondary stage %d video %s: %s",
+                    stage_number,
+                    video.video_id,
+                    exc,
+                )
+                # Cross-correlation fallback: when the primary already has a
+                # beep, try aligning the secondary's audio against the
+                # primary's landmark window. Same buzzer + first shots in the
+                # same room means the loudness envelopes line up modulo a
+                # constant time offset, even when the secondary's mic missed
+                # the sustained 2-5 kHz tone the in-stream detector wants.
+                with handle.timer.phase("cross_align"):
+                    aligned = _try_align_secondary_to_primary(
+                        state.shooter_root(slug), proj, stg, video, handle
+                    )
+                video.beep_peak_amplitude = None
+                video.beep_duration_ms = None
+                video.beep_candidates = []
+                video.beep_reviewed = False
+                video.processed["beep"] = True
+                # Surface the cross-correlation confidence whenever we got one,
+                # even if we don't promote the suggestion. Lets the UI tell the
+                # difference between "never tried" and "tried, sub-floor result".
+                video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
+                # Delta is only meaningful when both in-stream AND cross-align
+                # produced timestamps. In-stream failed here, so wipe it.
+                video.beep_alignment_delta_ms = None
+                if aligned is not None and aligned.confidence >= _align_confidence_floor:
+                    handle.update(
+                        progress=0.55,
+                        message=(
+                            f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"
+                        ),
+                    )
+                    video.beep_time = aligned.secondary_beep_time
+                    video.beep_source = "aligned"
+                    video.beep_auto_detect_failed = False
+                    # Treat as "we have a usable beep_time": fall through to
+                    # the trim block below.
+                    beep = aligned
+                else:
+                    if aligned is not None:
+                        logger.info(
+                            "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
+                            stage_number,
+                            video.video_id,
+                            aligned.confidence,
+                            _align_confidence_floor,
+                        )
+                    handle.update(progress=0.55, message="No beep detected; pick on waveform")
+                    video.beep_time = None
+                    video.beep_source = "auto"
+                    video.beep_auto_detect_failed = True
+                    video.processed["trim"] = False
+                    beep = None
         else:
             handle.update(progress=0.55, message="Saving beep...")
             video.beep_time = beep.time
@@ -1566,6 +1658,14 @@ def register_job_bodies(state: AppState) -> None:
                 if check is not None and check.confidence >= _align_confidence_floor:
                     video.beep_alignment_confidence = check.confidence
                     video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
+
+        # Persist which window was used (for the audit trail and take overview).
+        if take_window is not None:
+            video.beep_window = take_window[0]
+            video.beep_window_source = take_window[1]  # type: ignore[assignment]
+        else:
+            video.beep_window = None
+            video.beep_window_source = None
 
         trimmed_ok = False
         if beep is not None and stg.time_seconds > 0:
@@ -1621,9 +1721,21 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
                 v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
                 v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
+                v_fresh.beep_window = video.beep_window
+                v_fresh.beep_window_source = video.beep_window_source
                 v_fresh.processed["beep"] = True
                 if trimmed_ok:
                     v_fresh.processed["trim"] = True
+                # Backfill raw video wall-clock metadata derived during this run so
+                # subsequent jobs on the same take don't need to re-probe.
+                raw_working = proj.find_raw_video(str(video.path))
+                if raw_working is not None:
+                    raw_fresh = fresh.find_raw_video(str(video.path))
+                    if raw_fresh is not None:
+                        if raw_working.duration_seconds is not None and raw_fresh.duration_seconds is None:
+                            raw_fresh.duration_seconds = raw_working.duration_seconds
+                        if raw_working.recorded_start is not None and raw_fresh.recorded_start is None:
+                            raw_fresh.recorded_start = raw_working.recorded_start
                 fresh.save(state.shooter_root(slug))
         handle.timer.set_meta(trimmed=trimmed_ok)
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
@@ -1658,6 +1770,44 @@ def register_job_bodies(state: AppState) -> None:
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
+        # Sequential-mode chaining: when this was a windowed sequential detect,
+        # submit detect_beep for the next uncovered stage so each stage's window
+        # anchors off the previous beep. Only chains on success (beep_time is
+        # set); soft-fail leaves chaining to the user who will pick manually.
+        if take_window is not None and take_window[1] == "sequential" and video.beep_time is not None:
+            raw_for_chain = fresh.find_raw_video(str(video.path))
+            if raw_for_chain is not None:
+                current_idx: int | None = None
+                for _i, _n in enumerate(raw_for_chain.covers_stages):
+                    if _n == stage_number:
+                        current_idx = _i
+                        break
+                if current_idx is not None:
+                    for _next_n in raw_for_chain.covers_stages[current_idx + 1 :]:
+                        try:
+                            _next_stg = fresh.stage(_next_n)
+                        except KeyError:
+                            continue
+                        _next_primary = _next_stg.primary()
+                        if _next_primary is None or _next_primary.beep_time is not None:
+                            continue
+                        if (
+                            asyncio.run(state.jobs.find_active(kind="detect_beep", stage_number=_next_n))
+                            is None
+                        ):
+                            asyncio.run(
+                                state.jobs.submit(
+                                    kind="detect_beep",
+                                    stage_number=_next_n,
+                                    video_id=_next_primary.video_id,
+                                    args={
+                                        "slug": slug,
+                                        "stage_number": _next_n,
+                                        "video_id": _next_primary.video_id,
+                                    },
+                                )
+                            )
+                        break
         handle.update(progress=1.0, message="Done")
 
     def _run_trim(

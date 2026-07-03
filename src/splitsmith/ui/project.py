@@ -694,6 +694,12 @@ class RawVideo(BaseModel):
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     storage_path: str
     covers_stages: list[int] = Field(default_factory=list)
+    # Backfilled by the detect-beep worker from ffprobe when not supplied at
+    # upload time. Used to bound sequential beep search windows.
+    duration_seconds: float | None = None
+    # Wall-clock recording start (UTC). Backfilled from st_birthtime or
+    # mtime - duration when the client does not supply it.
+    recorded_start: datetime | None = None
 
 
 class MatchAnalysis(BaseModel):
