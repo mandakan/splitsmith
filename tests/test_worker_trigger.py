@@ -315,3 +315,47 @@ def test_boot_retrigger_swallows_db_errors() -> None:
     hook = make_boot_retrigger(lambda: _BrokenCtx(), stub)
     asyncio.run(hook())  # must not raise
     assert stub.scheduled == 0
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: schedule() must never raise
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_never_raises_outside_event_loop() -> None:
+    """schedule() must not raise even when called outside a running loop.
+
+    It is called from the enqueue path (a raise would 500 a committed job)
+    and from the serve-boot lifespan. Outside a loop asyncio.get_running_loop()
+    raises RuntimeError; the try/except guard must absorb it.
+    """
+    launcher = RailwayWorkerLauncher(_config())
+    launcher.schedule()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: boot_retrigger cooldown
+# ---------------------------------------------------------------------------
+
+
+def test_boot_retrigger_cooldown_skips_second_immediate_call() -> None:
+    """The second call within min_interval_seconds must not hit the DB."""
+    stub = _StubLauncher()
+    session = _StubSession(1)
+    hook = make_boot_retrigger(lambda: _StubSessionCtx(session), stub, min_interval_seconds=300.0)
+    asyncio.run(hook())  # first call - runs
+    assert stub.scheduled == 1
+    asyncio.run(hook())  # second call within interval - skipped
+    assert stub.scheduled == 1  # no new schedule
+    assert len(session.queries) == 1  # second call did not query the DB
+
+
+def test_boot_retrigger_cooldown_zero_allows_every_call() -> None:
+    """With min_interval_seconds=0.0, consecutive calls both query the DB."""
+    stub = _StubLauncher()
+    session = _StubSession(1)
+    hook = make_boot_retrigger(lambda: _StubSessionCtx(session), stub, min_interval_seconds=0.0)
+    asyncio.run(hook())
+    asyncio.run(hook())
+    assert stub.scheduled == 2
+    assert len(session.queries) == 2

@@ -11,6 +11,9 @@ name: Worker safety net
 #
 # A failed wake is non-fatal - the next tick or the next real visit
 # covers it.
+#
+# WARNING: GitHub auto-disables scheduled workflows after 60 days with no
+# repo activity. Re-enable from the Actions tab when resuming a dormant project.
 
 on:
   schedule:

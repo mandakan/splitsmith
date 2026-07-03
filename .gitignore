@@ -75,3 +75,4 @@ tests/fixtures/full/*
 # lockfile *is* committed (under pnpm-lock.yaml) so wrangler version
 # stays reproducible across CI / contributors -- only ignore node_modules.
 node_modules/
+.worktrees/
