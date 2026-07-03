@@ -561,3 +561,82 @@ def test_take_peaks_hosted_mode_active_job_true(tmp_path: Path) -> None:
         assert body["active_job"] is True
     finally:
         gate.set()  # let the worker thread finish so the test teardown is clean
+
+
+# ---------------------------------------------------------------------------
+# I1: PUT beep-window 409 guard
+# ---------------------------------------------------------------------------
+
+
+def test_set_beep_window_409_when_detect_in_flight(tmp_path: Path) -> None:
+    """PUT beep-window returns 409 when detect_beep is already running for the video.
+
+    Covers I1: the endpoint rejects window updates while detection is in flight
+    so the job's write-back cannot silently overwrite the manual window.
+    """
+    import asyncio
+    import threading
+
+    from tests.conftest import submit_fn
+
+    client, video_id = _setup(tmp_path)
+
+    state = client.app.state.splitsmith_state
+
+    gate = threading.Event()
+
+    def _blocking_body(handle) -> None:  # noqa: ANN001
+        gate.wait(timeout=10)
+
+    job_id = asyncio.run(
+        submit_fn(
+            state.jobs,
+            kind="detect_beep",
+            fn=_blocking_body,
+            stage_number=1,
+            video_id=video_id,
+        )
+    )
+    assert job_id is not None
+
+    try:
+        resp = client.put(
+            f"/api/shooters/me/stages/1/videos/{video_id}/beep-window",
+            json={"start_s": 30.0, "end_s": 210.0},
+        )
+        assert resp.status_code == 409
+        assert "detection already running" in resp.json()["detail"]
+
+        # Window must not have been persisted.
+        proj = client.get("/api/shooters/me/project").json()
+        vid = proj["stages"][0]["videos"][0]
+        assert vid["beep_window"] is None
+    finally:
+        gate.set()
+
+
+# ---------------------------------------------------------------------------
+# I2: AttachRawVideoRequest naive recorded_start -> 422
+# ---------------------------------------------------------------------------
+
+
+def test_attach_raw_video_422_on_naive_recorded_start(tmp_path: Path) -> None:
+    """POST raw-videos/attach with naive recorded_start returns 422.
+
+    Covers I2: AwareDatetime validation fires before the 503 storage check
+    so naive datetimes are rejected at the API boundary.
+    """
+    from tests.test_ui_server import _match_create_app, _MatchClient
+
+    project_root = tmp_path / "match_attach"
+    app = _match_create_app(project_root=project_root, project_name="Attach Test")
+    client = _MatchClient(app)
+
+    resp = client.post(
+        "/api/shooters/me/raw-videos/attach",
+        json={
+            "filename": "VID.mp4",
+            "recorded_start": "2026-01-01T10:00:00",
+        },
+    )
+    assert resp.status_code == 422

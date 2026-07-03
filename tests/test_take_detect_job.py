@@ -387,3 +387,80 @@ def test_single_coverage_raw_passes_no_window(tmp_path: Path, monkeypatch: pytes
 
     assert len(captured) == 1
     assert captured[0] is None
+
+
+def test_manual_window_rescue_chains_next_stage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Manual window on stage 2 of a sequential take still chains stage 3 on success.
+
+    Covers B1: the chain-advance guard no longer filters on window source
+    being 'sequential', so a user rescue (manual window after soft-fail) also
+    advances the chain when detection succeeds.
+    """
+    match_root, shooter_root, fake_jobs, body = _setup(tmp_path, with_scorecard=False)
+    proj = MatchProject.load(shooter_root)
+    stg2 = proj.stage(2)
+    vid2 = stg2.primary()
+    assert vid2 is not None
+
+    # Simulate a prior soft-fail + user rescue: pre-set a manual window on stage 2.
+    vid2.beep_window = (100.0, 300.0)
+    vid2.beep_window_source = "manual"
+    proj.save(shooter_root)
+
+    _run_body(body, match_root, monkeypatch, stage_number=2, video_id=vid2.video_id)
+
+    chained = [s for s in fake_jobs.submitted if s["kind"] == "detect_beep"]
+    assert len(chained) == 1, f"expected 1 chained detect_beep, got {chained}"
+    assert chained[0]["stage_number"] == 3
+
+
+def test_mixed_mode_take_chains_after_scoreboard_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mixed-mode take: stage 2 has scorecard (scoreboard window), stages 3+1 don't.
+
+    After stage 2 detect succeeds, detect_beep for stage 3 is chained.
+    Covers B1: the chain-advance guard no longer filters on 'sequential' source.
+    """
+    match_root, shooter_root = scaffold_match(tmp_path)
+
+    proj = MatchProject.load(shooter_root)
+    for sn, time_s, has_scat in [(2, 18.0, True), (3, 25.0, False), (1, 22.0, False)]:
+        scat = T0 + timedelta(minutes=10) if has_scat else None
+        stg = StageEntry(
+            stage_number=sn,
+            stage_name=f"Stage {sn}",
+            time_seconds=time_s,
+            scorecard_updated_at=scat,
+        )
+        vid = StageVideo(path=Path("raw/take.mp4"), role="primary", stage_number=sn)
+        stg.videos.append(vid)
+        proj.stages.append(stg)
+    raw = RawVideo(
+        original_filename="take.mp4",
+        storage_path="raw/take.mp4",
+        covers_stages=[2, 3, 1],
+        duration_seconds=DURATION,
+        recorded_start=T0,
+    )
+    proj.raw_videos.append(raw)
+    proj.save(shooter_root)
+
+    (shooter_root / "raw").mkdir(parents=True, exist_ok=True)
+    (shooter_root / "raw" / "take.mp4").write_bytes(b"\x00")
+
+    app = create_app(project_root=match_root)
+    state = app.state.splitsmith_state
+    fake_jobs = _FakeJobBackend()
+    state.jobs = fake_jobs
+    body = state.job_bodies.get("detect_beep")
+
+    proj2 = MatchProject.load(shooter_root)
+    vid2 = proj2.stage(2).primary()
+    assert vid2 is not None
+
+    _run_body(body, match_root, monkeypatch, stage_number=2, video_id=vid2.video_id)
+
+    chained = [s for s in fake_jobs.submitted if s["kind"] == "detect_beep"]
+    assert len(chained) == 1, f"expected 1 chained detect_beep after scoreboard stage, got {chained}"
+    assert chained[0]["stage_number"] == 3

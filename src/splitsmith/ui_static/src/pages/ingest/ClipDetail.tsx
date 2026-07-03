@@ -124,13 +124,15 @@ export function ClipDetail({
     };
   }, [kebabOpen]);
 
-  // Load coverage suggestion from the server when the selected clip changes.
-  // Uses the video path as a hint; the server resolves span from disk metadata
-  // in local mode. Resets on every clip change so stale suggestions from the
-  // previous clip don't flash in the new one.
+  // Load coverage state when the selected clip changes.
+  // Initialize from persisted rawVideos entry when the clip is already a registered take;
+  // fall back to [] for unregistered clips. The server suggestion only pre-fills the
+  // draft when there is no persisted coverage so Apply never silently replaces it.
   useEffect(() => {
-    setCoverageSaved([]);
-    setCoverageDraft([]);
+    const persisted = findTakeForPath(rawVideos, clip?.video.path ?? "");
+    const persistedStages = persisted?.covers_stages ?? [];
+    setCoverageSaved(persistedStages);
+    setCoverageDraft(persistedStages);
     setCoverageSuggested(undefined);
     if (!clip || allStages.length === 0) return;
     let alive = true;
@@ -139,8 +141,10 @@ export function ClipDetail({
       .then((s) => {
         if (!alive || s.covers_stages.length === 0) return;
         setCoverageSuggested(s.covers_stages);
-        // Pre-fill draft from suggestion; saved stays [] until the user applies.
-        setCoverageDraft(s.covers_stages);
+        // Only pre-fill draft from suggestion when there is no persisted coverage.
+        if (persistedStages.length === 0) {
+          setCoverageDraft(s.covers_stages);
+        }
       })
       .catch(() => {
         /* non-fatal: coverage starts empty */
@@ -148,7 +152,7 @@ export function ClipDetail({
     return () => {
       alive = false;
     };
-  }, [clip, slug, allStages.length]);
+  }, [clip, slug, allStages.length, rawVideos]);
 
   if (!clip) {
     return (

@@ -1527,7 +1527,10 @@ def register_job_bodies(state: AppState) -> None:
         for n in raw.covers_stages:
             if n == stage.stage_number:
                 break
-            sibling = proj.stage(n)
+            try:
+                sibling = proj.stage(n)
+            except KeyError:
+                continue
             sib_primary = next((v for v in sibling.videos if str(v.path) == str(video.path)), None)
             if sib_primary is not None and sib_primary.beep_time is not None:
                 cand = sib_primary.beep_time + sibling.time_seconds + cfg.reset_margin_s
@@ -1822,17 +1825,12 @@ def register_job_bodies(state: AppState) -> None:
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
-        # Sequential-mode chaining: when this was a windowed sequential detect,
-        # submit detect_beep for the next uncovered stage so each stage's window
-        # anchors off the previous beep. Only chains on success (beep_time is
-        # set); soft-fail leaves chaining to the user who will pick manually
-        # (the manual-beep endpoint then calls _advance_sequential_chain).
-        if (
-            take_window is not None
-            and take_window[1] == "sequential"
-            and video.beep_time is not None
-            and v_fresh is not None
-        ):
+        # Take chaining: after any windowed detect succeeds, submit detect_beep
+        # for the next uncovered stage. The helper self-guards for scoreboard mode
+        # (independent windows, no chain) and non-takes.
+        # Only chains on success (beep_time is set); soft-fail or manual rescue
+        # both go through _advance_sequential_chain via the manual-beep endpoint.
+        if take_window is not None and video.beep_time is not None and v_fresh is not None:
             asyncio.run(_advance_sequential_chain(state, slug, fresh, v_fresh, stage_number))
         # Generate the whole-take envelope peaks for the TakeOverview waveform.
         # This runs on every take-windowed detect job; the WAV and peaks JSON
@@ -3195,7 +3193,7 @@ class AttachRawVideoRequest(BaseModel):
     # Optional metadata the SPA can supply at attach time; backfilled
     # by the detect-beep worker from ffprobe when absent.
     duration_seconds: float | None = None
-    recorded_start: datetime | None = None
+    recorded_start: AwareDatetime | None = None
 
 
 class MultipartCreateRequest(BaseModel):
@@ -6932,6 +6930,14 @@ def create_app(
         """
         if body.start_s < 0 or body.end_s <= body.start_s:
             raise HTTPException(status_code=422, detail="end_s must be greater than start_s >= 0")
+        in_flight = await state.jobs.find_active(
+            kind="detect_beep", stage_number=stage_number, video_id=video_id
+        )
+        if in_flight is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="detection already running for this video - wait for it to finish, then set the window",  # noqa: E501
+            )
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         root = state.shooter_root(slug)
         video.beep_window = (body.start_s, body.end_s)
