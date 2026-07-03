@@ -50,7 +50,7 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 
 ## Detection pipeline
 
-The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
+Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
 
 - **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
   auto-calibrated ``min_confidence`` floor (the lowest positive-shot
