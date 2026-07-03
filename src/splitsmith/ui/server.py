@@ -82,7 +82,8 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -4406,6 +4407,28 @@ def _tenant_s3_storage(client: Any, bucket: str | None, user_id: str) -> Storage
     return S3Storage(bucket=bucket, prefix=f"users/{user_id}/", client=client)
 
 
+def _boot_retrigger_lifespan(state: Any) -> Any | None:
+    """Return a lifespan context manager that fires state.boot_retrigger on startup.
+
+    Returns None when state.boot_retrigger is None so callers can pass the
+    result directly to FastAPI(lifespan=...) without branching.
+    """
+    if state.boot_retrigger is None:
+        return None
+
+    retrigger = state.boot_retrigger
+
+    @asynccontextmanager
+    async def _lifespan(_app: Any) -> AsyncIterator[None]:
+        # Cold starts include every wake from Railway app sleeping, so a
+        # stranded queue job recovers on the next visit instead of waiting
+        # for the 6-hourly safety cron.
+        await retrigger()
+        yield
+
+    return _lifespan
+
+
 def create_app(
     *,
     project_root: Path | None = None,
@@ -4479,12 +4502,8 @@ def create_app(
         title="splitsmith UI",
         description="Production UI backend (issue #11/#12).",
         version="0.1.0",
+        lifespan=_boot_retrigger_lifespan(state),
     )
-    if state.boot_retrigger is not None:
-        # Cold starts include every wake from Railway app sleeping, so a
-        # stranded queue job recovers on the next visit instead of waiting
-        # for the 6-hourly safety cron.
-        app.add_event_handler("startup", state.boot_retrigger)
     # Stash on app.state so the uvicorn server wrapper in :func:`serve`
     # can read live job state when handling Ctrl-C: the signal handler
     # needs to enumerate pending / running jobs to tell the user what's
