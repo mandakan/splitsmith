@@ -1001,13 +1001,9 @@ railway variables --set "SPLITSMITH_WORKER_TRIGGER_TOKEN=$PT" --set "SPLITSMITH_
 curl -s "$API" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"mutation { serviceInstanceUpdate(serviceId: \\\"$SERVE\\\", environmentId: \\\"$STAGING\\\", input: {sleepApplication: true}) }\"}"
 ```
 
-- [ ] **Step 5: Add the 6-hourly safety cron on staging worker**
+- [x] **Step 5 (AMENDED live): safety net is a GitHub Actions schedule, NOT a Railway cron**
 
-```bash
-curl -s "$API" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"query\":\"mutation { serviceInstanceUpdate(serviceId: \\\"$WORKER\\\", environmentId: \\\"$STAGING\\\", input: {cronSchedule: \\\"0 */6 * * *\\\"}) }\"}"
-```
-
-Cost note: each cron tick wakes Neon ~6 min (run + idle-suspend window); 4 ticks/day is roughly 4.5 CU-hours/month, ~2% of the Neon free tier. The enqueue launcher carries the latency and the boot re-check catches strays on the next visit - do not shorten this interval, it is the net of last resort.
+Setting `cronSchedule` on the worker service converts it to schedule-only starts: `serviceInstanceRedeploy` then creates deployments that never run until the next tick (observed live - deployment SUCCESS, zero logs, job stuck `todo`). The worker service must keep `cronSchedule: null`. The net is `.github/workflows/worker-safety-net.yml`: every 6 hours it curls `/api/health` on staging + production, waking a sleeping serve whose startup boot re-check fires the gated launcher if stranded jobs exist. Cost is unchanged (~2% of the Neon free tier from 4 wakes/day).
 
 - [ ] **Step 6: Redeploy staging serve + worker so the config applies**
 
@@ -1088,4 +1084,6 @@ Railway usage page: serve should show substantial sleeping time; worker only min
 - **Open SSE tabs keep serve awake** and therefore Neon awake. That is "user is active" by definition; no action.
 - **Failed heartbeat check suppresses the launch** (fail-safe: never redeploy over a possibly-live drain). In practice the enqueue that fired the trigger just used the same DB, so the checker failing is rare; the nets recover.
 - **Crashed-image loop is bounded:** if the latest worker image crashes on boot, each launch redeploys it once per cooldown/net cycle - same behavior a cron would have; fix the image, the nets stop firing it.
+- **Mid-boot blind spot:** between `serviceInstanceRedeploy` and the worker's heartbeat registration (~60-90s: container start + state build + model warmup), the gate sees no live worker, so an enqueue in that window fires a second redeploy that replaces the booting container. Observed live; harmless - the replacement drains everything, jobs stay `todo` until fetched, and the 30s cooldown bounds the churn.
+- **Railway cron is incompatible with the launcher** (schedule-only starts, above); never set `cronSchedule` on the worker service.
 - **Future non-Railway workers:** implement `WorkerLauncher` (webhook/ntfy publish, GitHub Actions dispatch), select via `SPLITSMITH_WORKER_LAUNCHER`. The worker binary is already portable (DATABASE_URL + R2 creds + models); external workers must be launched, never left polling Postgres.
