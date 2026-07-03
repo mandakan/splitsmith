@@ -352,6 +352,7 @@ function IngestInner({ slug }: { slug: string }) {
             }}
             onStorageChange={setStorage}
             shooterName={activeShooterName}
+            stages={project?.stages ?? []}
           />
         )}
       </main>

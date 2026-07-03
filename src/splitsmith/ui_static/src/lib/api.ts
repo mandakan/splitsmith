@@ -1343,6 +1343,39 @@ export interface RawVideoManifestEntry {
   covers_stages: number[];
 }
 
+/** Response from POST /api/shooters/{slug}/videos/suggest-coverage.
+ *  ``covers_stages`` is ordered by scorecard time; ``span`` is the
+ *  resolved wall-clock span in ISO-8601 or null when no span was
+ *  resolvable. */
+export interface CoverageSuggestion {
+  covers_stages: number[];
+  span: { start: string; end: string } | null;
+}
+
+/** Per-stage-video entry in a take-level overview. ``status`` is
+ *  ``"found"`` once beep_time is set, ``"none"`` after auto-detect
+ *  failed, and ``"pending"`` before the first detection pass. */
+export interface TakeOverviewStage {
+  stage_number: number;
+  stage_name: string;
+  video_id: string;
+  role: string;
+  beep_time: number | null;
+  beep_confidence: number | null;
+  beep_reviewed: boolean;
+  beep_window: [number, number] | null;
+  beep_window_source: string | null;
+  status: "found" | "none" | "pending";
+}
+
+/** Response from GET /api/shooters/{slug}/raw-videos/overview. */
+export interface TakeOverview {
+  raw_video: RawVideoManifestEntry;
+  duration_seconds: number | null;
+  stages: TakeOverviewStage[];
+  conflicts: number[];
+}
+
 /** One shot point on a shooter's timeline in /compare (#328). */
 export interface CompareShotPoint {
   shot_number: number;
@@ -2426,11 +2459,71 @@ export const api = {
       sha256?: string | null;
       size_bytes?: number | null;
       covers_stages?: number[] | null;
+      /** Client-probed duration from the video element metadata. */
+      duration_seconds?: number | null;
+      /** Recording start derived from file.lastModified - duration_s (UTC ISO). */
+      recorded_start?: string | null;
     },
   ) =>
     request<RawVideoManifestEntry>(
       `/api/shooters/${encodeURIComponent(slug)}/raw-videos/attach`,
       { method: "POST", json: body },
+    ),
+
+  /** Suggest which stages a file's span covers. The SPA probes the
+   *  file duration client-side and passes the result here to avoid a
+   *  server-side ffprobe on remote objects. ``recorded_start`` must be
+   *  a timezone-aware ISO string (always UTC/Z from the browser). In
+   *  local mode, passing ``path`` lets the server derive the span from
+   *  disk metadata when recorded_start is null. */
+  suggestCoverage: (
+    slug: string,
+    body: { recorded_start?: string | null; duration_s?: number | null; path?: string | null },
+  ) =>
+    request<CoverageSuggestion>(
+      `/api/shooters/${encodeURIComponent(slug)}/videos/suggest-coverage`,
+      { method: "POST", json: body },
+    ),
+
+  /** Update the per-stage coverage list for a registered raw video.
+   *  Declared order is preserved (shooting order for sequential-mode
+   *  takes). Returns the updated RawVideoManifestEntry post-merge. */
+  setRawVideoCoverage: (
+    slug: string,
+    body: { filename: string; covers_stages: number[] },
+  ) =>
+    request<RawVideoManifestEntry>(
+      `/api/shooters/${encodeURIComponent(slug)}/raw-videos/coverage`,
+      { method: "PATCH", json: body },
+    ),
+
+  /** Take-level overview: per-stage beep status + windows + conflict
+   *  list for the named raw video file. */
+  takeOverview: (slug: string, filename: string) =>
+    request<TakeOverview>(
+      `/api/shooters/${encodeURIComponent(slug)}/raw-videos/overview?filename=${encodeURIComponent(filename)}`,
+    ),
+
+  /** Whole-take envelope peaks. Hosted mode may return
+   *  ``{ pending: true; active_job: boolean }`` (202) while the
+   *  worker computes them; poll and render a spinner in that case. */
+  takePeaks: (slug: string, filename: string, bins = 3000) =>
+    request<PeaksResult | { pending: true; active_job: boolean }>(
+      `/api/shooters/${encodeURIComponent(slug)}/raw-videos/peaks?filename=${encodeURIComponent(filename)}&bins=${bins}`,
+    ),
+
+  /** Persist a manual beep-search window for a stage-video and
+   *  re-queue detection. Wipes the current beep and trim cache.
+   *  Returns the newly queued Job snapshot. */
+  setBeepWindow: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    body: { start_s: number; end_s: number },
+  ) =>
+    request<Job>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-window`,
+      { method: "PUT", json: body },
     ),
 
   /** Server health + bind state. The picker route polls this on mount

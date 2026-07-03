@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, MoreVertical, XCircle } from "lucide-react";
 
+import { CoverageSelect } from "@/components/ingest/CoverageSelect";
 import { RoleToggles } from "@/components/ingest/RoleToggles";
 import { ShooterPickerPopover } from "@/components/ingest/ShooterPickerPopover";
 import { Portal } from "@/components/ui/Portal";
@@ -31,6 +32,7 @@ export function ClipDetail({
   onRemove,
   onMoveShooter,
   onError,
+  onReload,
 }: {
   slug: string;
   clip: ClipItem | null;
@@ -41,11 +43,21 @@ export function ClipDetail({
   onRemove: (videoPath: string) => Promise<void>;
   onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   onError: (msg: string | null) => void;
+  /** Fires after a successful coverage update so the parent can reload
+   *  project state. Optional -- coverage updates succeed silently if
+   *  omitted. */
+  onReload?: () => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [rowBusy, setRowBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [kebabOpen, setKebabOpen] = useState(false);
+  // Coverage section state.
+  const [coverageValue, setCoverageValue] = useState<number[]>([]);
+  const [coverageSuggested, setCoverageSuggested] = useState<
+    number[] | undefined
+  >();
+  const [coverageBusy, setCoverageBusy] = useState(false);
   const kebabRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // Anchor for the portaled kebab menu: fixed coordinates captured when
@@ -99,6 +111,30 @@ export function ClipDetail({
       document.removeEventListener("keydown", onKey);
     };
   }, [kebabOpen]);
+
+  // Load coverage suggestion from the server when the selected clip changes.
+  // Uses the video path as a hint; the server resolves span from disk metadata
+  // in local mode. Resets on every clip change so stale suggestions from the
+  // previous clip don't flash in the new one.
+  useEffect(() => {
+    setCoverageValue([]);
+    setCoverageSuggested(undefined);
+    if (!clip || allStages.length === 0) return;
+    let alive = true;
+    void api
+      .suggestCoverage(slug, { path: clip.video.path })
+      .then((s) => {
+        if (!alive || s.covers_stages.length === 0) return;
+        setCoverageSuggested(s.covers_stages);
+        setCoverageValue(s.covers_stages);
+      })
+      .catch(() => {
+        /* non-fatal: coverage starts empty */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [clip, slug, allStages.length]);
 
   if (!clip) {
     return (
@@ -154,6 +190,26 @@ export function ClipDetail({
       onError(e instanceof ApiError ? e.detail : String(e));
     } finally {
       setDetecting(false);
+    }
+  }
+
+  async function applyCoverage(stages: number[]) {
+    if (coverageBusy) return;
+    setCoverageBusy(true);
+    onError(null);
+    try {
+      // Extract the filename from the path (raw/filename.mp4 -> filename.mp4).
+      const filename = video.path.split("/").pop() ?? video.path;
+      await api.setRawVideoCoverage(slug, {
+        filename,
+        covers_stages: stages,
+      });
+      setCoverageValue(stages);
+      await onReload?.();
+    } catch (e) {
+      onError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setCoverageBusy(false);
     }
   }
 
@@ -310,6 +366,29 @@ export function ClipDetail({
           </div>
         </div>
       </div>
+
+      {/* Coverage section - declare which stages this take covers */}
+      {allStages.length > 0 && (
+        <div className="border-t border-rule bg-surface-2 px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
+              Covers stages
+            </span>
+            {coverageBusy && (
+              <Loader2
+                aria-label="Saving coverage"
+                className="size-3 animate-spin text-led"
+              />
+            )}
+          </div>
+          <CoverageSelect
+            stages={allStages}
+            value={coverageValue}
+            onChange={(v) => void applyCoverage(v)}
+            suggested={coverageSuggested}
+          />
+        </div>
+      )}
     </div>
   );
 }

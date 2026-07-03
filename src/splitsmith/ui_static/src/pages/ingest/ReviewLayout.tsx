@@ -272,6 +272,7 @@ export function ReviewLayout({
           onRemove={onRemoveVideo}
           onMoveShooter={onMoveShooter}
           onError={onError}
+          onReload={onSaved}
         />
         <StageReferenceDrawer
           stages={project.stages}
