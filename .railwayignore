@@ -17,11 +17,12 @@
 **/*.pyc
 **/*.pyo
 
-# Regenerable / redundant SPA bits (node_modules rebuilt by `npm ci`, dist
-# rebuilt by the spa stage, alternate lockfile unused).
+# Regenerable SPA bits (node_modules rebuilt by `pnpm install`, dist
+# rebuilt by the spa stage). pnpm-lock.yaml MUST ship: the Dockerfile
+# COPYs it (the SPA is pnpm-only since PR #506) and the Railway build
+# fails with "pnpm-lock.yaml: not found" when this file strips it.
 src/splitsmith/ui_static/node_modules
 src/splitsmith/ui_static/dist
-src/splitsmith/ui_static/pnpm-lock.yaml
 **/*.map
 
 # Dev-only trees nothing in the image reads (tests/ holds the heavy .wav
