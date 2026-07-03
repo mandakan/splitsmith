@@ -302,6 +302,26 @@ def _rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _attach_procrastinate_logging() -> None:
+    """Share splitsmith's stdout handler with the ``procrastinate`` logger.
+
+    ``_configure_app_logging`` wires only the ``splitsmith`` package logger;
+    procrastinate's records propagate to a bare root logger left at WARNING,
+    so a deployed worker's drain lifecycle ("Starting worker", "No job found.
+    Stopping worker because wait=False") is invisible - a silent clean exit
+    is indistinguishable from a hang in Railway logs (observed live,
+    2026-07-03). Reuses the handler objects marked ``_splitsmith_stdout`` so
+    hosted-mode JSON formatting stays consistent. Idempotent.
+    """
+    pkg_logger = logging.getLogger("splitsmith")
+    proc_logger = logging.getLogger("procrastinate")
+    for handler in pkg_logger.handlers:
+        if getattr(handler, "_splitsmith_stdout", False) and handler not in proc_logger.handlers:
+            proc_logger.addHandler(handler)
+    if proc_logger.level == logging.NOTSET or proc_logger.level > logging.INFO:
+        proc_logger.setLevel(logging.INFO)
+
+
 async def run_worker(
     database_url: str,
     *,
@@ -365,9 +385,22 @@ async def run_worker(
         await asyncio.to_thread(warm_ensemble_runtime)
     except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
         logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
+    _attach_procrastinate_logging()
     app = await _open_app_with_retry(database_url, state)
     try:
-        await app.run_worker_async(queues=queues, concurrency=concurrency, wait=wait)
+        await app.run_worker_async(
+            queues=queues,
+            concurrency=concurrency,
+            wait=wait,
+            # A one-shot drain exits when the queue is empty; LISTEN/NOTIFY
+            # exists to wake a long-lived worker for jobs that arrive later.
+            # Beyond being useless mid-drain, cancelling the listener at
+            # shutdown intermittently hangs inside psycopg's notifies()
+            # generator (~1 in 5 one-shot runs locally), leaving a zombie
+            # container that never exits - the opposite of scale-to-zero.
+            listen_notify=wait,
+        )
+        logger.info("worker: drain complete (wait=%s); shutting down", wait)
     finally:
         await app.connector.close_async()
 

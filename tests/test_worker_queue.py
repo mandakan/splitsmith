@@ -210,6 +210,7 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
     asyncio.run(run_worker(_FAKE_PG_URL))
 
     assert captured["wait"] is True
+    assert captured["listen_notify"] is True  # long-lived fleet worker still wakes on LISTEN/NOTIFY
 
 
 def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,6 +253,32 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
     asyncio.run(run_worker(_FAKE_PG_URL, wait=False))
 
     assert captured["wait"] is False
+    assert captured["listen_notify"] is False
+
+
+def test_attach_procrastinate_logging_shares_stdout_handler() -> None:
+    """The worker must make procrastinate's INFO logs visible: only the
+    ``splitsmith`` logger gets a stdout handler, so procrastinate records
+    propagate to a bare root logger at WARNING and vanish - a clean drain
+    is then indistinguishable from a hang in Railway logs."""
+    import logging
+
+    from splitsmith.queue import _attach_procrastinate_logging
+
+    pkg_logger = logging.getLogger("splitsmith")
+    proc_logger = logging.getLogger("procrastinate")
+    handler = logging.StreamHandler()
+    handler._splitsmith_stdout = True  # type: ignore[attr-defined]
+    pkg_logger.addHandler(handler)
+    try:
+        _attach_procrastinate_logging()
+        assert handler in proc_logger.handlers
+        assert proc_logger.getEffectiveLevel() <= logging.INFO
+        _attach_procrastinate_logging()  # idempotent: no duplicate handler
+        assert proc_logger.handlers.count(handler) == 1
+    finally:
+        pkg_logger.removeHandler(handler)
+        proc_logger.removeHandler(handler)
 
 
 def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPatch) -> None:
