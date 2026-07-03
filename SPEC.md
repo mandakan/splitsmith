@@ -29,7 +29,7 @@ raw videos + stage JSON
 [1] Match videos to stages         (video_match.py)
     │   uses video mtime/ctime vs scorecard_updated_at
     ▼
-[1b] Optionally: declare take coverage          (api: PATCH raw-videos/coverage)
+[1b] Optionally: declare take coverage          (api: PATCH shooters/{slug}/raw-videos/coverage)
     │   one source file may cover N stages;
     │   POST suggest-coverage proposes stages from client-probed span;
     │   attach with covers_stages creates N StageVideos + enqueues
@@ -143,11 +143,11 @@ Tuning notes:
 **`audio.py`** - Audio extraction and caching for multi-stage clips.
 - `ensure_video_audio(...)`: Extract a stage's audio at 48 kHz mono; keyed per-stage per-video so reassignments don't reuse stale caches.
 - `take_audio_path(...)` and `ensure_take_audio(...)`: Extract a whole-take audio at 8 kHz mono (lightweight); keyed by blake2s(storage_path) so it cannot collide with per-stage 48 kHz WAVs. Reuses the same extract/cache/storage-push pattern as per-stage audio.
-- Peaks JSON (3000 bins): generated post-beep-detection for both per-stage (48 kHz) and whole-take (8 kHz) audio. Filenames encode frequency range and bin count so they are self-describing.
+- Peaks JSON (3000 bins): generated post-beep-detection for both per-stage (48 kHz) and whole-take (8 kHz) audio. Filenames encode the bin count.
 
 **`ui/server.py`** - Multi-stage take overview and coverage management (issue #348 / #427).
 - Take overview: Per-raw-video endpoints (`GET /api/shooters/{slug}/raw-videos/overview` and `GET /api/shooters/{slug}/raw-videos/peaks`) expose duration, per-stage beep status (found/none/pending), conflict list via `beep_windows.find_beep_conflicts()`, and peaks data.
-- Coverage management: `PATCH /api/raw-videos/coverage` and `POST /api/raw-videos/coverage/apply` edit the covers_stages list; `POST /api/raw-videos/coverage/suggest` proposes stages from a client-probed wall-clock span.
+- Coverage management: `PATCH /api/shooters/{slug}/raw-videos/coverage` edits the covers_stages list; `POST /api/shooters/{slug}/videos/suggest-coverage` proposes stages from a client-probed wall-clock span.
 - When coverage is declared (attach with covers_stages, or edit via PATCH), the backend creates N StageVideos (one per covered stage) and enqueues windowed beep-detection jobs for each. Conflict detection flags carve-up errors for the take overview page.
 
 **`splitsmith.mcp`** -- Model Context Protocol server (issue #211).
@@ -380,8 +380,8 @@ The production UI (`splitsmith ui --project PATH`) treats a *match* as the persi
   audio/                    # extracted .wav cache
                             # per-stage/per-video: stage<N>_cam_<video_id>*.wav
                             # per-stage peaks: stage<N>_cam_<video_id>*.peaks-*.json
-                            # take-wide peaks: take_<raw_video_id>.peaks-*.json
-                            # take audio (8 kHz mono): take_<raw_video_id>.wav
+                            # take-wide peaks (key = blake2s of storage_path): take_<key>.peaks-*.json
+                            # take audio (8 kHz mono): take_<key>.wav
   trimmed/                  # per-stage trimmed MP4s (Sub 5 / #16)
   audit/                    # per-stage audit JSON (same shape as fixture format)
   exports/                  # CSV / FCPXML / report.txt
