@@ -5,17 +5,19 @@ name: Deploy app (Railway)
 # Dockerfile; the env-scoped project token (a per-GitHub-Environment
 # RAILWAY_TOKEN secret) decides which Railway environment it lands in.
 #
+#   push to main           -> staging
+#   release published      -> production
 #   workflow_dispatch      -> the chosen environment (manual button)
-#
-# Automatic deploys (push to main -> staging, release published ->
-# production) are disabled for now because the Railway build keeps
-# failing; re-add the `push`/`release` triggers below once it's stable.
 #
 # Both services build from the same image (ENTRYPOINT `splitsmith`); the
 # `serve` and `worker` Railway services differ only by start command, set
 # on the service itself. `serve` runs `alembic upgrade head` on boot.
 
 on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       environment:
