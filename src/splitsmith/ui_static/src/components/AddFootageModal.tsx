@@ -29,6 +29,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FolderPicker } from "@/components/FolderPicker";
+import { CoverageSelect } from "@/components/ingest/CoverageSelect";
 import { Avatar } from "@/components/ui";
 import { Portal } from "@/components/ui/Portal";
 import {
@@ -40,6 +41,52 @@ import {
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
+
+/** Probe a File object for its duration and compute the recording start
+ *  from file.lastModified (modification time) minus duration. Returns
+ *  a timezone-aware UTC ISO string so the backend's AwareDatetime field
+ *  does not 422. */
+function probeFile(
+  file: File,
+): Promise<{ duration_s: number | null; recorded_start: string | null }> {
+  return new Promise((resolve) => {
+    const el = document.createElement("video");
+    el.preload = "metadata";
+    const url = URL.createObjectURL(file);
+    // Guard: revoke exactly once across all three exit paths.
+    let revoked = false;
+    function revoke() {
+      if (revoked) return;
+      revoked = true;
+      URL.revokeObjectURL(url);
+    }
+    // Timeout guard: if neither onloadedmetadata nor onerror fires (e.g.
+    // the codec is unsupported and the browser stalls silently), revoke
+    // the URL and resolve nulls after 5 seconds.
+    const timer = setTimeout(() => {
+      revoke();
+      resolve({ duration_s: null, recorded_start: null });
+    }, 5000);
+    el.onloadedmetadata = () => {
+      clearTimeout(timer);
+      const duration = Number.isFinite(el.duration) ? el.duration : null;
+      revoke();
+      resolve({
+        duration_s: duration,
+        recorded_start:
+          duration != null && file.lastModified
+            ? new Date(file.lastModified - duration * 1000).toISOString()
+            : null,
+      });
+    };
+    el.onerror = () => {
+      clearTimeout(timer);
+      revoke();
+      resolve({ duration_s: null, recorded_start: null });
+    };
+    el.src = url;
+  });
+}
 
 export type StorageMode = "symlink" | "copy";
 
@@ -79,6 +126,9 @@ interface AddFootageModalProps {
   /** Name of the active shooter displayed in the modal header as a
    *  visibility cue (A2). Omit for single-shooter or when unknown. */
   shooterName?: string;
+  /** Match stages for the coverage multi-select at attach time. Pass
+   *  the project's ``stages`` array; an empty array skips the widget. */
+  stages?: { stage_number: number; stage_name: string }[];
 }
 
 export function AddFootageModal({
@@ -89,6 +139,7 @@ export function AddFootageModal({
   onImported,
   onStorageChange,
   shooterName,
+  stages = [],
 }: AddFootageModalProps) {
   // Hosted mode: the SPA upload UX hasn't shipped yet (deferred to the
   // tus migration in doc 05). Render a placeholder explaining the
@@ -220,6 +271,7 @@ export function AddFootageModal({
         slug={slug}
         onClose={onClose}
         onImported={onImported}
+        stages={stages}
       />
     );
   }
@@ -765,13 +817,15 @@ function HostedUploadSurface({
   slug,
   onClose,
   onImported,
+  stages,
 }: {
   slug: string;
   onClose: () => void;
   onImported: (imported: number, paths: string[]) => void;
+  stages: { stage_number: number; stage_name: string }[];
 }) {
   return (
-    <HostedUploadBody slug={slug} onClose={onClose} onImported={onImported} />
+    <HostedUploadBody slug={slug} onClose={onClose} onImported={onImported} stages={stages} />
   );
 }
 
@@ -791,10 +845,12 @@ function HostedUploadBody({
   slug,
   onClose,
   onImported,
+  stages,
 }: {
   slug: string;
   onClose: () => void;
   onImported: (imported: number, paths: string[]) => void;
+  stages: { stage_number: number; stage_name: string }[];
 }) {
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
@@ -814,6 +870,16 @@ function HostedUploadBody({
       | { status: "error"; message: string }
     >
   >({});
+  // Client-side probe results keyed by filename. Populated when the file
+  // is enqueued so attach-after-upload still has duration + recorded_start.
+  const probeByFilenameRef = useRef<
+    Record<string, { duration_s: number | null; recorded_start: string | null }>
+  >({});
+  // Server-suggested coverage keyed by filename. Populated after upload
+  // success via suggestCoverage.
+  const [suggestionByFilename, setSuggestionByFilename] = useState<Record<string, number[]>>({});
+  // User-selected coverage keyed by filename. Pre-filled from suggestion.
+  const [coverageByFilename, setCoverageByFilename] = useState<Record<string, number[]>>({});
 
   // Initial list -- so the surface opens with a real "you've already
   // uploaded X" view instead of looking empty until the operator
@@ -864,6 +930,11 @@ function HostedUploadBody({
           status: "queued",
           bytesSent: 0,
         });
+        // Probe duration + recorded_start client-side so the data is
+        // ready when the user clicks Attach after upload finishes.
+        void probeFile(f).then((result) => {
+          probeByFilenameRef.current[f.name] = result;
+        });
       }
       setUploads((prev) => [...prev, ...next]);
     },
@@ -906,6 +977,34 @@ function HostedUploadBody({
           bytesSent: next.file.size,
         });
         await refreshExisting();
+        // After upload completes, fetch a coverage suggestion using the
+        // client-side probe data. Non-fatal: coverage stays empty if this
+        // fails or returns no stages.
+        const probe = probeByFilenameRef.current[next.file.name];
+        if (probe && stages.length > 0) {
+          void api
+            .suggestCoverage(slug, {
+              recorded_start: probe.recorded_start,
+              duration_s: probe.duration_s,
+            })
+            .then((s) => {
+              if (cancelled || s.covers_stages.length === 0) return;
+              const suggestion = s.covers_stages;
+              setSuggestionByFilename((prev) => ({
+                ...prev,
+                [next.file.name]: suggestion,
+              }));
+              // Pre-fill coverage from suggestion if the user hasn't set
+              // anything yet for this file.
+              setCoverageByFilename((prev) => ({
+                ...prev,
+                [next.file.name]: prev[next.file.name] ?? suggestion,
+              }));
+            })
+            .catch(() => {
+              /* non-fatal */
+            });
+        }
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.detail === "upload cancelled") {
@@ -953,16 +1052,20 @@ function HostedUploadBody({
   };
 
   const attachToProject = useCallback(
-    async (entry: RawUploadEntry) => {
+    async (entry: RawUploadEntry, coverage: number[]) => {
       setAttachState((prev) => ({
         ...prev,
         [entry.filename]: { status: "attaching" },
       }));
       try {
+        const probe = probeByFilenameRef.current[entry.filename];
         await api.attachRawVideo(slug, {
           filename: entry.filename,
           sha256: entry.etag,
           size_bytes: entry.size,
+          covers_stages: coverage.length > 0 ? coverage : undefined,
+          duration_seconds: probe?.duration_s ?? undefined,
+          recorded_start: probe?.recorded_start ?? undefined,
         });
         setAttachState((prev) => ({
           ...prev,
@@ -1097,14 +1200,25 @@ function HostedUploadBody({
                 browser sessions.
               </p>
             ) : (
-              <ul className="flex flex-col gap-1.5">
+              <ul className="flex flex-col gap-2">
                 {existing.map((e) => (
                   <ExistingRow
                     key={e.path}
                     entry={e}
                     attachState={attachState[e.filename]}
                     onDelete={() => removeUploaded(e.filename)}
-                    onAttach={() => attachToProject(e)}
+                    onAttach={() =>
+                      attachToProject(e, coverageByFilename[e.filename] ?? [])
+                    }
+                    stages={stages}
+                    coverage={coverageByFilename[e.filename] ?? []}
+                    suggestion={suggestionByFilename[e.filename] ?? []}
+                    onCoverageChange={(v) =>
+                      setCoverageByFilename((prev) => ({
+                        ...prev,
+                        [e.filename]: v,
+                      }))
+                    }
                   />
                 ))}
               </ul>
@@ -1193,6 +1307,10 @@ function ExistingRow({
   attachState,
   onDelete,
   onAttach,
+  stages,
+  coverage,
+  suggestion,
+  onCoverageChange,
 }: {
   entry: RawUploadEntry;
   attachState:
@@ -1202,55 +1320,76 @@ function ExistingRow({
     | undefined;
   onDelete: () => void;
   onAttach: () => void;
+  stages: { stage_number: number; stage_name: string }[];
+  coverage: number[];
+  suggestion: number[];
+  onCoverageChange: (v: number[]) => void;
 }) {
   const isAttaching = attachState?.status === "attaching";
   const isAttached = attachState?.status === "attached";
   const attachError =
     attachState?.status === "error" ? attachState.message : null;
   return (
-    <li className="flex items-center justify-between gap-3 rounded-md border border-rule bg-surface-2 px-3 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[0.75rem] text-ink">
-          {entry.filename}
+    <li className="rounded-md border border-rule bg-surface-2">
+      {/* File info row */}
+      <div className="flex items-center justify-between gap-3 px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-mono text-[0.75rem] text-ink">
+            {entry.filename}
+          </div>
+          <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+            {formatBytes(entry.size)}
+            {entry.last_modified && ` . ${formatRelative(entry.last_modified)}`}
+            {isAttached && (
+              <span className="text-done"> . attached to project</span>
+            )}
+            {attachError && (
+              <span className="text-led-text"> . {attachError}</span>
+            )}
+          </div>
         </div>
-        <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          {formatBytes(entry.size)}
-          {entry.last_modified && ` . ${formatRelative(entry.last_modified)}`}
-          {isAttached && (
-            <span className="text-done"> . attached to project</span>
-          )}
-          {attachError && (
-            <span className="text-led-text"> . {attachError}</span>
-          )}
-        </div>
-      </div>
-      {isAttached ? (
-        <span
-          aria-hidden
-          className="inline-flex size-5 items-center justify-center rounded-full bg-done text-bg"
-        >
-          <Check className="size-3" strokeWidth={3} />
-        </span>
-      ) : (
+        {isAttached ? (
+          <span
+            aria-hidden
+            className="inline-flex size-5 items-center justify-center rounded-full bg-done text-bg"
+          >
+            <Check className="size-3" strokeWidth={3} />
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onAttach}
+            disabled={isAttaching}
+            aria-label={`Attach ${entry.filename} to project`}
+            className="rounded-md border border-rule-strong bg-surface px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+          >
+            {isAttaching ? "Attaching..." : "Attach"}
+          </button>
+        )}
         <button
           type="button"
-          onClick={onAttach}
+          onClick={onDelete}
           disabled={isAttaching}
-          aria-label={`Attach ${entry.filename} to project`}
-          className="rounded-md border border-rule-strong bg-surface px-2.5 py-1 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+          aria-label={`Delete ${entry.filename}`}
+          className="rounded-md p-1 text-subtle hover:bg-led-tint hover:text-led-text disabled:opacity-50"
         >
-          {isAttaching ? "Attaching..." : "Attach"}
+          <Trash2 className="size-3.5" />
         </button>
+      </div>
+      {/* Coverage select - only when not attached and there are stages */}
+      {!isAttached && stages.length > 0 && (
+        <div className="border-t border-rule px-3 pb-2.5 pt-2">
+          <div className="mb-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-subtle">
+            Covers stages
+          </div>
+          <CoverageSelect
+            stages={stages}
+            value={coverage}
+            onChange={onCoverageChange}
+            suggested={suggestion}
+          />
+        </div>
       )}
-      <button
-        type="button"
-        onClick={onDelete}
-        disabled={isAttaching}
-        aria-label={`Delete ${entry.filename}`}
-        className="rounded-md p-1 text-subtle hover:bg-led-tint hover:text-led-text disabled:opacity-50"
-      >
-        <Trash2 className="size-3.5" />
-      </button>
     </li>
   );
 }

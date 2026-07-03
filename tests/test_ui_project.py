@@ -305,6 +305,7 @@ def test_round_trip_preserves_full_project(tmp_path: Path) -> None:
                     role="primary",
                     beep_time=12.453,
                     processed={"beep": True, "shot_detect": True, "trim": True},
+                    stage_number=1,
                 ),
                 StageVideo(
                     path=Path("raw/VID_002.mp4"),
@@ -312,6 +313,7 @@ def test_round_trip_preserves_full_project(tmp_path: Path) -> None:
                     beep_time=12.501,
                     processed={"beep": True, "shot_detect": False, "trim": True},
                     notes="bay cam from friend, added 2026-05-02",
+                    stage_number=1,
                 ),
             ],
         ),

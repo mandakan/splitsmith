@@ -35,6 +35,7 @@ import { Lab } from "@/pages/Lab";
 import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
 import { Shooters } from "@/pages/Shooters";
+import { TakeOverview } from "@/pages/TakeOverview";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { Review } from "@/pages/Review";
 import { api } from "@/lib/api";
@@ -164,6 +165,12 @@ export function App() {
               <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
               <Route path="shooters" element={<Shooters />} />
               <Route path="beep-review" element={<BeepReview />} />
+              {/* Take overview: carve-up review for one multi-stage raw
+                  recording. :filename is the raw video's basename. */}
+              <Route
+                path="take/:slug/:filename"
+                element={<ShooterScopedRoute element={<TakeOverview />} />}
+              />
               <Route
                 path="export/:slug"
                 element={<ShooterScopedRoute element={<Export />} />}

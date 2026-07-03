@@ -35,7 +35,6 @@ def _setup_project(tmp_path: Path, names: list[str]) -> tuple[Path, dict[str, st
     originals = tmp_path / "originals"
     originals.mkdir(parents=True, exist_ok=True)
     videos: list[StageVideo] = []
-    ids: dict[str, str] = {}
     for name in names:
         original = originals / name
         original.write_bytes(b"\x00")
@@ -43,9 +42,12 @@ def _setup_project(tmp_path: Path, names: list[str]) -> tuple[Path, dict[str, st
         link.symlink_to(original)
         sv = StageVideo(path=Path("raw") / name, role="primary")
         videos.append(sv)
-        ids[name] = sv.video_id
     project.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=videos)]
     project.save(shooter_root)
+    # Reload so the model validator stamps stage_number; video_id must match
+    # what the server computes after loading the project from disk.
+    stamped = MatchProject.load(shooter_root)
+    ids: dict[str, str] = {sv.path.name: sv.video_id for sv in stamped.all_videos()}
     return root, ids
 
 

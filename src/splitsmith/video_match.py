@@ -145,6 +145,25 @@ def match_videos_to_stages(
     )
 
 
+def stages_in_span(
+    start: datetime,
+    end: datetime,
+    stages: Iterable[StageData],
+    tolerance_minutes: int,
+) -> list[int]:
+    """Stage numbers whose match window overlaps [start, end], ordered by
+    scorecard_updated_at (shooting order). The coverage suggestion for a
+    single take spanning several runs; a one-stage clip returns one hit,
+    so the single-file case needs no special path."""
+    hits: list[StageData] = []
+    for stage in stages:
+        lower, upper = match_window(stage.scorecard_updated_at, tolerance_minutes)
+        if start <= upper and end >= lower:
+            hits.append(stage)
+    hits.sort(key=lambda s: s.scorecard_updated_at)
+    return [s.stage_number for s in hits]
+
+
 def _video_timestamp(path: Path, *, prefer_ctime: bool) -> datetime:
     """Return the recording-finished time for ``path``, normalized to UTC.
 

@@ -214,7 +214,9 @@ def _setup_promote_endpoint_project(
     raw = shooter_root / "raw"
     raw.mkdir(exist_ok=True)
     (raw / "v.mp4").write_bytes(b"\x00" * 16)
-    primary_id = project.stages[0].videos[0].video_id
+    # Reload so the model validator stamps stage_number; video_id must match
+    # what the server computes after loading the project from disk.
+    primary_id = MatchProject.load(shooter_root).stages[0].videos[0].video_id
     trimmed = shooter_root / "trimmed"
     trimmed.mkdir(exist_ok=True)
     trim_path = trimmed / f"stage1_cam_{primary_id}_trimmed.mp4"

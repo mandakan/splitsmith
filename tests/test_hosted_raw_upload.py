@@ -529,8 +529,10 @@ def test_attach_registers_raw_video_on_project(hosted_client_with_match) -> None
 def test_attach_with_covers_stages_creates_stagevideos(hosted_client_with_match) -> None:
     """``covers_stages`` pre-declares the per-stage references so the
     worker has something to detect against without a separate
-    auto-match call. The first stage gets primary; subsequent get
-    secondary (since they already have a primary on the shared raw)."""
+    auto-match call. Both stages get primary (each stage starts empty,
+    so the first video on each stage auto-promotes). Created StageVideos
+    carry distinct video_ids (path#stage_number hash) and the correct
+    stage_number stamp."""
 
     client, _, match_id, slug = hosted_client_with_match
     upload = _seed_upload(client, "headcam.mp4", b"shared " * 4096)
@@ -556,25 +558,27 @@ def test_attach_with_covers_stages_creates_stagevideos(hosted_client_with_match)
     assert stages[1]["videos"][0]["role"] == "primary"
     assert stages[2]["videos"][0]["role"] == "primary"
 
+    # Stage-scoped video_ids must be distinct (path + stage_number hash).
+    vid1 = stages[1]["videos"][0]["video_id"]
+    vid2 = stages[2]["videos"][0]["video_id"]
+    assert vid1 != vid2, "same-path videos on different stages must have distinct video_ids"
+
+    # stage_number is stamped on each StageVideo.
+    assert stages[1]["videos"][0]["stage_number"] == 1
+    assert stages[2]["videos"][0]["stage_number"] == 2
+
 
 def test_attach_is_idempotent_merges_covers_stages(hosted_client_with_match) -> None:
     """Repeat attaches with the same storage_path merge covers_stages
-    rather than appending duplicate raw_videos entries (the same
-    contract ``MatchProject.attach_raw_video`` enforces in unit
-    tests)."""
+    rather than appending duplicate raw_videos entries. Merge is
+    order-preserving (first-seen order wins): attaching [2] then [1]
+    yields [2, 1], not [1, 2]."""
 
     client, _, match_id, slug = hosted_client_with_match
     upload = _seed_upload(client, "shared.mp4", b"x" * 1024)
 
+    # First attach: covers stage 2 only.
     client.post(
-        _attach_url(match_id, slug),
-        json={
-            "filename": upload["filename"],
-            "sha256": upload["sha256"],
-            "covers_stages": [1],
-        },
-    )
-    resp = client.post(
         _attach_url(match_id, slug),
         json={
             "filename": upload["filename"],
@@ -582,14 +586,23 @@ def test_attach_is_idempotent_merges_covers_stages(hosted_client_with_match) -> 
             "covers_stages": [2],
         },
     )
+    # Second attach: covers stage 1; merges to [2, 1] (first-seen order).
+    resp = client.post(
+        _attach_url(match_id, slug),
+        json={
+            "filename": upload["filename"],
+            "sha256": upload["sha256"],
+            "covers_stages": [1],
+        },
+    )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["covers_stages"] == [1, 2]
+    # Order-preserving union: [2] U [1] = [2, 1], not sorted [1, 2].
+    assert resp.json()["covers_stages"] == [2, 1]
 
     project = _get_project(client, match_id, slug)
     stages = {s["stage_number"]: s for s in project["stages"]}
     assert len(project["raw_videos"]) == 1
-    # Stage 2 was added by the second attach without disturbing
-    # stage 1's existing StageVideo.
+    # Both stages have StageVideos.
     assert len(stages[1]["videos"]) == 1
     assert len(stages[2]["videos"]) == 1
 

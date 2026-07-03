@@ -85,7 +85,7 @@ import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 
@@ -109,13 +109,13 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import beep_detect, cross_align, match_model, report, user_config, video_probe
+from .. import beep_detect, beep_windows, cross_align, match_model, report, user_config, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -129,6 +129,7 @@ from ..auth import AuthBackend, LoopbackAuth, User
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
+    BeepWindowConfig,
     CoachAutoClassifyConfig,
     Config,
     IntervalClass,
@@ -1345,6 +1346,58 @@ async def _maybe_submit_model_download(state: AppState) -> None:
         return
 
 
+async def _advance_sequential_chain(
+    state: AppState, slug: str, project: MatchProject, video: StageVideo, stage_number: int
+) -> None:
+    """Submit detect_beep for the next stage in a sequential take.
+
+    Called after a manual beep is set on ``stage_number`` so that
+    stage ``i+1`` (the next stage in ``raw.covers_stages`` order
+    with no beep and no active job) gets kicked off automatically -
+    mirrors the chain-advance in ``_run_detect_beep_for_video`` for
+    the auto-detected success path.
+
+    No-op when the video is not part of a sequential take
+    (``len(covers_stages) < 2`` or every covered stage has
+    ``scorecard_updated_at`` - scoreboard mode derives independent
+    windows and doesn't chain).
+    """
+    raw = project.find_raw_video(str(video.path))
+    if raw is None or len(raw.covers_stages) < 2:
+        return
+    # Scoreboard mode: every covered stage has a scorecard timestamp.
+    # Windows are independent; no sequential chain needed.
+    try:
+        if all(project.stage(n).scorecard_updated_at is not None for n in raw.covers_stages):
+            return
+    except KeyError:
+        pass  # unknown stage -> sequential mode
+    try:
+        current_idx = raw.covers_stages.index(stage_number)
+    except ValueError:
+        return  # stage not in the take
+    for next_n in raw.covers_stages[current_idx + 1 :]:
+        try:
+            next_stg = project.stage(next_n)
+        except KeyError:
+            continue
+        next_primary = next_stg.primary()
+        if next_primary is None or next_primary.beep_time is not None:
+            continue
+        if await state.jobs.find_active(kind="detect_beep", stage_number=next_n) is None:
+            await state.jobs.submit(
+                kind="detect_beep",
+                stage_number=next_n,
+                video_id=next_primary.video_id,
+                args={
+                    "slug": slug,
+                    "stage_number": next_n,
+                    "video_id": next_primary.video_id,
+                },
+            )
+        break
+
+
 def register_job_bodies(state: AppState) -> None:
     """Register the production job-body closures on ``state.jobs.bodies``.
 
@@ -1421,6 +1474,69 @@ def register_job_bodies(state: AppState) -> None:
             return None
         return result
 
+    def _derive_take_window(
+        root: Path,
+        proj: MatchProject,
+        stage: StageEntry,
+        video: StageVideo,
+    ) -> tuple[tuple[float, float], str] | None:
+        """Resolve the beep search window for a take-covered video.
+
+        Returns (window, source) or None when the video is not part of a
+        multi-stage take (raw is None or covers only one stage). Resolution
+        order: manual > scoreboard > sequential.
+        """
+        raw = proj.find_raw_video(str(video.path))
+        if raw is None or len(raw.covers_stages) < 2:
+            return None
+        if video.beep_window_source == "manual" and video.beep_window is not None:
+            return video.beep_window, "manual"
+        cfg = BeepWindowConfig()
+        source_path = proj.resolve_video_path(root, video.path)
+        duration = raw.duration_seconds
+        if duration is None:
+            try:
+                duration = video_probe.probe(source_path, cache_dir=proj.probes_path(root)).duration
+            except video_probe.ProbeError:
+                duration = None
+            if duration:
+                raw.duration_seconds = float(duration)
+        start_dt = raw.recorded_start
+        if start_dt is None and duration:
+            st = source_path.stat()
+            birth = getattr(st, "st_birthtime", None)
+            start_dt = (
+                datetime.fromtimestamp(birth, tz=UTC)
+                if birth is not None
+                else datetime.fromtimestamp(st.st_mtime, tz=UTC) - timedelta(seconds=duration)
+            )
+            raw.recorded_start = start_dt
+        if duration is None:
+            return None
+        if stage.scorecard_updated_at is not None and start_dt is not None:
+            prior = beep_windows.StagePrior(
+                stage_number=stage.stage_number,
+                scorecard_updated_at=stage.scorecard_updated_at,
+                time_seconds=stage.time_seconds,
+            )
+            windows = beep_windows.derive_scoreboard_windows(start_dt, duration, [prior], cfg)
+            if windows:
+                w = windows[0]
+                return (w.start_s, w.end_s), "scoreboard"
+        anchor: float | None = None
+        for n in raw.covers_stages:
+            if n == stage.stage_number:
+                break
+            try:
+                sibling = proj.stage(n)
+            except KeyError:
+                continue
+            sib_primary = next((v for v in sibling.videos if str(v.path) == str(video.path)), None)
+            if sib_primary is not None and sib_primary.beep_time is not None:
+                cand = sib_primary.beep_time + sibling.time_seconds + cfg.reset_margin_s
+                anchor = cand if anchor is None else max(anchor, cand)
+        return beep_windows.sequential_window(anchor, duration, cfg), "sequential"
+
     def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
         """Worker: detect ``video``'s beep, then auto-chain trim.
 
@@ -1440,6 +1556,9 @@ def register_job_bodies(state: AppState) -> None:
             if video is None:
                 raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
             source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+        # Derive a per-stage search window for multi-stage single-take videos.
+        # None for single-stage videos - behavior identical to before this change.
+        take_window = _derive_take_window(state.shooter_root(slug), proj, stg, video)
         handle.timer.set_meta(role=video.role)
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(
@@ -1455,70 +1574,98 @@ def register_job_bodies(state: AppState) -> None:
                     source,
                     project=proj,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    window=take_window[0] if take_window is not None else None,
                 )
         except beep_detect.BeepNotFoundError as exc:
-            # Primary failure is fatal -- the entire downstream pipeline
-            # (trim window, shot timeline) hangs off the primary beep.
-            # Surfacing as a job error gets the user looking at the audio
-            # right away rather than silently falling through to a wrong
-            # alignment. Secondary failure is soft-handled below: many
-            # non-headcam cameras (iPhone tripod, RO position, AGC'd) just
-            # don't capture a sustained 2-5 kHz tone, and aborting the
-            # import on every one of them is the worse UX.
-            if video.role == "primary":
+            # Primary failure: fatal when no window was applied (whole-file search
+            # failed - the downstream pipeline has nothing to anchor on). Windowed
+            # primary failure is soft - the take overview surfaces "none" and the
+            # user picks the beep on the waveform.
+            if video.role == "primary" and take_window is None:
                 raise
-            logger.info(
-                "no beep on secondary stage %d video %s: %s",
-                stage_number,
-                video.video_id,
-                exc,
-            )
-            # Cross-correlation fallback: when the primary already has a
-            # beep, try aligning the secondary's audio against the
-            # primary's landmark window. Same buzzer + first shots in the
-            # same room means the loudness envelopes line up modulo a
-            # constant time offset, even when the secondary's mic missed
-            # the sustained 2-5 kHz tone the in-stream detector wants.
-            with handle.timer.phase("cross_align"):
-                aligned = _try_align_secondary_to_primary(state.shooter_root(slug), proj, stg, video, handle)
-            video.beep_peak_amplitude = None
-            video.beep_duration_ms = None
-            video.beep_candidates = []
-            video.beep_reviewed = False
-            video.processed["beep"] = True
-            # Surface the cross-correlation confidence whenever we got one,
-            # even if we don't promote the suggestion. Lets the UI tell the
-            # difference between "never tried" and "tried, sub-floor result".
-            video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
-            # Delta is only meaningful when both in-stream AND cross-align
-            # produced timestamps. In-stream failed here, so wipe it.
-            video.beep_alignment_delta_ms = None
-            if aligned is not None and aligned.confidence >= _align_confidence_floor:
-                handle.update(
-                    progress=0.55,
-                    message=(f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"),
+            if video.role == "primary":
+                # Windowed primary soft-fail: mirror secondary field-wipes but skip
+                # cross-align (no sibling audio to align against).
+                logger.info(
+                    "no beep in window on primary stage %d video %s: %s",
+                    stage_number,
+                    video.video_id,
+                    exc,
                 )
-                video.beep_time = aligned.secondary_beep_time
-                video.beep_source = "aligned"
-                video.beep_auto_detect_failed = False
-                # Treat as "we have a usable beep_time": fall through to
-                # the trim block below.
-                beep = aligned
-            else:
-                if aligned is not None:
-                    logger.info(
-                        "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
-                        stage_number,
-                        video.video_id,
-                        aligned.confidence,
-                        _align_confidence_floor,
-                    )
-                handle.update(progress=0.55, message="No beep detected; pick on waveform")
+                video.beep_peak_amplitude = None
+                video.beep_duration_ms = None
+                video.beep_candidates = []
+                video.beep_reviewed = False
+                video.processed["beep"] = True
+                video.beep_alignment_confidence = None
+                video.beep_alignment_delta_ms = None
+                handle.update(progress=0.55, message="No beep in window; pick on waveform")
                 video.beep_time = None
                 video.beep_source = "auto"
                 video.beep_auto_detect_failed = True
                 video.processed["trim"] = False
                 beep = None
+            else:
+                # Secondary failure is soft: many non-headcam cameras (iPhone
+                # tripod, RO position, AGC'd) don't capture the sustained
+                # 2-5 kHz tone. Aborting the import on every one would be
+                # worse UX than falling back to cross-correlation.
+                logger.info(
+                    "no beep on secondary stage %d video %s: %s",
+                    stage_number,
+                    video.video_id,
+                    exc,
+                )
+                # Cross-correlation fallback: when the primary already has a
+                # beep, try aligning the secondary's audio against the
+                # primary's landmark window. Same buzzer + first shots in the
+                # same room means the loudness envelopes line up modulo a
+                # constant time offset, even when the secondary's mic missed
+                # the sustained 2-5 kHz tone the in-stream detector wants.
+                with handle.timer.phase("cross_align"):
+                    aligned = _try_align_secondary_to_primary(
+                        state.shooter_root(slug), proj, stg, video, handle
+                    )
+                video.beep_peak_amplitude = None
+                video.beep_duration_ms = None
+                video.beep_candidates = []
+                video.beep_reviewed = False
+                video.processed["beep"] = True
+                # Surface the cross-correlation confidence whenever we got one,
+                # even if we don't promote the suggestion. Lets the UI tell the
+                # difference between "never tried" and "tried, sub-floor result".
+                video.beep_alignment_confidence = aligned.confidence if aligned is not None else None
+                # Delta is only meaningful when both in-stream AND cross-align
+                # produced timestamps. In-stream failed here, so wipe it.
+                video.beep_alignment_delta_ms = None
+                if aligned is not None and aligned.confidence >= _align_confidence_floor:
+                    handle.update(
+                        progress=0.55,
+                        message=(
+                            f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"
+                        ),
+                    )
+                    video.beep_time = aligned.secondary_beep_time
+                    video.beep_source = "aligned"
+                    video.beep_auto_detect_failed = False
+                    # Treat as "we have a usable beep_time": fall through to
+                    # the trim block below.
+                    beep = aligned
+                else:
+                    if aligned is not None:
+                        logger.info(
+                            "cross-align below floor for stage %d video %s: conf %.2f < %.2f",
+                            stage_number,
+                            video.video_id,
+                            aligned.confidence,
+                            _align_confidence_floor,
+                        )
+                    handle.update(progress=0.55, message="No beep detected; pick on waveform")
+                    video.beep_time = None
+                    video.beep_source = "auto"
+                    video.beep_auto_detect_failed = True
+                    video.processed["trim"] = False
+                    beep = None
         else:
             handle.update(progress=0.55, message="Saving beep...")
             video.beep_time = beep.time
@@ -1566,6 +1713,14 @@ def register_job_bodies(state: AppState) -> None:
                 if check is not None and check.confidence >= _align_confidence_floor:
                     video.beep_alignment_confidence = check.confidence
                     video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
+
+        # Persist which window was used (for the audit trail and take overview).
+        if take_window is not None:
+            video.beep_window = take_window[0]
+            video.beep_window_source = take_window[1]  # type: ignore[assignment]
+        else:
+            video.beep_window = None
+            video.beep_window_source = None
 
         trimmed_ok = False
         if beep is not None and stg.time_seconds > 0:
@@ -1621,9 +1776,21 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
                 v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
                 v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
+                v_fresh.beep_window = video.beep_window
+                v_fresh.beep_window_source = video.beep_window_source
                 v_fresh.processed["beep"] = True
                 if trimmed_ok:
                     v_fresh.processed["trim"] = True
+                # Backfill raw video wall-clock metadata derived during this run so
+                # subsequent jobs on the same take don't need to re-probe.
+                raw_working = proj.find_raw_video(str(video.path))
+                if raw_working is not None:
+                    raw_fresh = fresh.find_raw_video(str(video.path))
+                    if raw_fresh is not None:
+                        if raw_working.duration_seconds is not None and raw_fresh.duration_seconds is None:
+                            raw_fresh.duration_seconds = raw_working.duration_seconds
+                        if raw_working.recorded_start is not None and raw_fresh.recorded_start is None:
+                            raw_fresh.recorded_start = raw_working.recorded_start
                 fresh.save(state.shooter_root(slug))
         handle.timer.set_meta(trimmed=trimmed_ok)
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
@@ -1658,6 +1825,39 @@ def register_job_bodies(state: AppState) -> None:
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
+        # Take chaining: after any windowed detect succeeds, submit detect_beep
+        # for the next uncovered stage. The helper self-guards for scoreboard mode
+        # (independent windows, no chain) and non-takes.
+        # Only chains on success (beep_time is set); soft-fail or manual rescue
+        # both go through _advance_sequential_chain via the manual-beep endpoint.
+        if take_window is not None and video.beep_time is not None and v_fresh is not None:
+            asyncio.run(_advance_sequential_chain(state, slug, fresh, v_fresh, stage_number))
+        # Generate the whole-take envelope peaks for the TakeOverview waveform.
+        # This runs on every take-windowed detect job; the WAV and peaks JSON
+        # caches make repeated calls cheap (cache-hit path). Wrapped in
+        # try/except so a peaks failure never aborts the detect job.
+        if take_window is not None:
+            try:
+                root_for_peaks = state.shooter_root(slug)
+                take_wav = audio_helpers.ensure_take_audio(
+                    root_for_peaks,
+                    str(video.path),
+                    source,
+                    project=proj,
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                )
+                waveform_helpers.ensure_peaks(take_wav, 3000)
+                # Push the peaks JSON to storage so the API process can serve
+                # it without re-computing. No-op in local mode (no storage).
+                if proj._storage is not None and proj._storage_scope is not None:
+                    peaks_path = waveform_helpers.cache_path(take_wav, 3000)
+                    peaks_key = f"{proj._storage_scope}/audio/{peaks_path.name}"
+                    try:
+                        proj._storage.write_bytes(peaks_key, peaks_path.read_bytes())
+                    except Exception as push_exc:
+                        logger.info("take peaks: storage push failed: %s", push_exc)
+            except Exception as peaks_exc:
+                logger.info("take peaks: generation failed for %s: %s", video.path, peaks_exc)
         handle.update(progress=1.0, message="Done")
 
     def _run_trim(
@@ -2948,6 +3148,33 @@ class DeletionSummaryModel(BaseModel):
         return cls(**summary.__dict__)
 
 
+class SuggestCoverageRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/videos/suggest-coverage.
+
+    The SPA probes the file duration client-side (to avoid server-side ffprobe
+    of remote R2 objects) and passes the wall-clock span here. When all fields
+    are null the endpoint returns an empty suggestion so the caller falls back
+    to manual selection.
+    """
+
+    recorded_start: AwareDatetime | None = None
+    duration_s: float | None = None
+    path: str | None = None
+
+
+class CoverageEditRequest(BaseModel):
+    """Body for PATCH /api/shooters/{slug}/raw-videos/coverage.
+
+    ``covers_stages`` replaces the full per-stage assignment for this raw
+    video. Declared order is preserved (it is the shooting order for
+    sequential-mode takes). Stages absent from the new list are removed and
+    their trim/audio caches invalidated.
+    """
+
+    filename: str
+    covers_stages: list[int]
+
+
 class AttachRawVideoRequest(BaseModel):
     """Body for POST /api/shooters/{slug}/raw-videos/attach (doc 05).
 
@@ -2963,6 +3190,10 @@ class AttachRawVideoRequest(BaseModel):
     sha256: str | None = None
     size_bytes: int | None = None
     covers_stages: list[int] | None = None
+    # Optional metadata the SPA can supply at attach time; backfilled
+    # by the detect-beep worker from ffprobe when absent.
+    duration_seconds: float | None = None
+    recorded_start: AwareDatetime | None = None
 
 
 class MultipartCreateRequest(BaseModel):
@@ -3320,6 +3551,13 @@ class BeepSnapResponse(BaseModel):
     peak_amplitude: float
     score: float
     duration_ms: float
+
+
+class BeepWindowRequest(BaseModel):
+    """Body for PUT /api/shooters/{slug}/stages/{n}/videos/{vid}/beep-window."""
+
+    start_s: float
+    end_s: float
 
 
 class ExportStageRequest(BaseModel):
@@ -5104,6 +5342,186 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"delete failed: {exc}") from exc
         return JSONResponse({"ok": True, "path": key})
 
+    def _apply_raw_video_coverage(
+        project: MatchProject,
+        root: Path,
+        storage_path: str,
+        covers: list[int],
+    ) -> list[StageVideo]:
+        """Diff and apply per-stage coverage for a raw video.
+
+        Creates StageVideo entries for stages in ``covers`` not yet
+        registered under ``storage_path``; removes entries for stages
+        that were previously registered but are no longer listed (and
+        invalidates their trim/audio caches). Updates
+        ``rv.covers_stages`` with ``covers`` as-is (declared order is
+        shooting order for sequential-mode takes; no implicit sort).
+        Removes a matching ``unassigned_videos`` entry when coverage is
+        first applied (the video moves from the tray to named stages).
+
+        Creates the ``RawVideo`` manifest entry if one does not exist
+        yet (local-mode scan only puts the video in
+        ``unassigned_videos``; attach or PATCH coverage creates the
+        raw entry).
+
+        Returns the newly created ``StageVideo`` instances.
+        """
+        video_path = Path(storage_path)
+        rv = project.find_raw_video(storage_path)
+        if rv is None:
+            rv = RawVideo(
+                original_filename=video_path.name,
+                storage_path=storage_path,
+            )
+            project.raw_videos.append(rv)
+
+        previously_covered: set[int] = set(rv.covers_stages)
+        new_covers_set: set[int] = set(covers)
+
+        created: list[StageVideo] = []
+
+        # Add StageVideos for stages not yet registered.
+        for stage_number in covers:
+            stage = project.stage(stage_number)
+            if any(str(v.path) == storage_path for v in stage.videos):
+                continue  # already registered - skip
+            role: VideoRole = "secondary" if stage.primary() is not None else "primary"
+            sv = StageVideo(path=video_path, role=role, stage_number=stage_number)
+            stage.videos.append(sv)
+            created.append(sv)
+
+        # Remove StageVideos for stages no longer in the new list and
+        # invalidate their trim/audio caches so a later re-assign starts clean.
+        for stage_number in sorted(previously_covered - new_covers_set):
+            try:
+                stage = project.stage(stage_number)
+            except KeyError:
+                continue
+            to_remove = [v for v in stage.videos if str(v.path) == storage_path]
+            stage.videos = [v for v in stage.videos if str(v.path) != storage_path]
+            for v in to_remove:
+                audio_helpers.invalidate_video_audit_trim(root, stage_number, v, project=project)
+
+        # Update covers_stages with the caller-declared order (no sort).
+        rv.covers_stages = list(dict.fromkeys(covers))
+
+        # Remove from unassigned tray when coverage is being applied for
+        # the first time (moves it from "unregistered" to named stages).
+        project.unassigned_videos = [v for v in project.unassigned_videos if str(v.path) != storage_path]
+
+        return created
+
+    def _queue_take_detects(slug: str, project: MatchProject, created: list[StageVideo]) -> None:
+        """Enqueue detect_beep for newly created take StageVideos.
+
+        Mode selection (keyed off ``rv.covers_stages`` and per-stage
+        ``scorecard_updated_at``):
+
+        - Scoreboard-mode (every covered stage has ``scorecard_updated_at``):
+          one detect_beep per created video - the window derivation is
+          independent for each so they can all run in parallel.
+        - Sequential-mode (at least one covered stage lacks
+          ``scorecard_updated_at``): one initial detect_beep for the
+          first unprocessed covered stage in ``covers_stages`` order.
+          The detect job chains to the next stage after success (Task 5
+          / ``_run_detect_beep_for_video``).
+
+        Skips videos already in ``processed["beep"]`` or with a manual
+        beep. Uses ``asyncio.run`` because sync FastAPI endpoints run
+        in a threadpool with no active event loop. Does NOT call
+        ``resolve_video_path`` - in hosted mode that would mirror a
+        multi-GB object into the API container; reachability is the
+        worker's problem.
+        """
+        if not created:
+            return
+        storage_path = str(created[0].path)
+        raw = project.find_raw_video(storage_path)
+        if raw is None:
+            return
+
+        def _stage_has_scorecard(n: int) -> bool:
+            try:
+                return project.stage(n).scorecard_updated_at is not None
+            except KeyError:
+                return False
+
+        is_scoreboard = len(raw.covers_stages) >= 2 and all(
+            _stage_has_scorecard(n) for n in raw.covers_stages
+        )
+
+        # Skip enqueue when the database URL is not Postgres. This covers two
+        # cases: (a) SQLite-backed hosted mode in smoke/CI tests, where
+        # Procrastinate's DSN converter would raise ValueError on the first
+        # submit call; (b) local-mode (no SPLITSMITH_DATABASE_URL), which has
+        # no Procrastinate wiring at all.
+        #
+        # We gate explicitly on the URL rather than catching ValueError because
+        # the submit path writes a compute_jobs row before calling the deferrer;
+        # a bare except ValueError would swallow a real deferrer error in
+        # Postgres mode after that row is committed, leaving a PENDING job that
+        # never runs. The predicate matches _hosted_mode_active() + Postgres so
+        # that Postgres-mode errors propagate like _submit_detect_beep does.
+        if _hosted_mode_active():
+            db_url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV, "")
+            if not db_url.startswith("postgresql"):
+                logger.debug("_queue_take_detects: skipping enqueue (SQLite URL)")
+                return
+
+        if is_scoreboard or len(raw.covers_stages) < 2:
+            # One detect_beep per created video.
+            for sv in created:
+                if sv.processed.get("beep") or sv.beep_source == "manual":
+                    continue
+                existing = asyncio.run(
+                    state.jobs.find_active(
+                        kind="detect_beep",
+                        stage_number=sv.stage_number,
+                        video_id=sv.video_id,
+                    )
+                )
+                if existing is None:
+                    asyncio.run(
+                        state.jobs.submit(
+                            kind="detect_beep",
+                            stage_number=sv.stage_number,
+                            video_id=sv.video_id,
+                            args={
+                                "slug": slug,
+                                "stage_number": sv.stage_number,
+                                "video_id": sv.video_id,
+                            },
+                        )
+                    )
+        else:
+            # Sequential-mode: submit only the first unprocessed covered stage.
+            for n in raw.covers_stages:
+                try:
+                    stg = project.stage(n)
+                except KeyError:
+                    continue
+                primary = stg.primary()
+                if primary is None:
+                    continue
+                if primary.processed.get("beep") or primary.beep_source == "manual":
+                    continue
+                if primary.beep_time is not None:
+                    continue
+                existing = asyncio.run(
+                    state.jobs.find_active(kind="detect_beep", stage_number=n, video_id=primary.video_id)
+                )
+                if existing is not None:
+                    break  # chain already started
+                asyncio.run(
+                    state.jobs.submit(
+                        kind="detect_beep",
+                        stage_number=n,
+                        video_id=primary.video_id,
+                        args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                    )
+                )
+                break
+
     @app.post("/api/shooters/{slug}/raw-videos/attach")
     def attach_raw_video(
         slug: str,
@@ -5158,7 +5576,8 @@ def create_app(
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
 
-        covers = sorted(set(body.covers_stages or []))
+        # Preserve the caller's declared order; remove duplicates but do not sort.
+        covers = list(dict.fromkeys(body.covers_stages or []))
         if covers:
             # Verify every claimed stage exists before mutating anything;
             # an unknown stage_number is a 422 (client bug) rather than a
@@ -5185,33 +5604,343 @@ def create_app(
             sha256=body.sha256,
             storage_path=storage_path,
             covers_stages=covers,
+            duration_seconds=body.duration_seconds,
+            recorded_start=body.recorded_start,
         )
         canonical = project.attach_raw_video(rv)
 
+        # Stamp optional metadata from body onto the canonical entry even
+        # when attach_raw_video returned an existing merged entry.
+        if body.duration_seconds is not None and canonical.duration_seconds is None:
+            canonical.duration_seconds = body.duration_seconds
+        if body.recorded_start is not None and canonical.recorded_start is None:
+            canonical.recorded_start = body.recorded_start
+
         # Decide where the per-stage StageVideo entries land:
-        #   - covers_stages given -> one StageVideo per named stage
-        #     (the doc-05 "one raw covers N stages" shape).
+        #   - covers_stages given -> one StageVideo per named stage via
+        #     _apply_raw_video_coverage (handles create/remove diff).
         #   - covers_stages empty -> a single entry in unassigned_videos
         #     so the ingest tray UI picks it up the same way local-mode
-        #     scan does. The user then drags to stages or runs
-        #     auto-match. Without this, attach + no coverage would
-        #     leave the project's raw_videos manifest populated but
-        #     nothing for the worker to detect against.
-        video_path = Path(storage_path)
-        already_registered = project.find_video(video_path) is not None
+        #     scan does. The user then drags to stages or runs auto-match.
         if covers:
-            for stage_number in covers:
-                stage = project.stage(stage_number)
-                if any(str(v.path) == storage_path for v in stage.videos):
-                    continue
-                role: VideoRole = "secondary" if stage.primary() is not None else "primary"
-                stage.videos.append(StageVideo(path=video_path, role=role))
-        elif not already_registered:
-            project.unassigned_videos.append(StageVideo(path=video_path))
+            # Use the canonical merged covers (order-preserving union already
+            # computed by project.attach_raw_video) so that repeat attaches
+            # with different covers_stages accumulate rather than replace.
+            created = _apply_raw_video_coverage(project, root, storage_path, canonical.covers_stages)
+        else:
+            video_path = Path(storage_path)
+            already_registered = project.find_video(video_path) is not None
+            if not already_registered:
+                project.unassigned_videos.append(StageVideo(path=video_path))
+            created = []
 
         project.save(root)
 
+        if created:
+            _queue_take_detects(slug, project, created)
+
         return JSONResponse(canonical.model_dump(mode="json"))
+
+    @app.patch("/api/shooters/{slug}/raw-videos/coverage")
+    def edit_raw_video_coverage(
+        slug: str,
+        body: CoverageEditRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Update the per-stage coverage list for a registered raw video.
+
+        Works in local and hosted mode - identity key is the StageVideo
+        path string ``raw/<filename>``, the same in both modes.
+
+        Body: ``{"filename": str, "covers_stages": list[int]}``. Stages
+        are applied in declared order (shooting order for sequential-mode
+        takes). Stages previously covered but now absent are removed and
+        their trim/audio caches invalidated. Stages not previously covered
+        are created. After saving, enqueues detect_beep for newly created
+        entries via ``_queue_take_detects``.
+
+        Error contract:
+
+        - 400 - filename failed ``_sanitize_raw_filename``.
+        - 404 - no RawVideo or registered video matches ``raw/<filename>``.
+        - 422 - ``covers_stages`` references a stage not in the project.
+        """
+        name = _sanitize_raw_filename(body.filename)
+        storage_path = f"raw/{name}"
+        video_path = Path(storage_path)
+
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+
+        # 404 when the path isn't registered anywhere in the project.
+        if project.find_raw_video(storage_path) is None and project.find_video(video_path) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no video registered at {storage_path!r}",
+            )
+
+        covers = list(dict.fromkeys(body.covers_stages))
+        if covers:
+            known = {s.stage_number for s in project.stages}
+            unknown = [n for n in covers if n not in known]
+            if unknown:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"error": "unknown_stage_numbers", "stage_numbers": unknown},
+                )
+
+        created = _apply_raw_video_coverage(project, root, storage_path, covers)
+        project.save(root)
+
+        if created:
+            _queue_take_detects(slug, project, created)
+
+        canonical = project.find_raw_video(storage_path)
+        if canonical is None:
+            raise HTTPException(status_code=500, detail="coverage applied but raw video entry missing")
+        return JSONResponse(canonical.model_dump(mode="json"))
+
+    @app.get("/api/shooters/{slug}/raw-videos/overview")
+    def raw_video_overview(
+        slug: str,
+        filename: str = Query(...),
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Return the take-level overview for a registered raw video.
+
+        Response shape:
+
+        .. code-block:: json
+
+            {
+              "raw_video": { ...RawVideo dump... },
+              "duration_seconds": 1800.0,
+              "stages": [
+                {
+                  "stage_number": 2, "stage_name": "Short course",
+                  "video_id": "abc123def456", "role": "primary",
+                  "beep_time": 512.3, "beep_confidence": 0.91,
+                  "beep_reviewed": true, "beep_window": [420.0, 700.0],
+                  "beep_window_source": "scoreboard", "status": "found"
+                }
+              ],
+              "conflicts": [2, 3]
+            }
+
+        ``status`` per stage-video:
+        - ``"found"`` -- beep_time is set
+        - ``"none"`` -- beep_auto_detect_failed is True
+        - ``"pending"`` -- not yet detected
+
+        ``conflicts`` lists stage numbers whose beep times sit within
+        ``BeepWindowConfig.conflict_threshold_s`` of each other.
+        """
+        name = _sanitize_raw_filename(filename)
+        storage_path = f"raw/{name}"
+        project = state.shooter_project(slug)
+
+        rv = project.find_raw_video(storage_path)
+        if rv is None:
+            raise HTTPException(status_code=404, detail=f"no raw video at {storage_path!r}")
+
+        cfg = BeepWindowConfig()
+        stages_out = []
+        beeps_for_conflicts: dict[int, float] = {}
+
+        for stage_num in rv.covers_stages:
+            try:
+                stage = project.stage(stage_num)
+            except KeyError:
+                continue
+            # Find the StageVideo for this take (matched by path).
+            sv = next((v for v in stage.videos if str(v.path) == storage_path), None)
+            if sv is None:
+                continue
+
+            # Determine status.
+            if sv.beep_time is not None:
+                status = "found"
+                beeps_for_conflicts[stage_num] = sv.beep_time
+            elif sv.beep_auto_detect_failed:
+                status = "none"
+            else:
+                status = "pending"
+
+            beep_window_list = list(sv.beep_window) if sv.beep_window is not None else None
+            stages_out.append(
+                {
+                    "stage_number": stage.stage_number,
+                    "stage_name": stage.stage_name,
+                    "video_id": sv.video_id,
+                    "role": sv.role,
+                    "beep_time": sv.beep_time,
+                    "beep_confidence": sv.beep_confidence,
+                    "beep_reviewed": sv.beep_reviewed,
+                    "beep_window": beep_window_list,
+                    "beep_window_source": sv.beep_window_source,
+                    "status": status,
+                }
+            )
+
+        conflicts = sorted(beep_windows.find_beep_conflicts(beeps_for_conflicts, cfg.conflict_threshold_s))
+
+        payload = {
+            "raw_video": rv.model_dump(mode="json"),
+            "duration_seconds": rv.duration_seconds,
+            "stages": stages_out,
+            "conflicts": conflicts,
+        }
+        return JSONResponse(payload)
+
+    @app.get("/api/shooters/{slug}/raw-videos/peaks")
+    def raw_video_peaks(
+        slug: str,
+        filename: str = Query(...),
+        bins: int = Query(default=3000, ge=16, le=8192),
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Return ``bins`` peak magnitudes for the take's whole-file envelope waveform.
+
+        Local mode: extract the 8 kHz take WAV on demand, then compute peaks.
+
+        Hosted mode: the worker pushes a pre-computed peaks JSON to storage
+        after detection. When the JSON is absent from storage this endpoint
+        returns ``202 {"pending": true}`` so the SPA can poll and render a
+        spinner in the meantime.
+
+        Success response shape is identical to the per-stage
+        ``/stages/{n}/peaks`` endpoint.
+        """
+        name = _sanitize_raw_filename(filename)
+        storage_path = f"raw/{name}"
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
+
+        rv = project.find_raw_video(storage_path)
+        if rv is None:
+            raise HTTPException(status_code=404, detail=f"no raw video at {storage_path!r}")
+
+        take_wav = audio_helpers.take_audio_path(root, storage_path, project=project)
+
+        # Hosted mode: the worker pushed the peaks JSON to storage.
+        if state.storage is not None and project._storage_scope is not None:
+            # Hosted peaks are fixed at 3000 bins (worker-emitted); ignore requested bins.
+            hosted_bins = 3000
+            peaks_path = waveform_helpers.cache_path(take_wav, hosted_bins)
+            # Serve from local cache when already pulled by a prior request.
+            # WAV is never present locally in hosted mode so gate on peaks JSON only.
+            if peaks_path.exists():
+                result = waveform_helpers.PeaksResult.model_validate_json(
+                    peaks_path.read_text(encoding="utf-8")
+                )
+                return JSONResponse(result.model_dump(mode="json"))
+            peaks_key = f"{project._storage_scope}/audio/{peaks_path.name}"
+            pulled = False
+            try:
+                if state.storage.exists(peaks_key):
+                    peaks_path.parent.mkdir(parents=True, exist_ok=True)
+                    with state.storage.open_stream(peaks_key) as src, peaks_path.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    pulled = True
+            except Exception as exc:
+                logger.info("take peaks: storage pull failed: %s", exc)
+            if not pulled:
+                active_job = any(
+                    asyncio.run(state.jobs.find_active(kind="detect_beep", stage_number=n)) is not None
+                    for n in rv.covers_stages
+                )
+                return JSONResponse({"pending": True, "active_job": active_job}, status_code=202)
+            result = waveform_helpers.PeaksResult.model_validate_json(peaks_path.read_text(encoding="utf-8"))
+            return JSONResponse(result.model_dump(mode="json"))
+
+        # Local mode: extract + compute on demand.
+        video_path = Path(storage_path)
+        source = project.resolve_video_path(root, video_path)
+        wav = audio_helpers.ensure_take_audio(root, storage_path, source, project=project)
+        result = waveform_helpers.ensure_peaks(wav, bins)
+        return JSONResponse(result.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/videos/suggest-coverage")
+    def suggest_coverage(
+        slug: str,
+        body: SuggestCoverageRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Propose which stages a file's wall-clock span covers.
+
+        The SPA probes the file duration client-side (avoiding server-side
+        ffprobe of remote R2 objects) and sends the span here. Returns a
+        list of stage numbers whose match windows overlap the span, ordered
+        by scorecard time, plus the resolved span in ISO format.
+
+        Body: ``{"recorded_start": iso | null, "duration_s": float | null,
+        "path": str | null}``.
+
+        Returns ``{"covers_stages": [ints], "span": {"start": iso, "end": iso}
+        | null}``; empty list and null span when no span is resolvable.
+
+        Local mode only: when ``recorded_start`` is null but ``path`` is
+        provided, the server attempts to resolve the span from the file's
+        birthtime/mtime and ffprobe duration.
+        """
+        from .. import video_match as vm
+        from ..config import StageData as EngineStageData
+        from ..config import VideoMatchConfig
+
+        project = state.shooter_project(slug)
+        cfg = VideoMatchConfig()
+
+        # Build the span.
+        start_dt: datetime | None = body.recorded_start
+        end_dt: datetime | None = None
+
+        if start_dt is not None and body.duration_s is not None:
+            end_dt = start_dt + timedelta(seconds=body.duration_s)
+        elif body.path is not None and state.storage is None:
+            # Local mode: resolve from file timestamps + ffprobe.
+            root = state.shooter_root(slug)
+            video_path = project.resolve_video_path(root, Path(body.path))
+            duration: float | None = None
+            try:
+                duration = video_probe.probe(video_path, cache_dir=project.probes_path(root)).duration
+            except video_probe.ProbeError:
+                pass
+            if duration is not None:
+                st = video_path.stat()
+                birth = getattr(st, "st_birthtime", None)
+                end_dt = (
+                    datetime.fromtimestamp(birth, tz=UTC)
+                    if birth is not None
+                    else datetime.fromtimestamp(st.st_mtime, tz=UTC)
+                )
+                start_dt = end_dt - timedelta(seconds=duration)
+
+        if start_dt is None or end_dt is None:
+            return JSONResponse({"covers_stages": [], "span": None})
+
+        # Gather stages that have a scorecard timestamp.
+        engine_stages: list[EngineStageData] = []
+        for stg in project.stages:
+            if stg.scorecard_updated_at is not None:
+                engine_stages.append(
+                    EngineStageData(
+                        stage_number=stg.stage_number,
+                        stage_name=stg.stage_name,
+                        time_seconds=stg.time_seconds,
+                        scorecard_updated_at=stg.scorecard_updated_at,
+                    )
+                )
+
+        covers = vm.stages_in_span(start_dt, end_dt, engine_stages, cfg.tolerance_minutes)
+        return JSONResponse(
+            {
+                "covers_stages": covers,
+                "span": {
+                    "start": start_dt.isoformat(),
+                    "end": end_dt.isoformat(),
+                },
+            }
+        )
 
     @app.get("/api/shooters/{slug}/automation")
     def get_automation(slug: str) -> JSONResponse:
@@ -6188,6 +6917,45 @@ def create_app(
         await _submit_detect_beep(slug, stage_number, video)
         return True
 
+    @app.put("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window")
+    async def set_beep_window(
+        slug: str, stage_number: int, video_id: str, body: BeepWindowRequest
+    ) -> JSONResponse:
+        """Persist a manual beep search window and re-run detection.
+
+        The take overview's drag-to-adjust lands here. Setting a window
+        wipes the current beep (a new window is a new claim about where
+        the beep lives) and invalidates the trim cache, mirroring the
+        manual beep-time endpoint's semantics.
+        """
+        if body.start_s < 0 or body.end_s <= body.start_s:
+            raise HTTPException(status_code=422, detail="end_s must be greater than start_s >= 0")
+        in_flight = await state.jobs.find_active(
+            kind="detect_beep", stage_number=stage_number, video_id=video_id
+        )
+        if in_flight is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="detection already running for this video - wait for it to finish, then set the window",  # noqa: E501
+            )
+        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        root = state.shooter_root(slug)
+        video.beep_window = (body.start_s, body.end_s)
+        video.beep_window_source = "manual"
+        video.beep_time = None
+        video.beep_source = None
+        video.beep_confidence = None
+        video.beep_peak_amplitude = None
+        video.beep_duration_ms = None
+        video.beep_candidates = []
+        video.beep_reviewed = False
+        video.beep_auto_detect_failed = False
+        video.processed["beep"] = False
+        video.processed["trim"] = False
+        audio_helpers.invalidate_video_audit_trim(root, stage_number, video, project=project)
+        project.save(root)
+        return await _submit_detect_beep(slug, stage_number, video)
+
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/detect-beep")
     async def detect_beep_for_video(
         slug: str, stage_number: int, video_id: str, force: bool = False
@@ -6607,6 +7375,11 @@ def create_app(
         the value (in seconds, must be >= 0) is taken as authoritative
         with ``beep_source="manual"``. Same dedupe + auto-trim chain as
         the legacy primary endpoint, just keyed per video.
+
+        When ``beep_time`` is set on a video that belongs to a sequential
+        take (multi-stage raw, no scoreboard timestamps), also advances the
+        chain by submitting detect_beep for the next uncovered stage - the
+        same advance the auto-detect job performs on success (Task 5).
         """
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
         if req.beep_time is not None and req.beep_time < 0.0:
@@ -6615,6 +7388,7 @@ def create_app(
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
             await _maybe_chain_trim(slug, stage, video)
+            await _advance_sequential_chain(state, slug, project, video, stage_number)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
@@ -6637,6 +7411,7 @@ def create_app(
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
             await _maybe_chain_trim(slug, stage, primary)
+            await _advance_sequential_chain(state, slug, project, primary, stage_number)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/time")

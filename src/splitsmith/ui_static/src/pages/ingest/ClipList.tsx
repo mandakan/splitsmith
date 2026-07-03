@@ -1,3 +1,8 @@
+import { Link, useParams } from "react-router-dom";
+
+import type { RawVideoManifestEntry } from "@/lib/api";
+import { takeHref } from "@/lib/matchHref";
+import { findTakeForPath, takeFilename } from "@/lib/takes";
 import type { ClipItem, ClipModel } from "@/pages/ingest/model";
 import { pad2 } from "@/pages/ingest/model";
 import { cn } from "@/lib/utils";
@@ -12,10 +17,14 @@ function ClipRow({
   clip,
   selected,
   onSelect,
+  takeOverviewHref,
 }: {
   clip: ClipItem;
   selected: boolean;
   onSelect: (path: string) => void;
+  /** Link to the take-overview page when this clip is a multi-stage
+   *  take; null renders no link. */
+  takeOverviewHref: string | null;
 }) {
   const filename = clip.video.path.split("/").pop() ?? clip.video.path;
   const recordedAt =
@@ -27,51 +36,65 @@ function ClipRow({
   const role = clip.video.role;
   const hasBeep = clip.video.beep_time != null;
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(clip.video.path)}
-      aria-current={selected ? "true" : undefined}
+    <div
       className={cn(
-        "flex w-full items-center gap-2.5 border-l-2 px-3 py-2 text-left transition-colors",
+        "flex w-full items-center gap-2.5 border-l-2 px-3 py-2 transition-colors",
         selected
           ? "border-led bg-led/10"
           : "border-transparent hover:bg-surface-2",
       )}
     >
-      <div className="min-w-0 flex-1">
-        <div
-          className={cn(
-            "truncate font-mono text-[0.75rem] font-semibold",
-            selected ? "text-led" : "text-ink",
-          )}
-        >
-          {filename}
+      <button
+        type="button"
+        onClick={() => onSelect(clip.video.path)}
+        aria-current={selected ? "true" : undefined}
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <div
+            className={cn(
+              "truncate font-mono text-[0.75rem] font-semibold",
+              selected ? "text-led" : "text-ink",
+            )}
+          >
+            {filename}
+          </div>
+          <div className="mt-0.5 truncate font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-muted">
+            {recordedAt ?? "no timestamp"}
+            {clip.camera && <> &middot; {clip.camera.label}</>}
+          </div>
         </div>
-        <div className="mt-0.5 truncate font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-muted">
-          {recordedAt ?? "no timestamp"}
-          {clip.camera && <> &middot; {clip.camera.label}</>}
-        </div>
-      </div>
-      {clip.stageNumber != null && (
-        <span
-          className={cn(
-            "shrink-0 rounded border px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em]",
-            role === "ignored"
-              ? "border-rule bg-surface-3 text-muted line-through"
-              : "border-led-deep bg-led/10 text-led",
-          )}
+        {clip.stageNumber != null && (
+          <span
+            className={cn(
+              "shrink-0 rounded border px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em]",
+              role === "ignored"
+                ? "border-rule bg-surface-3 text-muted line-through"
+                : "border-led-deep bg-led/10 text-led",
+            )}
+          >
+            {ROLE_BADGE[role] ?? role}
+          </span>
+        )}
+        {hasBeep && (
+          <span
+            aria-label="beep detected"
+            title="beep detected"
+            className="size-1.5 shrink-0 rounded-full bg-beep shadow-[0_0_5px_var(--color-beep-glow)]"
+          />
+        )}
+      </button>
+      {takeOverviewHref != null && (
+        <Link
+          to={takeOverviewHref}
+          title={`Take overview for ${filename}`}
+          aria-label={`Take overview for ${filename}`}
+          className="shrink-0 rounded border border-beep/40 bg-beep-tint px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em] text-beep transition-colors hover:bg-beep/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-beep/60"
         >
-          {ROLE_BADGE[role] ?? role}
-        </span>
+          Take
+        </Link>
       )}
-      {hasBeep && (
-        <span
-          aria-label="beep detected"
-          title="beep detected"
-          className="size-1.5 shrink-0 rounded-full bg-beep shadow-[0_0_5px_var(--color-beep-glow)]"
-        />
-      )}
-    </button>
+    </div>
   );
 }
 
@@ -93,11 +116,24 @@ export function ClipList({
   model,
   selectedPath,
   onSelect,
+  slug,
+  rawVideos,
 }: {
   model: ClipModel;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  slug: string;
+  /** Raw-video manifest from the project; drives the "Take" link on
+   *  rows whose source recording covers 2+ stages. */
+  rawVideos: RawVideoManifestEntry[];
 }) {
+  const { matchId } = useParams<{ matchId?: string }>();
+  const takeOverviewHrefFor = (path: string): string | null => {
+    const take = findTakeForPath(rawVideos, path);
+    if (take == null) return null;
+    const filename = takeFilename(take);
+    return filename != null ? takeHref(matchId, slug, filename) : null;
+  };
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-rule-strong bg-surface">
       <div className="flex items-center gap-2 border-b border-rule-strong px-3 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] tabular-nums text-muted">
@@ -120,6 +156,7 @@ export function ClipList({
                 clip={clip}
                 selected={clip.video.path === selectedPath}
                 onSelect={onSelect}
+                takeOverviewHref={takeOverviewHrefFor(clip.video.path)}
               />
             ))}
           </div>
@@ -137,6 +174,7 @@ export function ClipList({
                 clip={clip}
                 selected={clip.video.path === selectedPath}
                 onSelect={onSelect}
+                takeOverviewHref={takeOverviewHrefFor(clip.video.path)}
               />
             ))}
           </div>

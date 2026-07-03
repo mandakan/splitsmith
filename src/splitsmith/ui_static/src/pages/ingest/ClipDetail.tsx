@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, MoreVertical, XCircle } from "lucide-react";
+import { ArrowRight, Loader2, MoreVertical, XCircle } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
 
+import { CoverageSelect } from "@/components/ingest/CoverageSelect";
 import { RoleToggles } from "@/components/ingest/RoleToggles";
 import { ShooterPickerPopover } from "@/components/ingest/ShooterPickerPopover";
 import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
+  type RawVideoManifestEntry,
   type ShooterListEntry,
   type StageEntry,
   type VideoRole,
 } from "@/lib/api";
 import { useSpacePlayPause } from "@/lib/keyboard";
+import { takeHref } from "@/lib/matchHref";
+import { findTakeForPath, takeFilename } from "@/lib/takes";
 import type { ClipItem } from "@/pages/ingest/model";
 import { pad2 } from "@/pages/ingest/model";
 
@@ -26,26 +31,45 @@ export function ClipDetail({
   clip,
   allStages,
   shooters,
+  rawVideos,
   busy,
   onMove,
   onRemove,
   onMoveShooter,
   onError,
+  onReload,
 }: {
   slug: string;
   clip: ClipItem | null;
   allStages: StageEntry[];
   shooters: ShooterListEntry[];
+  /** Raw-video manifest from the project; drives the "Take overview"
+   *  link when this clip's source recording covers 2+ stages. */
+  rawVideos: RawVideoManifestEntry[];
   busy: boolean;
   onMove: (videoPath: string, toStage: number | null, role: VideoRole) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
   onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   onError: (msg: string | null) => void;
+  /** Fires after a successful coverage update so the parent can reload
+   *  project state. Optional -- coverage updates succeed silently if
+   *  omitted. */
+  onReload?: () => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { matchId } = useParams<{ matchId?: string }>();
   const [rowBusy, setRowBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [kebabOpen, setKebabOpen] = useState(false);
+  // Coverage section state.
+  // coverageSaved: last value persisted to the server.
+  // coverageDraft: local chip selection - updates instantly, no network until Apply.
+  const [coverageSaved, setCoverageSaved] = useState<number[]>([]);
+  const [coverageDraft, setCoverageDraft] = useState<number[]>([]);
+  const [coverageSuggested, setCoverageSuggested] = useState<
+    number[] | undefined
+  >();
+  const [coverageBusy, setCoverageBusy] = useState(false);
   const kebabRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   // Anchor for the portaled kebab menu: fixed coordinates captured when
@@ -100,6 +124,36 @@ export function ClipDetail({
     };
   }, [kebabOpen]);
 
+  // Load coverage state when the selected clip changes.
+  // Initialize from persisted rawVideos entry when the clip is already a registered take;
+  // fall back to [] for unregistered clips. The server suggestion only pre-fills the
+  // draft when there is no persisted coverage so Apply never silently replaces it.
+  useEffect(() => {
+    const persisted = findTakeForPath(rawVideos, clip?.video.path ?? "");
+    const persistedStages = persisted?.covers_stages ?? [];
+    setCoverageSaved(persistedStages);
+    setCoverageDraft(persistedStages);
+    setCoverageSuggested(undefined);
+    if (!clip || allStages.length === 0) return;
+    let alive = true;
+    void api
+      .suggestCoverage(slug, { path: clip.video.path })
+      .then((s) => {
+        if (!alive || s.covers_stages.length === 0) return;
+        setCoverageSuggested(s.covers_stages);
+        // Only pre-fill draft from suggestion when there is no persisted coverage.
+        if (persistedStages.length === 0) {
+          setCoverageDraft(s.covers_stages);
+        }
+      })
+      .catch(() => {
+        /* non-fatal: coverage starts empty */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [clip, slug, allStages.length, rawVideos]);
+
   if (!clip) {
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-rule-strong bg-surface/50 px-6 text-center">
@@ -116,11 +170,18 @@ export function ClipDetail({
   const video = clip.video;
   const currentStage = clip.stageNumber;
   const filename = video.path.split("/").pop() ?? video.path;
+  // Multi-stage take link: shown when the clip's source recording is a
+  // registered raw video covering 2+ stages.
+  const take = findTakeForPath(rawVideos, video.path);
+  const takeName = take != null ? takeFilename(take) : null;
   const cameraDetail = [clip.camera?.model ?? null, clip.camera?.mount ?? null]
     .filter(Boolean)
     .join(" \u00B7 ");
   const needsBeep =
     video.role !== "ignored" && video.beep_time == null && currentStage != null;
+  // True when the draft differs from what's last saved - enables Apply button.
+  const coverageDirty =
+    JSON.stringify(coverageDraft) !== JSON.stringify(coverageSaved);
 
   async function changeStage(next: string) {
     setRowBusy(true);
@@ -157,6 +218,26 @@ export function ClipDetail({
     }
   }
 
+  async function applyCoverage() {
+    if (coverageBusy) return;
+    setCoverageBusy(true);
+    onError(null);
+    try {
+      // Extract the filename from the path (raw/filename.mp4 -> filename.mp4).
+      const fn = video.path.split("/").pop() ?? video.path;
+      await api.setRawVideoCoverage(slug, {
+        filename: fn,
+        covers_stages: coverageDraft,
+      });
+      setCoverageSaved(coverageDraft);
+      await onReload?.();
+    } catch (e) {
+      onError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setCoverageBusy(false);
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-rule-strong bg-surface">
       {/* Header: filename + camera */}
@@ -172,6 +253,15 @@ export function ClipDetail({
             </div>
           )}
         </div>
+        {take != null && takeName != null && (
+          <Link
+            to={takeHref(matchId, slug, takeName)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-beep/40 bg-beep-tint px-2.5 py-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em] text-beep transition-colors hover:bg-beep/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-beep/60"
+          >
+            Take overview &middot; {take.covers_stages.length} stages
+            <ArrowRight aria-hidden className="size-3" />
+          </Link>
+        )}
         <button
           type="button"
           onClick={() => void onRemove(video.path)}
@@ -310,6 +400,39 @@ export function ClipDetail({
           </div>
         </div>
       </div>
+
+      {/* Coverage section - declare which stages this take covers */}
+      {allStages.length > 0 && (
+        <div className="border-t border-rule bg-surface-2 px-4 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
+                Covers stages
+              </span>
+              {coverageBusy && (
+                <Loader2
+                  aria-label="Saving coverage"
+                  className="size-3 animate-spin text-led"
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => void applyCoverage()}
+              disabled={coverageBusy || !coverageDirty}
+              className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2.5 py-1 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:border-led-deep hover:bg-led-tint hover:text-led disabled:opacity-50"
+            >
+              {coverageBusy ? "Saving..." : "Apply coverage"}
+            </button>
+          </div>
+          <CoverageSelect
+            stages={allStages}
+            value={coverageDraft}
+            onChange={setCoverageDraft}
+            suggested={coverageSuggested}
+          />
+        </div>
+      )}
     </div>
   );
 }

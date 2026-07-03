@@ -29,27 +29,42 @@ raw videos + stage JSON
 [1] Match videos to stages         (video_match.py)
     │   uses video mtime/ctime vs scorecard_updated_at
     ▼
-[2] Detect start beep              (beep_detect.py)
+[1b] Optionally: declare take coverage          (api: PATCH shooters/{slug}/raw-videos/coverage)
+    │   one source file may cover N stages;
+    │   POST suggest-coverage proposes stages from client-probed span;
+    │   attach with covers_stages creates N StageVideos + enqueues
+    ▼
+[2] Derive per-stage search window               (beep_windows.py)
+    │   scoreboard mode: anchor on scorecard_updated_at;
+    │   sequential fallback: previous stage's beep + time + reset_margin;
+    │   conflict detection: beep_windows.find_beep_conflicts flags
+    │   stages within conflict_threshold_s (default 2 s)
+    ▼
+[3] Detect start beep per (stage, video)        (beep_detect.py, jobs)
+    │   inside its derived search window via ffmpeg -ss/-t;
     │   bandpass + tonal/duration scoring + calibrated confidence;
     │   automation.beep_low_confidence_threshold gates auto-trust
-    │   -> below it, items land in `GET /api/hitl-queue` (#219)
+    │   -> below it, items land in `GET /api/hitl-queue` (#219);
+    │   windowed mode soft-fails (beep_auto_detect_failed) vs raising;
+    │   sequential chain: next covered stage resumes from this beep
     ▼
-[3] Trim video                     (trim.py)
+[4] Trim video                     (trim.py)
     │   lossless (`-c copy`) for archival; audit-mode short-GOP
     │   re-encode for SPA scrub
     ▼
-[4] Detect shots                   (shot_detect.py / ensemble/)
+[5] Detect shots                   (shot_detect.py / ensemble/)
     │   3-voter ensemble (envelope + CLAP + GBDT; PANN folded into
     │   GBDT as a feature) with per-camera-class thresholds +
     │   adaptive priors from stage_rounds; consensus seeds shots[]
     ▼
-[5] Generate outputs               (csv_gen.py, fcpxml_gen.py,
+[6] Generate outputs               (csv_gen.py, fcpxml_gen.py,
     │                              ui/exports.py, ui/match_exports.py,
     │                              report.py)
     │
     ▼
 CSV + FCPXML + report per stage   match-level FCPXML / MP4 /
-                                  YouTube sidecar
+                                  YouTube sidecar;
+                                  take overview + peaks endpoints
 ```
 
 The CLI walks the pipeline in batch (`splitsmith process`); the
@@ -70,12 +85,20 @@ or other MCP client can drive the same flow.
 
 Be aware: `scorecard_updated_at` is when the score was *typed in*, not when the stage was shot. Real shoot time is typically 1–10 minutes earlier. Bias the matching window accordingly.
 
+**`beep_windows.py`** - Pure module deriving per-stage search windows inside multi-stage single-take videos.
+- `derive_scoreboard_windows`: for stages with `scorecard_updated_at`, expected beep offset is `(scorecard - video_start) - stage_time - scorecard_lead_s`; pads by pre/post; clamps to file bounds.
+- `sequential_window`: fallback when no scorecard timestamps; previous stage's beep anchors the next search window; each stage runs to end-of-file so found beeps narrow downstream searches, never current.
+- `find_beep_conflicts`: flags stage pairs whose detected beeps sit closer than `conflict_threshold_s` (default 2 s); signals carve-up errors where two stages latched onto the same physical beep.
+- All functions pure: datetimes + seconds in, windows out. No file I/O, no project access - the job layer (server.py) resolves the video's wall-clock start, duration, and sibling beeps, then calls in here.
+- Configuration: `BeepWindowConfig` in config.py (scorecard_lead_s, pre/post_pad_s, reset_margin_s, min_window_s, conflict_threshold_s).
+
 **`beep_detect.py`** — Find the start beep timestamp in the audio.
 - Most shot timer beeps are pure tones in the 2.2-3.3 kHz range, lasting 200-500 ms (empirically 2298, 2402, 2698, 2700, 3198 Hz on the labelled fixture set).
 - Approach: bandpass filter to 2-5 kHz, compute Hilbert envelope, smooth at 40 ms; rank candidate runs by `silence_score * tonal_factor * duration_factor`.
 - Adaptive cutoff: `max(min_amplitude * peak, noise_floor * noise_factor, min_abs_peak)`. The noise-floor leg recovers handheld / phone clips where the beep is faint in absolute terms but well above the recording's median noise floor.
 - Return: a `BeepDetection` with `time` (rise-foot leading edge), `peak_amplitude`, `duration_ms`, calibrated `confidence` in [0, 1], and the ranked candidate list.
 - The confidence formula (in `candidate_confidence`) blends tonal purity, duration plausibility, and saturating silence preference, tilted by the margin to the runner-up. Empirically validated against `tests/fixtures/beep_calibration/`: confidence >= 0.7 is right ~95 % of the time. The HTTP server / MCP / SPA use this against `automation.beep_low_confidence_threshold` (default 0.6) to decide whether the auto-trust chain fires (#219).
+- Multi-stage mode: receives a derived `beep_window` tuple (start_s, end_s) from beep_windows.py; ffmpeg extracts that span's audio via `-ss start_s -t (end_s - start_s)`; detection runs inside the window; results are offset back to source-absolute via the window bounds. Windowed mode soft-fails (sets `beep_auto_detect_failed = True`) instead of raising when no candidate clears the confidence threshold, allowing sequential chaining to continue to the next covered stage.
 - Must be robust to: ambient match noise, RO commands, distant beeps from other bays, AGC'd handheld phones with faint beeps, mid-stage shots with quiet pre-roll.
 - Calibration suite + harness live under `tests/fixtures/beep_calibration/` and `scripts/eval_beep_detector.py`. `top-N` recall + per-confidence-bin precision are pinned in `baseline.json`; layer-2 detector tweaks must keep the auto-trust band at >= 95 %.
 
@@ -116,6 +139,16 @@ Tuning notes:
   - Special: first shot (draw) and shots after >1s gap (transitions/reloads) get a different color (e.g., blue) to indicate they're not pure splits.
 - Frame rate: detect from source video via ffprobe, generate fcpxml at matching rate.
 - Add markers on the V1 clip at each shot timestamp for keyboard navigation in FCP.
+
+**`audio.py`** - Audio extraction and caching for multi-stage clips.
+- `ensure_video_audio(...)`: Extract a stage's audio at 48 kHz mono; keyed per-stage per-video so reassignments don't reuse stale caches.
+- `take_audio_path(...)` and `ensure_take_audio(...)`: Extract a whole-take audio at 8 kHz mono (lightweight); keyed by blake2s(storage_path) so it cannot collide with per-stage 48 kHz WAVs. Reuses the same extract/cache/storage-push pattern as per-stage audio.
+- Peaks JSON (3000 bins): generated post-beep-detection for both per-stage (48 kHz) and whole-take (8 kHz) audio. Filenames encode the bin count.
+
+**`ui/server.py`** - Multi-stage take overview and coverage management (issue #348 / #427).
+- Take overview: Per-raw-video endpoints (`GET /api/shooters/{slug}/raw-videos/overview` and `GET /api/shooters/{slug}/raw-videos/peaks`) expose duration, per-stage beep status (found/none/pending), conflict list via `beep_windows.find_beep_conflicts()`, and peaks data.
+- Coverage management: `PATCH /api/shooters/{slug}/raw-videos/coverage` edits the covers_stages list; `POST /api/shooters/{slug}/videos/suggest-coverage` proposes stages from a client-probed wall-clock span.
+- When coverage is declared (attach with covers_stages, or edit via PATCH), the backend creates N StageVideos (one per covered stage) and enqueues windowed beep-detection jobs for each. Conflict detection flags carve-up errors for the take overview page.
 
 **`splitsmith.mcp`** -- Model Context Protocol server (issue #211).
 - Wraps splitsmith's pipeline as agent-callable tools so MCP-aware clients (Claude Desktop, Claude Code, IDE plugins) can drive a match end-to-end.
@@ -189,6 +222,44 @@ class StageAnalysis(BaseModel):
     beep_time: float
     shots: list[Shot]
     anomalies: list[str]
+
+class RawVideo(BaseModel):
+    """One uploaded raw video file attached to a match.
+    
+    A raw video is the original camera recording the user uploaded once;
+    a single 30-minute head-cam clip typically covers multiple stages.
+    StageVideo entries are the per-stage references that point at this
+    raw via storage_path - N:1 relationship (many StageVideos can
+    resolve to the same RawVideo when one source covers multiple stages).
+    """
+    original_filename: str
+    size_bytes: int = 0
+    sha256: str | None = None              # populated on hosted uploads
+    uploaded_at: datetime
+    storage_path: str                      # project-relative or absolute path
+    covers_stages: list[int]               # stage numbers this take spans
+    duration_seconds: float | None = None  # backfilled by detect-beep worker
+    recorded_start: datetime | None = None # wall-clock UTC, backfilled from
+                                           # st_birthtime or mtime - duration
+
+class StageVideo(BaseModel):
+    """One video file assigned to a stage.
+    
+    Assigned videos hash "<path>#<stage_number>" so one source file
+    covering N stages yields N distinct video_ids (per-video API routes
+    and cache filenames stay collision-free).
+    """
+    path: Path
+    role: Literal["primary", "secondary", "ignored"]
+    beep_time: float | None = None
+    beep_window: tuple[float, float] | None = None  # (start_s, end_s)
+                                                    # into source file
+    beep_window_source: Literal["scoreboard",
+                                "sequential",
+                                "manual"] | None = None
+    stage_number: int | None = None        # stamped by MatchProject,
+                                           # feeds video_id computation
+    # ... other fields
 ```
 
 ## Configuration
@@ -307,6 +378,10 @@ The production UI (`splitsmith ui --project PATH`) treats a *match* as the persi
   project.json              # MatchProject metadata + per-stage index
   raw/                      # original video files (or symlinks)
   audio/                    # extracted .wav cache
+                            # per-stage/per-video: stage<N>_cam_<video_id>*.wav
+                            # per-stage peaks: stage<N>_cam_<video_id>*.peaks-*.json
+                            # take-wide peaks (key = blake2s of storage_path): take_<key>.peaks-*.json
+                            # take audio (8 kHz mono): take_<key>.wav
   trimmed/                  # per-stage trimmed MP4s (Sub 5 / #16)
   audit/                    # per-stage audit JSON (same shape as fixture format)
   exports/                  # CSV / FCPXML / report.txt
@@ -339,6 +414,8 @@ Pydantic model `splitsmith.ui.project.MatchProject`. All writes go through `atom
           "added_at": "2026-04-26T18:00:00+00:00",
           "processed": { "beep": true, "shot_detect": true, "trim": true },
           "beep_time": 12.453,
+          "beep_window": [0.0, 60.0],
+          "beep_window_source": "scoreboard",
           "notes": ""
         },
         {
@@ -347,6 +424,8 @@ Pydantic model `splitsmith.ui.project.MatchProject`. All writes go through `atom
           "added_at": "2026-04-28T09:14:00+00:00",
           "processed": { "beep": true, "shot_detect": false, "trim": true },
           "beep_time": 12.501,
+          "beep_window": null,
+          "beep_window_source": null,
           "notes": "bay cam from friend, added 2 days post-match"
         }
       ]

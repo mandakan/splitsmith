@@ -46,7 +46,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { BeepWaveformPicker } from "@/components/BeepSection";
 import { Kicker } from "@/components/ui";
@@ -57,8 +57,10 @@ import {
   api,
   type BeepQueueItem,
   type BeepQueueResponse,
+  type RawVideoManifestEntry,
 } from "@/lib/api";
-import { useMatchHref } from "@/lib/matchHref";
+import { takeHref, useMatchHref } from "@/lib/matchHref";
+import { findTakeForPath, takeFilename } from "@/lib/takes";
 import { modKeyGlyph } from "@/lib/platform";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 
@@ -716,6 +718,28 @@ function ActiveDetail({
     setDraftTime(null);
   }, [item.slug, item.stage_number, item.video_id]);
 
+  // "Part of take <filename>" link when this primary belongs to a raw
+  // recording covering 2+ stages. Resolved from the shooter's raw-video
+  // manifest; errors are silent (the link just hides).
+  const { matchId } = useParams<{ matchId?: string }>();
+  const [takeEntry, setTakeEntry] = useState<RawVideoManifestEntry | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setTakeEntry(null);
+    void api
+      .getProject(item.slug)
+      .then((p) => {
+        if (alive) setTakeEntry(findTakeForPath(p.raw_videos, item.video_path));
+      })
+      .catch(() => {
+        /* non-fatal: no take link */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [item.slug, item.video_path]);
+  const takeName = takeEntry != null ? takeFilename(takeEntry) : null;
+
   // Single source of truth for playback: the right-pane <video>
   // element. The waveform picker reads from this same element instead
   // of creating its own audio (same pattern as the audit canvas
@@ -794,6 +818,14 @@ function ActiveDetail({
           <span className="text-ink-2">{item.shooter_name}</span>
         </span>
         <span className="text-subtle">Primary camera</span>
+        {takeName != null && (
+          <Link
+            to={takeHref(matchId, item.slug, takeName)}
+            className="inline-flex items-center gap-1 text-beep underline-offset-2 hover:text-ink-2 hover:underline"
+          >
+            Part of take {takeName}
+          </Link>
+        )}
         <span
           className={cn(
             "ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[0.625rem] tracking-[0.12em]",

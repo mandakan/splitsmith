@@ -261,17 +261,25 @@ export function ReviewLayout({
             : "lg:grid-cols-[300px_minmax(0,1fr)_300px]",
         )}
       >
-        <ClipList model={model} selectedPath={selectedPath} onSelect={setSelectedPath} />
+        <ClipList
+          model={model}
+          selectedPath={selectedPath}
+          onSelect={setSelectedPath}
+          slug={slug}
+          rawVideos={project.raw_videos ?? []}
+        />
         <ClipDetail
           slug={slug}
           clip={selectedClip}
           allStages={project.stages}
           shooters={shooters}
+          rawVideos={project.raw_videos ?? []}
           busy={busy}
           onMove={handleMove}
           onRemove={onRemoveVideo}
           onMoveShooter={onMoveShooter}
           onError={onError}
+          onReload={onSaved}
         />
         <StageReferenceDrawer
           stages={project.stages}
