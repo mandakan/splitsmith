@@ -22,6 +22,7 @@ open so the next access re-extracts under the new naming.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -250,6 +251,83 @@ def ensure_video_window_audio(
         str(start_s),
         "-t",
         str(end_s - start_s),
+        "-i",
+        str(src_resolved),
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-vn",
+        str(audio_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise AudioExtractionError(
+            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc
+    _try_push_audio_to_storage(project, audio_path)
+    return audio_path
+
+
+def take_audio_path(
+    project_root: Path,
+    storage_path: str,
+    *,
+    project: MatchProject | None = None,
+) -> Path:
+    """Cache path for a take-level 8 kHz mono WAV.
+
+    Keyed by a blake2s(storage_path) hash so the name stays short and
+    collision-free across files with the same basename in different folders.
+    The 8 kHz rate keeps the file small (about 1.8 MB/min) while retaining
+    enough resolution for a whole-file envelope waveform.
+
+      <audio_dir>/take_<blake2s(storage_path, digest_size=6).hexdigest()>.wav
+    """
+    audio_dir = project.audio_path(project_root) if project else project_root / "audio"
+    h = hashlib.blake2s(storage_path.encode(), digest_size=6).hexdigest()
+    return audio_dir / f"take_{h}.wav"
+
+
+def ensure_take_audio(
+    project_root: Path,
+    storage_path: str,
+    source: Path,
+    *,
+    sample_rate: int = 8000,
+    ffmpeg_binary: str = "ffmpeg",
+    project: MatchProject | None = None,
+) -> Path:
+    """Extract a mono 8 kHz WAV for the whole take if not already cached.
+
+    Same extract/cache/storage-push pattern as :func:`ensure_video_audio`.
+    The low sample rate keeps the take-level file small; it is only used
+    for the overview waveform, not for beep detection (which uses the
+    per-stage window WAV at 48 kHz).
+    """
+    audio_path = take_audio_path(project_root, storage_path, project=project)
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+
+    src_resolved = source.resolve()
+    if not src_resolved.exists():
+        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+
+    if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
+        return audio_path
+
+    if _try_pull_audio_from_storage(project, audio_path):
+        return audio_path
+
+    if not shutil.which(ffmpeg_binary):
+        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
+
+    cmd = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
         "-i",
         str(src_resolved),
         "-ac",

@@ -80,3 +80,56 @@ def test_window_wav_ffmpeg_args_and_cache(tmp_path: Path) -> None:
     assert cmd[cmd.index("-ss") + 1] == "30.0"
     assert cmd[cmd.index("-t") + 1] == "180.0"
     assert out1.name == f"stage2_cam_{video.video_id}_win_30000_210000.wav"
+
+
+def test_ensure_take_audio_uses_8khz_and_caches(tmp_path: Path) -> None:
+    """ensure_take_audio passes -ar 8000 to ffmpeg and caches by storage_path hash."""
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, capture_output, text):  # noqa: ANN001
+        calls.append(cmd)
+        Path(cmd[-1]).write_bytes(b"RIFF")
+
+        class R:
+            returncode = 0
+
+        return R()
+
+    src = tmp_path / "VID_TAKE.mp4"
+    src.write_bytes(b"\x00")
+    storage_path = "raw/VID_TAKE.mp4"
+
+    with (
+        patch.object(audio_helpers.subprocess, "run", side_effect=fake_run),
+        patch.object(audio_helpers.shutil, "which", return_value="/usr/bin/ffmpeg"),
+    ):
+        out1 = audio_helpers.ensure_take_audio(tmp_path, storage_path, src)
+        out2 = audio_helpers.ensure_take_audio(tmp_path, storage_path, src)
+
+    assert out1 == out2
+    assert len(calls) == 1  # second call was a cache hit
+
+    cmd = calls[0]
+    # Sample rate must be 8000 for the take-level envelope WAV.
+    assert cmd[cmd.index("-ar") + 1] == "8000"
+    # Cache name is keyed by blake2s hash of storage_path, not video_id.
+    import hashlib
+
+    h = hashlib.blake2s(storage_path.encode(), digest_size=6).hexdigest()
+    assert out1.name == f"take_{h}.wav"
+    assert out1.parent == tmp_path / "audio"
+
+
+def test_take_audio_path_deterministic(tmp_path: Path) -> None:
+    """take_audio_path is deterministic and scoped to the storage_path."""
+    import hashlib
+
+    storage_path = "raw/VID_TAKE.mp4"
+    h = hashlib.blake2s(storage_path.encode(), digest_size=6).hexdigest()
+
+    p = audio_helpers.take_audio_path(tmp_path, storage_path)
+    assert p == tmp_path / "audio" / f"take_{h}.wav"
+
+    # Different storage_paths produce different names.
+    other = audio_helpers.take_audio_path(tmp_path, "raw/OTHER.mp4")
+    assert other.name != p.name

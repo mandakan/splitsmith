@@ -1834,6 +1834,33 @@ def register_job_bodies(state: AppState) -> None:
             and v_fresh is not None
         ):
             asyncio.run(_advance_sequential_chain(state, slug, fresh, v_fresh, stage_number))
+        # Generate the whole-take envelope peaks for the TakeOverview waveform.
+        # This runs on every take-windowed detect job; the WAV and peaks JSON
+        # caches make repeated calls cheap (cache-hit path). Wrapped in
+        # try/except so a peaks failure never aborts the detect job.
+        if take_window is not None:
+            try:
+                root_for_peaks = state.shooter_root(slug)
+                take_wav = audio_helpers.ensure_take_audio(
+                    root_for_peaks,
+                    str(video.path),
+                    source,
+                    project=proj,
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                )
+                peaks_result = waveform_helpers.ensure_peaks(take_wav, 3000)
+                # Push the peaks JSON to storage so the API process can serve
+                # it without re-computing. No-op in local mode (no storage).
+                if proj._storage is not None and proj._storage_scope is not None:
+                    peaks_path = waveform_helpers.cache_path(take_wav, 3000)
+                    peaks_key = f"{proj._storage_scope}/audio/{peaks_path.name}"
+                    try:
+                        proj._storage.write_bytes(peaks_key, peaks_path.read_bytes())
+                    except Exception as push_exc:
+                        logger.info("take peaks: storage push failed: %s", push_exc)
+                del peaks_result  # result used only for side-effect (cache write)
+            except Exception as peaks_exc:
+                logger.info("take peaks: generation failed for %s: %s", video.path, peaks_exc)
         handle.update(progress=1.0, message="Done")
 
     def _run_trim(
@@ -5675,6 +5702,157 @@ def create_app(
         if canonical is None:
             raise HTTPException(status_code=500, detail="coverage applied but raw video entry missing")
         return JSONResponse(canonical.model_dump(mode="json"))
+
+    @app.get("/api/shooters/{slug}/raw-videos/overview")
+    def raw_video_overview(
+        slug: str,
+        filename: str = Query(...),
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Return the take-level overview for a registered raw video.
+
+        Response shape:
+
+        .. code-block:: json
+
+            {
+              "raw_video": { ...RawVideo dump... },
+              "duration_seconds": 1800.0,
+              "stages": [
+                {
+                  "stage_number": 2, "stage_name": "Short course",
+                  "video_id": "abc123def456", "role": "primary",
+                  "beep_time": 512.3, "beep_confidence": 0.91,
+                  "beep_reviewed": true, "beep_window": [420.0, 700.0],
+                  "beep_window_source": "scoreboard", "status": "found"
+                }
+              ],
+              "conflicts": [2, 3]
+            }
+
+        ``status`` per stage-video:
+        - ``"found"`` -- beep_time is set
+        - ``"none"`` -- beep_auto_detect_failed is True
+        - ``"pending"`` -- not yet detected
+
+        ``conflicts`` lists stage numbers whose beep times sit within
+        ``BeepWindowConfig.conflict_threshold_s`` of each other.
+        """
+        name = _sanitize_raw_filename(filename)
+        storage_path = f"raw/{name}"
+        project = state.shooter_project(slug)
+
+        rv = project.find_raw_video(storage_path)
+        if rv is None:
+            raise HTTPException(status_code=404, detail=f"no raw video at {storage_path!r}")
+
+        cfg = BeepWindowConfig()
+        stages_out = []
+        beeps_for_conflicts: dict[int, float] = {}
+
+        for stage_num in rv.covers_stages:
+            try:
+                stage = project.stage(stage_num)
+            except KeyError:
+                continue
+            # Find the StageVideo for this take (matched by path).
+            sv = next((v for v in stage.videos if str(v.path) == storage_path), None)
+            if sv is None:
+                continue
+
+            # Determine status.
+            if sv.beep_time is not None:
+                status = "found"
+                beeps_for_conflicts[stage_num] = sv.beep_time
+            elif sv.beep_auto_detect_failed:
+                status = "none"
+            else:
+                status = "pending"
+
+            beep_window_list = list(sv.beep_window) if sv.beep_window is not None else None
+            stages_out.append(
+                {
+                    "stage_number": stage.stage_number,
+                    "stage_name": stage.stage_name,
+                    "video_id": sv.video_id,
+                    "role": sv.role,
+                    "beep_time": sv.beep_time,
+                    "beep_confidence": sv.beep_confidence,
+                    "beep_reviewed": sv.beep_reviewed,
+                    "beep_window": beep_window_list,
+                    "beep_window_source": sv.beep_window_source,
+                    "status": status,
+                }
+            )
+
+        conflicts = sorted(beep_windows.find_beep_conflicts(beeps_for_conflicts, cfg.conflict_threshold_s))
+
+        payload = {
+            "raw_video": rv.model_dump(mode="json"),
+            "duration_seconds": rv.duration_seconds,
+            "stages": stages_out,
+            "conflicts": conflicts,
+        }
+        return JSONResponse(payload)
+
+    @app.get("/api/shooters/{slug}/raw-videos/peaks")
+    def raw_video_peaks(
+        slug: str,
+        filename: str = Query(...),
+        bins: int = Query(default=3000, ge=16, le=8192),
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Return ``bins`` peak magnitudes for the take's whole-file envelope waveform.
+
+        Local mode: extract the 8 kHz take WAV on demand, then compute peaks.
+
+        Hosted mode: the worker pushes a pre-computed peaks JSON to storage
+        after detection. When the JSON is absent from storage this endpoint
+        returns ``202 {"pending": true}`` so the SPA can poll and render a
+        spinner in the meantime.
+
+        Success response shape is identical to the per-stage
+        ``/stages/{n}/peaks`` endpoint.
+        """
+        name = _sanitize_raw_filename(filename)
+        storage_path = f"raw/{name}"
+        root = state.shooter_root(slug)
+        project = state.shooter_project(slug)
+
+        rv = project.find_raw_video(storage_path)
+        if rv is None:
+            raise HTTPException(status_code=404, detail=f"no raw video at {storage_path!r}")
+
+        take_wav = audio_helpers.take_audio_path(root, storage_path, project=project)
+        peaks_path = waveform_helpers.cache_path(take_wav, bins)
+
+        # Hosted mode: the worker pushed the peaks JSON to storage.
+        if state.storage is not None and project._storage_scope is not None:
+            # Serve from local cache when already pulled by a prior request.
+            if peaks_path.exists() and take_wav.exists():
+                result = waveform_helpers.PeaksResult.model_validate_json(
+                    peaks_path.read_text(encoding="utf-8")
+                )
+                return JSONResponse(result.model_dump(mode="json"))
+            peaks_key = f"{project._storage_scope}/audio/{peaks_path.name}"
+            try:
+                if not state.storage.exists(peaks_key):
+                    return JSONResponse({"pending": True}, status_code=202)
+                peaks_path.parent.mkdir(parents=True, exist_ok=True)
+                with state.storage.open_stream(peaks_key) as src, peaks_path.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            except Exception as exc:
+                logger.info("take peaks: storage pull failed: %s", exc)
+                return JSONResponse({"pending": True}, status_code=202)
+            result = waveform_helpers.PeaksResult.model_validate_json(peaks_path.read_text(encoding="utf-8"))
+            return JSONResponse(result.model_dump(mode="json"))
+
+        # Local mode: extract + compute on demand.
+        video_path = Path(storage_path)
+        source = project.resolve_video_path(root, video_path)
+        wav = audio_helpers.ensure_take_audio(root, storage_path, source, project=project)
+        result = waveform_helpers.ensure_peaks(wav, bins)
+        return JSONResponse(result.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/videos/suggest-coverage")
     def suggest_coverage(
