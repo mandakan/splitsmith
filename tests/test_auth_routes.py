@@ -161,6 +161,21 @@ def test_is_admin_case_insensitive(hosted_env: str, monkeypatch: pytest.MonkeyPa
         assert me.json()["is_admin"] is True
 
 
+def test_is_admin_allowlist_with_whitespace(hosted_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allowlist entries with surrounding whitespace are still recognized."""
+    monkeypatch.setenv("SPLITSMITH_ADMIN_EMAILS", " M@thias.se , other@x.se ")
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    sender = _CapturingSender()
+    app.state.splitsmith_state.auth._email = sender
+    with TestClient(app, follow_redirects=False) as client:
+        login(client, sender, "m@thias.se")
+        me = client.get("/api/me")
+        assert me.status_code == 200
+        assert me.json()["is_admin"] is True
+
+
 def test_is_admin_false_for_non_admin_hosted_user(hosted_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Hosted user whose email is NOT in SPLITSMITH_ADMIN_EMAILS: is_admin false."""
     monkeypatch.setenv("SPLITSMITH_ADMIN_EMAILS", "other@example.com")

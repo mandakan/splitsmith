@@ -4294,7 +4294,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     state.cookie_secure = public_url.lower().startswith("https://")
 
     raw_admin = os.environ.get(SPLITSMITH_ADMIN_EMAILS_ENV, "")
-    state.admin_emails = frozenset(e.lower() for e in raw_admin.split(",") if e.strip())
+    state.admin_emails = frozenset(e.strip().lower() for e in raw_admin.split(",") if e.strip())
 
     # ``pool_disabled=True`` because the hosted-mode boot path runs
     # multiple short-lived event loops (each worker thread's asyncio.run,
