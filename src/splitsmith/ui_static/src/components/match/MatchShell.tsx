@@ -11,7 +11,7 @@
  * sidebar footer rail (v2 audit chrome -- no more floating FAB).
  */
 
-import { HelpCircle, Menu, Repeat, Settings } from "lucide-react";
+import { Menu, Repeat } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
@@ -26,7 +26,7 @@ import { JobsSurface } from "@/components/Jobs";
 import { MobileNav } from "@/components/match/MobileNav";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { FOOTAGE_HINT, matchNavItems } from "@/components/match/navItems";
-import { Brand, IconButton } from "@/components/ui";
+import { Brand } from "@/components/ui";
 import {
   MatchSidebar,
   SIDEBAR_COLLAPSED_WIDTH,
@@ -435,12 +435,6 @@ export function MatchShell() {
           ) : null}
           <div className="flex-1" />
           <AccountChip />
-          <IconButton variant="subtle" size="md" label="Help">
-            <HelpCircle className="size-[18px]" />
-          </IconButton>
-          <IconButton variant="subtle" size="md" label="Settings">
-            <Settings className="size-[18px]" />
-          </IconButton>
           <button
             type="button"
             onClick={switchProject}
@@ -488,12 +482,6 @@ export function MatchShell() {
               <div className="flex items-center gap-2 px-1 py-1">
                 <AccountChip />
                 <div className="flex-1" />
-                <IconButton variant="subtle" size="md" label="Help">
-                  <HelpCircle className="size-[18px]" />
-                </IconButton>
-                <IconButton variant="subtle" size="md" label="Settings">
-                  <Settings className="size-[18px]" />
-                </IconButton>
               </div>
               <button
                 type="button"
@@ -505,6 +493,11 @@ export function MatchShell() {
                 <span className="truncate">Switch project</span>
               </button>
               <JobsSurface mobile />
+              {health?.version ? (
+                <div className="px-3 pb-1 pt-2 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
+                  Splitsmith v{health.version}
+                </div>
+              ) : null}
             </div>
           }
         />
@@ -538,6 +531,7 @@ export function MatchShell() {
           matchId={urlMatchId ?? health?.match_id ?? undefined}
           collapsed={sidebarCollapsed}
           onCollapseToggle={toggleSidebar}
+          version={health?.version}
         />
         )}
         <div className={cn("min-w-0 flex-1")}>
