@@ -11,7 +11,7 @@
  * sidebar footer rail (v2 audit chrome -- no more floating FAB).
  */
 
-import { HelpCircle, Repeat, Settings } from "lucide-react";
+import { HelpCircle, Menu, Repeat, Settings } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Navigate,
@@ -22,7 +22,10 @@ import {
 } from "react-router-dom";
 
 import { AccountChip } from "@/components/AccountChip";
+import { JobsSurface } from "@/components/Jobs";
+import { MobileNav } from "@/components/match/MobileNav";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
+import { matchNavItems } from "@/components/match/navItems";
 import { Brand, IconButton } from "@/components/ui";
 import {
   MatchSidebar,
@@ -39,6 +42,7 @@ import {
 } from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { useShellHeaderHeight } from "@/lib/shellChrome";
 import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
@@ -114,6 +118,16 @@ export function MatchShell() {
     });
   }, []);
 
+  // Mobile shell (< md): sidebar is replaced by the MobileNav drawer.
+  // Drawer state is ephemeral - never persisted.
+  const isMobile = useIsMobile();
+  const [navOpen, setNavOpen] = useState(false);
+  // Safety net: any route change closes the drawer, even when the
+  // navigation came from somewhere other than a drawer row.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
   // Shell geometry as CSS vars: measured header height (the header
   // wraps, so no constant is safe) + current sidebar width. The sidebar
   // and the fixed bottom bars (StageActionBar, session summary) read
@@ -121,9 +135,9 @@ export function MatchShell() {
   const { headerRef, headerStyle } = useShellHeaderHeight();
   const shellStyle = {
     ...headerStyle,
-    "--shell-sidebar-w": `${
-      sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH
-    }px`,
+    "--shell-sidebar-w": isMobile
+      ? "0px"
+      : `${sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH}px`,
   } as React.CSSProperties;
 
   const [didInitMode, setDidInitMode] = useState(false);
@@ -326,6 +340,11 @@ export function MatchShell() {
     navigate("/pick", { replace: true });
   }
 
+  // Same base MatchSidebar derives from its matchId prop, so the drawer
+  // links stay inside the match-scoped subtree.
+  const mobileNavMatchId = urlMatchId ?? health?.match_id ?? null;
+  const mobileNavBase = mobileNavMatchId ? `/match/${mobileNavMatchId}` : "";
+
   return (
     <div
       className="min-h-screen text-ink"
@@ -349,6 +368,23 @@ export function MatchShell() {
             opacity: 0.55,
           }}
         />
+        {isMobile ? (
+          <div className="flex items-center gap-3 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open navigation"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+            >
+              <Menu className="size-5" aria-hidden />
+            </button>
+            <Brand variant="compact" />
+            <span className="min-w-0 truncate font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
+              {health?.project_name ?? "..."}
+            </span>
+            <div className="flex-1" />
+          </div>
+        ) : (
         <div className="flex flex-wrap items-center gap-4 px-7 py-3">
           <Brand variant="compact" />
           <nav
@@ -424,9 +460,54 @@ export function MatchShell() {
             <Repeat className="size-3.5 text-subtle" />
           </button>
         </div>
+        )}
       </header>
 
+      {isMobile ? (
+        <MobileNav
+          open={navOpen}
+          onClose={() => setNavOpen(false)}
+          // Same matchNavItems call MatchSidebar makes, argument for
+          // argument, so drawer and sidebar destinations never drift.
+          items={matchNavItems({
+            base: mobileNavBase,
+            shooterSlug: defaultShooterSlug,
+            hasFootage: shooters.some((s) => s.video_count > 0),
+            shooterCount,
+            beepReviewPendingCount: beepReviewPending,
+            footageHint:
+              "Attach footage to this match before this surface is usable",
+          })}
+          header={{ matchName: project?.name ?? health?.project_name ?? "..." }}
+          extras={
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2 px-1 py-1">
+                <AccountChip />
+                <div className="flex-1" />
+                <IconButton variant="subtle" size="md" label="Help">
+                  <HelpCircle className="size-[18px]" />
+                </IconButton>
+                <IconButton variant="subtle" size="md" label="Settings">
+                  <Settings className="size-[18px]" />
+                </IconButton>
+              </div>
+              <button
+                type="button"
+                onClick={switchProject}
+                title="Switch project"
+                className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left font-display text-sm font-bold uppercase tracking-wide text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <Repeat className="size-[15px] shrink-0" aria-hidden />
+                <span className="truncate">Switch project</span>
+              </button>
+              <JobsSurface mobile />
+            </div>
+          }
+        />
+      ) : null}
+
       <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))]">
+        {isMobile ? null : (
         <MatchSidebar
           matchName={project?.name ?? health?.project_name ?? "..."}
           matchSubtitle={renderMatchSubtitle(project)}
@@ -454,6 +535,7 @@ export function MatchShell() {
           collapsed={sidebarCollapsed}
           onCollapseToggle={toggleSidebar}
         />
+        )}
         <div className={cn("min-w-0 flex-1")}>
           <Outlet
             context={{

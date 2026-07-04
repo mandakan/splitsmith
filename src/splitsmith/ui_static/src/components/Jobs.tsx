@@ -355,11 +355,14 @@ export interface JobsSheetProps {
   state: JobsState;
   onClose: () => void;
   /** Horizontal offset from the left viewport edge -- the host pins the
-   *  sheet just outside the sidebar rail. */
+   *  sheet just outside the sidebar rail. Ignored when ``mobile``. */
   leftOffset: number;
+  /** Full-width mobile position (left-4 right-4 bottom-4) instead of the
+   *  sidebar-anchored offset. */
+  mobile?: boolean;
 }
 
-export function JobsSheet({ state, onClose, leftOffset }: JobsSheetProps) {
+export function JobsSheet({ state, onClose, leftOffset, mobile = false }: JobsSheetProps) {
   const { running, pending, failed, error, cancel, acknowledge, acknowledgeAll } =
     state;
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -388,8 +391,11 @@ export function JobsSheet({ state, onClose, leftOffset }: JobsSheetProps) {
       ref={panelRef}
       role="dialog"
       aria-label="Jobs"
-      className="fixed bottom-4 z-drawer flex max-h-[480px] w-[360px] flex-col overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[0_24px_60px_-16px_rgba(0,0,0,0.75)]"
-      style={{ left: leftOffset }}
+      className={cn(
+        "fixed bottom-4 z-drawer flex max-h-[480px] flex-col overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[0_24px_60px_-16px_rgba(0,0,0,0.75)]",
+        mobile ? "left-4 right-4" : "w-[360px]",
+      )}
+      style={mobile ? undefined : { left: leftOffset }}
     >
       <div className="flex items-center gap-2 border-b border-rule bg-surface-2 px-3.5 py-2.5">
         <Zap className="size-3.5 text-led" aria-hidden />
@@ -611,19 +617,24 @@ function pad2(n: number): string {
 /* -------------------------------------------------------------------------- */
 
 export interface JobsSurfaceProps {
-  collapsed: boolean;
+  collapsed?: boolean;
   /** Width of the sidebar when expanded -- the sheet anchors just past it. */
-  sidebarExpandedWidth: number;
+  sidebarExpandedWidth?: number;
   /** Width of the sidebar when collapsed. */
-  sidebarCollapsedWidth: number;
+  sidebarCollapsedWidth?: number;
+  /** Mobile drawer mode: the trigger renders as a full-width drawer row
+   *  and the sheet takes the full-width position (no sidebar offset). */
+  mobile?: boolean;
 }
 
 /** Combined rail + sheet with internal open state. Drop this at the
- *  bottom of any sidebar; the sheet anchors itself just past the rail. */
+ *  bottom of any sidebar; the sheet anchors itself just past the rail.
+ *  In ``mobile`` mode it drops into the nav drawer footer instead. */
 export function JobsSurface({
-  collapsed,
-  sidebarExpandedWidth,
-  sidebarCollapsedWidth,
+  collapsed = false,
+  sidebarExpandedWidth = 0,
+  sidebarCollapsedWidth = 0,
+  mobile = false,
 }: JobsSurfaceProps) {
   const state = useJobs();
   const [open, setOpen] = useState(false);
@@ -648,7 +659,11 @@ export function JobsSurface({
 
   return (
     <>
-      <JobsRail state={state} collapsed={collapsed} open={open} onToggle={toggle} />
+      {mobile ? (
+        <MobileJobsRow state={state} open={open} onToggle={toggle} />
+      ) : (
+        <JobsRail state={state} collapsed={collapsed} open={open} onToggle={toggle} />
+      )}
       {open ? (
         <Portal>
           {/* z-drawer minus epsilon isn't a thing -- the backdrop shares
@@ -664,10 +679,59 @@ export function JobsSurface({
             state={state}
             onClose={() => setOpen(false)}
             leftOffset={offset}
+            mobile={mobile}
           />
         </Portal>
       ) : null}
     </>
+  );
+}
+
+/** Full-width Jobs trigger row for the mobile nav drawer footer. Same
+ *  status readout idiom as the expanded JobsRail header. */
+function MobileJobsRow({
+  state,
+  open,
+  onToggle,
+}: {
+  state: JobsState;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { running, pending, failed } = state;
+  const attn = failed;
+  const hasActivity = running.length > 0 || attn.length > 0;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={`Jobs: ${running.length} running, ${pending.length} queued${
+        attn.length ? `, ${attn.length} need attention` : ""
+      }`}
+      className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left font-display text-sm font-bold uppercase tracking-wide text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+    >
+      <Zap className="size-[15px] shrink-0" aria-hidden />
+      <span className="flex-1">Jobs</span>
+      <span
+        aria-hidden
+        className="font-mono text-[0.5625rem] font-bold tabular-nums tracking-[0.04em] text-subtle"
+      >
+        {running.length}·R {pending.length}·Q
+        {attn.length ? ` ${attn.length}·!` : ""}
+      </span>
+      {hasActivity ? (
+        <span
+          aria-hidden
+          className={cn(
+            "inline-block size-2 shrink-0 animate-pulse rounded-full",
+            attn.length
+              ? "bg-live shadow-[0_0_8px_var(--color-live-glow)]"
+              : "bg-led shadow-[0_0_8px_var(--color-led-glow)]",
+          )}
+        />
+      ) : null}
+    </button>
   );
 }
 
