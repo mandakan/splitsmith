@@ -7,11 +7,12 @@
  * operator-only assumptions. See the 2026-07-04 spec.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
+import { api } from "@/lib/api";
 import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
 import { statusLabel } from "@/lib/stageStatus";
 import { useMatchHref } from "@/lib/matchHref";
@@ -87,16 +88,72 @@ export function Results() {
   );
   const totals = useMemo(() => matchTotals(rows, shooters), [rows, shooters]);
 
-  // Total match time: sum of per-stage time_seconds from the loaded project.
-  // In single-shooter mode this is the shooter's match total. In multi-shooter
-  // mode it reflects the primary/default shooter's data - a known limitation
-  // of the overview context (no per-shooter stage times in the outlet data).
-  const totalTimeSecs = useMemo(
-    () => (project ? project.stages.reduce((sum, s) => sum + (s.time_seconds ?? 0), 0) : 0),
-    [project],
-  );
-
   const isSingleShooter = shooters.length <= 1;
+
+  // Per-shooter stage times. The outlet-context project belongs to ONE
+  // shooter (the URL/default one), so multi-shooter matches fetch every
+  // shooter's project (read-only GET) and pivot to slug -> stage -> time.
+  // Null while in flight; a shooter whose fetch failed is simply absent
+  // from the map - its cells render the status chip without a time. A
+  // wrong time is worse than no time on a results surface.
+  const [shooterStageTimes, setShooterStageTimes] = useState<Record<
+    string,
+    Record<number, number>
+  > | null>(null);
+  useEffect(() => {
+    if (shooters.length <= 1) {
+      setShooterStageTimes(null);
+      return;
+    }
+    let alive = true;
+    setShooterStageTimes(null);
+    Promise.all(
+      shooters.map((s) =>
+        api
+          .getProject(s.slug)
+          .then((p) => [s.slug, p] as const)
+          .catch(() => [s.slug, null] as const),
+      ),
+    ).then((entries) => {
+      if (!alive) return;
+      const map: Record<string, Record<number, number>> = {};
+      for (const [slug, p] of entries) {
+        if (!p) continue;
+        map[slug] = Object.fromEntries(
+          p.stages.map((st) => [st.stage_number, st.time_seconds]),
+        );
+      }
+      setShooterStageTimes(map);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [shooters]);
+
+  // Stage time for one cell, or null when unknown (multi-shooter fetch
+  // still in flight / failed for that shooter). Single-shooter reads the
+  // outlet-context project directly - it IS that shooter's project.
+  const cellTime = (slug: string, stageNumber: number): number | null => {
+    if (isSingleShooter) {
+      return (
+        project?.stages.find((s) => s.stage_number === stageNumber)
+          ?.time_seconds ?? null
+      );
+    }
+    const t = shooterStageTimes?.[slug]?.[stageNumber];
+    return typeof t === "number" ? t : null;
+  };
+
+  // Total match time: single-shooter only. In multi-shooter mode there is
+  // no single "match total" to show in the header (each shooter has their
+  // own), so the header omits it rather than showing one shooter's sum.
+  const totalTimeSecs = useMemo(
+    () =>
+      isSingleShooter && project
+        ? project.stages.reduce((sum, s) => sum + (s.time_seconds ?? 0), 0)
+        : 0,
+    [isSingleShooter, project],
+  );
 
   if (!project) {
     return (
@@ -149,9 +206,6 @@ export function Results() {
       {/* Mobile: one card per stage */}
       <div className="lg:hidden space-y-3">
         {rows.map((row) => {
-          const stageTime = project.stages.find(
-            (s) => s.stage_number === row.stageNumber,
-          )?.time_seconds ?? 0;
           return (
             <section
               key={row.stageNumber}
@@ -173,6 +227,7 @@ export function Results() {
                 {row.cells.map((cell) => {
                   const audited = cell.status === "audited";
                   if (audited) {
+                    const time = cellTime(cell.shooter.slug, row.stageNumber);
                     return (
                       <Link
                         key={cell.shooter.slug}
@@ -190,7 +245,7 @@ export function Results() {
                             isSingleShooter && "flex-1",
                           )}
                         >
-                          {formatTime(stageTime)}
+                          {time != null ? formatTime(time) : "--"}
                         </span>
                         <StatusChip tone={cell.tone} status={cell.status} />
                       </Link>
@@ -254,9 +309,6 @@ export function Results() {
         {/* Stage rows */}
         <div className="space-y-px">
           {rows.map((row) => {
-            const stageTime = project.stages.find(
-              (s) => s.stage_number === row.stageNumber,
-            )?.time_seconds ?? 0;
             return (
               <div
                 key={row.stageNumber}
@@ -278,6 +330,7 @@ export function Results() {
                 {row.cells.map((cell) => {
                   const audited = cell.status === "audited";
                   if (audited) {
+                    const time = cellTime(cell.shooter.slug, row.stageNumber);
                     return (
                       <Link
                         key={cell.shooter.slug}
@@ -285,7 +338,7 @@ export function Results() {
                         className="flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
                         <span className="font-mono text-sm tabular-nums text-ink-2">
-                          {formatTime(stageTime)}
+                          {time != null ? formatTime(time) : "--"}
                         </span>
                         <StatusChip tone={cell.tone} status={cell.status} />
                       </Link>
