@@ -238,21 +238,34 @@ class WorkerDispatcher:
                     woken_ids.append(worker.id)
                     woke_self_hosted = True
             if woken_ids:
-                await self._store.touch_wake(woken_ids)
+                try:
+                    await self._store.touch_wake(woken_ids)
+                except Exception:
+                    # Bookkeeping only (last_wake_at): a DB hiccup here must
+                    # not cancel the grace-timer arming below or flip a
+                    # delivered wake to False.
+                    logger.warning("worker dispatcher: touch_wake bookkeeping failed", exc_info=True)
                 if woke_self_hosted:
                     # Self-hosted wakes are best-effort (a connected box may
                     # be wedged); railway-only wakes need no faster net than
                     # the existing ones.
-                    self._spawn(self._grace_escalate(priority))
+                    self._spawn(self._grace_escalate(priority, armed_stamp=self._last_attempt))
                 return True
         return False
 
-    async def _grace_escalate(self, woken_priority: int) -> None:
+    async def _grace_escalate(self, woken_priority: int, armed_stamp: float | None) -> None:
         """After ``grace_seconds``: if jobs are still pending and no worker
         heartbeat appeared, wake the tiers below the one already woken.
 
-        Bypasses the cooldown - the escalation is part of the same logical
-        trigger. Never raises: it runs as a detached task and a failure is
+        ``armed_stamp`` is ``self._last_attempt`` as of the wake that armed
+        this window. Before escalating, the stamp is re-checked and moved
+        under ``self._lock``: if another wake attempt (a trigger or a racing
+        escalation) has moved it since, this window stands down - the newer
+        attempt's own grace window (or the nets) covers it. That keeps
+        overlapping grace windows from double-booting Railway, while the
+        escalation still bypasses the cooldown its own trigger stamped.
+
+        Never raises: it runs as a detached task and a failure is
         covered by the nets. A failing heartbeat check aborts the
         escalation (same fail-safe as :meth:`trigger`).
         """
@@ -262,6 +275,10 @@ class WorkerDispatcher:
                 return
             if self._worker_active is not None and await self._worker_active():
                 return
+            async with self._lock:
+                if self._last_attempt != armed_stamp:
+                    return
+                self._last_attempt = time.monotonic()
             logger.info(
                 "worker dispatcher: no drain %.0fs after wake - escalating past priority %s",
                 self._grace_seconds,

@@ -458,6 +458,90 @@ def test_grace_escalation_skipped_when_queue_drained() -> None:
     assert requests == []
 
 
+def test_grace_escalations_racing_fire_exactly_one_redeploy() -> None:
+    """Two overlapping grace windows must not double-boot Railway: the first
+    escalation moves the attempt stamp under the lock; the second sees the
+    stamp changed and stands down."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        await _railway_row_id(store)
+        dispatcher = _dispatcher(
+            store,
+            WakeChannelRegistry(),
+            railway=_config(),
+            requests=requests,
+            worker_active=_inactive,
+            pending_jobs=_pending(1),
+        )
+        await asyncio.gather(
+            dispatcher._grace_escalate(10, armed_stamp=None),
+            dispatcher._grace_escalate(10, armed_stamp=None),
+        )
+
+    asyncio.run(scenario())
+    assert len(requests) == 1
+
+
+def test_grace_escalation_stands_down_after_newer_wake_attempt() -> None:
+    """A grace window armed by an older trigger must not escalate once a
+    newer wake attempt has moved the stamp - the newer attempt's own grace
+    window (or the nets) covers it."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        await _railway_row_id(store)
+        dispatcher = _dispatcher(
+            store,
+            WakeChannelRegistry(),
+            railway=_config(),
+            requests=requests,
+            worker_active=_inactive,
+            pending_jobs=_pending(1),
+        )
+        dispatcher._last_attempt = 12345.0  # a newer attempt moved the stamp
+        await dispatcher._grace_escalate(10, armed_stamp=1.0)
+
+    asyncio.run(scenario())
+    assert requests == []
+
+
+def test_touch_wake_failure_does_not_cancel_wake_or_grace() -> None:
+    """A DB hiccup on the last_wake_at bookkeeping must not flip a delivered
+    wake to False or skip arming the grace timer."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> bool:
+        home_id = await _add_home(store)
+        await _railway_row_id(store)
+        registry = WakeChannelRegistry()
+        queue = registry.connect(home_id)
+
+        async def _broken_touch_wake(worker_ids: list[str]) -> None:
+            raise RuntimeError("db gone")
+
+        store.touch_wake = _broken_touch_wake  # type: ignore[method-assign]
+        dispatcher = _dispatcher(
+            store,
+            registry,
+            railway=_config(),
+            requests=requests,
+            worker_active=_inactive,
+            pending_jobs=_pending(1),
+            grace_seconds=0.01,
+        )
+        fired = await dispatcher.trigger()
+        assert queue.qsize() == 1  # the wake itself was delivered
+        await _drain_tasks(dispatcher)
+        return fired
+
+    assert asyncio.run(scenario()) is True
+    assert len(requests) == 1  # grace escalation still armed and fired railway
+
+
 def test_grace_timer_not_armed_for_railway_only_wake() -> None:
     """A railway-only wake has no faster net than the existing ones; nothing
     to escalate to, so no second redeploy after the grace window."""
