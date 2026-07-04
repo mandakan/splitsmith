@@ -385,7 +385,7 @@ export function MatchShell() {
             </button>
             <Brand variant="compact" />
             <span className="min-w-0 truncate font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
-              {health?.project_name ?? "..."}
+              {project?.name ?? health?.project_name ?? "..."}
             </span>
             <div className="flex-1" />
           </div>
