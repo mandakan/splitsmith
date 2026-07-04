@@ -47,7 +47,7 @@ class WakeChannelRegistry:
             del self._channels[worker_id]
             logger.debug("worker_channel: disconnected %s", worker_id)
 
-    async def push(self, worker_id: str, event: str) -> bool:
+    def push(self, worker_id: str, event: str) -> bool:
         """Push event onto the channel for worker_id.
 
         Returns True if the worker was connected, False otherwise.

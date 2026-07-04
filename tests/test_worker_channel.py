@@ -15,7 +15,7 @@ from splitsmith.worker_channel import WakeChannelRegistry
 # - push to unconnected id returns False
 def test_push_unconnected_returns_false() -> None:
     reg = WakeChannelRegistry()
-    result = asyncio.run(reg.push("worker-1", "wake"))
+    result = reg.push("worker-1", "wake")
     assert result is False
 
 
@@ -25,7 +25,7 @@ def test_connect_and_push_readable() -> None:
 
     async def _run() -> str:
         q = reg.connect("worker-1")
-        await reg.push("worker-1", "wake")
+        reg.push("worker-1", "wake")
         return await q.get()
 
     event = asyncio.run(_run())
@@ -36,7 +36,7 @@ def test_connect_and_push_readable() -> None:
 def test_push_connected_returns_true() -> None:
     reg = WakeChannelRegistry()
     reg.connect("worker-2")
-    result = asyncio.run(reg.push("worker-2", "wake"))
+    result = reg.push("worker-2", "wake")
     assert result is True
 
 
@@ -50,7 +50,7 @@ def test_reconnect_supersedes() -> None:
         # old queue should receive "replaced"
         replaced_msg = await old_q.get()
         # push lands on the new queue
-        await reg.push("worker-1", "wake")
+        reg.push("worker-1", "wake")
         new_msg = await new_q.get()
         return replaced_msg, new_msg
 
@@ -66,7 +66,7 @@ def test_disconnect_stale_queue_no_evict() -> None:
     _new_q = reg.connect("worker-1")
     # disconnect with the old (stale) queue - must not evict the new connection
     reg.disconnect("worker-1", old_q)
-    result = asyncio.run(reg.push("worker-1", "wake"))
+    result = reg.push("worker-1", "wake")
     assert result is True
 
 
@@ -75,7 +75,7 @@ def test_disconnect_current_queue_removes_mapping() -> None:
     reg = WakeChannelRegistry()
     q = reg.connect("worker-1")
     reg.disconnect("worker-1", q)
-    result = asyncio.run(reg.push("worker-1", "wake"))
+    result = reg.push("worker-1", "wake")
     assert result is False
 
 
@@ -106,5 +106,5 @@ def test_push_after_disconnect_returns_false() -> None:
     reg = WakeChannelRegistry()
     q = reg.connect("worker-1")
     reg.disconnect("worker-1", q)
-    result = asyncio.run(reg.push("worker-1", "disabled"))
+    result = reg.push("worker-1", "disabled")
     assert result is False
