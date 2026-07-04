@@ -79,6 +79,53 @@ def video_audio_path(
     return audio_dir / f"stage{stage_number}_cam_{video.video_id}.wav"
 
 
+def legacy_video_id(video: StageVideo) -> str:
+    """Pre-take-spec ``video_id``: hash of the source path only.
+
+    The take spec (2026-07-03) changed ``StageVideo.video_id`` to hash
+    "<path>#<stage_number>" for stage-assigned videos, which orphaned
+    every derived-artifact cache (audio WAVs, audit trims) written under
+    the old path-only id. This mirrors the exact legacy hashing
+    (``project.py``'s ``video_id``, minus the stage suffix) so read
+    paths can fall back to those files. Remove together with the
+    fallbacks once a cache migration tool exists.
+    """
+    return hashlib.blake2s(str(video.path).encode("utf-8"), digest_size=6).hexdigest()
+
+
+def _legacy_cache_fallback(
+    project: MatchProject | None,
+    video: StageVideo,
+    new_path: Path,
+    legacy_path: Path,
+) -> Path | None:
+    """Return ``legacy_path`` when it can safely stand in for ``new_path``.
+
+    Read-only fallback for caches orphaned by the take-spec id change:
+    the legacy file must exist (non-empty), differ from the new-keyed
+    name, and the video's source path must be registered exactly once
+    across the whole project (all stages + the unassigned tray). A
+    multi-stage single take registers one path on N stages and the
+    legacy artifact carries one unknown stage's content - ambiguity
+    means no fallback. Writes never target the legacy name.
+    """
+    if project is None or legacy_path == new_path:
+        return None
+    if not (legacy_path.exists() and legacy_path.stat().st_size > 0):
+        return None
+    registrations = 0
+    for stage in project.stages:
+        for v in stage.videos:
+            if v.path == video.path:
+                registrations += 1
+    for v in project.unassigned_videos:
+        if v.path == video.path:
+            registrations += 1
+    if registrations != 1:
+        return None
+    return legacy_path
+
+
 def primary_audio_path(
     project_root: Path,
     stage_number: int,
@@ -145,6 +192,22 @@ def ensure_video_audio(
     """
     audio_path = video_audio_path(project_root, stage_number, video, project=project)
     audio_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Legacy-id read fallback: the take-spec video_id change orphaned
+    # WAVs keyed by the old path-only hash. When the new-keyed WAV is
+    # absent, serve the legacy one if the registration is unambiguous
+    # (single-registration gate in _legacy_cache_fallback) and it is not
+    # stale - an unreachable source counts as not-stale because the
+    # cache is then the only thing we can serve at all. Fresh
+    # extractions below keep writing the new-keyed name. Remove once a
+    # cache migration tool exists.
+    if not (audio_path.exists() and audio_path.stat().st_size > 0):
+        legacy_wav = audio_path.with_name(f"stage{stage_number}_cam_{legacy_video_id(video)}.wav")
+        legacy = _legacy_cache_fallback(project, video, audio_path, legacy_wav)
+        if legacy is not None:
+            src_probe = source_video.resolve()
+            if not src_probe.exists() or legacy.stat().st_mtime >= src_probe.stat().st_mtime:
+                return legacy
 
     src_resolved = source_video.resolve()
     if not src_resolved.exists():
@@ -734,6 +797,18 @@ def pull_trimmed_video(
     output = trimmed_video_path(project_root, stage_number, video, project=project)
     if not (output.exists() and output.stat().st_size > 0):
         _try_pull_trim_from_storage(project, output)
+    if not (output.exists() and output.stat().st_size > 0):
+        # Legacy-id read fallback: the take-spec video_id change
+        # orphaned trims cut under the old path-only hash; without this
+        # the resolver misses a valid trim on disk and falls back to the
+        # source, which 424s when the source lives on unplugged external
+        # storage. Read-only and single-registration-gated (see
+        # _legacy_cache_fallback); new trims keep writing the new-keyed
+        # name. Remove once a cache migration tool exists.
+        legacy_mp4 = output.with_name(f"stage{stage_number}_cam_{legacy_video_id(video)}_trimmed.mp4")
+        legacy = _legacy_cache_fallback(project, video, output, legacy_mp4)
+        if legacy is not None:
+            return legacy
     return output
 
 
