@@ -1,6 +1,6 @@
 """Tests for ShareTokenStore and resolve_share_token.
 
-Runs against SQLite in-memory via aiosqlite -- same pattern as
+Runs against SQLite in-memory via aiosqlite - same pattern as
 test_matches_store.py. The store has no Postgres-specific behaviour,
 so SQLite proves the SQL shapes + the multi-tenant invariant.
 """
@@ -64,7 +64,7 @@ def test_list_for_match_newest_first_includes_revoked() -> None:
     store = ShareTokenStore(sf, user_id=uid)
     first = asyncio.run(store.create("match-1"))
     second = asyncio.run(store.create("match-1"))
-    asyncio.run(store.revoke(first.id))
+    asyncio.run(store.revoke(first.id, match_id="match-1"))
     rows = asyncio.run(store.list_for_match("match-1"))
     # Both returned (revoked included), newest first.
     assert len(rows) == 2
@@ -78,7 +78,7 @@ def test_revoke_sets_revoked_at_and_returns_true() -> None:
     sf, (uid,) = _engine_with_users("a@thias.se")
     store = ShareTokenStore(sf, user_id=uid)
     token = asyncio.run(store.create("match-1"))
-    assert asyncio.run(store.revoke(token.id)) is True
+    assert asyncio.run(store.revoke(token.id, match_id="match-1")) is True
     rows = asyncio.run(store.list_for_match("match-1"))
     assert rows[0].revoked_at is not None
 
@@ -87,7 +87,7 @@ def test_revoke_sets_revoked_at_and_returns_true() -> None:
 def test_revoke_unknown_id_returns_false() -> None:
     sf, (uid,) = _engine_with_users("a@thias.se")
     store = ShareTokenStore(sf, user_id=uid)
-    assert asyncio.run(store.revoke("no-such-id")) is False
+    assert asyncio.run(store.revoke("no-such-id", match_id="match-1")) is False
 
 
 # - revoke() on another user's share id returns False (isolation)
@@ -97,7 +97,7 @@ def test_revoke_other_users_share_returns_false() -> None:
     store_b = ShareTokenStore(sf, user_id=uid_b)
     token = asyncio.run(store_a.create("match-1"))
     # user-b cannot revoke user-a's share.
-    assert asyncio.run(store_b.revoke(token.id)) is False
+    assert asyncio.run(store_b.revoke(token.id, match_id="match-1")) is False
     # user-a's share is still live.
     rows = asyncio.run(store_a.list_for_match("match-1"))
     assert rows[0].revoked_at is None
@@ -133,7 +133,7 @@ def test_resolve_revoked_token_returns_none() -> None:
     sf, (uid,) = _engine_with_users("a@thias.se")
     store = ShareTokenStore(sf, user_id=uid)
     token = asyncio.run(store.create("match-1"))
-    asyncio.run(store.revoke(token.id))
+    asyncio.run(store.revoke(token.id, match_id="match-1"))
     assert asyncio.run(resolve_share_token(sf, token.token)) is None
 
 
@@ -151,3 +151,15 @@ def test_resolve_expired_token_returns_none() -> None:
 
     asyncio.run(_seed_expiry())
     assert asyncio.run(resolve_share_token(sf, token.token)) is None
+
+
+# - revoke() with a wrong match_id returns False (match-scope guard)
+def test_revoke_wrong_match_id_returns_false() -> None:
+    sf, (uid,) = _engine_with_users("a@thias.se")
+    store = ShareTokenStore(sf, user_id=uid)
+    token = asyncio.run(store.create("match-1"))
+    # Correct user_id, wrong match_id - must not revoke.
+    assert asyncio.run(store.revoke(token.id, match_id="match-2")) is False
+    # Share is still live.
+    rows = asyncio.run(store.list_for_match("match-1"))
+    assert rows[0].revoked_at is None

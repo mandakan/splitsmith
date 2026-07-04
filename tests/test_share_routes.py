@@ -11,9 +11,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete as _delete
 from sqlalchemy import select as _select
 
-from splitsmith.db import ProjectStateStore, ShareTokenRow, User, create_engine, sessionmaker
+from splitsmith.db import MatchRow, ProjectStateStore, ShareTokenRow, User, create_engine, sessionmaker
 from tests.hosted_helpers import _CapturingSender, login, seed_match
 
 MID = "test-match-abc123"
@@ -252,6 +253,55 @@ def _setup_shared_match(
     return token
 
 
+def _seed_state_docs_with_scan_dir(
+    db_url: str, user_email: str, match_id: str, slug: str, scan_dir: str
+) -> None:
+    """Seed match + project state docs with last_scanned_dir set on the project."""
+    from splitsmith import match_model
+    from splitsmith.ui.project import MatchProject
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        match = match_model.Match(
+            match_id=match_id,
+            name=f"Test match {match_id}",
+            shooters=[slug],
+            stages=[match_model.MatchStageDefinition(stage_number=1, stage_name="Stage 1")],
+        )
+        await store.save_match(match_id, match.model_dump(mode="json"), expected_version=0)
+        project = MatchProject(name="Anna", last_scanned_dir=scan_dir)
+        await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=0)
+
+    asyncio.run(_seed())
+
+
+def _delete_match_row(db_url: str, user_email: str, match_id: str) -> None:
+    """Delete the MatchRow for match_id directly (simulates a deleted match)."""
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _del() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        async with sf() as s:
+            await s.execute(
+                _delete(MatchRow).where(
+                    MatchRow.user_id == user_id,
+                    MatchRow.match_id == match_id,
+                )
+            )
+            await s.commit()
+
+    asyncio.run(_del())
+
+
 # -- uniform 404s --------------------------------------------------------
 
 
@@ -386,6 +436,71 @@ def test_share_url_match_id_is_ignored(
     assert slugs == [SLUG]
 
 
+# -- path disclosure hardening ------------------------------------------
+
+
+def test_share_match_root_blanked_for_anonymous_viewer(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """match_root is blank on the anonymous share path; populated for the owner."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, sender = hosted_app
+
+    # Via share: match_root must not expose a server path.
+    resp = client.get(_share_url(token, "match/shooters"))
+    assert resp.status_code == 200
+    assert resp.json()["match_root"] in ("", None)
+
+    # Via owner session: match_root is populated.
+    login(client, sender, "owner@example.com")
+    resp = client.get(f"/api/matches/{MID}/match/shooters")
+    assert resp.status_code == 200
+    assert resp.json()["match_root"]
+    client.cookies.clear()
+
+
+def test_share_last_scanned_dir_nulled_for_anonymous_viewer(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """last_scanned_dir is None on the anonymous share path; populated for the owner."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs_with_scan_dir(hosted_env, "owner@example.com", MID, SLUG, "/owner/scan/dir")
+    token = _create_share_token(client, MID)
+    client.cookies.clear()
+
+    # Via share: last_scanned_dir must be None.
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/project"))
+    assert resp.status_code == 200
+    assert resp.json()["last_scanned_dir"] is None
+
+    # Via owner session: last_scanned_dir is populated.
+    login(client, sender, "owner@example.com")
+    resp = client.get(f"/api/matches/{MID}/shooters/{SLUG}/project")
+    assert resp.status_code == 200
+    assert resp.json()["last_scanned_dir"] == "/owner/scan/dir"
+    client.cookies.clear()
+
+
+def test_share_deleted_match_uniform_404(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A live token whose match row was deleted returns the uniform 404, not a leaky body."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _delete_match_row(hosted_env, "owner@example.com", MID)
+    client.cookies.clear()
+
+    resp = client.get(_share_url(token, "match/shooters"))
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
 # -- local mode: no share surface ---------------------------------------
 
 
@@ -399,6 +514,16 @@ def test_share_local_mode_404() -> None:
         resp = client.get(_share_url("anything", "match/shooters"))
         assert resp.status_code == 404
         assert resp.json() == NOT_FOUND
+
+
+def test_share_management_routes_local_mode_404() -> None:
+    """GET and POST /api/matches/{id}/match/shares return 404 in local mode."""
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app, follow_redirects=False) as client:
+        assert client.get(_url(MID)).status_code == 404
+        assert client.post(_url(MID)).status_code == 404
 
 
 # -- whitelist regex lock ------------------------------------------------

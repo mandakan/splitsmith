@@ -97,13 +97,14 @@ class ShareTokenStore:
             ).scalars()
             return [_to_share_token(r) for r in rows]
 
-    async def revoke(self, share_id: str) -> bool:
+    async def revoke(self, share_id: str, *, match_id: str) -> bool:
         async with self._session_factory() as session:
             row = (
                 await session.execute(
                     select(ShareTokenRow).where(
                         ShareTokenRow.user_id == self._user_id,
                         ShareTokenRow.id == share_id,
+                        ShareTokenRow.match_id == match_id,
                     )
                 )
             ).scalar_one_or_none()

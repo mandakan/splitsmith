@@ -655,7 +655,7 @@ class AuthBeginRequest(BaseModel):
 class ShareInfo(BaseModel):
     """One share link as returned by the owner-management routes.
 
-    ``url`` embeds the raw token -- it does not appear anywhere else
+    ``url`` embeds the raw token - it does not appear anywhere else
     in the API response. Module-level so FastAPI resolves it correctly
     under ``from __future__ import annotations``."""
 
@@ -745,6 +745,10 @@ def _no_project_error() -> HTTPException:
 # go away entirely once every endpoint is exercised under the new prefix.
 current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
 current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
+# Set True by _share_alias for anonymous read requests so handlers can
+# strip server-local fields (e.g. match_root, last_scanned_dir) from their
+# response payloads before returning them to anonymous viewers.
+current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
 
 
 @dataclass
@@ -4783,7 +4787,7 @@ def create_app(
         store = state.share_tokens
         if store is None:
             raise HTTPException(status_code=500, detail="share store unavailable")
-        ok = await store.revoke(share_id)
+        ok = await store.revoke(share_id, match_id=mid)
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
@@ -4971,9 +4975,18 @@ def create_app(
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
+        share_token = current_share_request.set(True)
         try:
-            return await call_next(request)
+            response = await call_next(request)
+            # Uniform-404 seam: a live token whose underlying resource no
+            # longer exists (e.g. match row deleted) must return the same
+            # opaque 404 as an invalid token - not the downstream's own
+            # error body which may distinguish the cases.
+            if response.status_code == 404:
+                return not_found
+            return response
         finally:
+            current_share_request.reset(share_token)
             current_tenant.reset(tenant_token)
 
     # ----------------------------------------------------------------------
@@ -5216,6 +5229,11 @@ def create_app(
             status = statuses.get(int(n))
             if status is not None:
                 stage_dict["status"] = status.value
+        # Strip owner-local scan directory from anonymous share responses -
+        # it is a server path that serves no purpose for read-only viewers.
+        # Video/trim paths are load-bearing for streaming and are kept.
+        if current_share_request.get():
+            payload["last_scanned_dir"] = None
         return JSONResponse(payload)
 
     @app.get("/api/shooters/{slug}/project/export")
@@ -10177,7 +10195,7 @@ def create_app(
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
         return ShooterListResponse(
-            match_root=str(match_root),
+            match_root="" if current_share_request.get() else str(match_root),
             match_name=match.name,
             shooters=entries,
         )
