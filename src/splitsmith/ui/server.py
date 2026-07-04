@@ -5012,7 +5012,7 @@ def create_app(
             # Anonymous share reads: authorization is the token itself,
             # resolved by the _share_alias middleware inside this gate. No
             # session is required (and none is consulted), so the gate hands
-            # off without pinning current_tenant -- _share_alias pins the
+            # off without pinning current_tenant - _share_alias pins the
             # owner's tenant from the token row instead.
             return await call_next(request)
         user = await state.auth.authenticate_request(request)
