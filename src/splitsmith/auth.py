@@ -36,6 +36,7 @@ class User(BaseModel):
     id: str
     email: str
     display_name: str | None = None
+    is_admin: bool = False
 
 
 class AuthBackend(Protocol):

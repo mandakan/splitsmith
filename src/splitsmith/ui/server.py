@@ -899,6 +899,10 @@ class AppState:
     # their defaults in local mode (no auth, no cookies).
     public_base_url: str | None = None
     cookie_secure: bool = False
+    # Lowercase email addresses granted admin access. Populated from
+    # ``SPLITSMITH_ADMIN_EMAILS`` by ``_apply_hosted_mode_wiring``; stays
+    # empty in local mode so nobody is admin there.
+    admin_emails: frozenset[str] = frozenset()
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
@@ -4130,6 +4134,11 @@ SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
 # is the base of the magic-link callback URL and decides the session
 # cookie's Secure flag (Secure iff the scheme is https).
 SPLITSMITH_PUBLIC_URL_ENV = "SPLITSMITH_PUBLIC_URL"
+# Comma-separated list of email addresses granted admin access. Comparison
+# is case-insensitive. Unset or empty means nobody is admin (the default).
+# Parsed only in hosted mode by ``_apply_hosted_mode_wiring``; local mode
+# always has an empty frozenset and no admin path is exercised.
+SPLITSMITH_ADMIN_EMAILS_ENV = "SPLITSMITH_ADMIN_EMAILS"
 # Magic-link e-mail transport selector. Unset / "console" -> log the link
 # (docker / self-host). A provider name selects its HTTP sender. See
 # ``splitsmith.db.email.build_email_sender``.
@@ -4283,6 +4292,9 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # (https) gets Secure and docker / self-host on http does not -- one
     # source of truth, no separate knob to contradict it.
     state.cookie_secure = public_url.lower().startswith("https://")
+
+    raw_admin = os.environ.get(SPLITSMITH_ADMIN_EMAILS_ENV, "")
+    state.admin_emails = frozenset(e.lower() for e in raw_admin.split(",") if e.strip())
 
     # ``pool_disabled=True`` because the hosted-mode boot path runs
     # multiple short-lived event loops (each worker thread's asyncio.run,
@@ -4637,6 +4649,19 @@ def create_app(
         if user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
         return user
+
+    async def require_admin(user: User = Depends(get_current_user)) -> User:
+        """FastAPI dependency: gate admin-only endpoints.
+
+        Raises HTTP 403 if the authenticated user is not in
+        ``state.admin_emails``. Returns a copy with ``is_admin=True`` so
+        admin handlers receive a truthful object. Task 7's
+        ``/api/admin/workers`` endpoints consume this; they live in the
+        same closure scope so no export is needed.
+        """
+        if user.email.lower() not in state.admin_emails:
+            raise HTTPException(status_code=403, detail="admin access required")
+        return user.model_copy(update={"is_admin": True})
 
     # ----------------------------------------------------------------------
     # Magic-link auth routes (hosted mode only)
@@ -7455,8 +7480,11 @@ def create_app(
         user (id ``"local"``); hosted mode will resolve cookies to a
         real database user. The SPA reads this once on mount so the
         same code path works in both modes.
+
+        ``is_admin`` is derived from ``state.admin_emails`` at request
+        time; it is never stored on the user record itself.
         """
-        return user
+        return user.model_copy(update={"is_admin": user.email.lower() in state.admin_emails})
 
     @app.get("/api/me/jobs", response_model=list[Job])
     async def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
