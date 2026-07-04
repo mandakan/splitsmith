@@ -8,15 +8,19 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
+import { Share2 } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
+import { Button } from "@/components/ui/button";
 import { api, type StageStatus } from "@/lib/api";
 import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
 import { statusLabel } from "@/lib/stageStatus";
+import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
+import { ShareDialog } from "@/components/results/ShareDialog";
 
 /* -------------------------------------------------------------------------- */
 /* Status chip                                                                 */
@@ -81,6 +85,16 @@ function formatTime(seconds: number): string {
 export function Results() {
   const { project, shooters } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
+
+  // Share button: hosted mode only, and only on the owner route. The same
+  // Results component renders for anonymous share viewers under /share/:token -
+  // the button must not appear there. useDeploymentMode() returns "local" while
+  // the features fetch is in flight (conservative default), so the button pops
+  // in after the first fetch settles - the same behavior as other hosted-only chrome.
+  const deploymentMode = useDeploymentMode();
+  const shareToken = useParams<{ token?: string }>().token;
+  const canShare = deploymentMode === "hosted" && !shareToken;
+  const [showShare, setShowShare] = useState(false);
 
   const rows = useMemo(
     () => (project ? buildStageMatrix(project.stages, shooters) : []),
@@ -170,10 +184,27 @@ export function Results() {
     <div className="max-w-[1100px] mx-auto px-4 md:px-7 pb-20 pt-6">
       {/* Match header */}
       <header className="mb-6">
-        <Kicker className="mb-2">Results</Kicker>
-        <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink mb-2">
-          {project.name}
-        </h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Kicker className="mb-2">Results</Kicker>
+            <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink mb-2">
+              {project.name}
+            </h1>
+          </div>
+          {canShare ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1 shrink-0"
+              onClick={() => setShowShare(true)}
+              aria-label="Manage share links for these results"
+            >
+              <Share2 className="size-4" aria-hidden="true" />
+              Share
+            </Button>
+          ) : null}
+        </div>
         <div className="flex flex-wrap items-center gap-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
           {project.match_date ? (
             <time
@@ -199,6 +230,11 @@ export function Results() {
           </span>
         </div>
       </header>
+
+      {/* Share dialog - owner + hosted only */}
+      {canShare && showShare ? (
+        <ShareDialog onClose={() => setShowShare(false)} />
+      ) : null}
 
       {/* Mobile: one card per stage */}
       <div className="lg:hidden space-y-3">

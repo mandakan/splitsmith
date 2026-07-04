@@ -3296,6 +3296,25 @@ export const api = {
         video_paths: videoPaths,
       },
     }),
+
+  // Share-link management (hosted-only). These ride scopeRequestPath so
+  // /api/match/shares rewrites to /api/matches/{id}/match/shares on the owner
+  // route. IMPORTANT: only call from the owner match URL (/match/:matchId/...).
+  // On a /share/:token URL scopeRequestPath rewrites onto the share prefix and
+  // the routes 404 - the ShareDialog mounts only when !shareToken.
+
+  /** List share links for the current match. */
+  listShares: () => request<ShareListResponse>("/api/match/shares"),
+
+  /** Create a new share link for the current match. */
+  createShare: () =>
+    request<ShareInfo>("/api/match/shares", { method: "POST" }),
+
+  /** Revoke (soft-delete) a share link by id. */
+  revokeShare: (shareId: string) =>
+    request<void>(`/api/match/shares/${encodeURIComponent(shareId)}`, {
+      method: "DELETE",
+    }),
 };
 
 export interface PromoteSnapResult {
@@ -3563,6 +3582,20 @@ export interface MoveShooterOutcome {
 export interface MoveShooterResponse {
   outcome: MoveShooterOutcome;
   source_project: MatchProject;
+}
+
+/** One share link for a match. Mirrors the backend ShareInfo Pydantic model.
+ *  ``revoked_at`` is null while the link is live. */
+export interface ShareInfo {
+  id: string;
+  url: string;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+/** Response from GET /api/match/shares. */
+export interface ShareListResponse {
+  shares: ShareInfo[];
 }
 
 export { ApiError };
