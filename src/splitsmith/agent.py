@@ -170,7 +170,7 @@ def apply_credentials(state: AgentState) -> None:
     s3 = creds.get("s3")
     if s3:
         os.environ["SPLITSMITH_S3_BUCKET"] = s3["bucket"]
-        os.environ["SPLITSMITH_S3_ENDPOINT_URL"] = s3["endpoint_url"]
+        os.environ["SPLITSMITH_S3_ENDPOINT_URL"] = s3["endpoint_url"] or ""
         os.environ["SPLITSMITH_S3_REGION"] = s3["region"]
         os.environ["SPLITSMITH_S3_ACCESS_KEY_ID"] = s3["access_key_id"]
         os.environ["SPLITSMITH_S3_SECRET_ACCESS_KEY"] = s3["secret_access_key"]
@@ -340,7 +340,7 @@ async def _drain_loop(
     """Run exactly one drain per wake, serialised.
 
     The event is cleared *before* the drain, so a wake that arrives while a
-    drain is in flight re-arms it and the loop runs one more drain afterwards --
+    drain is in flight re-arms it and the loop runs one more drain afterwards -
     never lost, never concurrent. Multiple wakes during one drain collapse into
     a single follow-up (the event is one-slot).
     """

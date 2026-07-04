@@ -146,6 +146,32 @@ def test_apply_credentials_with_s3(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["SPLITSMITH_S3_SECRET_ACCESS_KEY"] == "sk"
 
 
+def test_apply_credentials_with_s3_null_endpoint_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    _isolate_env(monkeypatch)
+    state = AgentState(
+        server_url="http://srv",
+        worker_id="w1",
+        worker_token="t",
+        credentials={
+            "database_url": "postgresql://db",
+            "public_url": "http://srv",
+            "s3": {
+                "bucket": "splits",
+                "endpoint_url": None,
+                "region": "auto",
+                "access_key_id": "ak",
+                "secret_access_key": "sk",
+            },
+        },
+    )
+    apply_credentials(state)
+    assert os.environ["SPLITSMITH_S3_BUCKET"] == "splits"
+    assert os.environ["SPLITSMITH_S3_ENDPOINT_URL"] == ""
+    assert os.environ["SPLITSMITH_S3_REGION"] == "auto"
+    assert os.environ["SPLITSMITH_S3_ACCESS_KEY_ID"] == "ak"
+    assert os.environ["SPLITSMITH_S3_SECRET_ACCESS_KEY"] == "sk"
+
+
 # ---------------------------------------------------------------------------
 # parse_sse_events (pure)
 # ---------------------------------------------------------------------------
