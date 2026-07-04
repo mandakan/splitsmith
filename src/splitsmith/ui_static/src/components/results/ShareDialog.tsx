@@ -56,6 +56,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useDialogFocus(true, panelRef, onClose);
 
   const loadShares = async () => {
@@ -78,6 +79,10 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
     void loadShares();
     // Run once on mount - loadShares captures setShares/setFetchError from
     // the same render; refs are stable, so the empty dep array is correct.
+  }, []);
+
+  useEffect(() => () => {
+    if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
   }, []);
 
   const handleCreate = async () => {
@@ -111,8 +116,10 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
     try {
       await navigator.clipboard.writeText(url);
       setCopiedId(shareId);
+      // Clear any existing timer before setting a new one.
+      if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
       // Reset label after 2 s.
-      setTimeout(
+      copyTimerRef.current = setTimeout(
         () => setCopiedId((id) => (id === shareId ? null : id)),
         2000,
       );
@@ -215,7 +222,6 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
                                 : "Copy share link to clipboard"
                             }
                             onClick={() => void handleCopy(share.id, share.url)}
-                            disabled={busy}
                           >
                             {copiedId === share.id ? "Copied" : "Copy"}
                           </Button>
