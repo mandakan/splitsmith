@@ -314,6 +314,191 @@ def test_trim_available_reports_storage_without_download(
     assert not output.exists()
 
 
+def _project_with_assigned_video(
+    root: Path, video_path: Path, *, stage_numbers: tuple[int, ...] = (STAGE,)
+) -> tuple[MatchProject, StageVideo]:
+    """Project whose StageVideo(s) carry a stamped ``stage_number`` so
+    ``video_id`` uses the post-take-spec "<path>#<stage>" hash. One
+    StageVideo per entry in ``stage_numbers``, all sharing ``video_path``
+    (two entries model a multi-stage single take). Returns the first."""
+    project = MatchProject.init(root, name="legacy-id-test")
+    project.stages = [
+        StageEntry(
+            stage_number=n,
+            stage_name=f"S{n}",
+            time_seconds=STAGE_TIME,
+            videos=[StageVideo(path=video_path, role="primary", stage_number=n)],
+        )
+        for n in stage_numbers
+    ]
+    return project, project.stages[0].videos[0]
+
+
+def _touch(path: Path, data: bytes = b"X") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def _legacy_trim_path(root: Path, project: MatchProject, video: StageVideo) -> Path:
+    new = trimmed_video_path(root, STAGE, video, project=project)
+    return new.with_name(f"stage{STAGE}_cam_{audio_helpers.legacy_video_id(video)}_trimmed.mp4")
+
+
+def test_pull_trimmed_video_prefers_new_keyed_file(tmp_path: Path) -> None:
+    """A trim under the current video_id wins even when a legacy-keyed
+    sibling also exists - the fallback only fires on a miss."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+    new = _touch(trimmed_video_path(root, STAGE, video, project=project), b"NEW")
+    _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+
+    got = audio_helpers.pull_trimmed_video(root, STAGE, video, project=project)
+
+    assert got == new
+    assert got.read_bytes() == b"NEW"
+
+
+def test_pull_trimmed_video_legacy_fallback_single_registration(tmp_path: Path) -> None:
+    """Pre-take-spec trim (path-only id) is served read-only when the
+    source path is registered on exactly one stage. Regression: the
+    take-spec video_id change orphaned these caches and streaming 424d
+    despite a valid trim on disk."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+    # Guard: the fixture must actually exercise the id divergence.
+    assert video.video_id != audio_helpers.legacy_video_id(video)
+    legacy = _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+
+    got = audio_helpers.pull_trimmed_video(root, STAGE, video, project=project)
+
+    assert got == legacy
+    assert got.read_bytes() == b"LEGACY"
+    # The new-keyed name stays untouched - the fallback never writes.
+    assert not trimmed_video_path(root, STAGE, video, project=project).exists()
+
+
+def test_pull_trimmed_video_no_fallback_when_path_on_two_stages(tmp_path: Path) -> None:
+    """Multi-stage single take: one source path on two stages means the
+    legacy trim's window belongs to an unknown stage - no fallback, the
+    (missing) new-keyed path is returned."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source, stage_numbers=(STAGE, STAGE + 1))
+    _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+
+    got = audio_helpers.pull_trimmed_video(root, STAGE, video, project=project)
+
+    assert got == trimmed_video_path(root, STAGE, video, project=project)
+    assert not got.exists()
+
+
+def test_pull_trimmed_video_neither_file_returns_missing_path(tmp_path: Path) -> None:
+    """No new-keyed trim, no legacy trim: the resolver returns the
+    (nonexistent) new-keyed path so callers fall through as before."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+
+    got = audio_helpers.pull_trimmed_video(root, STAGE, video, project=project)
+
+    assert got == trimmed_video_path(root, STAGE, video, project=project)
+    assert not got.exists()
+
+
+def test_resolve_trim_for_read_shared_resolver_and_sidecar_pre_buffer(tmp_path: Path) -> None:
+    """The resolver behind both stream_video and the beep anchor: None
+    when nothing exists, the unambiguous legacy trim next, the new-keyed
+    trim first once present. The pre-buffer comes from whichever file's
+    sidecar the resolver returned so anchor and bytes agree."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+
+    assert audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project) is None
+
+    legacy = _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+    _touch(
+        legacy.with_name(f"{legacy.stem}.params.json"),
+        json.dumps({"pre_buffer_seconds": 3.0}).encode("utf-8"),
+    )
+    got = audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project)
+    assert got == legacy
+    # Legacy trim was cut with pre_buffer 3.0, not the current 5.0.
+    assert audio_helpers.trim_pre_buffer_seconds_for(got, default=5.0) == pytest.approx(3.0)
+
+    new = _touch(trimmed_video_path(root, STAGE, video, project=project), b"NEW")
+    got = audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project)
+    assert got == new
+    # No sidecar beside the new-keyed trim -> default.
+    assert audio_helpers.trim_pre_buffer_seconds_for(got, default=5.0) == pytest.approx(5.0)
+
+
+def test_resolve_trim_for_read_ambiguous_registration_returns_none(tmp_path: Path) -> None:
+    """Same path on two stages: the resolver refuses the legacy trim so
+    the beep anchor stays source-based, matching the source clip
+    stream_video will serve."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source, stage_numbers=(STAGE, STAGE + 1))
+    _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+
+    assert audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project) is None
+
+
+def test_invalidate_video_audit_trim_sweeps_legacy_files(tmp_path: Path) -> None:
+    """A beep/stage-time change must also drop the legacy-keyed trim +
+    sidecar, or the read fallback would keep serving a stale cut."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+    new = _touch(trimmed_video_path(root, STAGE, video, project=project), b"NEW")
+    new_params = _touch(new.with_name(f"{new.stem}.params.json"))
+    legacy = _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+    legacy_params = _touch(legacy.with_name(f"{legacy.stem}.params.json"))
+
+    audio_helpers.invalidate_video_audit_trim(root, STAGE, video, project=project)
+
+    for p in (new, new_params, legacy, legacy_params):
+        assert not p.exists(), p
+
+
+def test_ensure_video_audio_legacy_fallback_when_source_unplugged(tmp_path: Path) -> None:
+    """WAV seam: only a legacy-keyed WAV exists and the source is gone
+    (unplugged external storage) - the legacy WAV is served instead of
+    raising FileNotFoundError, when the registration is unambiguous."""
+    root = tmp_path / "p"
+    source = tmp_path / "raw" / "gone.mov"  # never created
+    project, video = _project_with_assigned_video(root, source)
+    legacy = _touch(
+        project.audio_path(root) / f"stage{STAGE}_cam_{audio_helpers.legacy_video_id(video)}.wav",
+        b"WAVDATA",
+    )
+
+    got = audio_helpers.ensure_video_audio(root, STAGE, video, source, project=project)
+
+    assert got == legacy
+    assert got.read_bytes() == b"WAVDATA"
+
+
+def test_ensure_video_audio_no_legacy_fallback_when_ambiguous(tmp_path: Path) -> None:
+    """WAV seam ambiguity gate: same path on two stages means no
+    fallback; with the source unreachable the pre-existing
+    FileNotFoundError contract holds."""
+    root = tmp_path / "p"
+    source = tmp_path / "raw" / "gone.mov"  # never created
+    project, video = _project_with_assigned_video(root, source, stage_numbers=(STAGE, STAGE + 1))
+    _touch(
+        project.audio_path(root) / f"stage{STAGE}_cam_{audio_helpers.legacy_video_id(video)}.wav",
+        b"WAVDATA",
+    )
+
+    with pytest.raises(FileNotFoundError):
+        audio_helpers.ensure_video_audio(root, STAGE, video, source, project=project)
+
+
 def test_pull_trimmed_video_mirrors_from_storage(tmp_path: Path, fake_trim: list[dict[str, object]]) -> None:
     """The API serving path pulls a worker-pushed trim into the local
     cache and never invokes ffmpeg."""

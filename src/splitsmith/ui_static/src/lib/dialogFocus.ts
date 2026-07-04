@@ -17,12 +17,32 @@
  * persistent sliding surfaces (ListDrawer), or ``true`` for surfaces
  * that are conditionally rendered (their mount lifecycle is the open
  * lifecycle).
+ *
+ * Stack contract (stacked dialogs, e.g. jobs sheet over mobile nav
+ * drawer): every active registration joins a module-level stack in
+ * activation order, and ONLY the topmost registration handles keys.
+ * Escape closes the topmost surface only; a covered dialog neither
+ * traps Tab nor reacts to Escape while something is above it. A
+ * ``trap: false`` surface on top still claims Escape but enforces no
+ * trap - the covered dialog's trap stays suppressed until the upper
+ * surface deactivates and pops, at which point the lower dialog
+ * resumes trapping and owns the next Escape. Deactivation splices by
+ * identity, so out-of-order teardown (a covered dialog closing first)
+ * cannot corrupt the stack. With a single active dialog - the common
+ * case - behavior is identical to the pre-stack implementation.
  */
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Module-level stack of active dialog registrations, bottom to top.
+ * Entries are identity tokens (one per activation); the token whose
+ * hook instance sits at the top of the stack owns keyboard handling.
+ */
+const dialogStack: object[] = [];
 
 export interface DialogFocusOptions {
   /** Trap Tab/Shift-Tab inside the surface. Default true (modal). */
@@ -38,6 +58,26 @@ export function useDialogFocus(
   onClose: () => void,
   { trap = true, disableEscape = false }: DialogFocusOptions = {},
 ): void {
+  // Identity token for this activation's slot in the dialog stack.
+  // Null while inactive; a fresh token per open keeps stale closures
+  // from matching a later activation.
+  const stackTokenRef = useRef<object | null>(null);
+
+  // Stack membership: push on activate, splice by identity on
+  // deactivate (a covered dialog may close before the one above it,
+  // so a plain pop would remove the wrong entry).
+  useEffect(() => {
+    if (!active) return;
+    const token = {};
+    stackTokenRef.current = token;
+    dialogStack.push(token);
+    return () => {
+      const idx = dialogStack.indexOf(token);
+      if (idx !== -1) dialogStack.splice(idx, 1);
+      if (stackTokenRef.current === token) stackTokenRef.current = null;
+    };
+  }, [active]);
+
   // Initial focus + restore-on-close. Focus the first focusable control
   // (for confirm-style dialogs that is Cancel, the least destructive)
   // so a stray Enter can't fire a destructive action.
@@ -57,6 +97,14 @@ export function useDialogFocus(
   useEffect(() => {
     if (!active) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      // Only the topmost dialog handles keys. Escape fires every
+      // same-node document listener regardless of stopPropagation, so
+      // without this check stacked dialogs would all close at once,
+      // and a covered dialog's trap would yank Tab out of the surface
+      // above it.
+      if (dialogStack[dialogStack.length - 1] !== stackTokenRef.current) {
+        return;
+      }
       if (e.key === "Escape" && !disableEscape) {
         e.preventDefault();
         e.stopPropagation();

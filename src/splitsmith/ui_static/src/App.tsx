@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
+import { DesktopGate } from "@/components/DesktopOnlyNotice";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
 import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
@@ -37,6 +38,8 @@ import { Pick } from "@/pages/Pick";
 import { Shooters } from "@/pages/Shooters";
 import { TakeOverview } from "@/pages/TakeOverview";
 import { PromoteReview } from "@/pages/PromoteReview";
+import { Results } from "@/pages/Results";
+import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
 import { api } from "@/lib/api";
 
@@ -128,8 +131,8 @@ export function App() {
               runs whether or not a project is bound. MatchShell redirects
               here when it sees /api/health.bound === false. */}
           <Route path="pick" element={<Pick />} />
-          <Route path="pick/new" element={<CreateMatch />} />
-          <Route path="pick/merge" element={<MergeMatches />} />
+          <Route path="pick/new" element={<DesktopGate screen="Match creation" links={false}><CreateMatch /></DesktopGate>} />
+          <Route path="pick/merge" element={<DesktopGate screen="Match merge" links={false}><MergeMatches /></DesktopGate>} />
           {/* Canonical match-scoped surfaces (#353 Phase 3 PR C). All
               shooter / stage / overview / picker-within-match routes
               live under ``/match/:matchId/...``. Bare match-scoped paths
@@ -139,47 +142,52 @@ export function App() {
           <Route path="match/:matchId">
             <Route
               path="ingest/:slug"
-              element={<ShooterScopedRoute element={<Ingest />} />}
+              element={<ShooterScopedRoute element={<DesktopGate screen="Ingest"><Ingest /></DesktopGate>} />}
             />
             <Route path="ingest" element={<DefaultShooterRedirect base="ingest" />} />
             <Route element={<MatchShell />}>
               <Route index element={<Home />} />
               <Route
                 path="audit/:slug"
-                element={<ShooterScopedRoute element={<Audit />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Audit"><Audit /></DesktopGate>} />}
               />
               <Route
                 path="audit/:slug/:stage"
-                element={<ShooterScopedRoute element={<Audit />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Audit"><Audit /></DesktopGate>} />}
               />
               <Route path="audit" element={<DefaultShooterRedirect base="audit" />} />
-              <Route path="compare/:stage" element={<Compare />} />
+              <Route path="compare/:stage" element={<DesktopGate screen="Compare"><Compare /></DesktopGate>} />
               <Route
                 path="coach/:slug"
-                element={<ShooterScopedRoute element={<Coach />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Coach"><Coach /></DesktopGate>} />}
               />
               <Route
                 path="coach/:slug/:stage"
-                element={<ShooterScopedRoute element={<Coach />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Coach"><Coach /></DesktopGate>} />}
               />
               <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
-              <Route path="shooters" element={<Shooters />} />
-              <Route path="beep-review" element={<BeepReview />} />
+              <Route path="shooters" element={<DesktopGate screen="Shooter management"><Shooters /></DesktopGate>} />
+              <Route path="beep-review" element={<DesktopGate screen="Beep review"><BeepReview /></DesktopGate>} />
               {/* Take overview: carve-up review for one multi-stage raw
                   recording. :filename is the raw video's basename. */}
               <Route
                 path="take/:slug/:filename"
-                element={<ShooterScopedRoute element={<TakeOverview />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Take review"><TakeOverview /></DesktopGate>} />}
               />
               <Route
                 path="export/:slug"
-                element={<ShooterScopedRoute element={<Export />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Export"><Export /></DesktopGate>} />}
               />
               <Route
                 path="export/:slug/:stage"
-                element={<ShooterScopedRoute element={<Export />} />}
+                element={<ShooterScopedRoute element={<DesktopGate screen="Export"><Export /></DesktopGate>} />}
               />
               <Route path="export" element={<DefaultShooterRedirect base="export" />} />
+              <Route path="results" element={<Results />} />
+              <Route
+                path="results/:slug/:stage"
+                element={<ShooterScopedRoute element={<ResultsStage />} />}
+              />
             </Route>
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
@@ -187,21 +195,21 @@ export function App() {
               cyan-accented DeveloperShell. */}
           <Route element={<DeveloperShell />}>
             <Route path="dev" element={<Navigate to="/dev/corpus" replace />} />
-            <Route path="dev/corpus" element={<DevCorpus />} />
-            <Route path="dev/review" element={<DevReviewQueue />} />
-            <Route path="dev/validate" element={<DevValidate />} />
-            <Route path="dev/retrain" element={<DevRetrain />} />
-            <Route path="dev/legacy/lab" element={<Lab />} />
-            <Route path="dev/legacy/lab/:slug" element={<Lab />} />
+            <Route path="dev/corpus" element={<DesktopGate screen="Developer tools" links={false}><DevCorpus /></DesktopGate>} />
+            <Route path="dev/review" element={<DesktopGate screen="Developer tools" links={false}><DevReviewQueue /></DesktopGate>} />
+            <Route path="dev/validate" element={<DesktopGate screen="Developer tools" links={false}><DevValidate /></DesktopGate>} />
+            <Route path="dev/retrain" element={<DesktopGate screen="Developer tools" links={false}><DevRetrain /></DesktopGate>} />
+            <Route path="dev/legacy/lab" element={<DesktopGate screen="Developer tools" links={false}><Lab /></DesktopGate>} />
+            <Route path="dev/legacy/lab/:slug" element={<DesktopGate screen="Developer tools" links={false}><Lab /></DesktopGate>} />
           </Route>
           {/* Fixture editor + design system stay AppShell-mounted: the
               editor is a single-purpose tool that the dev review queue
               links into via /review?fixture=..., and /_design is the
               token palette browser. */}
           <Route element={<AppShell />}>
-            <Route path="review" element={<Review />} />
-            <Route path="promote-review" element={<PromoteReview />} />
-            <Route path="_design" element={<Design />} />
+            <Route path="review" element={<DesktopGate screen="Fixture editor" links={false}><Review /></DesktopGate>} />
+            <Route path="promote-review" element={<DesktopGate screen="Promote review" links={false}><PromoteReview /></DesktopGate>} />
+            <Route path="_design" element={<DesktopGate screen="Design system" links={false}><Design /></DesktopGate>} />
             {/* Legacy redirects so old bookmarks don't 404. */}
             <Route path="lab" element={<Navigate to="/dev/legacy/lab" replace />} />
             <Route path="lab/:slug" element={<RedirectLabSlug />} />

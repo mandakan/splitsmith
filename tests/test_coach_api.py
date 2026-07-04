@@ -169,6 +169,96 @@ def test_get_coach_clamps_beep_to_pre_buffer_when_trimmed(tmp_path: Path) -> Non
     assert body["shots"][0]["time_absolute"] == pytest.approx(5.0 + 1.5)
 
 
+def _bootstrap_legacy_trim(tmp_path: Path, *, stage_numbers: tuple[int, ...]) -> tuple[TestClient, str]:
+    """Project(s) with beep at 8 s and ONLY a pre-take-spec legacy-keyed
+    trim (path-only video_id) + params sidecar (pre_buffer 3.0) on disk
+    for stage 1. Two ``stage_numbers`` share one source path to model a
+    multi-stage single take (ambiguous registration)."""
+    from splitsmith.ui import audio as audio_helpers
+    from tests.conftest import scaffold_match
+
+    root, shooter_root = scaffold_match(tmp_path, name="Legacy Trim Match")
+    project = MatchProject.load(shooter_root)
+    project.stages = [
+        StageEntry(
+            stage_number=n,
+            stage_name=f"S{n}",
+            time_seconds=30.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=8.0)],
+        )
+        for n in stage_numbers
+    ]
+    project.save(shooter_root)
+
+    audit_dir = shooter_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "S1",
+                "shots": [{"shot_number": 1, "ms_after_beep": 1500, "source": "detected"}],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    stamped = MatchProject.load(shooter_root)
+    video = stamped.stages[0].videos[0]
+    legacy_id = audio_helpers.legacy_video_id(video)
+    assert legacy_id != video.video_id  # fixture must exercise the divergence
+    trimmed_dir = stamped.trimmed_path(shooter_root)
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / f"stage1_cam_{legacy_id}_trimmed.mp4").write_bytes(b"legacy trim bytes")
+    (trimmed_dir / f"stage1_cam_{legacy_id}_trimmed.params.json").write_text(
+        json.dumps(
+            {
+                "beep_time": 8.0,
+                "stage_time_seconds": 30.0,
+                "pre_buffer_seconds": 3.0,
+                "post_buffer_seconds": 5.0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    app = create_app(project_root=root, project_name="Legacy Trim Match")
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+    return TestClient(app), f"/api/matches/{match_id}"
+
+
+def test_get_coach_anchors_on_legacy_trim_when_unambiguous(tmp_path: Path) -> None:
+    """Regression (take-spec video_id change): stream_video serves the
+    legacy-keyed trim via the read fallback, so the beep anchor must be
+    trim-based too - and use the sidecar's pre_buffer (3.0), not the
+    project default (5.0). Anchor/bytes mismatch offsets every marker
+    by beep - pre_buffer."""
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1,))
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # min(beep 8.0, sidecar pre_buffer 3.0) inside the legacy trim.
+    assert body["beep_time"] == pytest.approx(3.0)
+    assert body["videos"][0]["beep_in_clip"] == pytest.approx(3.0)
+    assert body["shots"][0]["time_absolute"] == pytest.approx(3.0 + 1.5)
+
+
+def test_get_coach_stays_source_anchored_when_legacy_trim_ambiguous(tmp_path: Path) -> None:
+    """Same path registered on two stages: the read fallback refuses the
+    legacy trim (its window belongs to an unknown stage), stream_video
+    serves the source, and the anchor stays source-based to match."""
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1, 2))
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["beep_time"] == pytest.approx(8.0)
+    assert body["videos"][0]["beep_in_clip"] == pytest.approx(8.0)
+    assert body["shots"][0]["time_absolute"] == pytest.approx(8.0 + 1.5)
+
+
 def test_get_stage_distributions(tmp_path: Path) -> None:
     client, _audit, base = _bootstrap(tmp_path)
     resp = client.get(f"{base}/shooters/me/stages/1/coach/distributions")
