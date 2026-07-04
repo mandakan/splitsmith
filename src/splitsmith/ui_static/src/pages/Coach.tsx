@@ -55,36 +55,7 @@ import {
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
-
-const INTERVAL_LABEL: Record<CoachIntervalClass, string> = {
-  first_shot: "Draw",
-  split: "Fire",
-  transition: "Transition",
-  movement: "Movement",
-  reload: "Reload",
-  activation: "Activation",
-};
-
-const INTERVAL_TONE: Record<CoachIntervalClass, string> = {
-  first_shot: "text-led border-led-deep bg-led/10",
-  split: "text-done border-done/40 bg-done/10",
-  transition: "text-live border-live/40 bg-live/10",
-  movement: "text-beep border-beep/40 bg-beep-tint",
-  reload: "text-manual border-manual/40 bg-manual/10",
-  activation: "text-ink-2 border-rule-strong bg-surface-3",
-};
-
-const SPLIT_BUCKETS = [
-  { max: 0.25, label: "fast", color: "var(--color-done)" },
-  { max: 0.45, label: "ok", color: "var(--color-ink-2)" },
-  { max: 0.85, label: "slow", color: "var(--color-live)" },
-  { max: Infinity, label: "vslow", color: "var(--color-led)" },
-];
-
-function splitBucket(s: number): { label: string; color: string } {
-  for (const b of SPLIT_BUCKETS) if (s <= b.max) return b;
-  return SPLIT_BUCKETS[SPLIT_BUCKETS.length - 1];
-}
+import { INTERVAL_LABEL, INTERVAL_TONE, SPLIT_BUCKETS, splitBucket } from "@/lib/splits";
 
 export function Coach() {
   // Slug carried by ShooterScopedRoute (#353 phase 1) -- present whenever
