@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0](https://github.com/mandakan/splitsmith/compare/v0.6.0...v0.7.0) (2026-07-04)
+
+
+### Features
+
+* **ui:** mobile results viewer - read-only match/stage playback + mobile shell ([#535](https://github.com/mandakan/splitsmith/issues/535)) ([164fd0c](https://github.com/mandakan/splitsmith/commit/164fd0cab79a6dbb51321027b7a8182f7ff00a4d))
+
+
+### Bug Fixes
+
+* **worker:** final-review hardening - awake-path net, worker gate, never-raise schedule ([#534](https://github.com/mandakan/splitsmith/issues/534)) ([1c4d861](https://github.com/mandakan/splitsmith/commit/1c4d8618206656b5a0468d3cceae4ccd020d1549))
+
+
+### Build / CI
+
+* 6-hourly wake-based worker safety net; document Railway cron incompatibility ([#533](https://github.com/mandakan/splitsmith/issues/533)) ([67979fa](https://github.com/mandakan/splitsmith/commit/67979fa9ec23b2c573506ea6e67cf7c080da9697))
+* re-enable Railway auto-deploy (push -&gt; staging, release -&gt; production) ([#530](https://github.com/mandakan/splitsmith/issues/530)) ([ac99bb9](https://github.com/mandakan/splitsmith/commit/ac99bb9837f9ff4bcc2437231e0e9f6ae51e60e1))
+
 ## [0.6.0](https://github.com/mandakan/splitsmith/compare/v0.5.3...v0.6.0) (2026-07-03)
 
 
