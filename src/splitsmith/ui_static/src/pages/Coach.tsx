@@ -56,6 +56,7 @@ import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 import { INTERVAL_LABEL, INTERVAL_TONE, SPLIT_BUCKETS, splitBucket } from "@/lib/splits";
+import { ShotRuler } from "@/components/results/ShotRuler";
 
 export function Coach() {
   // Slug carried by ShooterScopedRoute (#353 phase 1) -- present whenever
@@ -1211,43 +1212,13 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         ))}
       </div>
 
-      {/* Shot ruler */}
-      <div className="overflow-hidden rounded-xl border border-rule-strong bg-surface px-6 py-5">
-        <div className="relative h-5">
-          <span
-            aria-hidden
-            className="absolute inset-y-1/2 left-0 right-0 h-px -translate-y-1/2 bg-rule"
-          />
-          {coach.shots.map((shot) => {
-            const x = ((shot.time_absolute - minAbs) / span) * 100;
-            const b = splitBucket(shot.split);
-            const active = activeShotNumber === shot.shot_number;
-            return (
-              <button
-                key={shot.shot_number}
-                type="button"
-                onClick={() => seekToShot(shot)}
-                title={`Shot ${shot.shot_number} · ${shot.split.toFixed(3)}s · ${
-                  shot.interval_class
-                    ? INTERVAL_LABEL[shot.interval_class]
-                    : ""
-                }`}
-                aria-label={`Shot ${shot.shot_number}`}
-                className={cn(
-                  "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all",
-                  active
-                    ? "size-4 ring-2 ring-led ring-offset-2 ring-offset-surface shadow-[0_0_8px_var(--color-led-glow)]"
-                    : "size-3 hover:size-3.5",
-                )}
-                style={{
-                  left: `${x}%`,
-                  backgroundColor: b.color,
-                }}
-              />
-            );
-          })}
-        </div>
-      </div>
+      <ShotRuler
+        shots={coach.shots}
+        minAbs={minAbs}
+        span={span}
+        activeShotNumber={activeShotNumber}
+        onSeek={seekToShot}
+      />
 
       {/* Work grid: video + current shot panel on left, full list on right */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
