@@ -76,6 +76,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -685,6 +686,20 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # auth gate skips it by prefix.)
         "/api/v1/auth/begin",
     }
+)
+
+
+# GET-only path shapes reachable through /api/share/{token}/ - the entire
+# anonymous surface. Anything else under the prefix is a uniform 404. The
+# share middleware impersonates the owner's tenant for the request, so this
+# whitelist is the containment boundary: extend it only with read-only,
+# match-scoped routes, and never let the client supply the match id. The
+# pattern is anchored (fullmatch) and case-sensitive by design.
+_SHARE_PATH_RE = re.compile(
+    r"^(?:match/shooters"
+    r"|shooters/[^/]+/project"
+    r"|shooters/[^/]+/stages/\d+/coach"
+    r"|shooters/[^/]+/videos/stream)$"
 )
 
 
@@ -4913,6 +4928,55 @@ def create_app(
             current_match_id.reset(id_token)
 
     # ----------------------------------------------------------------------
+    # Share-link anonymous read middleware (issue #349)
+    # ----------------------------------------------------------------------
+    #
+    # Required execution order: ``_auth_gate`` (outer) -> ``_share_alias``
+    # (this) -> ``_match_id_alias`` (inner). Starlette runs later-registered
+    # ``@app.middleware("http")`` OUTER, so this must be *defined* between
+    # ``_match_id_alias`` (above) and ``_auth_gate`` (below). Rationale:
+    #   - It runs INSIDE the gate so the gate's ``/api/share/`` exemption
+    #     lets an anonymous request through, but a garbage token still 404s
+    #     here rather than 401ing at the gate.
+    #   - It runs OUTSIDE ``_match_id_alias`` so the path rewrite this
+    #     middleware performs (onto ``/api/matches/{match_id}/...``) is what
+    #     the alias then validates + strips, and the owner tenant pinned
+    #     here is in scope for the alias's RLS-scoped ownership check.
+    #
+    # Security invariants: the match id comes ONLY from the resolved token
+    # row (never the URL); every non-token / non-whitelisted / non-GET /
+    # local-mode case returns the same opaque 404 so unknown, revoked, and
+    # expired tokens are indistinguishable.
+    @app.middleware("http")
+    async def _share_alias(request, call_next):
+        path = request.url.path
+        prefix = "/api/share/"
+        if not path.startswith(prefix):
+            return await call_next(request)
+        not_found = JSONResponse(status_code=404, content={"detail": "not found"})
+        resolver = state.resolve_share_token
+        if resolver is None:
+            # Local mode: no share surface at all.
+            return not_found
+        token, sep, rest = path[len(prefix) :].partition("/")
+        if not sep or not token or request.method != "GET" or not _SHARE_PATH_RE.fullmatch(rest):
+            return not_found
+        resolved = await resolver(token)
+        if resolved is None:
+            return not_found
+        # Rewrite onto the match-alias prefix with the match id from the
+        # token row - never from the URL - and pin the owner's tenant so
+        # the downstream ownership check + stores resolve as the owner.
+        rewritten = f"/api/matches/{resolved.match_id}/{rest}"
+        request.scope["path"] = rewritten
+        request.scope["raw_path"] = rewritten.encode("utf-8")
+        tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
+        try:
+            return await call_next(request)
+        finally:
+            current_tenant.reset(tenant_token)
+
+    # ----------------------------------------------------------------------
     # Auth gate middleware (saas-readiness step)
     # ----------------------------------------------------------------------
     #
@@ -4943,6 +5007,13 @@ def create_app(
         if not path.startswith("/api/"):
             return await call_next(request)
         if path in _PUBLIC_API_PATHS:
+            return await call_next(request)
+        if path.startswith("/api/share/"):
+            # Anonymous share reads: authorization is the token itself,
+            # resolved by the _share_alias middleware inside this gate. No
+            # session is required (and none is consulted), so the gate hands
+            # off without pinning current_tenant -- _share_alias pins the
+            # owner's tenant from the token row instead.
             return await call_next(request)
         user = await state.auth.authenticate_request(request)
         if user is None:
