@@ -467,6 +467,80 @@ Sub 2 (#13) shipped: ingest screen + supporting backend.
 
 Subsequent sub-issues fill in the audit screen (#15), short-GOP trim (#16), and analysis/export (#17).
 
+## Hosted deployment: self-hosted workers
+
+The production server supports registering home Docker boxes as compute workers alongside
+the Railway worker. Self-hosted workers run the same Procrastinate worker code against
+Neon and R2 directly (direct-DB model), so no new job transport is needed. The dispatcher
+wakes the cheapest available tier first; the Railway worker is the fallback.
+
+### Registration
+
+An admin (any email in `SPLITSMITH_ADMIN_EMAILS`) opens the Workers admin page, names a
+worker, and submits the form. The server creates a pending `workers` row and returns a
+one-time registration token (shown once in the dialog) plus a copy-paste `docker run`
+command.
+
+The agent runs on the home box with that token:
+
+```
+docker run -d --restart unless-stopped \
+  -v splitsmith-agent:/data \
+  <IMAGE> agent \
+  --server-url https://my.splitsmith.app \
+  --token <REGISTRATION_TOKEN>
+```
+
+The agent calls `POST /api/workers/register` once, exchanging the token for a permanent
+worker token and direct Neon and R2 credentials (identical to those the Railway worker
+uses). Both are persisted to the state dir (`agent.json`, mode 0600). Subsequent starts
+reuse that file; `--token` is not needed again.
+
+**Credential-revocation limitation.** Deleting a worker in the admin UI revokes its
+channel and worker tokens but does not invalidate the Neon or R2 credentials the agent
+already downloaded. Real revocation requires rotating those at the provider (Neon
+connection string, R2 access keys).
+
+### Wake channel
+
+The agent holds a long-lived outbound SSE connection to `GET /api/workers/channel`
+authenticated by the worker token. No inbound port is required on the home box. The
+server pushes a `wake` event each time a compute job is enqueued. The agent runs one
+drain (`run_worker(wait=False)`) then releases the Neon connection so the database scales
+to zero between jobs. The connection uses periodic keepalives; edge idle-timeouts are
+normal and the agent reconnects with exponential backoff.
+
+Because the SSE channel keeps an open HTTP connection to the serve instance, the serve
+process cannot scale to zero while a home worker is connected. This is a known cost of
+the outbound-SSE model.
+
+### Dispatch policy
+
+The `workers` table holds every compute target, including Railway (seeded automatically
+as `kind='railway'` when the Railway env vars are present). Each row has `enabled` (bool)
+and `priority` (int, lower fires first; self-hosted default 10, Railway default 100).
+
+On enqueue, the dispatcher:
+
+1. Groups enabled, registered targets by priority into tiers and takes the top tier.
+2. Wakes each target in the tier - self-hosted via the SSE channel, Railway via a
+   `serviceInstanceRedeploy` GraphQL call.
+3. If the top tier had no available target (no connected home agent), falls through to
+   the next tier immediately.
+4. If a wake was delivered but no Procrastinate heartbeat appears within the grace window
+   (default 90 s), escalates to the next tier.
+
+Disabling a target (including the Railway row) prevents the dispatcher from waking it. A
+connected but disabled agent receives a `disabled` event and idles without draining.
+
+### Env vars
+
+| Var | Used by | Default | Purpose |
+| --- | --- | --- | --- |
+| `SPLITSMITH_ADMIN_EMAILS` | serve | (none) | Comma-separated list of admin email addresses; a user is admin iff their authenticated email matches (case-insensitive). Required to access `/admin/workers`. |
+| `SPLITSMITH_AGENT_STATE_DIR` | agent | `/data` | Directory where the agent persists `agent.json`. Mount a named Docker volume here so the agent survives container restarts without re-registering. |
+| `SPLITSMITH_AGENT_IMAGE` | serve | `ghcr.io/mandakan/splitsmith:latest` | Docker image tag shown in the register dialog's copy-paste command. Swap to a locally built tag if not pulling from the registry. |
+
 ## References
 
 - librosa onset detection: https://librosa.org/doc/main/generated/librosa.onset.onset_detect.html
