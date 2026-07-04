@@ -4876,19 +4876,6 @@ def create_app(
             raise HTTPException(status_code=401, detail="not authenticated")
         return user
 
-    async def require_admin(user: User = Depends(get_current_user)) -> User:
-        """FastAPI dependency: gate admin-only endpoints.
-
-        Raises HTTP 403 if the authenticated user is not in
-        ``state.admin_emails``. Returns a copy with ``is_admin=True`` so
-        admin handlers receive a truthful object. Task 7's
-        ``/api/admin/workers`` endpoints consume this; they live in the
-        same closure scope so no export is needed.
-        """
-        if user.email.lower() not in state.admin_emails:
-            raise HTTPException(status_code=403, detail="admin access required")
-        return user.model_copy(update={"is_admin": True})
-
     # ----------------------------------------------------------------------
     # Magic-link auth routes (hosted mode only)
     # ----------------------------------------------------------------------
