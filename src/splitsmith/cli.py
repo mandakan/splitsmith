@@ -673,6 +673,88 @@ def worker(
         console.print("\n[yellow]Stopped.[/]")
 
 
+@app.command()
+def agent(
+    server_url: str = typer.Option(
+        ..., "--server-url", help="Base URL of the hosted splitsmith server (e.g. https://my.splitsmith.app)."
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        "-t",
+        help="One-time registration token from the admin UI. Only needed the first run; "
+        "after that the cached agent.json is reused.",
+    ),
+    state_dir: Path = typer.Option(
+        None,
+        "--state-dir",
+        help="Directory holding agent.json (credential cache). "
+        "Defaults to $SPLITSMITH_AGENT_STATE_DIR or /data.",
+    ),
+    concurrency: int = typer.Option(
+        1, "--concurrency", "-c", help="Max jobs this agent runs in parallel per drain."
+    ),
+) -> None:
+    """Run a self-hosted worker agent that lends this box to the hosted fleet.
+
+    The self-hosted twin of ``splitsmith worker``: it pops and runs the same
+    compute jobs, but it lives on someone else's machine and carries none of the
+    server's secrets up front.
+
+    How it works:
+
+    - Registration is one-time. On the first run pass ``--token`` (shown once by
+      the admin UI). The agent exchanges it for a credential bundle - the
+      Postgres URL, the server URL, and the S3 bundle when configured - and
+      caches it in ``agent.json`` (mode 0600) under ``--state-dir``. Later runs
+      reuse the cache and ignore the token.
+
+    - It drains on wake, not on a poll. The agent holds a cheap SSE channel open
+      to the server and runs one queue drain each time the server pushes a
+      ``wake``. Between drains it holds nothing against Postgres, so a
+      scale-to-zero Neon compute can actually suspend - the same idea as
+      ``worker --one-shot`` but push-driven instead of cron-driven.
+
+    - It reconnects on its own (exponential backoff) and exits cleanly if the
+      admin revokes or deletes this worker.
+
+    ``--state-dir`` should be a persistent volume so registration survives
+    restarts; ``/data`` is the default.
+    """
+    import asyncio as _asyncio
+    import os as _os
+
+    from .agent import run_agent as _run_agent
+
+    resolved_state_dir = state_dir or Path(_os.environ.get("SPLITSMITH_AGENT_STATE_DIR", "/data"))
+
+    from .agent import AgentState as _AgentState
+
+    if _AgentState.load(resolved_state_dir) is None and not token:
+        console.print(
+            "[red]No agent.json found and no --token given.[/] "
+            "Pass the one-time registration token from the admin UI "
+            "(splitsmith agent --server-url ... --token <token>)."
+        )
+        raise typer.Exit(2)
+
+    console.print(
+        f"[green]splitsmith agent[/]: connecting to [bold]{server_url}[/] "
+        f"(state-dir={resolved_state_dir}, concurrency={concurrency})   (Ctrl+C to stop)"
+    )
+    try:
+        _asyncio.run(
+            _run_agent(
+                server_url,
+                registration_token=token,
+                state_dir=resolved_state_dir,
+                concurrency=concurrency,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/]")
+
+
 @app.command("audit-prep")
 def audit_prep(
     video: Path = typer.Option(..., "--video", help="Source video file (mp4/mov)."),
