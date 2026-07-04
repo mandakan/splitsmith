@@ -204,12 +204,17 @@ class WorkersStore:
             return None
         hashed = _hash(token)
         async with self._session_factory() as session:
+            # Row-lock the pending row: under READ COMMITTED two concurrent
+            # register() calls could both mint tokens; FOR UPDATE serializes them so
+            # the loser's SELECT re-checks WHERE and returns None. No-op on SQLite.
             row = (
                 await session.execute(
-                    select(WorkerRow).where(
+                    select(WorkerRow)
+                    .where(
                         WorkerRow.registration_token_hash == hashed,
                         WorkerRow.registered_at.is_(None),
                     )
+                    .with_for_update()
                 )
             ).scalar_one_or_none()
             if row is None:
