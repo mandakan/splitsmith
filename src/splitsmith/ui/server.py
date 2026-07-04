@@ -112,6 +112,8 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
@@ -4958,6 +4960,18 @@ def create_app(
             content={"detail": {"code": "shutting_down", "message": str(exc)}},
         )
 
+    @app.exception_handler(RequestValidationError)
+    async def _worker_validation_gate(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Return the uniform 404 for malformed /api/workers/register bodies.
+
+        Any other path gets the default FastAPI 422 so existing validation
+        behavior is unchanged.  The worker register endpoint must not leak
+        its existence or expected shape via a 422.
+        """
+        if request.url.path == "/api/workers/register":
+            return JSONResponse(status_code=404, content={"detail": "not found"})
+        return await request_validation_exception_handler(request, exc)
+
     # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
     # SPA can reload + retry. Registered only when the db layer imports
     # (hosted, or any dev env with the deps); local slim installs never
@@ -5300,7 +5314,7 @@ def create_app(
         Unknown, expired, and replayed tokens are indistinguishable.
         """
         store = state.workers_store
-        if store is None:
+        if store is None or state.worker_credentials is None:
             return _workers_not_found()
         result = await store.register(body.token, body.info)
         if result is None:
@@ -5309,7 +5323,7 @@ def create_app(
         return WorkerRegisterResponse(
             worker_id=record.id,
             worker_token=worker_token,
-            credentials=state.worker_credentials or {},
+            credentials=state.worker_credentials,
         )
 
     @app.get("/api/workers/channel")

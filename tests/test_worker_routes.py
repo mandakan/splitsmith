@@ -94,6 +94,41 @@ def test_local_mode_channel_is_uniform_404() -> None:
 
 
 # ---------------------------------------------------------------------------
+# POST /api/workers/register - malformed body
+# ---------------------------------------------------------------------------
+
+
+def test_register_malformed_body_is_uniform_404() -> None:
+    """Missing body, missing required field, and truncated JSON all return 404.
+
+    FastAPI's default RequestValidationError -> 422 must be intercepted for
+    this path so the endpoint existence and its expected input shape are
+    not revealed to unauthenticated callers.
+    """
+    from splitsmith.ui.server import create_app
+
+    with TestClient(create_app()) as client:
+        # No body at all
+        resp = client.post("/api/workers/register")
+        assert resp.status_code == 404, f"no body: {resp.text}"
+        assert resp.json() == NOT_FOUND
+
+        # Valid JSON but missing required `token` field
+        resp = client.post("/api/workers/register", json={})
+        assert resp.status_code == 404, f"empty json: {resp.text}"
+        assert resp.json() == NOT_FOUND
+
+        # Truncated / invalid JSON
+        resp = client.post(
+            "/api/workers/register",
+            content=b"{",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 404, f"invalid json: {resp.text}"
+        assert resp.json() == NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
 # POST /api/workers/register
 # ---------------------------------------------------------------------------
 
