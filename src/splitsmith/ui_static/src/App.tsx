@@ -209,7 +209,7 @@ export function App() {
           <Route element={<AppShell />}>
             <Route path="review" element={<DesktopGate screen="Fixture editor" links={false}><Review /></DesktopGate>} />
             <Route path="promote-review" element={<DesktopGate screen="Promote review" links={false}><PromoteReview /></DesktopGate>} />
-            <Route path="_design" element={<Design />} />
+            <Route path="_design" element={<DesktopGate screen="Design system" links={false}><Design /></DesktopGate>} />
             {/* Legacy redirects so old bookmarks don't 404. */}
             <Route path="lab" element={<Navigate to="/dev/legacy/lab" replace />} />
             <Route path="lab/:slug" element={<RedirectLabSlug />} />
