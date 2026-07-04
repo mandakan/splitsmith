@@ -181,6 +181,22 @@ export function ResultsPlayer({
     videoRef.current?.load();
   };
 
+  // Stage time = last shot from beep; pairs with the beep-relative
+  // elapsed readout in the transport row.
+  const stageTime = shots.length > 0 ? shots[shots.length - 1].time_from_beep : null;
+
+  // iPhone Safari has no requestFullscreen on video elements (it ships
+  // webkitEnterFullscreen instead); feature-test so neither path throws.
+  const enterFullscreen = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (typeof v.requestFullscreen === "function") {
+      void v.requestFullscreen().catch(() => {});
+      return;
+    }
+    (v as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
+  }, [videoRef]);
+
   return (
     <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3">
       {/* Video box. The element stays mounted through errors so the ref
@@ -230,13 +246,18 @@ export function ResultsPlayer({
         >
           {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
         </button>
+        {/* Beep-relative elapsed vs stage time - the axis a shooter
+            reads. Shows 0.0 during the preroll before the beep. */}
         <span className="font-mono text-sm tabular-nums text-ink-2">
-          {clock(time - winStart)}
-          <span className="text-muted"> / {clock(winSpan)}</span>
+          {clock(Math.max(0, time - beepTime))}
+          <span className="text-muted">
+            {" / "}
+            {stageTime != null ? clock(stageTime) : "-"}
+          </span>
         </span>
         <button
           type="button"
-          onClick={() => void videoRef.current?.requestFullscreen().catch(() => {})}
+          onClick={enterFullscreen}
           aria-label="Fullscreen"
           className="ml-auto inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
         >
@@ -245,7 +266,8 @@ export function ResultsPlayer({
       </div>
 
       {/* Marker scrub bar. The whole 44px track is the hit area; markers
-          are visual only. Keyboard: arrow keys step +/-0.5s. */}
+          are visual only. Keyboard: arrows step +/-0.5s, Home/End jump
+          to the window edges. */}
       <div
         ref={trackRef}
         role="slider"
@@ -263,6 +285,9 @@ export function ResultsPlayer({
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();
             seekTo(time + (e.key === "ArrowLeft" ? -0.5 : 0.5));
+          } else if (e.key === "Home" || e.key === "End") {
+            e.preventDefault();
+            seekTo(e.key === "Home" ? winStart : winEnd);
           }
         }}
         className="relative mt-2 h-11 cursor-pointer touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"

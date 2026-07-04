@@ -100,6 +100,7 @@ export function SplitsList({ shots, activeShotNumber, onSeek, isPlaying }: Split
                 ) : null}
                 {shot.improvement_flag ? (
                   <Flag
+                    role="img"
                     aria-label="Flagged for improvement"
                     className="ml-auto size-3.5 shrink-0 text-led"
                   />
